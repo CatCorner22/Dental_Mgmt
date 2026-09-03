@@ -133,3 +133,10 @@ The critic's list of what the plan does well is recorded in the saved critique f
 
 - The exact `next-auth` 5.0.0-beta.x version to pin (the plan wraps all session logic behind `guards.ts` so the provider is swappable).
 - The Tailwind major version in the dental repo (the plan assumes v3 and defers an upgrade).
+
+## Feature-layer amendments (2026-09-03)
+
+Adopted from `docs/13-innovation-and-intuitiveness.md` (the feature workflow's synthesis and its critique). Where an amendment conflicts with text above, the amendment governs.
+
+- Add: the after-hours emergency encounter on a provisional patient vs the two-identifier rule; Tennessee counsel review of the for-dentist observation vocabulary, the informed-refusal language, the minor-consent licences (§ 63-1-176), and the counsel-frozen killer list; the CARC→action table maintainer and PR-group-code mapping; per-payer evidence thresholds for SRP and crowns labelled 'practice's configured threshold, not qualifies for reimbursement'; the eight-word gate copy rule vs counsel-required text (goes behind Why); deferred-revenue treatment as a tenant setting confirmed with the pilot CPA; the pediatric plain-language dictionary review; whether passkeys or badge tap replace the operatory PIN keypad; delta-readback rounding threshold and contract-variance tolerance tuned on pilot 835s; walk-over coercion as a residual risk.
+- From the feature critique: the after-hours emergency encounter on a provisional patient versus the two-identifier rule (resolved provisionally by minting the provisional patient from name and date of birth at the door; counsel to confirm); the consequences-of-waiting and alternatives library for case presentation must be dentist-authored or dentist-selected from a counsel-reviewed per-procedure library, never derived; whether iOS web push is reliable enough for approval requests or the SMS nudge with a request id is the working path; the staff shift roster (`staff_shifts`) needed before 'front desk has no coordinator' can be computed.

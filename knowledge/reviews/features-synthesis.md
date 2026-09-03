@@ -1,0 +1,839 @@
+# Feature synthesis (the catalog behind docs/13)
+
+- **Source**: Claude Code feature workflow `wf_9011b632-d5f` (read-only agent; no web access); inputs: docs/01, 04, 05, 08, the dental repository adversarial panels and UX research, knowledge base v3
+- **Type**: analysis
+- **Author/Origin**: planning agent, reviewed by the session lead before inclusion
+- **Published**: 2026-09-03
+- **Ingested**: 2026-09-03
+- **Tags**: features, synthesis
+
+## Summary
+
+30 features and 6 signature moments merged from eight lenses and three judges; 25 rejected with reasons.
+
+## Thesis
+
+This PMS is different because every screen is the work itself and every gate is a fact the database already knows, not a reminder someone must heed. The money is a journal (three labeled numbers, one Explain that reads the same to the biller, the patient, and the CPA, an As-of chip that makes the past a query) and the only green is a bank line; controls refuse inside the posting transaction and the refusal is one verb line plus one control that names who can unblock it from a phone or the next desk. The chair record is built the same way: one paint gesture writes chart, plan, note scaffold, and pending charge with FK parents; perio is 168 keystrokes by one gloved operator with named licences for what was not probed; hygienist observations are typed objects the dentist must disposition; File is the single irreversible verb that releases charges and holds the claim until the note exists. Nobody is scored, nothing is metered, PHI leaves only through a BAA-gated boundary that writes a disclosure row, and a temp finds "walkout" in the palette and is checking patients out within the hour. What incumbents cannot retrofit is the combination: a ledger that explains itself, controls that feel like a card rather than a report, and a clinical record whose evidence flows into the claim before the payer ever asks.
+
+## Signature moments
+
+
+### Item 1
+- **name**: Tied by 7:42
+- **moment**: 0:00 Owner opens the PMS on her phone in the parking lot; Daily Close shows one tile: filled circle, 'Tied · independent', because Dana closed and Dana posted nothing yesterday. 0:10 She taps the tile (1): three tender rows, cash/check/card, expected vs bank, gaps of $0; a fourth line reads 'Yesterday changed after close: 0'. 0:20 Below, 'Delta EFT $4,812.33' is already matched by trace number to the 835 that posted 41 patient lines overnight; no click. 0:30 One row says '1 variance': she taps it (2) and reads a sentence: 'Bank shows $1,240.00 card settlement dated 9/2. Day sheet expected $1,310.00 for 9/1. Gap $70.00. Two card refunds posted 9/1 at 6:40 pm total $70.00.' Two controls: Match these / Investigate. She taps Match these (3). 0:45 A last row: 'Decisions due for review: 1' — the vacation-cover threshold raise from June, with 'Since 6/1: 14 lab payments single-released, $21,400; 0 variances.' She taps Retire (4). 0:55 Home is empty. Four taps, and she knows the money reached the bank and that nobody could have changed yesterday without her seeing a row.
+
+### Item 2
+- **name**: The $410 write-off
+- **moment**: 0:00 Biller on Money Desk taps Write-off on a $410 balance, picks reason 'courtesy', hits Post (2). 0:05 The button does not grey out; it becomes a Held control with one line: 'Needs a second approver — Dana or Dr. Reagan' and one control 'Request approval'. She taps it (3). 0:10 In operatory 3, Dr. Reagan's phone shows a card: initials, account number, $410, reason, the frozen ledger sentence 'Crown #14 charged $1,180 on 8/12; primary paid $650 on 8/29; patient owes $530', and one more line: 'Denied 8/29, no appeal filed.' Two buttons, Approve and Send back. 0:25 She taps Send back with 'appeal first' (2 taps). The biller's screen flips to 'Sent back: appeal first' with the Appeal control beside it. 0:35 Second scene, same desk at 8:40 pm: a $60 refund, below any threshold, is held anyway — 'After hours: needs a second approver'. 0:45 Third scene, daytime: Dana is standing beside the biller; she taps 'Second signer is here', enters PIN and TOTP on a full-screen sheet; the posting reads 'Posted · approved by Dana'. Two attributed identities, no shared password, and the compliant path was faster than the workaround.
+
+### Item 3
+- **name**: 168 sites, one operator
+- **moment**: 0:00 Hygienist taps Chairs; the 9:00 card reads 'Med hx changed: new anticoagulant (intake 2 days ago) · Perio 14 mo ago · BWX due · What helped last time: stop signal, sunglasses.' 0:08 She taps Perio (1). Grid opens, cursor at UR site 1, prior exam ghosted grey. 0:10 Keypad in a barrier sleeve: 3-2-3, space for bleeding, pedal for next tooth; the probing path is hers (facial around, then lingual). Implant #19: Skip; the site stores 'not probed'. 3:30 Save exam (1 tap): the skipped set asks one licence, 'Implant'. The hygiene note's measurement fields appear read-only 'from exam 9:14'; the chart image is stored on the encounter. 3:40 A Next visit strip is pre-filled: 4 months, Perio maintenance, BWX; she confirms (1 tap). 3:45 Long-press on #30 opens a bounded list; 'Suspected caries, DO' (1 tap) drops a pin. 3:50 Ready for exam (1 tap). Her card reads 'Exam: 2nd in queue'. 4:10 The dentist's Exams-to-sign row says 'Chair 3 · Perio: 6 sites ≥2 mm worse · 1 observation · 2 BWX, no interpretation'. Nobody walked the hall.
+
+### Item 4
+- **name**: Paint, file, check out
+- **moment**: 0:00 Dentist opens the seated chart from Exams to sign (1); cursor lands in Assessment with the hygienist's tag at top: 'Suspected caries #30 DO'. She taps Chart it (2). 0:10 On the odontogram she taps #30 (3), drags D-O (4), taps 'Composite 2-surf D2392' (5); the Today · Planned · Existing segment already reads Today. One transaction: chart_event, procedure with pending charge from the Delta fee schedule, plan item with estimate, note scaffold with tooth and surfaces as fields. 0:25 Open note (6): starters visible, anesthetic block inserted (7). She types 'pt quoted $210'; on blur a finding appears: 'Money in note — move to plan' with one control; she taps it (8) and the sentence becomes 'Fee discussed; see plan P-1043'. 0:40 File (9): the strip shows zero killers; the read-back line says 'Filing as Dr. Reagan for J.D., DOB 03/1978, #30 DO' and the Board chip flips to Filed. 0:50 At the window the coordinator taps Checkout (1): completed procedure pre-selected, patient portion $44, Collect is the default; card field, Post (4 clicks). The patient asks why $44; the coordinator taps Explain, then Show patient (2): 'Filling, tooth 30, today: fee $210; your plan pays about $166; $44 today.'
+
+### Item 5
+- **name**: The temp at 7:50
+- **moment**: 0:00 The night before, the Board's readiness strip reads 'Tomorrow: front desk has no coordinator'; the office manager taps 'Add day pass' (1), enters name, role Front desk, end time 5:30 pm (3 fields), sees 'No SoD conflicts', saves (2). 0:20 7:50 am: the temp signs in on her own phone via magic link plus TOTP and lands on the Board for this location, not a welcome page. A rail under the top bar shows five chips: Arrive · Seat · Checkout · Take payment · Find a patient. She taps Arrive (1); the first card's Arrive button pulses with one line: 'Tap Arrive on the first card.' She does (2); the chip retires because the server saw appointment.arrived by her. 0:40 A patient asks for a 'walkout statement'. She presses Ctrl-K, types 'walk' (3 keys); the row reads 'Statement — called walkout statement in Dentrix'. Enter. 0:50 At 5:30 pm her grants expire and her session is revoked; every posting she made carries her frozen name. No shared login, no homework, no 'you are not allowed yet'.
+
+### Item 6
+- **name**: Denial to appeal in one click
+- **moment**: 0:00 Money Desk → ERA tab: 'Delta 835 · 41 lines · 37 posted' — the clean lines posted before the biller sat down. 0:08 She taps Post matched (1); a readback list of three lines appears, only the ones where the ERA differs from what the claim expected: 'Line 14 · #19 crown · expected paid $590, ERA says $540 · CARC 45'. She confirms two (2 taps) and holds one (1 tap). 0:25 The held line is now an exception row: 'Paid $412; contract allows $460 (Delta PPO, Dr. Reagan, D2740)' with Dispute as the primary control (1 tap). 0:35 Denials tab: 'Denied: perio chart not received — Delta · appeal by Oct 3' with one primary action, Appeal. She taps it (1): the packet drawer is pre-filled from the encounter — the perio exam rendered as a chart image, the filed note excerpt, the frozen 837 and 835, a letter shell restating the CARC. Send appeal (1). 0:50 The write-off control for that claim exists only as a secondary, and because the claim has a denial with no appeal it would have named a second approver. 0:55 The patient's next statement carries one sentence: 'Your plan paid less than we estimated: it counts this as a frequency limit (one cleaning every 6 months).'
+
+## Features
+
+
+### Item 1
+- **name**: Independence-graded Tied status
+- **surface**: Daily Close
+
+#### personas
+- owner
+- office manager
+- **problem**: The owner's morning question is whether yesterday's money reached the bank, and today the answer comes from a day sheet the same person who posted can edit, so 'tied' is a self-assertion and the owner must remember who closed and whether that person also posted.
+- **spec**: Owner home renders one tile computed server-side from reconciliation_runs joined to bank_transactions and to that day's domain_event actors. Three states: filled circle + 'Tied · independent' when every deposit line matched a bank row and reconciliation_runs.independent is true; half circle + 'Tied · needs a second look' when matched but the closer also posted or prepared the deposit that day, or the only bank source is a statement import older than 48 h; triangle + 'N variances'. No green state exists without a bank_transactions row from a feed or statement import. Expanding shows three tender rows (cash, check, card) expected vs bank with the gap, then 'Yesterday changed after close: N'. The Clear control is not rendered for any user who posted or prepared the deposit that day; the tile instead says 'Dana closed; you or the CPA seat can clear'. Copy describes hands, never the person.
+- **interaction**: Login lands on the tile (0 taps). Tap 1 expands tender rows and the changed-after-close line. Tap 2 on a variance row opens the Variance sentence card. Nothing else is above the fold.
+- **why intuitive**: Home is the work and one shape+word status is readable in grayscale; the SoD rule is enforced by the absence of the control, not by a warning; the tile names who can clear so the owner never recalls the rule.
+- **why innovative**: No PMS in the corpus reconciles to the bank (report A.6.1 #7, D.4 #10 unmet); Zeldent compares bank to PMS from outside and cannot know who posted, so it cannot grade independence. Dentrix and Open Dental day sheets are self-asserted totals.
+- **phi and controls**: Tile shows tender totals only; variance rows show initials and account number until expanded, logged as a payment-purpose read. Enforces the named runtime SoD rule (poster/depositor cannot clear) via withGuard. One-owner practices degrade to owner-only clearance and the degraded state is a finding. Bank data enters through the aggregator or statement import under DPA/BAA review.
+- **phase**: Phase 1
+- **effort**: M
+- **data model changes**: reconciliation_runs gains independence_grade enum (independent | same_hands | stale_import) computed at close; day_closes gains changed_after_close_count view. No new tables.
+- **ux flow changes**: Owner home (docs/04 Daily Close row) gains the three-state grade and the changed-after-close line; flow 5's 'next morning the owner sees Tied or N variances' becomes graded. Clicks: 0 to see, 1 to expand, 2 to a variance.
+- **judge consensus**: 23/23/24; in all three top-25 lists. All three: copy must describe the process ('same hands posted and closed'), never the closer.
+- **evidence**: docs/04 Owner home row; docs/05 'reconciliation_runs.independent is computed'; knowledge/sources/zeldent-dental-fraud-detection.md: reconciliation 'performed by something that sits outside the system being checked'; report A.6.1 #7 tab32 'unreconciled, mismatched reports'.
+
+### Item 2
+- **name**: Variance sentence with proposed match
+- **surface**: Daily Close
+
+#### personas
+- owner
+- office manager
+- biller
+- **problem**: When bank and day sheet disagree the owner opens three reports and hunts; most gaps are timing (card settlement batches, refunds after 6 pm, a check deposited a day late), and the hunt is why owners stop reconciling.
+- **spec**: A deterministic matcher in the sealed verifier package runs exhaustive subset-sum over same-tender ledger and deposit rows within a two-day window, capped at 12 candidate rows, and emits one templated sentence in the ledger-explanation voice with every amount linked to its rows: 'Bank shows $1,240.00 card settlement dated 9/2. Day sheet expected $1,310.00 in cards for 9/1. Gap $70.00. Two card refunds posted 9/1 at 6:40 pm total $70.00.' Candidate rows render below with pre-checked boxes. Controls: 'Match these' (reversible identity; writes reconciliation_matches under the runtime SoD guard) and 'Investigate' (opens a control_finding with rows attached, routed to Money Desk 'variances I own'). When no subset explains the gap the sentence says so and only Investigate and 'Clear with reason' (reason code from a short list, aggregated in the digest) appear. Sentence templates are property-tested alongside the ledger suite.
+- **interaction**: From the Tied tile: tap variance row (1) → read sentence → Match these (2). Investigate is also 2. Clear with reason is 3 (the slow lane).
+- **why intuitive**: Deterministic first with a rule trace and no confidence figure; one verb line plus one control; the compliant path (match or investigate) is faster than clearing with a reason.
+- **why innovative**: Zeldent claims deposit matching from outside the PMS and cannot cite the refund rows; CareStack, Open Dental, and Curve ledgers (report A.6.1 #5) cannot render a variance as a sentence because they lack explicit allocation rows.
+- **phi and controls**: Amounts, tender, times, row ids; patient names only on expansion with a logged read. Poster/depositor of that day cannot match (withGuard). 'Clear with reason' is a reason-coded event counted practice-wide in the digest.
+- **phase**: Phase 1
+- **effort**: M
+- **data model changes**: reconciliation_variances gains candidate_set jsonb (row ids the matcher proposed) and sentence_template_version; reconciliation_matches unchanged.
+- **ux flow changes**: Flow 5's '1 click to clear with reason or escalate' becomes Match these / Investigate at 2 taps from home; Money Desk 'variances I own' receives Investigate rows.
+- **judge consensus**: 23/22/23; in all three top-25 lists. Eng judge: cap subset-sum to same tender within two days or it invents matches.
+- **evidence**: docs/04 flow 5; docs/08 Phase 1 exit 'median variance investigation under 10 minutes'; report D.6 Open Dental 'allocated/unallocated/hidden payments'.
+
+### Item 3
+- **name**: Sealed closed day with visible corrections
+- **surface**: Daily Close
+
+#### personas
+- owner
+- office manager
+- biller
+- **problem**: Retro-dated edits are how a short deposit is made to match the books; any ledger that lets a closed day change in place makes the owner's morning check meaningless and the owner cannot know yesterday changed after they looked.
+- **spec**: After Close day the business day's ledger view shows a lock glyph and 'Closed 9/1 6:14 pm by Dana'. A posting whose effective date falls in a closed day is not refused; the posting service writes it into today's open day as kind='correction' with a required reason code and a NOT NULL corrects_entry_id FK (enforced by CHECK). The closed day's view gains a footer 'Corrected on 9/3: see entry #5121'; today's row reads 'Corrects #4412 from 9/1'. The owner's Daily Close shows 'Yesterday changed after close: N' (human corrections only; insurance_payment entries from ERAs are excluded from the count). A correction dated more than N days back fires the existing retroactive-dated hard event. ledger_entries stays INSERT-only for the app role; day_closes freezes totals with the HMAC chain head.
+- **interaction**: Poster: Post as usual; the form shows one line 'Day 9/1 is closed — posts today as a correction' and requires the reason code (1 extra pick). Owner: the count is on the home tile (0 taps); tap opens the rows (1).
+- **why intuitive**: Structural correctness over vigilance: yesterday cannot silently change, and if it is corrected the correction is a row on today's screen; the poster is redirected, not blocked.
+- **why innovative**: Incumbents' ledgers mutate in place (tab32 mismatched reports, Ascend inconsistent reporting, Open Dental hidden payments); Zeldent flags retroactive edits precisely because the PMSes it monitors permit them. No incumbent offers an append-only day close with cross-linked corrections.
+- **phi and controls**: No new PHI; corrections carry the same patient scope as the row they correct. Enforced at the database (INSERT-only role, CHECK on corrects_entry_id and reason). The count is practice-scoped; per-poster detail sits behind the owner/reviewer seat.
+- **phase**: Phase 1
+- **effort**: M
+- **data model changes**: ledger_entries.kind gains 'correction'; new column corrects_entry_id (NOT NULL when kind='correction', CHECK); day_closes gains chain_head_hash; CPA journal export presents corrections in the posted period with a memo referencing the original date.
+- **ux flow changes**: Flow 5 Close day unchanged (2 clicks); the owner home gains one line. Ledger view gains the lock header and correction footers.
+- **judge consensus**: 22/22/22; Eng judge top-25. All three: exempt late ERA postings from the count or the line is never zero.
+- **evidence**: docs/01 principle 2 'corrections are reversal plus repost'; docs/05 detector 'reversals or adjustments dated more than N days before posting'; precog conflict-rules.ts rule-deposit-post fraudPath 'Deposit short; books adjusted to match'.
+
+### Item 4
+- **name**: Second approver from a phone or the next desk
+- **surface**: Cross-cutting
+
+#### personas
+- owner
+- office manager
+- biller
+- front-desk coordinator
+- **problem**: Dual release dies in week one if the second approver must find a workstation; the owner is in an operatory, the biller has a patient waiting, and the habitual workaround is the manager leaning over and typing her password into the biller's session, which destroys attribution.
+- **spec**: When postGuarded returns needs_second, the requester's screen shows 'Needs a second approver — Dana or Dr. Reagan' and 'Request approval'. Phone path (Phase 1): eligible approvers' installed web app receives a push carrying only the request id; after auth the card renders patient initials and account number, amount, reason code, requester, the frozen ledger sentence, and when claim events show a denial without appeal one line 'Denied 8/29, no appeal filed'. Two 44 px controls with 8 px gap: Approve (irreversible identity; TOTP step-up above the high-value band) and Send back (one-line reason). No 'Approve all'. Approval is compare-and-set on approval_requests with CHECK requester ≠ approver re-checked server-side; the worker executes the held posting and the requester's screen flips to Posted without reload. Walk-over path (ships when registered desk devices exist, Phase 2): on a registered shared/desk device a second control 'Second signer is here' opens a full-screen sheet with the request summary and PIN + TOTP fields; the server mints a 60-second session scoped to the single entitlement approve:<request_id>, runs the same compare-and-set, and closes; the requester's session is never elevated. Same identity returns blocked_same_person with 'You requested this; someone else must second it.' Disabled on operatory-profile devices.
+- **interaction**: Requester: Post (1) → Request approval (2). Approver on phone: tap notification (1) → Approve (2), plus TOTP above the band (3). Walk-over: 'Second signer is here' (1) → PIN + TOTP (2 fields) → done. Target median under five minutes.
+- **why intuitive**: One verb line plus one control; the card carries the frozen evaluation so the approver never opens the ledger; two identities stay distinct because the approval session is a separate minimal-entitlement row.
+- **why innovative**: No dental PMS in the corpus has a second-approver flow on write-offs; prepare-vs-approve separation exists only in accounting systems (smb-accounting-internal-controls.md) and QuickBooks' audit trail is 'defeated by shared Administrator logins'. The denial-no-appeal line is the dental-specific piece.
+- **phi and controls**: Push payload carries no PHI; card shows minimum necessary, full name only after a logged tap. Requester ≠ approver CHECK, role eligibility from user_entitlements, BEFORE INSERT trigger on ledger_entries requiring an approved request. The approval session row records 'approved on requester's terminal' so the digest can show the practice-level share of walk-over vs phone approvals.
+- **phase**: Phase 1
+- **effort**: M
+- **data model changes**: approval_requests gains channel enum (phone | walkover | inbox) and decided_on_device_id; sessions gains scope jsonb (single-entitlement scope, request id) and ttl for the 60-second approval session; push_subscriptions table (user, endpoint, keys, device profile).
+- **ux flow changes**: Flow 4 and flow 5: 'held, never silently allowed' now resolves in under five minutes without leaving the screen; the approvals inbox on Money Desk and Daily Close shows the same card. Owner home 'approvals only I can give' is this card list.
+- **judge consensus**: Phone card 22/21/22 (OM and attorney top-25); walk-over 23/21/23 (OM and attorney top-25). Eng judge: iOS push needs home-screen install, fall back to the inbox with visible age; attorney: require TOTP with PIN and disable on operatory glass.
+- **evidence**: docs/08 Phase 1 'responsive approvals-and-alerts surface ... within minutes; without it dual release becomes a bottleneck and gets waived'; docs/05 verdict table; precog dual-release.ts blocked_same_person.
+
+### Item 5
+- **name**: Business-hours scope on dual release
+- **surface**: Cross-cutting
+
+#### personas
+- owner
+- office manager
+- biller
+- **problem**: After-hours refunds and adjustments are the classic cover move, and today the best control is an alert the next morning after the money moved, leaving the owner to chase a completed posting.
+- **spec**: ExceptionScope in the ported dual-release evaluator gains a time scope: a force_dual exception whose window is the location's business hours (per location, per weekday, from locations.hours) evaluated server-side from the transaction timestamp. Default policy row: refund, adjustment, and write-off channels outside hours return needs_second regardless of amount. Processor-initiated card refunds at settlement are excluded (not human postings). The held-posting card gains one line 'Posted at 8:40 pm, location closed at 6:00 pm'. The next-morning after-hours hard event still fires but reads 'held, approved by you at 8:52 pm' or 'held, still waiting', never 'posted'. Turning the rule off requires the owner role and writes a control_decision with a review date, shown on the owner home as 'After-hours hold: off since 3/2, review due 6/1'.
+- **interaction**: Poster at 8:40 pm: Post (1) → 'After hours: needs a second approver — Dr. Reagan' → Request approval (2). Owner: the same phone card, Approve (2 taps). Policy toggle: Practice → Controls → one row with a switch, review date required.
+- **why intuitive**: The after-hours move is held by the same gate that holds a large write-off so staff learn one behavior; the compliant path (post during hours) is fastest and the override is a request, not a settings change.
+- **why innovative**: Zeldent alerts after the fact; the shipped Precog exception model has amount, payee, person, role, and channel scopes but no hours scope, so adding time turns a detector into an enforced control using existing machinery.
+- **phi and controls**: Reuses the held-posting card. Hours come from location settings and the server clock, never the client. Exception is a versioned control_policies row; the digest reports the practice-level count of after-hours holds.
+- **phase**: Phase 1
+- **effort**: S
+- **data model changes**: control_exceptions.scope enum gains 'hours' with a window jsonb (weekday → open/close, timezone from locations); locations gains hours jsonb.
+- **ux flow changes**: No change to flow 4 during hours; after hours flow 4's Post becomes a held posting with the same one line and one control. Owner home gains the 'off since / review due' line when disabled.
+- **judge consensus**: 22/23/24; Eng and attorney top-25. Both: per-location, per-weekday windows or evening clinics will waive it; exclude processor-initiated refunds.
+- **evidence**: docs/01 principle 14 (after-hours refund is a hard event); precog dual-release.ts ExceptionScope lacks a time scope; zeldent-dental-fraud-detection.md 'after-hours transactions'.
+
+### Item 6
+- **name**: Decision review with measured effect
+- **surface**: Daily Close
+
+#### personas
+- owner
+- compliance lead
+- **problem**: A temporary threshold raise for vacation cover becomes permanent because nobody comes back to it; an accepted SoD conflict from setup is never re-examined, and the CPA finds a standing exception nobody can explain.
+- **spec**: Every control decision is born at the gate: when the owner waives, raises a threshold, or accepts a conflict from the inline card, the card's last field is 'Review on' pre-filled with 90 days (30 for waivers) plus a one-line why. Daily Close shows 'Decisions due for review: N' only when non-zero. Each review card renders the original reason and one deterministic sentence computed from domain_event since the decision: 'Since this raise on 6/1: 14 lab ACH payments single-released totalling $21,400; 0 variances; 0 findings on this payee' (labelled 'directional' under the digest minimum sample). Three controls: Keep 90 more days (reversible), Tighten (opens the policy card with the base value pre-selected), Retire (irreversible). Nothing auto-renews: an unreviewed decision becomes a control_finding and the exception stops applying at midnight of review_by via isDateActive in evaluateRelease. Reviews are batched into one monthly card, one decision per row.
+- **interaction**: Owner: tap 'Decisions due' (1) → read → Keep / Tighten / Retire (2). Creating the decision at the gate costs one pre-filled field.
+- **why intuitive**: Recognition over recall: the owner is shown what happened rather than asked to remember what they meant; neglect tightens instead of loosens, so the lazy path is safe.
+- **why innovative**: COSO and ACFE materials are 'documents and templates, not interactive software'; no PMS in the corpus has a control register, and the shipped Precog code auto-expires exceptions but has no review loop or measured-effect sentence.
+- **phi and controls**: Decisions reference policies, payees, roles, amounts; no patient data. control_decisions is append-only with frozen names; the review writes a new row. Person-scoped exceptions show counts only to the owner and reviewer seat.
+- **phase**: Phase 1
+- **effort**: S
+- **data model changes**: control_decisions gains review_by (already planned), supersedes_decision_id, and measured_effect jsonb snapshot at review; control_findings gains kind 'decision_unreviewed'.
+- **ux flow changes**: Owner home 'decisions due for review' row becomes a card with three controls; the inline dual-release and SoD cards gain the Review-on field.
+- **judge consensus**: 23/22/22; no top-25 listing but no dissent. OM judge: batch monthly so it is one card, not five.
+- **evidence**: docs/05 'a temporary raise cannot quietly become permanent' and 'COSO Principle 17 is literally open findings without a decision'; precog dual-release.ts ex-temp-om-writeoff 'Time-bound; auto-expires.'
+
+### Item 7
+- **name**: CPA month-end package and CPA seat
+- **surface**: Daily Close
+
+#### personas
+- owner
+- office manager
+- biller
+- CPA seat
+- **problem**: The outside accountant receives a day-sheet PDF and an AR aging that do not sum to each other or to the bank, re-keys deposits, cannot tell whether a closed month changed, and has no way to ask a question except email; payroll and vendor channels the PMS does not hold either lie green or sit blank.
+- **spec**: Practice → Roles: 'Invite CPA seat' (name, email, firm) grants view_reports_only + bank_reconcile + question; the SoD preview shows it creates no conflict, and because the seat never posts or deposits its variance clearances count as independent. Daily Close → 'Close month' appears on the first business day after the last day close (irreversible identity, confirm). It freezes a month_close artifact: GL journal in QBO and Xero formats mapped from gl_bucket and reason codes through a per-tenant maker-checker mapping table; deposit register with bank match status per line (payer ids and TRNs, no names); AR roll-forward by bucket with every figure linking to its ledger view; deferred-revenue roll-forward for membership fees when the tenant setting is on; reason-code summary of adjustments and write-offs with approval counts; control register, active exceptions, open decisions, chain-verification status; a one-page tie-out sheet where each total shows 'reconciles to ledger view: yes'. Any entry effective-dated into a closed month is refused unless kind='correction' with reason 'prior_period', posts today, and fires the retroactive hard event. The CPA lands on a Month-end home: one row per month, 'Download' (disclosure row with row count). Any package line has 'Question', which becomes a variance-shaped row on the owner's Daily Close ('CPA asks: why did courtesy adjustments double in August?') with rows attached; the owner answers in one line; thread append-only. An 'Attest' tab lists external channels (payroll, vendor payments until integrated) with 'Reviewed this month', writing a dated attestation so the recorded-vs-enforced table shows 'external / attested 9/3 by CPA seat'.
+- **interaction**: Owner: Close month (2 clicks). CPA: Download (1); Question on a line (1) + one line of text; Attest (1 per channel). Owner answers a question in 1 tap plus one line.
+- **why intuitive**: Every number links to its rows and the same metric shows the same value everywhere, so the CPA's first question ('does this tie?') is answered on the sheet; the owner receives questions in the shape they already know (a variance row with one action).
+- **why innovative**: D.4 #10 'reporting that matches the bank' is unmet; Ascend reporting is 77% negative, Eaglesoft custom reports cost ~$5,000, Open Dental answers with SQL. No PMS gives the accountant an independent-reconciler seat, a question channel into the owner's worklist, or an honest attested/enforced distinction.
+- **phi and controls**: PHI-minimal by construction: journal lines carry gl_bucket, reason code, amounts, dates, payer or tender. Patient-level drill-down is a logged payment-purpose read under the CPA's BAA; export writes a disclosure row. month_close is INSERT-only and hash-chained; the prior-period refusal lives in the posting service. Attestations are recorded, labelled attested, excluded from scores.
+- **phase**: Phase 1
+- **effort**: M
+- **data model changes**: month_closes (tenant, period, artifact keys, chain head, closed_by frozen); gl_mappings (tenant, reason_code/gl_bucket → account, maker-checker state); cpa_questions (package line ref, text, owner answer, append-only); channel_attestations (channel, period, attested_by frozen, at); ledger_entries reason code 'prior_period'.
+- **ux flow changes**: Adds a persona home (Month-end) for the CPA seat to docs/04; owner home gains 'Month open N days' and CPA question rows; Daily Close gains Close month after Close day.
+- **judge consensus**: Package 23/21/21 (OM top-25); CPA seat 21/21/22 (merged here by Eng judge). All: GL mapping must be tenant-editable under maker-checker or the first import fails.
+- **evidence**: docs/08 Phase 1 'month-end accounting package for the CPA seat'; docs/05 'external / attested, never as enforced'; report A.6.1 #7.
+
+### Item 8
+- **name**: One ledger view: three numbers, Explain in three voices, As-of, statements that hold for a reason
+- **surface**: Patient Rail
+
+#### personas
+- biller
+- front-desk coordinator
+- office manager
+- owner
+- patient
+- guardian
+- CPA seat
+- **problem**: Billers cannot explain a balance after dual coverage and a partial payment; the coordinator at the window guesses or waives; the patient's statement is a number with no story that sometimes goes out on a balance still waiting on insurance; and six weeks later nobody can reconstruct what the patient was looking at.
+- **spec**: Patient Rail → Ledger is the only ledger view. Header: three labeled numbers (Patient due / Waiting on insurance / Credit) from account_balances; estimates never join. 'Explain' renders one deterministic sentence per open procedure from ledger_explanations over ledger_entries and payment_allocations: 'Crown #19 on 8/12: charge $1,180; Delta paid $590 on 9/1 (ERA 4412); contractual write-off $118 (PPO fee); you owe $472', every amount linking to its rows. 'Show patient' re-renders the same row ids through audience:'patient' templates (no reason codes, no poster names, estimate lines visibly labelled 'estimate'), suitable to turn the screen or print (disclosure row). The CPA package renders the same rows keyed by gl_bucket. 'Send to biller' creates a Money Desk row with the sentence attached. An 'As of today' chip re-renders the view as the sum over entries with posted_at ≤ a chosen instant or a chosen frozen statement, with a 'What changed since' strip listing later entries (kind, reason, frozen poster); the chip states posted-date vs effective-date. Money Desk → Statements due: each row is guarantor, amount, and 'Ready' or a hold reason ('Held: Delta claim pending 18 days on D2740') with a tenant maximum hold age after which the row surfaces regardless. Statement body is the patient-voice sentences under three numbers, family members labelled by first name, adult dependents' procedure names withheld when confidential-communication preferences say so; pending claims list under 'Waiting on insurance' with no patient dollar figure. Send freezes a statement artifact with an id and writes a disclosure row per channel. CI fails when a reason code has no explanation template.
+- **interaction**: Rail → Ledger (1) → Explain (2) → Show patient (3). As-of: tap chip (1), pick date or statement (2), Back to today (1). Statement: Money Desk → Statements due → Send (1, irreversible) or Preview (reversible).
+- **why intuitive**: One canonical view per fact: biller, patient, and CPA read the same rows so they cannot disagree; recognition over recall (the biller picks the statement the patient is holding instead of reconstructing it); money never inside note text because the explanation is generated from allocation rows.
+- **why innovative**: Report D.5 names 'a ledger both clinicians and accountants can read' as the clearest whitespace with 'nobody universally' close; Open Dental exposes allocation internals, CareStack generates transfer adjustments, Curve is invoice-based, Oryx prints estimates as AR. None renders the balance as pinned sentences, none offers a point-in-time view, and none holds a statement for a stated reason.
+- **phi and controls**: Read-only over tenant rows with a phi_access_log payment-purpose row per open; print, mail, portal, and SMS-link sends are disclosure rows with the frozen statement id; mail and SMS vendors gate at the BAA registry; the standardize pass is disabled on patient-audience text; self-pay-restricted lines never mention a plan. Templates are versioned and stamped so a wording change never rewrites a past statement.
+- **phase**: Phase 1
+- **effort**: M
+- **data model changes**: ledger_explanations view gains audience parameter (staff | patient | cpa) and template_version; statements gains hold_reason enum, held_since, frozen_render_key, statement_id sequence; ledger_entries.posted_at indexed for the As-of query (monthly partitions already planned); reason_codes gains explanation_template_id NOT NULL.
+- **ux flow changes**: Patient Rail balance summary and flow 4 checkout both gain Explain → Show patient at 2 taps; Money Desk 'statements due' tab gains hold reasons; no new screen.
+- **judge consensus**: Two-voices 23/23/23 (all three top-25); window 23/21/21, statement with hold reasons 22/22/22 (OM top-25), portal statement 20/21/20, As-of 23/23/24 (all three top-25); all judges merged these four into the canonical Explain. Eng judge: the As-of chip must say posted vs effective date.
+- **evidence**: docs/01 bet 1 'Explain this balance renders one plain sentence per open procedure'; docs/01 principle 2; report A.6.1 #5 and D.6 'My accounting team HATES it with the passion of 1,000 suns'.
+
+### Item 9
+- **name**: ERA EFT tied to the bank line by trace number
+- **surface**: Money Desk
+
+#### personas
+- biller
+- owner
+- office manager
+- **problem**: The largest deposits are payer EFTs covering dozens of patients; the day sheet shows insurance payments by patient and the bank shows one EFT, so the owner's 'Tied?' fails on insurance days and the variance is noise the biller explains by hand.
+- **spec**: When an ERA batch posts, the era_payment's BPR/TRN segments (trace number, payer id, amount, effective date) create a deposit line of tender 'EFT' automatically. The Daily Close matcher pairs bank_transactions to deposit lines by amount plus TRN (or the TRN embedded in the bank description), so a $4,812.33 EFT matches in one step and its 41 patient lines are already explained. Many-to-one and one-to-many (multiple 835s per EFT, split EFTs) are tolerated by summing candidates within the payer and a two-day window; when no combination matches the row falls to amber, never forced. A recoupment or offset renders as a variance row for the owner ('Delta EFT $4,612.33 vs 835 $4,812.33 — $200 recoupment on claim 1187' → Investigate) and a Money Desk row for the biller ('Recoupment: post $200 reversal on claim 1187' → one control). Paper checks in an 835 create a deposit line of tender 'check' awaiting the physical slip.
+- **interaction**: Biller: nothing (0 clicks) for a clean EFT. Recoupment: Money Desk row → Post reversal (1, routes through postGuarded; dual release above threshold). Owner: Investigate (1) from the variance row.
+- **why intuitive**: Removes vigilance: the biller no longer explains insurance days to the owner; the match is on payer data plus bank data, neither typed by staff, so the shape+word status stays honest.
+- **why innovative**: Denticon and Curve post 835s but nothing in the corpus matches the 835 trace number to a bank feed line; Zeldent reconciles from outside; Dental Intelligence and Jarvis never touch the bank.
+- **phi and controls**: Deposit lines carry payer id and TRN, no patient names, so the reconciliation screen is PHI-minimal. The runtime SoD block applies: whoever posted the ERA cannot clear that day's variance. Recoupment reversals link to the era_line with a reason code.
+- **phase**: Phase 2
+- **effort**: M
+- **data model changes**: deposit_lines gains tender 'eft', trn text, payer_id, era_payment_id FK; bank_transactions gains parsed_trn; reconciliation_matches gains match_basis enum (amount_trn | amount_date | manual).
+- **ux flow changes**: Flow 5 'Post ERAs + close the day' produces the EFT deposit line with zero clicks; the owner's Tied tile stops turning amber on insurance days.
+- **judge consensus**: 24/23/23; in all three top-25 lists. All: many-to-one tolerance, fall back to amber, never force a match.
+- **evidence**: docs/01 principle 3 'The bank is the only independent ground truth'; zeldent-dental-fraud-detection.md; report A.6.1 #7.
+
+### Item 10
+- **name**: ERA posting: matched lines already posted, delta readback, contract variance, secondary from the frozen 835
+- **surface**: Money Desk
+
+#### personas
+- biller
+- office manager
+- owner
+- **problem**: Automatic 835 posting in incumbents posts whatever the payer allowed and writes off the difference as contractual, so underpayment is never noticed; a one-click batch hides the surprising lines in a wall of green; and the secondary claim is a manual re-key after the primary EOB that is the step most often forgotten.
+- **spec**: The worker posts clean lines before the biller opens the batch: each insurance_payment and computed contractual write_off links to era_line, 835 segment, claim line, and the fee-schedule row used; 'Why did this post?' on any entry shows a four-line trace. 'Post matched' for the remaining matched lines first runs a deterministic diff of each line against the claim's expected payer id, billed, allowed, CARC set, and patient responsibility; lines with deltas (ignoring rounding under a tenant threshold, default $1) render as a readback checklist capped at eight, one line each ('Line 14 · #19 crown · expected paid $590, ERA says $540 · CARC 45') with Confirm per item and 'Hold these' for the batch; nothing posts until each delta is confirmed or held. Allowed-vs-contract variance beyond tolerance (tenant setting under maker-checker, default $5 or 2%) is an amber row 'Paid $412; contract allows $460 (Delta PPO, Dr. Reagan, D2740)' with Dispute (creates an appeal row citing the fee-schedule line) and a secondary 'Accept as contractual (reason)' that is a discretionary write-off routed through evaluateRelease above threshold; a CARC that explains the difference (alternate benefit) suppresses the row; a missing fee schedule renders 'no contract on file', never false green. When a posted line's patient has rank-2 coverage covering the service date, the worker assembles the secondary claim in 'queued' with COB segments from the frozen 835 and the primary ERA attached where required; Money Desk shows 'Secondary ready — MetLife — $142 remaining on D2740' → Send. The Rail shows ins_ar_primary drop and ins_ar_secondary rise as two labeled numbers, never a transfer line.
+- **interaction**: Clean batch: Post matched (1). Batch with three deltas: Post matched (1) → Confirm ×2, Hold ×1 (3). Variance row: Dispute (1). Secondary: Send (1).
+- **why intuitive**: Silent until something differs; clean batches stay one click and only the surprising lines ask; severity by shape and word so a biller ranks the batch in grayscale; zero recall that a secondary exists because the coverage row makes it structural.
+- **why innovative**: Aviation readback applied to money: incumbents auto-post silently (Open Dental allocation complaints, CareStack transfer adjustments), none compares allowed to the plan's fee schedule at posting (that work is sold by outside RCM services such as Zentist), and none assembles the secondary from frozen 835 bytes rather than re-keyed EOB figures.
+- **phi and controls**: ERA bytes arrive only through the BAA-covered clearinghouse and are frozen. The computed contractual write-off is exempt from dual release only because its amount is arithmetic over frozen rows; 'Accept as contractual' is discretionary and gated. Each confirmation is an approvals_log-style event with the frozen delta. Disputes aggregate by payer and reason, never by biller.
+- **phase**: Phase 2
+- **effort**: M
+- **data model changes**: era_lines gains expected_snapshot jsonb, delta_flags, confirmed_by frozen; claims gains assembled_from_era_id; claim_events kind 'assembled_from_era'; control_policies gains contract_variance_tolerance; fee_schedule_lines referenced by insurance_payment.fee_schedule_line_id.
+- **ux flow changes**: Flow 5 step 'Post matched (1 click)' gains the delta checklist only when deltas exist; the ERA exceptions tab gains variance rows with Dispute as primary; the Claims tab gains 'Secondary ready' rows.
+- **judge consensus**: Contract variance 23/22/21 (OM and Eng top-25); delta readback 22/23/22 (Eng top-25); secondary-from-835 20/20/18 (attorney: core scope, folded here). Eng judge: tune the delta threshold on pilot 835s.
+- **evidence**: docs/04 flow 5; docs/01 must-have #1 'automatic 835 posting with line-item match' and 'automatic secondary claims'; readbackClass.ts 'confirmed on Apply, not inferred'; report A.6.2 Ascend 'fee-schedule workarounds', CareStack 'dual-insurance glitches'.
+
+### Item 11
+- **name**: Record-bound claim pre-flight and narrative by quotation
+- **surface**: Money Desk
+
+#### personas
+- biller
+- dentist
+- hygienist
+- office manager
+- **problem**: The biller queues D4341, D2740, or D7210 and learns 30–45 days later that the payer wanted a perio chart, a radiograph interpretation, or a patient-specific indication; scrubbers check form fields but never ask whether the chart supports the line, and when the evidence exists the biller retypes it into the narrative, introducing wrong-tooth and wrong-depth errors and a second version of the truth.
+- **spec**: Scrubber rules are triggered by the CDT code on the claim line, never by regex on procedure words, and read tenant rows: SRP requires perio_sites with depth ≥4 mm or bleeding in the billed quadrant on the same encounter (Phase 3, when perio exists); crown requires a chart_event finding class (fracture, caries into dentin, failed restoration) on that tooth; extraction requires a finding plus an imaging interpretation; attachment-required codes require an attachment row (Phase 2). A failing line is a row 'D4341 UR quadrant: no perio site ≥4 mm recorded on this encounter' with WHAT/WHY/HOW and one control 'Open perio exam' or 'Open note field' that deep-links into the encounter with the cursor placed. Passing lines show a green square 'Supported' with the satisfying span quoted. A blocked line cannot be queued; a dentist may add a named 'clinical judgement' indication field (reason-coded, stamped) rather than a free-text dodge; release to patient responsibility requires a reason code. Findings write preflight_findings stamped RULESET_VERSION so later rule changes never regrade a queued claim. The same chip appears per line on the checkout screen so the fix happens while the patient is in the building. On a satisfied line the narrative field offers 'Build narrative from note': a deterministic extractor stitches only verbatim clauses matching the rule's satisfiedBy pattern plus structured perio_sites values, each with a colored underline linking to its source span; connectives come from a fixed template list; the biller may delete a quoted clause but typing requires 'Edit freely', which drops span links and marks the narrative 'manual' on the claim event. If no satisfying clause exists the control is absent and the tool never fills the gap; a per-payer rulebook is versioned. No model anywhere.
+- **interaction**: Failing line: tap the row (1) → Open note field (2) → clinician fixes → chip turns Supported on save. Narrative: Build narrative from note (1) → Queue (2). Clean claims move to Queued with zero clicks.
+- **why intuitive**: Structural correctness over vigilance: the rule reads perio_sites and chart_events that already carry the encounter FK, so the biller never remembers which payer wants what; the span underline is the evidence, so there is nothing to verify because nothing was generated.
+- **why innovative**: Dentrix is praised for eClaims depth and CareStack for a claims tracker, but every incumbent scrubs the form, not the record; the insurance-auditor panel's attack ('two systems, one story tailored for pay') is possible because no product matches code to finding. Only a PMS that owns perio_sites and chart_events can bind them, and only one with a grounding-verified extractor can quote instead of draft.
+- **phi and controls**: Runs server-side on tenant rows; no egress. No AI drafts indication language; the deterministic rule is the only twin and there is no model twin for necessity. Release-to-patient is a reason-coded event visible in the digest by reason, never by person. The 837 carries a quoted|manual flag so denial rates by narrative kind can be compared at practice scope.
+- **phase**: Phase 2
+- **effort**: M
+- **data model changes**: preflight_findings gains rule_id, satisfying_span refs (note revision id + offsets, perio_site ids), ruleset_version; claim_lines gains indication_reason_code and narrative_kind enum (quoted | manual); payer_rulebooks (payer, rule id, version, effective dates).
+- **ux flow changes**: Flow 4 checkout's 'per-line pre-flight status' becomes a chip with a deep link; Money Desk Claims tab gains a 'Needs pre-flight' group; the encounter page gains a narrative-source highlight when opened from a claim.
+- **judge consensus**: Record-bound pre-flight 22/22/22 (all three top-25); CDT narrative pre-flight 22/22/20 (merged here by all three); narrative by quotation 23/22/23 (attorney top-25). OM and attorney: false blocks on legitimate care need the clinical-judgement field and the precision harness.
+- **evidence**: justification.ts 'Scaling and root planing is documented without the periodontal evidence carriers require'; grounding.ts 'every clinical word the model writes must trace back to a word the writer typed'; docs/01 insurance row 'pre-flight failures phrase WHAT / WHY / HOW and deep-link to the note field'; report A.6.1 #1 '78% report rising denials'.
+
+### Item 12
+- **name**: Denial worklist with plain-language CARC, deterministic next action, appeal built from the record, and the patient's sentence
+- **surface**: Money Desk
+
+#### personas
+- biller
+- office manager
+- dentist
+- patient
+- front-desk coordinator
+- **problem**: A denial arrives as CARC 16 / RARC N4; the biller decodes it, decides whether to fix, appeal, or bill the patient, and builds an appeal by copying from the chart; appeal windows are missed and the quiet path is to write it off. The same code is then read aloud to a patient asking why they owe $190 instead of $44.
+- **spec**: Money Desk → Denials tab. Each row: patient, amount, one plain line from a versioned CARC/RARC dictionary with per-payer overlay ('Denied: perio chart not received — Delta'), the appeal-by date when the payer table has one, and one primary action chosen by the table: 'Attach and resubmit', 'Appeal', 'Correct and resubmit', or 'Bill patient' (offered only when the code is a PR group code; otherwise 'Review'). Appeal opens a packet drawer pre-filled from frozen artifacts: filed-note excerpt for the billed module, perio sites for the quadrant, images with interpretations, the frozen 837 and 835, the fee-schedule row, and a letter shell restating the CARC; the biller reviews checkboxes and presses Send appeal (irreversible; disclosure row with artifact hashes). Write-off exists only as a secondary reversible-styled control and, because the claim has a denial with no appeal, always shows the inline dual-release card naming a second approver who is not the claim submitter. After three denials for the same CARC and CDT family from one payer in 90 days, the Claims tab shows a proposal row 'Delta denied 3 D4341 for missing perio chart — add pre-flight rule?' with Accept (maker-checker, versioned) or Dismiss (reason). When an ERA line posts with a CARC raising patient responsibility above the frozen shared estimate, the same dictionary produces the statement sentence 'Your plan paid less than we estimated: it counts this as a frequency limit (one cleaning every 6 months)'; unknown codes render 'Your plan gave a reason we can't explain — tap to ask us'; the biller's exception row shows the sentence with 'Appeal' or 'Explain to patient' (adds it to the next statement). Phase 2 ships the worklist, dictionary, next action, and patient sentence; the record-built packet lands in Phase 3 when perio and images exist in the encounter.
+- **interaction**: Appeal (1) → review → Send appeal (2). Attach and resubmit (1). Write-off: secondary control (1) → Request approval (2). Explain to patient (1).
+- **why intuitive**: Recognition over recall: the code is translated once by the table, not by every biller; every row has exactly one primary action; the compliant path (appeal) is one click with the packet built while write-off is the slow lane with a second approver; the patient reads the same sentence the biller does.
+- **why innovative**: CareStack's tracker and Dentrix's eClaims are not described as translating CARC to an action or building an appeal from structured rows; the auditor panel notes offices 'wave GPA/stamp; still lose' because appeals cite prose. The per-payer rule proposal is a deterministic feedback loop no incumbent offers, and no incumbent renders adjudication reasons for the patient.
+- **phi and controls**: Each appeal send is a disclosure row (payment purpose, payer destination, artifact hashes) through the BAA-gated clearinghouse or attachment vendor. Denial suppression is enforced in postGuarded. Counts aggregate by payer, CARC, and CDT family; no per-biller denial rate anywhere. Rule proposals stamped with a rulebook version and human-accepted. Self-pay-restricted lines are excluded from the patient sentence by construction.
+- **phase**: Phase 2
+- **effort**: L
+- **data model changes**: carc_dictionary (code, rarc, plain_text, action enum, group_code, version) with payer_overrides; claims.appeal_by date; appeal_packets (claim, artifact refs + hashes, sent_at, disclosure_id); rule_proposals (payer, carc, cdt_family, count, window, decision); statements line annotation carc_sentence_id.
+- **ux flow changes**: Money Desk denials tab (already one of three) gains the plain line, appeal-by, and one derived action; statements gain a per-line adjudication sentence; the ERA exceptions tab gains 'Explain to patient'.
+- **judge consensus**: Denial worklist 22/19/18 (OM top-25; Eng and attorney: L effort, 'Bill patient' must require a PR group code, split worklist first and packet later — adopted); 'Why your plan paid less' 22/21/22 folded here as the patient-facing half of the same dictionary.
+- **evidence**: docs/05 denial-suppression rule; docs/01 insurance row 'claim lines with CARC/RARC ... denial worklist'; report A.6.1 #1 and #5; adversarial-insurance-auditor-hate.md 'Durable indication fields cited in appeals'.
+
+### Item 13
+- **name**: Checkout closes on a typed collection decision, with the self-pay restriction toggle
+- **surface**: Board
+
+#### personas
+- front-desk coordinator
+- biller
+- owner
+- patient
+- **problem**: The patient portion not collected at the window disappears: the coordinator clicks past payment, nothing is written, and the balance surfaces weeks later on an aging report nobody trusts. Separately, a patient who pays in full and asks that a procedure stay off their insurance record still gets a claim filed because nothing at checkout can stop it.
+- **spec**: Checkout screen (from the Board card) lists completed procedures from the procedure log with the patient portion and the estimate column separate. The payment block is a segmented control of three 44 px choices: Collect (default; hosted card field or cash/check; allocation defaults oldest-open and is shown), Send statement, Set up payment plan. Post is disabled until one is chosen; Collect with $0 is not allowed. Send statement writes no ledger entry but a statement_due row visible on Money Desk the same day; Payment plan opens the schedule inline (amount, cadence, token; only patient_ar charges are eligible, ins_ar charges greyed 'Waiting on Delta'). Per procedure line, when the tender covers the full fee, a 44 px toggle 'Paid in full — don't send to insurance' appears; Post writes procedures.self_pay_restricted in the same transaction as charge, payment, and allocations; claim assembly refuses the procedure, ERA matching ignores it, statements never mention a plan for it, the Rail shows a 'restricted' glyph; lifting it requires the patient's request recorded as a consent object. Daily Close shows 'Not collected at window: $X across N visits' at practice level only.
+- **interaction**: Board card → Checkout (1) → Collect is pre-selected → card field → Post (4 clicks total). Send statement: 1 extra tap. Payment plan: 2 more clicks. Restriction toggle: 1 tap, only when unused it costs nothing.
+- **why intuitive**: The uncollected portion is a typed row, not an absence; three named options instead of remembering to note 'will bill'; a HIPAA right offered at the only moment it can be exercised, with structural refusal in claim assembly rather than a note on the account; two identities (Post irreversible, Send statement reversible until the statement job runs).
+- **why innovative**: Dentrix is praised only for a 'ledger tied to checkout' and Curve complained about for partial-payment posting; none refuses a silent $0 checkout, and no incumbent in the corpus enforces the 164.522(a)(1)(vi) restriction because insurance modules are built to send everything.
+- **phi and controls**: statement_due and payment_plans carry patient, amount, frozen creator and enter the ledger only when money moves; auto-charges run on the processor token in the hosted vault (PCI SAQ-A); the restriction is a hard block in the scrubber and in payment-purpose disclosures while treatment and legally required disclosures are unaffected; flag changes are domain events. No per-coordinator figure anywhere.
+- **phase**: Phase 2
+- **effort**: S
+- **data model changes**: statement_due (account, amount, created_by frozen, reason 'window_deferred'); procedures.self_pay_restricted boolean + restricted_at + lifted_consent_id; payment_plans already planned, gains eligible_bucket CHECK (patient_ar only).
+- **ux flow changes**: Flow 4 'Take payment → Post' becomes 'choose Collect / Send statement / Plan → Post' with Collect pre-selected so the common path stays ≤4 clicks; Daily Close gains one practice-level line; Money Desk statements-due tab receives window deferrals.
+- **judge consensus**: Typed collection 23/23/24 and self-pay toggle 24/24/24; both in all three top-25 lists. Merged because they live on the same screen and are both S.
+- **evidence**: docs/04 flow 4; docs/06 control 25 procedures.self_pay_restricted; report A.6.1 #5; report A.6.2 Dentrix 'ledger tied to checkout'.
+
+### Item 14
+- **name**: Checkout queue with structural chips and a Filed-later lane
+- **surface**: Board
+
+#### personas
+- front-desk coordinator
+- dentist
+- biller
+- **problem**: The coordinator is made the note cop: the patient reaches the window, the note is not filed, and she absorbs the complaint and chases assistants by text; she has no signal she trusts and no way to check the patient out without waiting for the doctor or laundering an unfinished chart.
+- **spec**: Board right-hand Checkout queue lists patients in chair-out order. Each row carries two chips derived from rows, not buttons: Note (Filed / Open · initials of the owner, a projection of clinical_notes_filed existence on the encounter FK) and Claim (Ready / Needs: attachment). If Note is Open, the checkout screen shows one line 'Note not filed — Dr. K' and one control 'Ping chair' (in-app domain event to that chair's device only, capped at one per encounter per 15 minutes). Because charges are released only by File, checkout on an unfiled encounter posts the patient payment to unapplied_credit with an allocation intent against the pending charges; when the encounter reaches note_filed, the worker posts the charges, applies the allocations, and releases the claim from state held_note_unfiled to the scrubber automatically. The Board card moves to a bottom 'Filed later' lane until note_filed. No front-desk control can flip Note to Filed. Median ready → filed is reported practice-wide only.
+- **interaction**: Tap row (1) → Checkout screen → Ping chair (optional, 1) → Collect → Post (4 clicks). Nothing else changes for the coordinator.
+- **why intuitive**: The chip is a database fact so nobody trusts a verbal green light; structural correctness over vigilance; one verb line plus one control at the gate; the blocker is fixed by a button rather than decorated by a banner; the pressure lands on the dentist's Exams-to-sign queue instead of the window.
+- **why innovative**: Curve Hero has no board-level documentation status, which is why the design partner's coordinator resorted to group texts; no incumbent in the corpus gates claim release on a filed encounter note, and the plan's encounter FK makes the chip a fact rather than a status someone marks.
+- **phi and controls**: Board chips show initials and chair only; the ping is a domain event, not SMS, so no disclosure row. Payment posts through postGuarded; held claims are a claim state, not a ledger entry; allocation intents are not allocations until charges exist, so the DB invariant (charges require a completed procedure) holds. No per-person counts of open notes; the ping is one-to-one and unbroadcast.
+- **phase**: Phase 3
+- **effort**: M
+- **data model changes**: claims.status gains held_note_unfiled; allocation_intents (payment entry, pending procedure ids, amounts; consumed on note_filed); appointments state gains checked_out_unfiled; domain_event type board.ping_chair with rate-limit key.
+- **ux flow changes**: Flow 4 gains the Note/Claim chips and the Filed-later lane; the Board home's 'checkout queue' is specified; the dentist's Exams-to-sign queue receives the unfiled-with-payment rows at the top.
+- **judge consensus**: 24/23/19; OM and Eng top-25. Attorney judge flagged that posting charges before filing conflicts with planned→completed gated on filing; resolved here by posting the payment to unapplied_credit with allocation intents and letting File release charges and claim.
+- **evidence**: adversarial-hate-front-desk.md 'You made me the note cop'; docs/01 principle 9; docs/04 flow 3 'filing ... flips the Board chip'.
+
+### Item 15
+- **name**: Open-the-day readiness strip
+- **surface**: Board
+
+#### personas
+- front-desk coordinator
+- office manager
+- **problem**: Dead chairs at 8:00 come from things nobody checked at 7:45: a temp whose role is unset, a shared tablet still holding yesterday's author, a lab case not back for a 9:00 seat, insured patients whose 6 am eligibility failed, a provider template with no operatory; each is discovered with the patient in the lobby.
+- **spec**: Before the first appointment the Board shows a single strip above the operatory columns, one row per unresolved chair-blocking item computed from tables: lab_cases.due vs appointments.start ('Lab case for 9:00 Op 3 not received' → Call lab); eligibility_checks status ('3 eligibility checks failed overnight' → Re-run, fires 270s); sessions on operatory devices ('Tablet Op 2 still signed in as J.M.' → Sign out, server revocation); user_entitlements without location ('Temp account for today has no location' → Assign here, office manager only); tomorrow's uncovered chair ('Tomorrow: 1 chair with no writer' → Add day pass). Rows are ordered by the time of the appointment they block; the strip is capped to items that block a chair today or tomorrow and collapses to the word 'Ready' when empty. Everything else is a Money Desk or Practice worklist row.
+- **interaction**: Zero rows means zero taps. Each row: one control (1 tap).
+- **why intuitive**: Recognition over recall: the coordinator carries no mental checklist; home is the work; one verb line plus one control per row; severity by time position, shape, and word.
+- **why innovative**: Incumbents surface problems at chair time (report A.6.1 #3, #11); no PMS in the corpus presents a pre-open checklist computed from lab, eligibility, device-session, and provisioning state, and the temp recruiter's kill #1 (the unset-role greeting) becomes impossible to meet at 8:00.
+- **phi and controls**: Rows carry time, operatory, and item type; the patient name appears only on tap into the card. Re-run eligibility is a 270 through the BAA-gated clearinghouse with an eligibility_checks row and a disclosure row per query. Sign-out is an enforced server session revocation. 'Assign here' is a role event that runs detectSodConflicts. Rows name devices and items, never people as problems.
+- **phase**: Phase 2
+- **effort**: S
+- **data model changes**: None new; a readiness view over lab_cases (Phase 3 rows appear when the table exists), eligibility_checks, sessions, user_entitlements, appointments.
+- **ux flow changes**: Board home 'readiness strip before open' specified; flow 1 check-in becomes 1 tap because the amber eligibility badge was already re-run before open.
+- **judge consensus**: 23/22/22; OM top-25. Eng and attorney: cap to chair-blocking items or it becomes the dashboard the doctrine forbids.
+- **evidence**: adversarial-temp-agency-recruiter.md fix #1 'Coordinator Monday readiness strip'; docs/01 lab-case row 'a Board warning when a seat appointment precedes the due date'; docs/04 Board home row.
+
+### Item 16
+- **name**: Send path refuses a message without matching consent scope
+- **surface**: Cross-cutting
+
+#### personas
+- front-desk coordinator
+- office manager
+- compliance lead
+- owner
+- patient
+- **problem**: Recall and marketing texts go to people who consented only to appointment reminders; STOP is handled by a vendor rather than the record; communications vendors are the breach surface (MMG Fusion settled with OCR in 2026).
+- **spec**: Every outbound message (reminder, recall campaign, statement link, marketing) carries a scope enum. The send service checks sms_email_consents (channel, scope, timestamp, source) inside the same transaction that writes the message row and refuses mismatches with one line and one control: 'No marketing consent for 41 of 200 — Send to 159', listing the 41 rather than silently dropping them. An inbound STOP flips consent in-stream and writes the event. Templates are linted at save (silent until blur): a template containing a procedure word or a coverage status fails. Every send is a disclosure row with channel, recipient, template version. The Phase 2 reminder may add one generic sentence ('Please bring your current insurance card') when the eligibility snapshot is Unverified or Inactive; it never states plan name or status.
+- **interaction**: Send (1) → refusal line → Send to 159 (2). The refusal costs the same tap as the send.
+- **why intuitive**: The compliant path is the fastest path; one verb line and one control; nothing to audit later because the check happened in the write.
+- **why innovative**: Weave, RevenueWell, Solutionreach, Curve GRO, Ascend, and Denticon messaging are listed in the corpus as bolt-ons or included features; none documents a consent-scope refusal, and Abyde or Patient Protect record the policy where the PMS is the only place it can be enforced.
+- **phi and controls**: Enforced in the transaction path and listed on the recorded-vs-enforced table. The SMS/email vendor sits behind a BAA row (Twilio Security Edition or AWS End User Messaging class). Templates carry no clinical detail; every send is a disclosure row. TCPA healthcare-exemption reading is labelled UNVERIFIED pending counsel.
+- **phase**: Phase 2
+- **effort**: S
+- **data model changes**: messages gains scope enum NOT NULL, template_version, consent_check_id; sms_email_consents already planned, gains source and stop_at; message_templates gains lint_status.
+- **ux flow changes**: No flow changes for the five daily flows; reminders (Phase 2) and recall campaigns (Phase 4) acquire the refusal line. The Board's 'Coverage to confirm' filter is fed by the same eligibility snapshot.
+- **judge consensus**: 23/23/24; Eng and attorney top-25. Attorney: the vendor's own liability shield; 'bring your card' must stay generic and consent-gated (adopted).
+- **evidence**: docs/06 TCPA row; docs/06 OCR row on MMG Fusion (March 2026 settlement); tennessee-dental-law-summary.md separate marketing-photo consent.
+
+### Item 17
+- **name**: Temp day pass and the event-verified first-shift rail
+- **surface**: Cross-cutting
+
+#### personas
+- temp
+- new hire
+- office manager
+- front-desk coordinator
+- hygienist
+- biller
+- **problem**: A day-rate temp arrives before the manager, meets an 'unset role' warning or a shared generic login, and burns the first hour on a tour modal or training homework; the office reaches for a shared 'temp' login that destroys attribution.
+- **spec**: Provisioning: from the Board readiness strip ('Tomorrow: 1 chair with no writer' → Add day pass) or Practice → Roles, the office manager enters name, licence or role (RDH, RDA, DA, Front desk), location, and shift end (four fields). Clinical entitlements come from the licence template; the front-desk template has no refund, write-off, or reconciliation entitlement; the grant is an append-only user_entitlements row with expiry = shift end + grace, detectSodConflicts runs synchronously and shows any conflict before save. The invite is a magic link plus TOTP on the temp's own phone (or a PIN set on the operatory tablet after the office manager's two-identifier check). At expiry the grants lapse and the session is revoked; the account remains as a frozen name on everything it posted. First run: the temp lands on the persona home; a 56 px collapsible rail under the top bar shows the role's five daily steps as 44 px chips (front desk: Arrive · Seat · Checkout · Take payment · Find a patient; hygienist: Perio grammar strip and Save exam). Tapping a chip pulses the outline of the real control on the live surface (first card in DOM order, reduced-motion honored) with one verb line; a chip retires when the server sees that user's real domain event (appointment.arrived by this actor); a step with no eligible object says 'Nothing to check out yet'. State is a per-user server row, never device storage. Weekly digest shows day passes issued at practice scope.
+- **interaction**: Manager: Add day pass (1) → four fields → Save (2). Temp: sign in → land on Board (0) → tap chip (1) → do the real action (2); chip retires.
+- **why intuitive**: Role before work means the first beat is never 'you are not allowed'; the rail points at the live object instead of describing it; completion is derived from the event stream, not a checklist; learnable by a temp in one shift is a design constraint, not a claim.
+- **why innovative**: Incumbents answer staffing with familiarity, not provisioning (Dentrix 'training at scale'; Open Dental training $3,650 a day); no incumbent offers a time-boxed named temp identity from the schedule's readiness view with SoD preview, nor first-run rendered inside the live worklist and retired by real transactions.
+- **phi and controls**: Unique identity per person (no shared login), argon2id PIN, expiring grants enforced at withGuard per request; rail copy references controls, not patients; no completion score is stored per person; digest counts are practice-scoped.
+- **phase**: Phase 2
+- **effort**: M
+- **data model changes**: user_entitlements.expires_at (already append-only grant log); users.day_pass boolean and licence_type; first_run_state (user, step id, retired_at, retired_by_event_id).
+- **ux flow changes**: Adds the Board readiness row and the rail to the temp/new-hire home (docs/04 'Same as their role' row); no change to the five flows' click counts; measures the ≤90-minute training gate.
+- **judge consensus**: Day pass 24/24/23 and first-shift rail 23/23/23; both in all three top-25 lists; all three merged the front-desk temp identity and the hygienist grammar strip into these.
+- **evidence**: docs/01 principle 22 and module map 'Role is set at provisioning, never day-of'; adversarial-temp-agency-recruiter.md kills 1–3; report D.4 #5 and A.6.1 #11.
+
+### Item 18
+- **name**: Command palette with incumbent-vocabulary translation
+- **surface**: Cross-cutting
+
+#### personas
+- temp
+- front-desk coordinator
+- biller
+- office manager
+- hygienist
+- **problem**: Staff hired from Dentrix or Eaglesoft offices know the job but not the words; they search for 'walkout statement', 'Office Journal', or 'ledger adjustment', find nothing, and ask a colleague or call support.
+- **spec**: Cmd/Ctrl-K or the 44 px search button opens one input. Three letters list patients (name · DOB · last-4 phone as two identifiers), appointments, claims, reports, and actions, filtered per request through withGuard. Actions are verbs in the PMS's own words; a versioned, tenant-editable synonym catalog labelled by source system maps incumbent vocabulary to the same rows ('Statement — called walkout statement in Dentrix'; 'day sheet' and 'deposit slip' → Daily Close; 'adjustment' → 'Write-off or adjustment (needs a reason code)'). Enter runs a reversible action or opens the screen; an irreversible action opens its in-place gate instead of executing. Selecting a patient requires the second identifier before the chart opens. Recents are per user server-side and never shown on operatory-profile devices. Patient search never widens to phonetic matches.
+- **interaction**: 3 keystrokes + Enter to any object; +1 identifier confirmation to open a chart.
+- **why intuitive**: Recognition over recall: the user types the word they know and sees the word the PMS uses beside it, which teaches the canonical term at the moment of use; removes menu paths entirely.
+- **why innovative**: The hiring pool is Dentrix and Eaglesoft's moat (report D.4 #5, A.6.1 #11) and incumbents are criticized for clicks; no incumbent offers a global command surface, and none translates a competitor's vocabulary.
+- **phi and controls**: Results authorization-filtered per request; two identifiers only until confirmation writes the phi_access_log row on chart open; no recents cached on operatory devices; actions never execute money or filing outside postGuarded/signNoteAtomic.
+- **phase**: Phase 2
+- **effort**: M
+- **data model changes**: palette_synonyms (tenant nullable for the shipped catalog, source_system, term, action_id, version); user_recents (user, object ref, at) excluded on operatory sessions.
+- **ux flow changes**: Top bar (docs/04 IA) already names the palette; this specifies the synonym table and the two-identifier gate. Flow 4 and Rail navigation reachable in 3 keystrokes.
+- **judge consensus**: 23/23/23; in all three top-25 lists. Eng judge: synonym tables ship versioned and tenant-editable.
+- **evidence**: docs/01 principle 10; docs/08 risks 'Command palette, role-before-work, temp quick-start, free certification'; report A.6.1 #11.
+
+### Item 19
+- **name**: Gate contract in code and CI: refusal component, shape pack, copy catalog, glove floor, keys layer
+- **surface**: Cross-cutting
+
+#### personas
+- biller
+- front-desk coordinator
+- hygienist
+- dentist
+- office manager
+- color-blind staff
+- keyboard-only or screen-reader staff
+- **problem**: Gates drift: a refused button fades to 40% opacity with the reason hidden from screen readers, Stop/Required/Review collapse into one brick under red-green CVD, gate messages grow into policy paragraphs, chips shrink to 0.65rem, 44 px targets exist only behind pointer:coarse, and worklists are mouse-only, so the plan's principle 11 is a promise rather than a property.
+- **spec**: One shared Refusal component renders every server verdict (reasons[], nextSteps[] from postGuarded, evaluateRelease, signNoteAtomic, role grants): the first reason becomes the verb line (≤8 words, verb first), the first next step the one 44 px control; the primary button never dims but switches to the Held identity (outlined, lock glyph, the word Held); an aria-live region announces once on verdict change and is linked by aria-describedby; further reasons and a 'Why' paragraph (live threshold, who set it, last review date, from the control_policies row; for temps 'Approvals usually take N minutes here' at practice scope) sit behind one disclosure. Shape pack: every severity, claim state, eligibility badge, and appointment type is a distinct mark (filled square, triangle, diamond, circle, bar; ≤8 appointment glyphs), a short word, and a fill whose luminance rises monotonically with urgency; tokens live in design-tokens.json and components consume semantics only. A grayscale preview is a per-user Settings preference, not top-bar chrome. Copy catalog: all gate strings live in one versioned catalog keyed by id; CI fails a gate string over eight words, not verb-first, containing a currency token in note-scoped copy, or using a term outside the terminology registry (one canonical word per fact: 'write-off', 'Arrive'); counsel-required text goes behind Why. Glove floor: density derives from sessions.device_profile, not the pointer media query; operatory devices render every control ≥44 px with 8 px gaps regardless of pointer; desks default to the floor with a per-user compact opt-out never offered on operatory devices; odontogram cells 44 px with a live 'Selected: 14' line and adjacent Undo; clinical paths set animation, transition, and transform to none under reduced motion and always on operatory profiles. Keys layer: worklist rows and gate controls carry a single-key accelerator printed as a 14 px key cap when the per-user Keys toggle is on (Money Desk: arrows, P post, W write-off, A appeal; Board: A arrive, S seat, C checkout; Encounter: F file); irreversible keys open the gate, never execute. CI: Playwright runs the five daily flows with the pointer disabled and axe-core, measures every interactive bounding box (fail under 44×44 or 8 px gap), and asserts the luminance ladder from token metadata, not pixels.
+- **interaction**: No added taps on any flow. A refusal is read (or heard) and answered with one tap; Keys users complete a 200-line ERA batch without touching the mouse.
+- **why intuitive**: Staff learn the refusal shape once and it is the same on the refund form, ERA row, File, Close day, and role grant; severity ranks in grayscale; the key is printed on the control so nobody memorizes a sheet; the floor is a build-time assertion, not a designer's promise.
+- **why innovative**: Incumbents' controls are absent or advisory and their refusals read as errors; nothing in the corpus credits any PMS with color-vision-safe encoding, a published VPAT, keyboard-complete worklists, or a glove-specific density policy; even Smile Notes shipped 44 px only behind pointer:coarse and drifted to 0.65rem chips.
+- **phi and controls**: Purely presentational plus build-time refusals to ship; the Refusal component renders only what the server returned so it can never invent a path around a gate; key-layer, grayscale, and compact preferences are per-user server rows so nothing leaks between authors on a shared device; the money-in-note lint enforces principle 11 at build time.
+- **phase**: Phase 1
+- **effort**: M
+- **data model changes**: users.preferences jsonb (keys_layer, grayscale_preview, compact_desk); sessions.device_profile already planned; no other schema. Copy catalog and tokens are repository files with version stamps.
+- **ux flow changes**: Every gate in flows 3, 4, 5 and the approvals inbox adopts the Refusal component; flow 5's 200-line batch becomes keyboard-only; flow 2 keeps its perio grammar with a legend in the grid margin. Tokens land in Phase 0 repo surgery; first user-facing surfaces are the Phase 1 approvals inbox and ledger.
+- **judge consensus**: Refusal contract 23/23/23 (Eng and attorney top-25; all three merged the gate-side explainer into it); shape pack 19/23/21 (OM killed only the top-bar toggle, kept here as a Settings preference); copy lint 21/21/19 (attorney called it discipline not feature; two judges 20+, kept as CI); glove floor 20/21/21; keys layer 20/20/20.
+- **evidence**: docs/01 principle 11; docs/05 verdict table 'return 403 with reasons[] and nextSteps[]'; adversarial-a11y-advocate-hate.md kills 2, 4, 5; adversarial-cvd-dyslexia-hate.md hate 1 and fixes 3–4; docs/08 Phase 3 exit 'keyboard-only end-to-end test passes for all five daily flows'.
+
+### Item 20
+- **name**: Chairs card: what changed, what is due, what helped
+- **surface**: Chairs
+
+#### personas
+- hygienist
+- front-desk coordinator
+- guardian
+- **problem**: Before seating, the hygienist opens three or four screens to learn whether the medical history changed, when perio was last charted, whether bitewings are due, whether a premed alert exists, and what calmed an anxious child last time; under a packed recall column that reading is skipped and the visit starts blind.
+- **spec**: Chairs (mine) lists today's patients in seat order. Each card: name (initials in privacy mode), chair, appointment type, two 44 px buttons Perio and Note (a third, Ready for exam, once the exam or note has content). A one-line 'since last visit' strip renders only deltas computed from stored rows: medical-history snapshot diff restricted to clinically typed fields (medications, allergies, conditions); perio_exams age and count of sites ≥2 mm worse; imaging study dates against the tenant's interval rule, labelled the practice's rule; the un-collapsible critical alert; a 'Full chart due' badge from the screening lane; 'Intake: N changes' when a proposal set awaits accept; and for pediatric or anxiety-comfort encounters the last filed 'what helped' field ('Stop signal + counting; sunglasses'), never a behavior label. When nothing changed the strip reads 'No changes since 03/2026'.
+- **interaction**: 0 taps to read the strip; tap strip (1) to expand; Perio (1) lands at UR site 1.
+- **why intuitive**: Home is the work; recognition over recall (the card says what changed rather than making her remember to look); one canonical view per fact (the same deltas the dentist sees); the comfort handoff comes with the appointment type at zero taps.
+- **why innovative**: Curve's Sidekick is a persistent patient rail but no incumbent computes a since-last-visit diff for the hygienist; report D.5 says no vendor markets to hygienists, and pediatric depth is a named gap (A.6.1 #13); the anxiety-comfort handoff across visits exists in no incumbent.
+- **phi and controls**: PHI stays on the tenant; privacy mode hides names on operatory glass; every card open writes a phi_access_log row (treatment). Derived from rows, never AI. Card order is seat order; no person-level metric; module completion is practice-scoped under SYSTEMIC_SHARE.
+- **phase**: Phase 3
+- **effort**: M
+- **data model changes**: medical_history_snapshots diff view over typed fields; tenant imaging_interval_rules; appointment_types.behavior_contract gains preselected module ids (pediatric → anxiety-comfort); no new tables.
+- **ux flow changes**: Hygienist home (docs/04 Chairs row) gains the delta strip and Ready-for-exam; flow 2 begins with 0 taps of reading instead of 3–4 screens.
+- **judge consensus**: 22/21/22 (OM top-25); family handoff 21/22/21 folded here by the synthesis as the card's comfort line. All: diff only clinically typed fields or it becomes noise.
+- **evidence**: docs/04 Hygienist home row; report A.6.1 #10; adversarial-parent-portal-language-hate.md hate 4 (the intake answer had 'nowhere to live'); anxiety-comfort.ts helpText.
+
+### Item 21
+- **name**: Six-point perio by one gloved operator: grammar, probing path, any-HID pedal, glove pad, screening lane
+- **surface**: Chairs
+
+#### personas
+- hygienist
+- dentist
+- front-desk coordinator
+- **problem**: Full-mouth perio takes a second person or a paid voice add-on because native grids demand mouse clicks per site in a fixed order; gloved fingers cannot use a keyboard cleanly and mistap 32 px cells; and when the column runs late 60% of hygienists skip the chart entirely because the only choices are 'full chart or blank'.
+- **spec**: Chairs → Perio opens on the correct dentition with the cursor at UR site 1 and the prior exam ghosted grey. Grammar: digits 1–9 record depth and advance; 0 then digit records ≥10; space toggles bleeding on the last site; S suppuration; Backspace undoes and steps back; arrows skip and store 'not probed', never 0. Any HID device that emits keystrokes works without a driver; a Perio settings drawer echoes 'Last key pressed: PageDown → Next site' so a $15 clicker or pedal is mapped by pressing. Probing path (facial around then lingual; quadrant; arch) is a per-user preference chosen once from three diagrams. Glove pad: tapping the grid or the pad icon opens a bottom pad of 44 px keys with 8 px gaps (1–9, Bleed, Skip, Undo) plus a 56 px Next tooth bar, with the active site drawn enlarged above (tooth, site, prior value); Undo shows the removed value for two seconds; the pad hides when a key or pedal event arrives. Depths above 15 mm are refused at the control. Screening lane: a segmented control Full chart | Screening; Screening shows six sextant boxes taking one code 0–4 each plus an asterisk key (≤12 keystrokes); any 3 or 4 creates a 'Full chart due' recall row and Chairs badge. In Full chart, Save asks one licence for the skipped set from a 44 px list (implant, third molar, patient intolerance, time — screening completed instead, other); the derived note states which periodontal.ts chart-status sentence is true and a blank never reads as 'full chart recorded'. Save exam is one transaction over perio_exams, perio_sites, perio_tooth. On shared tablets Save is disabled until the PIN author is the hygienist. Every keystroke autosaves to the encrypted session-bound draft mirror (same-session resume only).
+- **interaction**: Chairs → Perio (1) → 168 keystrokes or pad taps → Save exam (1) → one licence tap if anything was skipped. Screening: Screening (1) → ≤12 keys → Save (1). Acceptance: one operator at or under the incumbent's measured median.
+- **why intuitive**: The cursor is always where the probe is; the ghosted prior value sits beside each cell; five keys make the grammar learnable in one shift; the glove floor made literal; named omission licences so the compliant path (screening) is faster than skipping and explaining.
+- **why innovative**: The corpus's answer to perio speed is voice add-ons (HS1 Voice Perio, Curve Perio+, Bola, Alta, Denticon and Ascend AI Voice Perio), all metered or add-on; Open Dental is praised for keyboard speed but fixed-order and mouse-sized. No incumbent offers a driverless pedal path, a per-user probing path, a glove-sized pad with one-step undo, or a screening lane that routes into recall with per-site omission reasons.
+- **phi and controls**: No audio; keystrokes are local input; no PHI leaves the tenant. Exam carries NOT NULL encounter_id and frozen clinical-performer attribution; PIN author switch gates Save; screening share is reported practice-wide only and the licence chosen is never aggregated per hygienist; the draft mirror is disabled on shared devices.
+- **phase**: Phase 3
+- **effort**: M
+- **data model changes**: perio_sites gains status enum (probed | not_probed) and omission_licence; perio_exams gains mode enum (full | screening), sextant_codes, code_set_version; users.preferences gains probing_path and hid_map; recall_due gains source 'screening_full_chart_due'.
+- **ux flow changes**: Flow 2 specified in full (1 tap in, grammar, 1 tap Save) and gains the Screening alternative at 2 taps plus 12 keys; Chairs card gains the Full chart due badge.
+- **judge consensus**: Six-point grid 23/23/23 (all three top-25); glove pad 22/22/23 (attorney top-25); screening lane 23/22/22. Eng: skips store not_probed, never 0; OM: the pad is a fallback that eats 30% of a 10-inch tablet.
+- **evidence**: docs/08 Phase 3 'Six-point perio with the keyboard/foot-pedal grammar and prior-exam deltas'; report A.6.1 #10 '60% skip full-mouth perio when behind'; periodontal.ts chart-status sentences; adversarial-hate-chairside-da.md 'My glove is fat. Your chip is not.'
+
+### Item 22
+- **name**: Save exam derives the note and the recall prescription; attachments assemble from the encounter
+- **surface**: Chairs
+
+#### personas
+- hygienist
+- dentist
+- biller
+- front-desk coordinator
+- **problem**: After probing, the hygienist retypes deepest pocket, bleeding count, mobility, and furcation into the note and writes '4-month perio maintenance with BWX' in prose that the front desk books as a 6-month prophy; the biller later leaves the claim, opens the imaging app, exports a JPEG, screenshots the perio chart, names files, and uploads them one by one to NEA or Vyne, with wrong-patient uploads common because nothing ties the file to the claim.
+- **spec**: Save exam (one transaction) computes the periodontal module's measurement fields (deepest depth, bleeding sites, greatest mobility and furcation, chart-status sentence) and shows them read-only in the hygiene note with a 'from exam 10:42' link; renders the exam as a dated chart image stored as a document on the encounter (byte-reproducible from frozen rows); and shows a Next visit strip pre-filled from the tenant's rule (interval 3/4/6 months, type Prophy or Perio maintenance labelled as the practice's policy, imaging due) that the hygienist confirms or edits, writing a recall_prescription on the encounter. At checkout the Board card shows one control 'Book 4-mo perio maint + BWX' opening the scheduler filtered to that type and provider for the target week; the supervision validator refuses a perio-maintenance slot when the exam-interval rule is unmet and offers 'Add exam'. If the dentist's plan conflicts, the plan wins and the prescription shows 'superseded'. On Money Desk, a claim line needing an attachment shows 'Attach from visit': a drawer lists what the encounter holds, pre-checked by payer rule (perio chart image, radiographs from the encounter's study, filed-note excerpt for the billed module, pre-authorization); the biller unchecks and presses 'Send with claim' (irreversible); a missing artifact reads 'No radiograph on this visit' with 'Request from Dr. Reagan', which creates a row on the dentist's Exams-to-sign queue. Phase 2 ships the drawer with documents only; perio and radiograph artifacts arrive with Phase 3. No quadrant-count line proposes a billable code; the dentist plans SRP from the plan card and the pre-flight rule blocks a claim the record does not support.
+- **interaction**: Hygienist: Save exam (1) → confirm Next visit (1). Coordinator: Book (1) → slot (1). Biller: Attach from visit (1) → Send with claim (2).
+- **why intuitive**: One canonical view per fact: the exam is the source and the note, recall, and claim read from it; recognition over recall for the front desk (the type is on the button) and the biller (the drawer shows what exists); wrong-patient attachments are impossible by encounter FK.
+- **why innovative**: Curve, Denticon, and Ascend sell voice perio as data entry and every incumbent 'covers' recall as a last-visit-date list; attachments in every incumbent are a file-upload step from a separate imaging store (Dentrix images 'outside the database', Eaglesoft x-rays 'cannot be bridged'), so none can assemble an attachment from structured perio and imaging rows or bind a clinician's recall prescription to the checkout control.
+- **phi and controls**: Derivation is server-side inside the tenant; the chart image is a document row and its send is a disclosure row (payment purpose, artifact hashes, never rendered PHI in the event payload) to the attachment vendor, which stays disabled at the registry until a countersigned BAA exists; frozen attachment bytes sit beside the frozen 837. The self-pay-restricted flag blocks attachment assembly. Nothing is scored per person; the hygienist never plans treatment (licence scope at the API).
+- **phase**: Phase 3
+- **effort**: M
+- **data model changes**: recall_prescriptions (encounter, interval, type, imaging_due, superseded_by_plan_item_id, frozen author); documents.kind 'perio_chart_render' with source exam id; claim_attachments (claim line, document ids, payer rule id, sent hash, disclosure id); appointment_types gains supervision interval rule ref.
+- **ux flow changes**: Flow 2's Save exam 'derives the periodontal module summary' is specified and gains the Next visit strip (1 tap); flow 4 checkout gains the one-control recall booking; Money Desk claims rows gain Attach from visit at 2 clicks.
+- **judge consensus**: Save exam derives 24/21/20 (OM top-25; attorney killed only the 'tap a quadrant to add D4341' half, removed here); attachment assembled 21/21/21 (Eng merged the two); recall prescribed 21/21/20 folded here because it appears on the same Save. Attorney: label the perio-maintenance pre-selection as policy, never recommendation.
+- **evidence**: docs/01 perio row 'periodontal.ts (summary fields become derived outputs)'; docs/08 Phase 2 attachment vendor and scrubber rule; report A.6.1 #8 imaging lock-in; adversarial-insurance-auditor-hate.md.
+
+### Item 23
+- **name**: For-dentist tags: a licence-scoped handoff object
+- **surface**: Chairs
+
+#### personas
+- hygienist
+- dentist
+- **problem**: The hygienist sees a suspected carious lesion or a fractured margin but must not write a diagnosis; incumbents give her free text, so findings are buried in prose the dentist never reads or written as diagnoses under the wrong licence, while the locked Assessment/Plan sections show as her unfinished work.
+- **spec**: On Chart or Perio, long-press or a visible 'Note for dentist' control on a tooth opens a 44 px list of bounded observations from a tenant-versioned, counsel-labelled observation-only vocabulary (suspected caries with surface picker, fractured restoration, recession ≥3 mm, mobility, soft-tissue lesion with site, other observation). Choosing one writes a for_dentist_tags row (tooth, surface, observation, hygienist attribution, timestamp) that renders as a pin on the odontogram and a row on the dentist's Exams-to-sign card. The hygiene note shows dentist-owned sections as one collapsed strip 'Waiting for dentist'. On the dentist's exam the tags are a checklist at the top of Assessment/Plan with two controls each: 'Chart it' (writes a chart_event or plan item through the paint gesture) or 'Seen, no treatment' (writes a disposition with the dentist's attribution; multi-select allowed). Sign refuses while any tag lacks a disposition: '2 observations need a disposition'. Licence scope is enforced at the API: a hygienist cannot write a chart_event of diagnostic type.
+- **interaction**: Hygienist: control or long-press (1) → observation (1). Dentist: Chart it (1) or Seen, no treatment (1, multi-select).
+- **why intuitive**: An observation cannot be written as a diagnosis because the vocabulary has no diagnosis words; the dentist cannot forget a tag because sign refuses; a checklist, not a prose hunt; the false 'incomplete' chrome leaves the hygienist's surface.
+- **why innovative**: Incumbents' notes are free text with section-level permissions at best; none has a typed hygienist-observation object the dentist must disposition, and Alta Voice's 72% vs 29% confidence gap between dentists and hygienists is exactly this unstructured handoff.
+- **phi and controls**: Tags live on the encounter with NOT NULL encounter_id and frozen author; dispositions are appended, never edited; no counts of tags per hygienist appear anywhere; the only aggregate is practice-level 'observations dispositioned same day' shown to the owner as a control-design measure.
+- **phase**: Phase 3
+- **effort**: M
+- **data model changes**: for_dentist_tags (encounter, tooth, surface, observation_code, vocab_version, author frozen); tag_dispositions (tag, kind chart | seen_no_treatment, dentist frozen, linked chart_event or plan item); observation_vocabulary (tenant, version, codes).
+- **ux flow changes**: Flow 2 gains an optional 2-tap tag; flow 3's exam opens with the tag checklist above the odontogram; the sign gate gains one refusal line.
+- **judge consensus**: 22/22/23; attorney top-25. OM: long-press is hidden, add a visible control (adopted). Attorney: vocabulary needs TN counsel label before ship.
+- **evidence**: adversarial-hate-chairside-da.md hate 4 'Diagnosis is not my license'; docs/05 enforced 'note-signing gates (killers, licence scope, supervision corroboration)'; report A.6.1 #10 confidence gap.
+
+### Item 24
+- **name**: Exams-to-sign queue ordered by chair wait, framed by hygiene findings
+- **surface**: Encounter
+
+#### personas
+- dentist
+- hygienist
+- front-desk coordinator
+- **problem**: Between operatories the dentist has no single place that says who is seated and waiting, which hygiene findings need a diagnosis, which images have no interpretation, and which notes need a licensed signature; the hygienist walks the hall to find the dentist and the patient waits with nobody knowing how many chairs are ahead.
+- **spec**: Dentist login lands on Exams to sign. Rows derive from encounter state (exam_requested, in_chart with unresolved finding-no-disposition, imaging without interpretation, notes awaiting filing authority, unfiled encounters already checked out) ordered by time in chair, shown as a plain duration with no color escalation below a practice threshold. Each row: chair, initials (privacy mode) or name, one phrase naming what waits ('Perio: 4 sites ≥2 mm deeper, BOP 18% · 1 observation · 2 BWX, no interpretation · Hygiene note ready for signature'), one primary action Open exam. The hygienist's Ready for exam button appends exam_requested and shows 'Exam: 2nd in queue' on her card and a shape+word chip with initials and chair on the Board strip. Open exam lands on Assessment/Plan with tags hoisted, the ghosted prior perio beside today's, and images one tap away from their teeth; images imported or acquired are tagged to teeth (DICOM metadata or a fast hygienist tap) and open beside an interpretation field with structured starters that are selected and edited, never inserted; saving freezes a dentist-attributed interpretation and clears the imaging killer; 'Interpretation deferred to Dr. X, due date' is a named licence that creates a queue row for that dentist. Sign exam locks dentist-owned sections and enables the hygienist's File; 'Not today' with a reason (patient declined, reschedule exam) unlocks the same way so the note is never held hostage. Rows leave only by filing, never by dismiss. Two-dentist practices default the request to the appointment's supervising dentist.
+- **interaction**: Dentist: land (0) → Open exam (1) → sign (see Filing gate). Hygienist: Ready for exam (1). Image read: tap tooth (1) → starter (1) → Save (1).
+- **why intuitive**: Home is the work; every row has one primary action; the queue tells the dentist what hygiene found instead of requiring a chart re-read; rows are derived from state so nothing depends on a hallway flag; the imaging deferral is a named licence, not a blank.
+- **why innovative**: Curve's Sidekick is patient-centric, not queue-centric; Dentrix and Eaglesoft have per-chair colors but no request object that orders the dentist's work and gates note filing; no incumbent tracks an interpretation owner (imaging complaints in the corpus are about lock-in, not reads). The Board strip is the only per-chair readiness surface in the corpus and this is its dentist-side mirror.
+- **phi and controls**: Initials only in privacy mode; full names after two-identifier confirmation with a treatment-purpose phi_access_log row; nothing leaves the tenant. Wait time is per encounter, never aggregated per dentist or hygienist; 'Not today' reasons aggregate at practice level. Filing authority enforced by clinicalRoles.ts at the API; interpretations are dentist-frozen and hash-chained.
+- **phase**: Phase 3
+- **effort**: M
+- **data model changes**: appointment/encounter event 'exam_requested' with requested_at and target dentist; encounters.exam_disposition (signed | not_today + reason); images gains tooth_tags, interpretation_owner_id, deferred_to and due; queue is a view.
+- **ux flow changes**: Dentist home (docs/04) specified as this queue; hygienist home gains Ready for exam and queue position; Board strip gains the exam-requested chip; flow 3 starts from the queue at 1 tap.
+- **judge consensus**: 23/23/23; in all three top-25 lists; all three merged the hygienist-side ready-for-exam queue into it; imaging interpretation 20/20/21 folded here as the imaging row. All: wait shown as plain duration, no color escalation.
+- **evidence**: docs/04 Dentist home row; adversarial-rdh-surveillance-labor.md hate 3 'Fix the blocker. Do not decorate my failure'; docs/08 Phase 3 exit 'a radiograph ... carries a dentist's interpretation'; litigation-documentation-research.md §4 '4 BWs taken'.
+
+### Item 25
+- **name**: Paint once, write four records, with temporality set by a human
+- **surface**: Encounter
+
+#### personas
+- dentist
+- hygienist
+- biller
+- **problem**: In incumbent charting the dentist paints the tooth, retypes tooth and surfaces into the note, someone rebuilds the plan line, and the front desk posts the charge from memory: four entries of one fact and four chances for #14 to become #41. Meanwhile a crown placed elsewhere in 2019, one planned for next month, and one seated today look identical until someone reads history, and software that guesses produces claims for work never done.
+- **spec**: Rail → Chart. Tap tooth #14 (44 px glyph, 8 px gap); surface zones light and the impossible ones (D and I on a molar) are disabled at the control; drag M–O; a ranked, role-filtered procedure strip appears ordered by this practice's frequency for that tooth type and never auto-selects. Directly under it a three-segment control Today · Planned · Existing (≥44 px each), defaulted from the appointment type's behavior contract (Planned in an exam, Today in a restorative visit), always visible for mixed visits. Tapping a procedure runs one server transaction: chart_event (tooth, surfaces, category, temporality, historical flag when Existing), a procedure row with NOT NULL encounter FK and a pending charge from the per-plan per-provider fee schedule (maker-checker; no fee can be typed on the chart), a treatment-plan item with an estimate and rule trace, and a note scaffold that pre-selects the module and fills tooth and surface as structured fields. Today marks are filled, Planned outlined, Existing hatched with a 'by another practice' toggle; Existing creates no plan item, charge, or module. Planned becomes Today only by being performed in an encounter and filed; there is no drag between states. The extractor reading prose back onto the chart draws anything it can only infer at 0.45 opacity and never promotes it. Undo within the encounter writes a reversing chart_event. Property-tested like the ledger.
+- **interaction**: Rail → Chart (1) → tooth (2) → drag surfaces (3) → procedure (4); temporality is 0 taps in the common case, 1 tap for a mixed visit. Restorative visit charted and signed in ≤10 taps.
+- **why intuitive**: Attachment is structural: charge, plan item, and note point at the same procedure and encounter by FK; impossible surfaces disabled is poka-yoke, not warning; recognition over recall via the ranked strip; the three temporality states are the whole domain and the default follows the encounter type so the common case is zero extra taps.
+- **why innovative**: Curve auto-populates the plan card from the paint but its notes are separate tagged objects that 'may NOT attach even if tagged correctly' and it converts Planning to History by time of day at checkout, using red for planned work; no incumbent writes the note scaffold and pending charge from the same gesture with database-enforced parents, and none refuses to infer temporality.
+- **phi and controls**: All writes stay in the tenant with one domain_event per record in the same transaction; the pending charge is not a ledger entry until File releases it so an estimate never enters the balance; money is written to the plan card and never into note text; an Existing mark is excluded from claims by construction, closing an upcoding path; chart-says-Existing vs note-says-today fires as S0 at File.
+- **phase**: Phase 3
+- **effort**: L
+- **data model changes**: chart_events gains temporality enum (today | planned | existing), historical boolean, other_practice boolean, reverses_event_id; procedures gains pending_charge_cents and released_by_note_id; treatment_plan_items.rule_trace; appointment_types.behavior_contract gains default_temporality; procedure_rankings view by tooth type.
+- **ux flow changes**: Flow 3 'paint a procedure → procedure line, plan card, chart layer, and note scaffold update together' specified at 4 taps; the encounter page gains the temporality segment under the procedure strip.
+- **judge consensus**: Paint once 23/22/22 (OM and Eng top-25); temporality selector 23/23/22 (Eng top-25), merged here as the same gesture. All: the strip must never auto-select; property-test the four-record transaction.
+- **evidence**: docs/01 odontogram row 'One painting gesture writes chart, plan, note scaffold, and pending charge'; extract/chart.ts header on temporality; curve-hero-pms-clinical-documentation.md 'Auto-conversion on checkout'; docs/04 flow 3.
+
+### Item 26
+- **name**: Filing gate: killer strip of at most three rows, one File button, licence-locked sections, money out of the note
+- **surface**: Encounter
+
+#### personas
+- dentist
+- hygienist
+- biller
+- **problem**: Dentists sign hygiene-drafted notes without reading a long audit panel or bypass to one-line templates because the finish path is a sermon; the three content gaps that dominate closed claims (findings, consent, rationale) file anyway because the Ready chip looked green; and clinicians type 'pt quoted $1,200' into the note because there is nowhere else convenient, so the chart reads as a fee ticket in a Board file.
+- **spec**: The hygienist drafts in the encounter during the appointment; Assessment and Plan are read-only to her licence with the word 'Dentist' beside them (enforced by clinicalRoles.ts at the API). The dentist opens from Exams to sign and the cursor lands in Assessment with ranked, role-filtered starters visible and assertions unchecked. At the bottom sits a strip of at most three rows, the open killer items only (imaging without interpretation, anesthetic amount missing, consent needs the conversation, clinical rationale missing, wrong-site S0, dose maximum), each with a Change link that jumps to the field; S2 and below live in a collapsed 'Other suggestions' that never blocks; the counsel-frozen killer list is stamped per RULESET_VERSION. Below is one large File button in the irreversible identity carrying its read-back line 'Filing as Dr. Reagan for J.D., DOB 03/1978, #30 DO'. When the strip is empty, File is one tap: signNoteAtomic runs the audit server-side, freezes text and version, byteaudit-verifies, stamps three identities, flips the Board chip to note_filed, converts performed Planned marks to Today, releases pending charges, consumes checkout allocation intents, and releases any held claim. On blur of a note field containing a currency cue ('$', 'USD', 'dollars', or an amount beside quoted/fee/cost) one S1 finding appears: 'Money in note — move to plan' with one control that opens the plan-item picker filtered to procedures in the sentence, rewrites the sentence by fixed template to 'Fee discussed; see plan P-1043', and annotates the plan card 'quoted to patient' with the date; the named licence 'Patient quote, keep verbatim' is available. On a shared tablet File requires the dentist's PIN author.
+- **interaction**: Open exam (1) → File (1) when clean; each killer costs Change (1) plus the fix. Money finding: 1 tap. Open note in flow 3 lands cursor-ready with 0 extra taps.
+- **why intuitive**: ≤3 rows plus one button is the blueprint's own finish rule; two visual identities (File irreversible, Preview reversible); home is the note; File is the only path from planned to completed and the only trigger for charges so no vigilance is required at checkout; validation silent until blur for the money finding.
+- **why innovative**: Curve's finish is 'Save on the visit. Done.' with enforcement 'thin: templates + required clicks'; the insurance-auditor panel's loophole 'S2 killers never block Copy/export' is closed by hard-blocking killers while keeping the strip at three rows; Curve's 'Billing' note tag is the label-not-structure pattern principle 9 rejects, and no incumbent separates clinical prose from money by rule.
+- **phi and controls**: Filed notes are INSERT-only and hash-chained; killers, licence scope, and supervision corroboration are enforced gates; filing emits a domain_event consumed by Board, controls engine, and claim pre-flight; the moved amount goes to the plan card as an annotation, never the ledger or estimate table, so records-request exports carry clinical text without quoted fees; the money licence is stamped and countable, never free text.
+- **phase**: Phase 3
+- **effort**: L
+- **data model changes**: clinical_notes_filed already planned (three identities, ruleset version, omission licences); killers_version stamped; note_findings kind 'money_in_note' with licence; treatment_plan_items gains quoted_to_patient (amount, date, note ref); encounter event 'charges_released'.
+- **ux flow changes**: Flow 3's 'killer strip ≤3 rows + one File button' specified, with a clean note costing one tap; the Board chip flip and the checkout queue's Filed-later release hang off this event.
+- **judge consensus**: Filing gate 22/21/23 (OM and attorney top-25); check-your-note summary 18/21/21 merged here by all three (the 'Nothing outstanding' one-liner kept); dollar-in-note finding 22/23/22 (Eng top-25) folded here as a strip finding. All: killer list frozen with counsel; detector requires a currency cue.
+- **evidence**: killers.ts 'open killers hard-block Copy and File — no checkbox ack escape'; adversarial-curve-power-user.md concession 3; litigation-documentation-research.md 'clinical findings (68), informed consent (55), clinical rationale (51)'; docs/01 'money lives on the plan card and ledger, never in note text'.
+
+### Item 27
+- **name**: Record integrity: chart/note/claim contradiction stop at File and Submit; amendments that propagate corrections
+- **surface**: Encounter
+
+#### personas
+- dentist
+- hygienist
+- biller
+- owner
+- **problem**: A note says #19 MOD composite, the chart event says #20, and the claim line says D2393 on #19 MO; nobody sees all three at once, so the wrong-tooth claim ships and is denied or paid wrongly. After filing, the dentist notices #30 should have been #31; incumbents either let the note be edited in place (spoliation exposure) or leave chart and claim drifting apart, and nobody remembers to fix the claim.
+- **spec**: At File (inside signNoteAtomic) and at Submit claim (inside claim submission), a deterministic extractor compares readback-class tokens (tooth, surface, quadrant, laterality, anesthetic agent and carpules, dose) across the note prose, chart_events, and claim lines. Agreement shows a green-checked list of at most six rows beside a small odontogram mirror and File proceeds on the same tap. Disagreement holds with one line 'Note says #41, chart says #14' and one control 'Show both' opening a two-column card: note clause with the token highlighted, chart_event row, claim line; each column has 'Use this', which writes the correction through its own normal path (chart event with human-set flag, note amendment, claim line edit), never silently; the extractor never guesses which is right; a dentist may record a reason-coded override. Multi-tooth and quadrant procedures (SRP D4341) are mapped from the CDT table so they do not false-fire; the rule blocks only after the 34-note corpus plus a claim-line corpus show zero blocking false positives. Amendments: on a filed note the only edit control is Add addendum with a required reason code (corrected tooth or surface, late entry, additional finding, clarification, patient-requested); if the addendum names a readback token that differs from the frozen note the same readback list appears; the addendum is a new sequence pointing at the superseded span and the original bytes never change. The Notes tab shows a cumulative view (superseded span struck, replacement inline) over a sequence list with author, time, and reason; entry time and date of service are shown distinctly and the effective date can never be set to the past. In the same transaction a tooth or surface change writes a chart correction event (old mark shown superseded) and, if a claim was submitted, a Money Desk row 'Claim needs correction — #30 → #31' with one action 'Prepare corrected claim'; the addendum cannot file without those rows.
+- **interaction**: Clean File: 0 extra taps. Contradiction: Show both (1) → Use this (1). Addendum: Add addendum (1) → reason (1) → text → File addendum (1); the claim-correction row appears with 0 clicks.
+- **why intuitive**: The contradiction is computed, not remembered; the fix is one tap on the correct column so the compliant path stays fastest; the chart mirror makes a transposed tooth visible without asking anyone to look; the cumulative view answers 'what does the record say now' and the claim correction is created by the amendment, not remembered by the biller.
+- **why innovative**: Dentrix, Eaglesoft, Open Dental, Curve, Denticon, and CareStack hold chart, note, and claim in one database yet none cross-checks them before submission; incumbents expose audit trails (Dentrix image audit trail, Denticon granular audit trail) but none renders cumulative-plus-sequence or propagates a token correction to chart and claim; readback is imported from ICAO Annex 10 and the amendment model from eCTD lifecycle rules because no PMS in the corpus has either.
+- **phi and controls**: In-tenant, no model. S0 runs server-side inside the filing and submission transactions so a client cannot bypass it; overrides are reason-coded, dentist-attributed events feeding the digest at practice scope under SYSTEMIC_SHARE. Addenda are INSERT-only, hash-chained, stamped with frozen author and RULESET_VERSION; reason codes aggregate practice-wide with per-person detail only behind the owner/reviewer seat; the corrected claim keeps the original frozen 837.
+- **phase**: Phase 3
+- **effort**: M
+- **data model changes**: contradiction_checks (encounter or claim, token set, verdict, override reason, ruleset version); note_amendments already planned, gains supersedes_span (revision id + offsets) and readback_confirmed jsonb; chart_events gains corrects_event_id; claims gains correction_of_claim_id and a Money Desk row kind 'claim_correction_needed'.
+- **ux flow changes**: Flow 3 File gains a six-row readback that costs nothing when it agrees; Money Desk claims tab gains 'Claim needs correction' rows; the Notes tab gains the cumulative/sequence toggle. Flow 5 Submit inherits the same stop.
+- **judge consensus**: Contradiction stop 22/21/22; scoped readback at File with chart mirror 21/21/21, merged into it by all three (mirror kept as the presentation); amendment propagation 21/21/21 folded here as the post-filing half of record integrity. OM: a false S0 on SRP quadrants would teach staff to tap through, so the claim-line corpus must exist first.
+- **evidence**: docs/01 odontogram row 'cross-surface contradiction (chart vs note vs claim) as blocking S0'; verifyMeaning.ts 'Wrong-site is an S0 STOP everywhere'; high-stakes-documentation-patterns.md §1 READBACK_CLASS and §6 'replace, never edit-in-place'; litigation-documentation-research.md §7 spoliation.
+
+### Item 28
+- **name**: Plan card with a rule-traced estimate; case presentation that records the decision, the refusal, and the consent
+- **surface**: Encounter
+
+#### personas
+- dentist
+- front-desk coordinator
+- biller
+- patient
+- guardian
+- **problem**: Plan estimates are opaque numbers the front desk cannot defend and the dentist cannot explain chairside; incumbents let estimated write-offs leak into AR; plans are presented verbally and acceptance is a signature or nothing; a declined recommendation vanishes from the record so years later the chart shows cleaning visits only; and for a minor nobody records who consented on what authority.
+- **spec**: Each plan item shows three labeled numbers: Fee / Your plan pays about / You'd owe about, from the estimates table (never joined into a balance). 'Why' opens one plain sentence per rule the estimate engine applied, each naming its row ('Delta PPO fee schedule for Dr. Reagan: $312. Deductible remaining $50 applied. Covered at 80%. Annual maximum remaining $1,100. Benefits verified 2 Sep.'); stale or missing inputs are stated ('not returned by carrier'; 'verified 41 days ago' → Re-verify runs a 270). Out-of-network cases render from provider_payer_credentials. Nothing on the card can be typed as a dollar figure. Present flips to patient voice through the plain-language pass: what we found / what we recommend / what happens if we wait / other options including no treatment, with the three numbers per phase and the rationale carried from the note. Share (print or portal) freezes a versioned estimate with the header 'This is an estimate until your plan pays' and writes a disclosure row. Per recommended item three equal 44 px controls: Accept, Decide later, Decline. Accept opens the consent object pre-filled from the plan item (what we found, options including none, main risks, your questions, your decision) and the Board slot search inline; the party taps Agree / Decline / Wait / Another option and signs; consenting party, relationship, and interpreter are recorded; for a minor the party must be a relationship with consent scope, with emancipated, mature-minor (14–18, provider judgment), and emergency as named licences; saving without a decision is refused. The procedure flips planned → consented; the note's consent field fills structurally. Decline requires one reason chip (cost, time, second opinion, does not want treatment) and a one-line 'Risks of declining discussed' with starters that must be edited or confirmed, writing an informed-refusal record with a follow-up date that surfaces as a Rail row and recall entry. The note receives a pointer sentence 'Treatment plan P-1043 presented; decisions recorded on plan', never dollar figures. Appointment-type contracts scope which procedures require the full consent flow.
+- **interaction**: Rail → Plan (1) → Why (1). Present (1) → Accept (1) → decision + sign (2) → slot (2). Decline (1) → reason chip (1) → confirm risks line (1).
+- **why intuitive**: Explanations behind progressive disclosure and the same Explain gesture the ledger uses; two visual identities (Accept and Decline are both recordable decisions; File remains the irreversible verb); Decide later is a first-class state; the consent state comes only from a consent object so the form cannot substitute for the discussion.
+- **why innovative**: Curve's plan cards show insurance/patient/total 'with eSign' and no trace; Oryx puts estimates into AR; Curve and CareStack market case acceptance and tablet presentation but neither treats a decline as a clinical record; the RCDSO panel found 'no refusal documentation despite claimed conversations'; no incumbent records decision plus discussion as a typed object or refuses a signature without a decision.
+- **phi and controls**: Estimates live in their own table (DB invariant) and never enter balances; the rule trace is stamped with the estimate engine version; prints and portal shares are disclosure rows; patient-audience text passes the plain-language and stigma gate with standardize disabled; consents require decision and party at the API; shared tablets run a session-bound view with no local mirror; marketing-photo consent is a separate scope; no per-dentist acceptance rate exists anywhere (the only aggregate is the front desk's 'accepted, not scheduled' worklist); content is labelled provisional until Tennessee counsel review.
+- **phase**: Phase 3
+- **effort**: L
+- **data model changes**: estimates gains rule_trace jsonb, engine_version, frozen_share_id; shared_estimates (version, channel, disclosure id); case_presentations gains per-item decision enum (accept | later | decline), reason chip, risks_discussed text, follow_up_date; consents already planned (decision, party, relationship, interpreter, scope) gains plan_item_id and minor_licence enum; informed_refusals view.
+- **ux flow changes**: Flow 3 gains Present → decision at 2–4 taps from the plan card; the Patient Rail's 'open plans' summary shows the three numbers; the Board's 'accepted, not scheduled' worklist and recall receive refusal follow-ups.
+- **judge consensus**: Plan card 23/21/22 (OM top-25; all three merged the patient estimate card into it); case presentation 21/21/21 and consent-as-decision 20/22/20 (Eng merged them as one decision object). OM: the decline field must be one-tap-editable or Decide later swallows everything; attorney: counsel on Tenn. Code § 63-1-176 minor rules.
+- **evidence**: docs/01 odontogram row 'estimate engine with rule trace'; docs/03 consents (decision agreed | declined | deferred | other_option); litigation-documentation-research.md §2 and §5 'Informed refusal silence'; report A.6.1 #5 Oryx AR including estimated write-offs.
+
+### Item 29
+- **name**: Who's-charting PIN author bar with chair-strip initials (desk profile: PIN on Post)
+- **surface**: Cross-cutting
+
+#### personas
+- hygienist
+- dental assistant
+- dentist
+- front-desk coordinator
+- office manager
+- temp
+- **problem**: One operatory tablet passes between a hygienist, an assistant, and a temp in a morning and the next author inherits the previous session and files under the wrong name; two coordinators share one front-desk workstation so whoever logged in first is the frozen poster on every payment; wrong-author on a shared device is a Board complaint and an immediate pilot kill.
+- **spec**: Devices marked Shared in Practice → Devices carry a persistent 44 px author chip in the top bar's left slot showing initials and licence glyph ('BL · RDH'). Operatory profile: tapping the chip opens a full-height numeric pad with 56 px keys; a different user's PIN (argon2id, ≥6 digits, throttled; can only resume its owner's session on a tenant-bound device) revokes the prior session server-side, discards the client key, wipes drafts, palette recents, and preferences from the device after server autosave, and opens the new author's session on the same encounter page; the owner's own PIN after the 10-minute idle lock restores the caret. Before File the read-back line repeats author and patient so a stale author is caught at the last gate with one tap to switch. The Board's per-chair strip shows each chair's current author initials with no patient data ('Chair 3 · BL') so the coordinator can catch a tablet still signed in as the morning temp. Desk profile: reversible actions need no PIN; the irreversible controls (Post at Checkout, Close day) carry a 4-digit PIN field on the control itself, verified server-side inside postGuarded, so the frozen poster is the PIN holder; switching author is one tap on the chip plus PIN. Failed PINs are rate-limited and produce a finding on the device, never a person. Passkeys or badge tap may later replace the keypad.
+- **interaction**: Operatory switch: chip (1) + 6 digits. Desk Post: PIN on the Post control (1 field, no modal) keeping checkout at ≤4 clicks. Unshared devices: no change.
+- **why intuitive**: The author is a server session, not a name someone remembers to change; initials are always visible; irreversible actions literally ask who you are while reversible ones do not; glove-sized keypad; the coordinator sees device authorship from the Board without opening anything.
+- **why innovative**: QuickBooks' audit trail is 'defeated by shared Administrator logins'; Curve's shared-iPad reality has no hard author switch; no dental PMS in the corpus documents a per-user PIN handoff, an author read-back at filing, a Board strip showing device authorship, or per-posting identity on a shared desk. Incumbents treat the workstation, not the person, as the session.
+- **phi and controls**: Server-enforced session revoke plus new session (docs/06 row 12); wiping local state closes the shared-device PHI residue path; the chair strip is initials and chair only and must never grow into productivity data; the frozen entry author comes from the session so 'zero wrong-author events' is measurable from domain_event; PIN is a second factor bound to an authenticated tenant session; MFA step-up above the high-value band remains separate.
+- **phase**: Phase 3
+- **effort**: M
+- **data model changes**: devices (tenant, profile operatory | desk, shared boolean, bound_at); sessions gains device_id and author_switch_from_session_id; users gains pin_hash (argon2id) and pin_throttle; domain_event type auth.author_switch; control_findings kind 'pin_failures_device'.
+- **ux flow changes**: Top bar gains the author chip on shared devices; Board strip gains author initials per chair; flow 4's Post gains one field on shared desks; flow 3's File gains the author read-back line. Desk PIN lands with the Phase 2 Board where shared desks exist; the operatory bar lands with Phase 3.
+- **judge consensus**: 23/23/23; in all three top-25 lists; all three merged the shared-desk PIN on Post into it. Eng: autosave must land first; OM: keep the PIN on the Post control, not a modal.
+- **evidence**: docs/06 row 12 'per-user PIN ... zero wrong-author events on shared tablets is a Phase 3 exit criterion'; adversarial-temp-agency-recruiter.md kill 3; docs/04 'zero wrong-author events on shared devices'; report B.6 shared Administrator logins.
+
+### Item 30
+- **name**: Lab cases from the paint gesture, held at the seat booking; vendor and bank-detail change quarantine
+- **surface**: Money Desk
+
+#### personas
+- dentist
+- front-desk coordinator
+- office manager
+- owner
+- **problem**: The crown is prepped, the impression goes to the lab, and two weeks later the patient is seated for a crown that has not come back; lab invoices are paid on sight, and the fictitious lab or the changed remit-to account is the standard small-office payables fraud that a manager can add and pay the same afternoon.
+- **spec**: When the dentist paints a prosthodontic procedure marked Today, the encounter shows a lab-case stub: Lab (typeahead over the vendor master), Shade and Material (chip sets from the practice catalog), Due (default from the vendor's turnaround). 'Send to lab' writes lab_cases and prints a slip with two identifiers and the case number (disclosure row, purpose print). On the Board, booking the seat before the due date is held with 'Lab case due 18 Sep' and one control 'Book after due date' (a hold with an office-manager override that writes a reason-coded appointment event, not a refusal); the seat card shows a 'Case not back' chip (shape + word) until Received is tapped from the card or the encounter. Vendor master: payee legal name and remit-to bank details are sealed fields; creating a vendor or editing either saves immediately but sets state quarantined_until (default 3 business days) shown as a hatched badge on the vendor card and any lab case naming it; payments to a quarantined vendor evaluate as needs_second regardless of amount via the existing force_dual exception scoped to vendor state; the owner's phone card shows vendor, changed field old and new side by side (bank masked to last four), who changed it, and the first invoice amount; Approve lifts quarantine early. The first payment after any bank-detail change is always dual even for a long-standing lab. A lab invoice is entered against a case's vendor and procedure; an invoice with no case behind it is a control finding; an emergency waiver expires in 24 hours. The monthly digest lists 'new or changed payees this month: 3' → Review.
+- **interaction**: Dentist: Lab stub fields (3 chips) → Send to lab (1). Coordinator: Book after due date (1) or Received (1). Vendor change: save (1); owner Approve from phone (2). Payment to quarantined vendor: Request approval (1).
+- **why intuitive**: The case is created where the work happens; the Board chip lets the front desk see the dependency without opening the chart; the compliant path is fast (a legitimate lab approved from a phone in a minute) and the fraud path is slow by structure (a waiting period the manager cannot shorten alone); the control appears on the vendor card and lab case, not a settings page.
+- **why innovative**: No incumbent in the corpus ties a lab case to a vendor-master dual-release channel or has a vendor master at all; smb-accounting-internal-controls.md notes Positive Pay is not native to QuickBooks Online; Precog's shipped rules name the scheme ('Create fake lab/vendor; pay self') as advice, and here it is a state machine the payment path reads.
+- **phi and controls**: Lab slip fields are a disclosure row; a digital lab-portal connector requires a BAA row before enablement; the lab fee is a ledger entry with procedure FK and vendor reference released through evaluateRelease; vendor bank details are encrypted and masked; self-approval of vendor master changes is in the hard runtime SoD set; vendor changes are append-only events with frozen actors; until a payment rail exists the recorded-vs-enforced table says 'enforced on recorded releases; bank rail external'.
+- **phase**: Phase 3
+- **effort**: M
+- **data model changes**: lab_cases already planned (encounter, procedure, vendor, sent, due, received, shade, material, fee entry); vendors gains state enum (active | quarantined), quarantined_until, sealed-field change events (vendor_events append-only with old/new); control_exceptions scope 'vendor_state'; appointment_events reason 'booked_before_lab_due'.
+- **ux flow changes**: Flow 3 gains an optional lab stub; flow 1 and the Board gain the Case-not-back chip and booking hold; Money Desk gains a Vendors worklist row for quarantined payees; the owner's phone card gains the vendor variant.
+- **judge consensus**: Lab case 22/22/21; vendor quarantine 22/22/23 (attorney top-25). Merged because both live on the vendor master and ship in Phase 3. All: the booking gate must be a hold with override, not a refusal; the Friday emergency vendor needs a 24-hour waiver.
+- **evidence**: docs/01 lab-case row 'Case not back is visible on the Board card before the patient is seated; lab invoices pass through the same vendor controls as any payee'; docs/08 Phase 3 'lab invoices are a recurring fictitious-vendor fraud vector'; precog conflict-rules.ts rule-vendor-create-pay.
+
+## Rejected
+
+
+### Item 1
+- **name**: Reconciliation drill
+- **reason**: Killed by the OM and Eng judges (17, 16); only the attorney scored 20+. Planting a synthetic bank line into the owner's Tied tile makes the one surface whose rule is 'the bank is the only ground truth' knowingly false for a day and contaminates the measured match-rate and lag metrics. The planted $300 skim already runs on a simulated month as a Phase 1 exit criterion, which is where it belongs.
+
+### Item 2
+- **name**: Book from the plan card
+- **reason**: On all three kill lists. Dentrix, Eaglesoft, and Curve schedule from the treatment plan; the plan_item FK carried to checkout is baseline scheduling plumbing, recorded as a docs/03 change (appointments.plan_item_id), not a catalog feature.
+
+### Item 3
+- **name**: Practice-scoped first-run friction card
+- **reason**: On all three kill lists. In a four-to-eight-person office '3 of 4 new writers' identifies a person by elimination, and with the five-user suppression the card almost never renders. The PHI-free, redacted metrics pipeline is already a Phase 0 deliverable and gives the vendor the same signal without a surface.
+
+### Item 4
+- **name**: In-place confirm for irreversible actions with object read-back
+- **reason**: Killed by the OM judge (16) though Eng and attorney scored 22 and 23. It adds a second tap to every File, Post, and Close day against the ≤4-click checkout and ≤10-tap restorative budgets on three of the five flows. What survives is its best idea: the object read-back line rendered on the commit control itself (the File button's 'Filing as BL · RDH for J.D.' and the desk PIN on Post), which costs no extra tap, plus the delta-only readbacks on ERA posting and the contradiction stop that appear only when a high-stakes token differs.
+
+### Item 5
+- **name**: Temp hygienist one-shift perio path and synthetic-mouth drill
+- **reason**: Killed by the Eng judge; a non-patient 'Practice mouth' card on the live Chairs worklist is a wrong-patient vector on the exact surface where two-identifier confirmation matters. The grammar strip is folded into the first-shift rail; the drill content belongs to the free certification sandbox (principle 22), which is already in the plan for Phase 4.
+
+### Item 6
+- **name**: Verifier-gated narrative and note rewrite with named refusals
+- **reason**: Killed by the attorney (14); scored 17 and 16 by the others. Sends note-body PHI to a model and polishes claim narratives, which is the insurance auditor's 'story tailored for pay' path even with verifyMeaning; both halves have shipped deterministic twins (Standardize; narrative by quotation). Revisit in Phase 5 only with a live zero-retention BAA and a measured false-refusal rate on the frozen corpus.
+
+### Item 7
+- **name**: Owner controls coach over role labels with read-only tools
+- **reason**: Killed by the attorney (15); 17 and 16 elsewhere. The deterministic what-if simulator already exists in docs/05 and needs no model; three-sentence control advice from an attorney-owned vendor over constants labelled directional reads as professional advice regardless of disclaimer. Keep the simulator, drop the chat.
+
+### Item 8
+- **name**: Voice perio, push-to-talk with quadrant read-back
+- **reason**: Scored 17/16/16; needs an on-device WASM engine or a BAA speech vendor that clears the frozen word-error-rate corpus, neither of which exists. The pedal grammar is the shipped answer; the PTT-only and read-back-per-quadrant posture is recorded as the Phase 5 design constraint in changes_to_plan.
+
+### Item 9
+- **name**: Perio never loses a probe (durable autosave and honest reconnect)
+- **reason**: 19/18/17. Continuing to accept entries while offline exceeds principle 20's read-only degraded mode and pre-empts the Phase 5 offline ADR. Same-session encrypted autosave with resume is kept inside the perio feature; queued offline capture waits for the ADR and measured outage minutes.
+
+### Item 10
+- **name**: Degraded-mode paper day and reconnect catch-up worklist
+- **reason**: 18/18/18 and Phase 4. Sound (nothing financial offline; catch-up rows carry posted_after_outage), but it depends on the Phase 3 read cache and a printed sheet with names and estimates is a PHI surface. Recorded as a Phase 4 candidate in changes_to_plan with initials-only default.
+
+### Item 11
+- **name**: Location- and licence-aware slot validator
+- **reason**: 21/22/22 but it restates the plan's own scheduling signature rule (docs/01 'supervision refusal is one line + one control'); the only addition is half-day provider location blocks, recorded as a docs/03 change.
+
+### Item 12
+- **name**: Emergency booking contract with a provisional patient
+- **reason**: 21/19/18. The attorney found the after-hours dentist path opening an encounter directly on a provisional patient contradicts the two-identifier rule the feature itself enforces at chart open. Not resolved here; parked as an open question in docs/11.
+
+### Item 13
+- **name**: Eligibility at booking that shapes the reminder
+- **reason**: 22/19/19; only the OM judge's top-25. Booking-time 270 is D.4 must-have #1 and already core Board scope; the useful twist (a generic 'bring your current card' sentence when the snapshot is Unverified or Inactive) is carried inside the consent-scope send feature and the 72-hour snapshot reuse is a docs/01 change.
+
+### Item 14
+- **name**: Waitlist fill from a cancellation, ranked deterministically
+- **reason**: Killed by the attorney as table stakes; 19/19 elsewhere. Reusing the booking validator for the ranking is a small delta recorded as Board core scope; the Phase 5 text-top-3 waits on the consent-scope refusal and compare-and-set.
+
+### Item 15
+- **name**: Claims aging with status re-check and exact-bytes resend
+- **reason**: Killed by the attorney as core scope; 20/19 elsewhere. A claims tracker is D.4 must-have #1 and frozen-bytes resend is already in submissions.ts; payer processing windows and the 276 degrade path are recorded as docs/01 insurance-row changes.
+
+### Item 16
+- **name**: Secondary claim fires from the primary ERA posting
+- **reason**: Killed by the attorney as a must-have incumbents already claim; 20/20 elsewhere. Folded into the ERA posting feature as the 'assembled from the frozen 835' behaviour rather than a standalone headline.
+
+### Item 17
+- **name**: Credit-balance refund worklist
+- **reason**: 21/21/21 but an aged unapplied-credit tab is already one of the Money Desk rows in docs/04; the refund routing through postGuarded and the after-hours hard event are already in docs/05. Recorded as a docs/04 detail (age column, Refund/Apply primary action).
+
+### Item 18
+- **name**: Payment and membership plans on adjudicated balances with deferred-revenue schedule
+- **reason**: 21/19/20; payment and membership plans are already Phase 1 scope in docs/08. The two genuinely new rules (plans eligible only over patient_ar; deferred-revenue roll-forward as a labelled tenant setting) are carried inside the checkout and CPA-package features and listed as docs/03 changes.
+
+### Item 19
+- **name**: Schedule honesty: documentation time versus the appointment template
+- **reason**: 21/21/22 with no kill, but Phase 4 and outside the 30-feature cap; it is the correct anti-surveillance answer (template medians practice-wide, no provider dimension in the query layer). Recorded as a Phase 4 Practice-health card in changes_to_plan with the CI-tested no-provider-dimension constraint.
+
+### Item 20
+- **name**: Sole-operator duty rotation, reason-code drift, tip channel with owner-exclusion routing
+- **reason**: 20–21 across judges; all three are already docs/05 detectors or the Phase 1 tip-intake rewrite. Their new specifics (cover grant closes on observed use; 'On leave' switch; drift card links fee-schedule changes in window; owner-exclusion routing server-side, two-party reveal deferred) are listed as docs/05 changes rather than catalog features.
+
+### Item 21
+- **name**: Delivery gate on patient-audience text and Plainer pass
+- **reason**: 19/22/22 and 22/22/22; both correct, but the portal is Phase 5 and the print path lands with Phase 3 case presentation, which already routes patient-audience text through the plain-language and stigma gate with standardize disabled. Recorded as docs/01 communications-row and Phase 3 changes; the pediatric dictionary review is a docs/11 item.
+
+### Item 22
+- **name**: Section-scoped suggested blocks rail; scoped readback on Accept; could-not-read spans
+- **reason**: 21–22 across judges but the first restates docs/01 'ranked, role-filtered starters always visible', the second is the readbackClass.ts machinery already used by the ERA and contradiction features, and the third (honest unread residue with a versioned tenant vocabulary queue) is a Phase 3 refinement carried as a docs/01 change rather than a headline.
+
+### Item 23
+- **name**: AI switch that shows its twin
+- **reason**: 23/22/22 with no kill, but Phase 5 and outside the cap. Its enforceable part (a capability table generated from the registry, a CI test that every model capability has a deterministic twin row, the toggle disabled without a countersigned BAA, 'Price change: none' on the trust page) is recorded as docs/01 principle 17 and trust-page changes.
+
+### Item 24
+- **name**: Guardian access with age-out; intake as proposals; 'Where my record went'; records request bundle; free certification drills
+- **reason**: Phase 4–5 items already in docs/06 (controls 22, 23, 26), docs/01 (principle 22), or the Phase 5 portal scope, scoring 18–22 with no dissent on doctrine. Kept in the plan where they already live; the catalog cap is spent on features that change the five daily flows before GA.
+
+### Item 25
+- **name**: 'Tap a quadrant to add D4341' line in the perio Save derivation
+- **reason**: Killed by the attorney: software surfacing 'UR 5 teeth meet the SRP rule' with one tap to add a billable code is a treatment proposal from numbers and an upcoding exhibit in a payer audit. The derived note fields and chart attachment are kept; the dentist plans SRP from the plan card and the pre-flight rule blocks a claim the record does not support (the safe direction).
+
+## Changes to plan
+
+
+### Item 1
+- **document**: docs/01-product-vision-and-scope.md
+- **change**: Ledger row: add the As-of chip (posted vs effective date stated), audience-parameterised ledger_explanations (staff | patient | cpa) with a CI test that every reason code has a template, statement hold reasons with a maximum hold age, and the checkout segmented control (Collect default / Send statement / Payment plan; $0 Collect refused). Insurance row: add record-bound pre-flight triggered by CDT code reading perio_sites and chart_events, narrative by quotation with quoted|manual flag, CARC dictionary with per-payer overlay and PR-group-code gate on 'Bill patient', deterministic per-payer rule proposals, 835 delta readback capped at eight, contract-variance rows that degrade to 'no contract on file', EFT deposit lines from BPR/TRN, payer processing windows and a 276 degrade path, 72-hour eligibility snapshot reuse. Controls row: business-hours as a first-class exception scope; walk-over single-entitlement approval session; vendor quarantine state; decision review sentence. Scheduling row: Filed-later checkout lane with held_note_unfiled claims and allocation intents; readiness strip capped to chair-blocking items; half-day provider location blocks; lab-case booking hold with override. Encounter row: for_dentist_tags with disposition-gated sign; money-in-note S1 finding with fixed-template rewrite and licence; contradiction stop at File and Submit with 'Show both'; addendum propagation to chart and claim; imaging interpretation owner and deferral licence. Perio row: probing-path preference, any-HID pedal with echo drawer, glove pad, screening lane with sextant codes and per-site omission licences, recall_prescription on Save; the perio Save must never propose a billable code. Principle 11: add the Refusal component contract (Held identity, aria-live, ≤8-word verb line) and that grayscale preview is a per-user Settings preference, never top-bar chrome. Principle 17: add the with/without-model capability table, the CI twin test, and the BAA-disabled toggle; record PTT-only and per-quadrant read-back as the Phase 5 voice constraint. Principle 22: add the day pass (licence-templated, no money entitlements, auto-revoking) and the event-verified first-shift rail. Communications row: consent-scope refusal in the send transaction, template lint, generic 'bring your card' reminder sentence. Add a CPA seat persona (independent reconciler, question verb, attestations) and a Month-end home.
+
+### Item 2
+- **document**: docs/03-data-model.md
+- **change**: Add tables: allocation_intents; statement_due; recall_prescriptions; for_dentist_tags and tag_dispositions with observation_vocabulary; claim_attachments; carc_dictionary with payer_overrides; appeal_packets; rule_proposals; payer_rulebooks; contradiction_checks; shared_estimates; devices; push_subscriptions; month_closes; gl_mappings; cpa_questions; channel_attestations; palette_synonyms; user_recents; first_run_state; vendor_events; message_templates. Add columns: ledger_entries.kind 'correction' with corrects_entry_id CHECK and reason 'prior_period'; reconciliation_runs.independence_grade; reconciliation_variances.candidate_set; reconciliation_matches.match_basis; deposit_lines tender 'eft' + trn + payer_id + era_payment_id; bank_transactions.parsed_trn; era_lines.expected_snapshot/delta_flags/confirmed_by; claims.status held_note_unfiled, assembled_from_era_id, correction_of_claim_id, appeal_by; claim_lines.indication_reason_code and narrative_kind; preflight_findings.satisfying_span refs and ruleset_version; procedures.self_pay_restricted + restricted_at + lifted_consent_id, pending_charge_cents, released_by_note_id; payment_plans eligible_bucket CHECK patient_ar; chart_events.temporality/historical/other_practice/reverses_event_id/corrects_event_id; perio_sites.status (probed | not_probed) + omission_licence; perio_exams.mode + sextant_codes + code_set_version; encounters.exam_disposition; encounter/appointment event exam_requested; images.tooth_tags/interpretation_owner_id/deferred_to; note_amendments.supersedes_span + readback_confirmed; note_findings kind money_in_note; treatment_plan_items.rule_trace and quoted_to_patient; estimates.engine_version/frozen_share_id; case_presentations per-item decision/reason/risks_discussed/follow_up_date; consents.plan_item_id + minor_licence; control_exceptions.scope 'hours' and 'vendor_state' with window jsonb; locations.hours; control_decisions.supersedes_decision_id + measured_effect; control_findings kinds decision_unreviewed and pin_failures_device; approval_requests.channel + decided_on_device_id; sessions.scope jsonb + ttl + device_id + author_switch_from_session_id; users.pin_hash/pin_throttle/day_pass/licence_type/preferences (keys_layer, grayscale_preview, compact_desk, probing_path, hid_map); user_entitlements.expires_at; vendors.state/quarantined_until; appointments.plan_item_id; appointment_types.behavior_contract (default_temporality, preselected modules, supervision interval rule); messages.scope/template_version/consent_check_id; sms_email_consents.source/stop_at; reason_codes.explanation_template_id NOT NULL; medical_history_snapshots typed-field diff view; tenant imaging_interval_rules and deferred-revenue setting.
+
+### Item 3
+- **document**: docs/04-ux-blueprint.md
+- **change**: Owner home: three-state independence grade, changed-after-close line, decisions-due card with Keep/Tighten/Retire, CPA question rows, 'Month open N days', Close month after Close day. Add a CPA-seat Month-end home row. Money Desk: add 'Needs pre-flight', 'Secondary ready', 'Claim needs correction', and Vendors rows; ERA tab gains delta checklist and variance rows with Dispute; Denials tab gains plain CARC line, appeal-by, derived action, 'Explain to patient'; Statements-due gains hold reasons; unallocated credits gain age and Refund/Apply. Board: readiness strip specified (capped to chair-blockers, collapses to 'Ready'); checkout queue with Note/Claim chips and the Filed-later lane; per-chair strip gains author initials and the exam-requested chip; Case-not-back chip and booking hold. Chairs: delta strip, what-helped line, Full-chart-due badge, Ready-for-exam button with queue position. Dentist: Exams-to-sign rows specified with plain-duration ordering, tag checklist, imaging rows. Temp row: day pass provisioning and the five-chip rail. Five flows: flow 2 adds Screening (2 taps + ≤12 keys), the licence tap on skipped sites, the Next visit strip (1 tap), optional tag (2 taps); flow 3 specified at 4 taps to paint with temporality 0–1 tap, File read-back line, money finding 1 tap, contradiction 'Show both' only on disagreement, Present at 2–4 taps; flow 4 becomes Collect-default segmented control with the self-pay toggle, Note/Claim chips, Explain → Show patient at 2 taps, recall booking 1 control, desk PIN on Post on shared desks; flow 5 adds delta readback only when deltas exist, EFT auto-matched deposit lines, correction posting redirect, variance sentence at 2 taps. 'How intuitive is achieved': add the Refusal component, the copy catalog rules, device-profile density, and the Keys layer; state that grayscale preview is a per-user preference. Measured section: add median approval time, share of walk-over vs phone approvals, day passes issued, screening share, observations dispositioned same day, all practice-scoped.
+
+### Item 4
+- **document**: docs/05-internal-controls-module.md
+- **change**: Exception scopes gain 'hours' (per location, per weekday, server clock) and 'vendor_state'; default policy holds refund/adjustment/write-off outside hours at any amount, excluding processor-initiated refunds. Add the walk-over approval session (60-second, single-entitlement, PIN + TOTP, disabled on operatory profiles) and the phone card contents (request id only in push; denial-no-appeal line). Add vendor quarantine as a state the evaluator reads and 'first payment after any bank-detail change is always dual'. Independent reconciliation gains a three-state grade (independent | same_hands | stale_import) and EFT matching by TRN with many-to-one tolerance falling to amber. Add the correction kind and 'changed after close' count with insurance postings excluded. Decision review: measured-effect sentence from domain_event, isDateActive expiry, unreviewed decision → finding, monthly batching. Detectors: cover grant closes on observed use; 'On leave' switch enforced by withGuard; reason-code drift card links fee-schedule and plan changes in window; tip routing excludes the owner server-side (two-party reveal deferred). Enforced-vs-recorded table gains: consent-scope refusal, self-pay restriction hard block, contradiction S0 at File and Submit, for-dentist tag disposition gate, plain-language delivery gate on print/portal, prior-period refusal, vendor quarantine ('enforced on recorded releases; bank rail external'), imaging-without-interpretation on referral send. Record explicitly that no reconciliation drill runs in production; the planted skim runs on a simulated month.
+
+### Item 5
+- **document**: docs/08-roadmap.md
+- **change**: Phase 1 scope adds: independence grade, variance sentence in the sealed verifier, correction kind, hours scope, decision review, Refusal component and copy catalog with CI lints, As-of chip, statement hold reasons, month close with prior-period lock and CPA seat (question + attest), phone card push. Phase 1 exit criteria add: a held posting approved from a phone under five minutes (already) plus a walk-over approval in staging; zero corrections without a reference FK; the CPA seat asks and the owner answers one question in the simulated month. Phase 2 scope adds: EFT-by-TRN deposit lines, delta readback, contract variance, secondary from frozen 835, CDT-triggered pre-flight and narrative by quotation, denial worklist with CARC dictionary and patient sentence (packet in Phase 3), typed collection decision and self-pay toggle, readiness strip, consent-scope send refusal, day pass and first-shift rail, palette with synonym catalog, desk PIN on Post, attachment drawer (documents only). Phase 2 exit criteria add: no $0 silent checkout in the moderated test; a self-pay-restricted procedure never reaches the scrubber (test); a marketing send without scope is refused (test); temp reaches first real Arrive within 15 minutes. Phase 3 scope adds: Filed-later lane with held_note_unfiled and allocation intents; Chairs delta strip; probing path, HID pedal, glove pad, screening lane, recall prescription; for-dentist tags; Exams-to-sign with exam_requested and imaging owner; temporality segment; money-in-note finding; contradiction stop at File and Submit with claim-line corpus gate; addendum propagation; plan card rule trace, case presentation decisions, consent object; operatory author bar with chair-strip initials; lab stub and vendor quarantine. Phase 3 exit criteria add: zero undispositioned tags on signed exams; screening share reported practice-wide only (query has no provider dimension, CI-tested); an addendum changing a tooth produces the chart and claim-correction rows atomically. Phase 4: add the Schedule-honesty Practice-health card (template vs measured medians, min-sample, no provider dimension), degraded-mode paper day with initials-only default, appeal packet from images once the sensor bridge lands, certification drills. Phase 5: PTT-only voice with per-quadrant read-back; AI switch with the twin table and CI twin test; portal delivery gate; guardian age-out; 'Where my record went'. Risk table: add 'Filed-later lane could normalise late filing' (mitigation: claim genuinely held, ready→filed reported practice-level) and 'walk-over coercion' (digest pattern only).
+
+### Item 6
+- **document**: docs/06-security-and-hipaa-plan.md
+- **change**: Add disclosure-row requirements for claim attachments (artifact hashes, never rendered PHI in the event payload), appeal packets, frozen statements per channel, shared estimates, lab slips, and referral sends; add push payloads carry request ids only; add the device registry (operatory | desk, shared) with server-side author switch, local wipe after autosave, PIN as second factor bound to an authenticated session, failed-PIN findings on the device; add the consent-scope send refusal and template lint under the TCPA row (healthcare exemption still UNVERIFIED); note self_pay_restricted also blocks attachment assembly; note the CPA seat's patient-level drill-down is a logged payment-purpose read under the CPA's BAA.
+
+### Item 7
+- **document**: docs/11-open-questions-and-unverified.md
+- **change**: Add: the after-hours emergency encounter on a provisional patient vs the two-identifier rule; Tennessee counsel review of the for-dentist observation vocabulary, the informed-refusal language, the minor-consent licences (§ 63-1-176), and the counsel-frozen killer list; the CARC→action table maintainer and PR-group-code mapping; per-payer evidence thresholds for SRP and crowns labelled 'practice's configured threshold, not qualifies for reimbursement'; the eight-word gate copy rule vs counsel-required text (goes behind Why); deferred-revenue treatment as a tenant setting confirmed with the pilot CPA; the pediatric plain-language dictionary review; whether passkeys or badge tap replace the operatory PIN keypad; delta-readback rounding threshold and contract-variance tolerance tuned on pilot 835s; walk-over coercion as a residual risk.
+
+### Item 8
+- **document**: docs/12-implementation-and-verification.md
+- **change**: Add CI gates: copy catalog lint (≤8 words, verb-first, no currency token in note-scoped copy, terminology registry); luminance-ladder ordering asserted from token metadata; bounding-box check ≥44×44 with 8 px gaps on the five flows; pointer-disabled Playwright run of the five flows plus axe-core; explanation-template coverage test over reason_codes; twin-row test over the AI capability registry; no-provider-dimension test on the schedule-honesty and screening-share queries; property tests for variance-sentence templates alongside the ledger suite; the claim-line corpus as a precondition for the contradiction stop blocking Submit.

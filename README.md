@@ -20,10 +20,11 @@ No application code lives here yet. Phase 0 scaffolding starts in a separate tas
 | 7 | `docs/06-security-and-hipaa-plan.md` | 18 regimes, 36 controls mapped to tables and phases, architecture, identity, encryption, audit, AI policy, vendors and BAAs, backup, breach clocks, secure development |
 | 8 | `docs/07-compliance-program-and-calendar.md` | Governance, cadence, attestations, the compliance calendar, and 32 questions for counsel |
 | 9 | `docs/08-roadmap.md` | Six phases with scope, exit criteria, dependencies, sequencing contingencies, and the risk register |
-| 10 | `docs/09-naming.md` | Thirty name candidates, selection criteria, the shortlist, and the collision-screen status |
-| 11 | `docs/10-decisions-for-owner.md` | The 26 decisions that are the owner's, each with options, a recommendation, and why; mirrored as ADRs under `docs/adr/` |
-| 12 | `docs/11-open-questions-and-unverified.md` | Verification method and labels, every correction adopted, every statement still unverified, and the completeness critique |
-| 13 | `docs/12-implementation-and-verification.md` | How this repository was produced and how to check it |
+| 10 | `docs/13-innovation-and-intuitiveness.md` | The feature layer: the thesis, six signature moments, 30 catalog features with specifications and click counts, 8 features adopted from the critique, the amendments adopted, and the ideas rejected with reasons |
+| 11 | `docs/09-naming.md` | Thirty name candidates, selection criteria, the shortlist, and the collision-screen status |
+| 12 | `docs/10-decisions-for-owner.md` | The 26 decisions that are the owner's, each with options, a recommendation, and why; mirrored as ADRs under `docs/adr/` |
+| 13 | `docs/11-open-questions-and-unverified.md` | Verification method and labels, every correction adopted, every statement still unverified, and the completeness critique |
+| 14 | `docs/12-implementation-and-verification.md` | How this repository was produced and how to check it |
 
 ## Status of the open decisions
 
@@ -43,7 +44,7 @@ Of 127 statements checked: 62 confirmed (SECONDARY), 17 corrected, 1 refuted and
 ## Evidence
 
 - `knowledge/` is the market-research knowledge base (v3, 2026-09-02) that the plan builds on: `INDEX.md`, `semantic-memory.md`, 31 source cards under `sources/`, and the full report.
-- `knowledge/reviews/` holds the 44 planning-agent outputs rendered to Markdown (explorer reports, design lenses, judges, design synthesis, security drafts, citation verdicts, security synthesis, naming sets, collision screen, critique) and the approved plan itself. Every conclusion in `docs/` traces to one of these files.
+- `knowledge/reviews/` holds the 44 planning-agent outputs rendered to Markdown (explorer reports, design lenses, judges, design synthesis, security drafts, citation verdicts, security synthesis, naming sets, collision screen, critique), the approved plan itself, and the 13 feature-workflow outputs behind `docs/13` (`features-*`). Every conclusion in `docs/` traces to one of these files.
 
 ## Checking this repository
 

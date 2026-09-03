@@ -31,3 +31,10 @@ The deliverable of this task is the review and the plan, so implementation means
 - Every reused-asset row in `docs/00` names a path that exists in the cloned `dental` or `precog` checkout (script: extract paths and `test -e`).
 - Every phase in `docs/08` has scope, exit criteria, and dependencies, and every decision row in `docs/10` matches the table in this plan (script: count `### Phase` headings and the three sub-headings under each; diff the decision numbers).
 - The draft PR exists, is marked draft, targets `main`, and the branch protection/CI state is reported back honestly (there is no CI in the new repo yet, so "no checks" is the expected state).
+
+## Feature-layer amendments (2026-09-03)
+
+Adopted from `docs/13-innovation-and-intuitiveness.md` (the feature workflow's synthesis and its critique). Where an amendment conflicts with text above, the amendment governs.
+
+- Add CI gates: copy catalog lint (≤8 words, verb-first, no currency token in note-scoped copy, terminology registry); luminance-ladder ordering asserted from token metadata; bounding-box check ≥44×44 with 8 px gaps on the five flows; pointer-disabled Playwright run of the five flows plus axe-core; explanation-template coverage test over reason_codes; twin-row test over the AI capability registry; no-provider-dimension test on the schedule-honesty and screening-share queries; property tests for variance-sentence templates alongside the ledger suite; the claim-line corpus as a precondition for the contradiction stop blocking Submit.
+- From the critique: the ≤8-word verb-first lint applies to the refusal verb line only; worklist rows and finding titles follow a separate row grammar (object · state · one action).
