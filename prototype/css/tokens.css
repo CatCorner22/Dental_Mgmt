@@ -1,0 +1,90 @@
+/* Design tokens derived from Smile Notes (design-tokens.json, palette.ts).
+   Primitive → semantic. Severity fills keep monotonic luminance so a grayscale
+   user ranks stop > required > review > style > info > clear in both themes. */
+:root {
+  /* primitives */
+  --cream: #F3F1EB; --navy: #1E3A5F; --blue: #2B6CB8; --teal: #0F766E; --gold: #F2CE4B;
+  --slate-50: #F8FAFC; --slate-100: #F1F5F9; --slate-200: #E2E8F0; --slate-300: #CBD5E1;
+  --slate-400: #94A3B8; --slate-500: #5B6578; --slate-600: #475569; --slate-700: #334155;
+  --slate-800: #1E293B; --slate-900: #0F172A; --white: #FFFFFF;
+
+  /* severity ladder: fill / soft / ink / rail / on-fill */
+  --stop-fill: #9B1C1C; --stop-soft: #FEF2F2; --stop-ink: #7F1D1D; --stop-rail: #B91C1C; --stop-on: #FFFFFF;
+  --required-fill: #C2410C; --required-soft: #FFF7ED; --required-ink: #9A3412; --required-rail: #EA580C; --required-on: #FFFFFF;
+  --review-fill: #D97706; --review-soft: #FFFBEB; --review-ink: #1C1917; --review-rail: #D97706; --review-on: #1C1917;
+  --style-fill: #6D28D9; --style-soft: #F5F3FF; --style-ink: #5B21B6; --style-rail: #7C3AED; --style-on: #FFFFFF;
+  --info-fill: #475569; --info-soft: #F8FAFC; --info-ink: #334155; --info-rail: #64748B; --info-on: #FFFFFF;
+  --clear-fill: #047857; --clear-soft: #ECFDF5; --clear-ink: #065F46; --clear-rail: #059669; --clear-on: #FFFFFF;
+
+  /* semantic, light */
+  --bg: var(--cream);
+  --surface: #FFFFFF;
+  --surface-2: #FAF9F5;
+  --ink: #17233A;            /* body text on cream and white */
+  --ink-2: #3D4A63;          /* secondary text, 7:1 on white */
+  --ink-3: #56617A;          /* tertiary, 5.5:1 on white */
+  --line: #D9D5CA;
+  --line-strong: #B8B2A3;
+  --brand: var(--navy);
+  --brand-on: #FFFFFF;
+  --accent: var(--teal);
+  --accent-on: #FFFFFF;
+  --link: #1F5A99;
+  --focus: #2B6CB8;
+  --held-line: var(--navy);
+  --irreversible: var(--navy);
+  --irreversible-on: #FFFFFF;
+  --reversible-line: var(--teal);
+  --reversible-ink: #0B5C56;
+  --selected: #E4EEF8;
+  --shadow: 0 1px 2px rgba(23, 35, 58, .08), 0 4px 12px rgba(23, 35, 58, .06);
+
+  /* size and rhythm */
+  --target: 44px;
+  --gap: 8px;
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 24px; --space-6: 32px;
+  --radius: 6px; --radius-lg: 10px;
+  --font: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-1: 13px; --fs-2: 15px; --fs-3: 17px; --fs-4: 20px; --fs-5: 26px; --fs-6: 34px;
+  --motion: 140ms;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0F172A;
+  --surface: #172033;
+  --surface-2: #1B2538;
+  --ink: #EEF2F8;
+  --ink-2: #C6CFDD;
+  --ink-3: #A7B2C4;
+  --line: #2C3A55;
+  --line-strong: #46567A;
+  --brand: #DCE7F5;
+  --brand-on: #0F172A;
+  --accent: #5FC2B6;
+  --accent-on: #062A27;
+  --link: #8FC1F5;
+  --focus: #8FC1F5;
+  --held-line: #DCE7F5;
+  --irreversible: #DCE7F5;
+  --irreversible-on: #0F172A;
+  --reversible-line: #5FC2B6;
+  --reversible-ink: #9FE3DA;
+  --selected: #223452;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 12px rgba(0, 0, 0, .35);
+
+  /* dark severity: soft backgrounds darken, inks lighten; luminance order preserved */
+  --stop-soft: #3A1414; --stop-ink: #FCA5A5; --stop-fill: #C53030; --stop-on: #FFFFFF;
+  --required-soft: #3B1F0E; --required-ink: #FDBA74; --required-fill: #E06B2B; --required-on: #1C1917;
+  --review-soft: #3A2A08; --review-ink: #FCD34D; --review-fill: #F0A72B; --review-on: #1C1917;
+  --style-soft: #2A1A4A; --style-ink: #D8C7FF; --style-fill: #9B7BF5; --style-on: #1C1917;
+  --info-soft: #1F2937; --info-ink: #D3DBE7; --info-fill: #94A3B8; --info-on: #0F172A;
+  --clear-soft: #0F2E26; --clear-ink: #A7F3D0; --clear-fill: #34D399; --clear-on: #062A27;
+  color-scheme: dark;
+}
+
+:root[data-grayscale="1"] { filter: grayscale(1); }
+
+@media (prefers-reduced-motion: reduce) { :root { --motion: 0ms; } }
+:root[data-motion="reduced"] { --motion: 0ms; }

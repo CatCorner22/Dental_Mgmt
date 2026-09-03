@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" data-theme="light" data-device="desk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Riverbend Dental · prototype</title>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/components.css">
+</head>
+<body>
+<a class="skip" href="#canvas" data-testid="skip.canvas">Skip to work</a>
+<header class="topbar" id="topbar" aria-label="Top bar"></header>
+<div class="andon" id="andon" aria-live="polite"></div>
+<div class="shell">
+  <aside class="rail" id="rail" aria-label="Patient rail" hidden></aside>
+  <main class="canvas" id="canvas" tabindex="-1"></main>
+</div>
+<div id="dialogs"></div>
+<div class="sr-only" id="live" aria-live="polite" aria-atomic="true"></div>
+<script defer src="js/events.js"></script>
+<script defer src="js/seed.js"></script>
+<script defer src="js/store.js"></script>
+<script defer src="js/router.js"></script>
+<script defer src="js/ui.js"></script>
+<script defer src="js/screens/signin.js"></script>
+<script defer src="js/screens/shell.js"></script>
+<script defer src="js/screens/board.js"></script>
+<script defer src="js/screens/checkout.js"></script>
+<script defer src="js/screens/chairs.js"></script>
+<script defer src="js/screens/perio.js"></script>
+<script defer src="js/screens/encounter.js"></script>
+<script defer src="js/screens/moneydesk.js"></script>
+<script defer src="js/screens/dailyclose.js"></script>
+<script defer src="js/screens/roles.js"></script>
+<script defer src="js/screens/rail.js"></script>
+<script defer src="js/screens/palette.js"></script>
+<script defer src="js/screens/phone.js"></script>
+<script defer src="js/app.js"></script>
+</body>
+</html>

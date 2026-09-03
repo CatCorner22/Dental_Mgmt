@@ -26,16 +26,20 @@ for path in glob.glob('docs/**/*.md', recursive=True) + glob.glob('knowledge/**/
         t = target.split('#')[0]
         if not os.path.exists(os.path.normpath(os.path.join(os.path.dirname(path), t))): probs.append(f'{path} -> {target}')
 report('relative links resolve', probs, f'{n} links checked')
-# 2. INDEX parity
-idx = open('knowledge/INDEX.md').read(); probs = []
+# 2. INDEX parity (recursive: every .md under sources/ and reviews/, plus the roster .json, listed exactly once)
+idx = open('knowledge/INDEX.md').read(); probs = []; nfiles = 0
 for d in ('sources', 'reviews'):
-    for f in sorted(os.listdir(f'knowledge/{d}')):
-        c = idx.count(f'({d}/{f})')
-        if c != 1: probs.append(f'{d}/{f} listed {c} times')
+    for root, dirs, files in os.walk(f'knowledge/{d}'):
+        for f in sorted(files):
+            if not (f.endswith('.md') or f.endswith('.json')): continue
+            rel = os.path.relpath(os.path.join(root, f), 'knowledge')
+            nfiles += 1
+            c = idx.count(f'({rel})')
+            if c != 1: probs.append(f'{rel} listed {c} times')
 for m in re.finditer(r'\]\((sources|reviews)/([^)]+)\)', idx):
     if '<' in m.group(2): continue  # format example line
     if not os.path.exists(f'knowledge/{m.group(1)}/{m.group(2)}'): probs.append(f'INDEX points at missing {m.group(1)}/{m.group(2)}')
-report('knowledge/INDEX.md lists every source and review exactly once', probs)
+report('knowledge/INDEX.md lists every source and review exactly once', probs, f'{nfiles} files')
 # 3. labels on regulatory table rows in docs/06 (rows that cite law must carry a label)
 labels = re.compile(r'\b(PRIMARY|SECONDARY|REPO|UNVERIFIED)\b')
 cite = re.compile(r'(CFR|Tenn\. Code|Rule 0460|Tenn\. Comp|U\.S\.C\.|FR \d|PCI DSS|HIPAA|HITECH)')
@@ -82,5 +86,58 @@ rows = re.findall(r'^\| (\d+a?) \|', dec, re.M)
 adrs = [f for f in os.listdir('docs/adr') if f.startswith('ADR-')]
 probs = [] if len(rows) == len(adrs) else [f'{len(rows)} decision rows vs {len(adrs)} ADR files']
 report('decision table rows match ADR files', probs, f'{len(rows)} decisions')
+# 7. beta roster quotas (docs/14 §Roster)
+import json, subprocess
+probs = []
+if os.path.exists('knowledge/reviews/beta-panel-roster.json'):
+    R = json.load(open('knowledge/reviews/beta-panel-roster.json'))['personas']
+    if len(R) != 30: probs.append(f'{len(R)} personas, expected 30')
+    from collections import Counter
+    g = Counter(p['group'] for p in R)
+    for k, v in g.items():
+        if v < 3: probs.append(f'group {k} has {v} < 3')
+    gi = Counter(p['gender_identity'] for p in R)
+    for k in ('man', 'woman', 'trans man', 'trans woman', 'nonbinary'):
+        if gi.get(k, 0) < 1: probs.append(f'no persona with gender identity {k}')
+    ages = [p['age'] for p in R]
+    if min(ages) < 19 or max(ages) > 68: probs.append('ages outside 19-68')
+    traits = sum(1 for p in R if any(not a.startswith('gloved') for a in p['ability_notes']))
+    if traits < 12: probs.append(f'only {traits} personas carry an access-relevant note (need 12)')
+    for p in R:
+        if not os.path.exists(f"knowledge/reviews/beta-panel/cards/{p['id']}.md"): probs.append(f"missing card for {p['id']}")
+    report('beta roster meets the pre-registered quotas', probs, f'{len(R)} personas, {traits} with access notes')
+else:
+    print('SKIP beta roster check (no roster yet)')
+# 8. beta session files validate and pre-registration precedes them
+sess = sorted(glob.glob('knowledge/reviews/beta-sessions/bp-*.md'))
+if sess:
+    r = subprocess.run(['node', 'scripts/beta/validate-session.mjs'] + sess, capture_output=True, text=True)
+    probs = [l for l in r.stdout.split('\n') if l.startswith('FAIL') or l.startswith('  - ')]
+    report('every beta session file validates (interview JSON, seq ranges)', probs, f'{len(sess)} sessions')
+    d14 = open('docs/14-beta-test-report.md').read()
+    probs = []
+    if '## Pre-registered thresholds (set 2026-09-03, before data)' not in d14: probs.append('docs/14 lacks the dated threshold section')
+    dates = [re.search(r'^date: (\S+)', open(s).read(), re.M) for s in sess]
+    if any(d and d.group(1) < '2026-09-03' for d in dates): probs.append('a session predates the threshold registration')
+    report('docs/14 thresholds are registered no later than the earliest session', probs)
+else:
+    print('SKIP beta session checks (no sessions yet)')
+# 9. every data-testid named in the task scripts has a matching builder in prototype/js
+probs = []; checked = 0
+js = ''
+for f in glob.glob('prototype/js/**/*.js', recursive=True): js += open(f).read()
+tid = re.compile(r'^([a-z0-9]+)\.([a-z0-9-]+)(?:\.[a-z0-9<>-]+)*\.([a-z0-9-]+)$')
+for f in glob.glob('scripts/beta/tasks/*.json'):
+    T = json.load(open(f))
+    for task in T['tasks']:
+        for step in task['steps']:
+            s = step.split(' ')[0].strip('()')
+            m = tid.match(s)
+            if not m: continue
+            checked += 1
+            head = m.group(1) + '.' + m.group(2); tail = m.group(3)
+            ok = (head in js) and ((("'" + tail + "'") in js) or (('.' + tail + "'") in js) or (('.' + tail + '"') in js) or (tail + '`' in js) or ((head + '.' + tail) in js))
+            if not ok: probs.append(f'{os.path.basename(f)} {task["id"]}: {s}')
+report('task-script test ids have builders in prototype/js', probs, f'{checked} ids checked')
 sys.exit(1 if fails else 0)
 PY

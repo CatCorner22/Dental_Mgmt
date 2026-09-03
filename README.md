@@ -25,6 +25,7 @@ No application code lives here yet. Phase 0 scaffolding starts in a separate tas
 | 12 | `docs/10-decisions-for-owner.md` | The 26 decisions that are the owner's, each with options, a recommendation, and why; mirrored as ADRs under `docs/adr/` |
 | 13 | `docs/11-open-questions-and-unverified.md` | Verification method and labels, every correction adopted, every statement still unverified, and the completeness critique |
 | 14 | `docs/12-implementation-and-verification.md` | How this repository was produced and how to check it |
+| 15 | `docs/14-beta-test-report.md` | The beta test of the clickable prototype: the falsifiable claim, thresholds pre-registered before any session, the 30-persona panel, declared constraints, what the exercise cannot prove, and the results |
 
 ## Status of the open decisions
 
@@ -45,6 +46,15 @@ Of 127 statements checked: 62 confirmed (SECONDARY), 17 corrected, 1 refuted and
 
 - `knowledge/` is the market-research knowledge base (v3, 2026-09-02) that the plan builds on: `INDEX.md`, `semantic-memory.md`, 31 source cards under `sources/`, and the full report.
 - `knowledge/reviews/` holds the 44 planning-agent outputs rendered to Markdown (explorer reports, design lenses, judges, design synthesis, security drafts, citation verdicts, security synthesis, naming sets, collision screen, critique), the approved plan itself, and the 13 feature-workflow outputs behind `docs/13` (`features-*`). Every conclusion in `docs/` traces to one of these files.
+
+## Prototype and beta
+
+`prototype/` is a static, dependency-free clickable prototype of the merged product built from `docs/04` and `docs/13`: the seven persona homes, the five daily flows, and the six signature moments, on synthetic data for one tenant with three locations. Open `prototype/index.html` directly or run `npx serve prototype -l 4173`. `prototype/CONTRACTS.md` names every route, `data-testid`, refusal code, and seed id, and defines the in-page event log (`window.__events`) that every check and every panel finding cites.
+
+- `node scripts/proto-check.mjs` runs the UI stability checks (console errors, the five flows keyboard-only within their click budgets, 44 px targets with 8 px gaps, WCAG contrast in both themes, horizontal overflow at three widths, reduced motion, visible focus and no keyboard traps, test-id coverage, screenshots). It exits 0 only when every row passes.
+- `node scripts/gen-roster.mjs --seed 20260903` regenerates the 30-persona panel byte-identically into `knowledge/reviews/beta-panel-roster.json` and one card per persona under `knowledge/reviews/beta-panel/cards/`.
+- `scripts/beta/tasks/*.json` are the pre-registered task scripts per profession; `scripts/beta/validate-session.mjs` rejects a session file whose findings lack event-log `seq` ranges.
+- `knowledge/reviews/beta-sessions/` holds one file per persona session, the verifier files, the dedup and severity table, the synthesis, and the critic's file. `docs/14-beta-test-report.md` states the verdict against the thresholds registered before the panel ran.
 
 ## Checking this repository
 
