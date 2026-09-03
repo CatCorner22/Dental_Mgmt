@@ -1,0 +1,14 @@
+{
+  "group": "back_office",
+  "persona": "biller",
+  "start": "#/biller/money",
+  "tasks": [
+    { "id": "bo-1", "title": "Post the matched Delta ERA lines and read back only the differing lines", "flow": 5, "budget_taps": 4, "steps": ["money.era.era-1.postmatched", "money.era.line.el-14.confirm", "money.era.line.el-22.hold", "money.era.line.el-31.dispute"], "success": "eraBatches era-1 status leaves 'review'; ledger insurance_payment and write_off rows for el-14 exist; el-22 status held; el-31 status disputed; exactly three readback rows were shown (not 41)", "watch": "does the readback name expected vs ERA amounts and the CARC in plain words?" },
+    { "id": "bo-2", "title": "Appeal denial c-88 from the record", "flow": 5, "budget_taps": 2, "steps": ["money.tab.denials", "money.denial.c-88.appeal", "money.appeal.send"], "success": "claim c-88 status 'appealed'; an appealPackets row with four slots; a disclosures row; the patient sentence is visible", "watch": "is the next action deterministic and in plain language (CARC 16 / N4 decoded)?" },
+    { "id": "bo-3", "title": "Try to bill the patient for the denied claim", "flow": 5, "budget_taps": 1, "steps": ["money.denial.c-88.bill"], "success": "a refusal event with code denial_suppression; nothing posted", "watch": "one verb line + one control? Did you understand why without reading policy prose?" },
+    { "id": "bo-4", "title": "Request a $410 courtesy write-off on Lena Fischer and see it held", "flow": 5, "budget_taps": 4, "steps": ["money.writeoff.p-306", "money.writeoff.reason.courtesy", "money.writeoff.post", "refusal.control"], "success": "an approvals row status pending with eligible approvers; a refusal event code needs_second naming 'Dana or Dr. Reagan'; the Post button became Held (not disabled)", "watch": "was the control a dead end or a next step?" },
+    { "id": "bo-5", "title": "Find 'Office Journal' and 'walkout statement' through the palette", "flow": 0, "budget_taps": 4, "steps": ["Ctrl+K", "type 'office journal'", "palette.row.0", "Ctrl+K", "type 'walkout'", "palette.row.0"], "success": "both terms resolve to a PMS row with the synonym line naming the source system; activation navigates", "watch": "did the words of your last office work on the first try?" },
+    { "id": "bo-6", "title": "Send a held statement with its reason visible", "flow": 5, "budget_taps": 3, "steps": ["money.tab.statements", "money.statement.sd-1.preview", "money.statement.sd-1.send"], "success": "statementsDue sd-1 sent true; a disclosures row; Preview showed the patient-voice sentence first", "watch": "two visual identities: Preview reversible, Send irreversible?" }
+  ],
+  "interview_focus": ["Could you explain Ines Okoro's balance to her from the Ledger view in one sentence?", "Would you choose this Money Desk over your last system's insurance module?", "Where did the ERA readback save you time, and where did it cost you?"]
+}

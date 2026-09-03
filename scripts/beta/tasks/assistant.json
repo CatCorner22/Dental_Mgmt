@@ -1,0 +1,13 @@
+{
+  "group": "assistant",
+  "persona": "frontdesk",
+  "start": "#/frontdesk/board?device=shared",
+  "tasks": [
+    { "id": "da-1", "title": "Switch author by PIN on the shared tablet before doing anything", "flow": 0, "budget_taps": 6, "steps": ["topbar.author", "pin.key.3 x4 (Jo Ramirez, RDA: 3333)", "pin.submit"], "success": "a sessions write; the author chip shows 'JR · RDA' (initials and licence glyph, no patient data)", "watch": "does the pad read for a gloved thumb? Are the keys at least 56 px?" },
+    { "id": "da-2", "title": "Arrive and seat a patient from the Board", "flow": 1, "budget_taps": 2, "steps": ["board.card.a-1042.arrive", "board.card.a-1042.seat"], "success": "a-1042 status seated; two appointmentEvents writes", "watch": "in privacy mode (?privacy=1) do the cards show initials only?" },
+    { "id": "da-3", "title": "Open Perio with the glove pad and record 12 sites by tapping", "flow": 2, "budget_taps": 15, "steps": ["route #/hygienist/perio/enc-9001?device=operatory", "perio.pad.toggle", "perio.pad.key.3 x12 (or a mix of keys and perio.pad.bleed)"], "success": "12 sites recorded via pad taps; every pad key at least 44 px with 8 px gaps; the Next tooth bar at least 56 px", "watch": "could a wet glove hit each key without mis-tapping the neighbour?" },
+    { "id": "da-4", "title": "Confirm the chair strip shows initials and no patient data", "flow": 1, "budget_taps": 0, "steps": ["(read board.chair.1..3)"], "success": "each chair shows 'Chair n · <initials>' only", "watch": "" },
+    { "id": "da-5", "title": "Issue a day pass for yourself as a new hire and check the first-shift rail retires on real events", "flow": 0, "budget_taps": 8, "steps": ["nav.roles (or route #/frontdesk/roles)", "roles.daypass.add", "type 'Sam Lee' in roles.daypass.name", "roles.daypass.role.frontdesk", "roles.daypass.location.loc-1", "roles.daypass.save", "roles.daypass.signin", "board.card.a-1043.arrive is not arrivable; arrive the first scheduled card (e.g. board.card.a-1061.arrive)"], "success": "a dayPasses row; route #/temp/board; rail1.chip.0 (Arrive) shows as retired after the arrive event; a firstRunState write", "watch": "did the rail point at the live control (pulse) instead of describing it?" }
+  ],
+  "interview_focus": ["Would you trust that your name, not the hygienist's, is on what you charted?", "Which control was too small or too close to its neighbour for gloves (testid)?", "As a new hire, what did the first-shift rail miss?"]
+}

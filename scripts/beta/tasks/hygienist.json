@@ -1,0 +1,14 @@
+{
+  "group": "hygienist",
+  "persona": "hygienist",
+  "start": "#/hygienist/chairs",
+  "tasks": [
+    { "id": "hy-1", "title": "Open Perio for Marisol Vega from your first card", "flow": 2, "budget_taps": 1, "steps": ["chairs.card.a-1042.perio"], "success": "route hygienist/perio/enc-9001; cursor at tooth 1 site 1 (or the first present tooth); the prior exam is ghosted", "watch": "does the Chairs card tell you what changed (anticoagulant), what is due (perio 14 mo, BWX), and what helped last time?" },
+    { "id": "hy-2", "title": "Full-mouth six-point perio, keyboard only, one pass", "flow": 2, "budget_taps": 1, "budget_keystrokes": 200, "steps": ["type 168 digits (mostly 2-4, some 5-6, use Space after a few for bleeding)", "perio.save"], "success": "a perioExams row with probed 168 (minus missing teeth sites), notes[enc-9001].perioSummary present; Save was one tap; no omission licence needed", "watch": "did the cursor ever jump somewhere you did not expect? Did the active-site display keep you oriented?" },
+    { "id": "hy-3", "title": "Undo a mistyped depth and skip a site without recording zero", "flow": 2, "budget_taps": 0, "steps": ["type 9 then Backspace then 3", "ArrowRight on one site"], "success": "the undone site shows the corrected value; the skipped site is stored as not probed (never 0); saving asks for an omission licence (refusal code omission_licence) and perio.licence.<code> then perio.licence.confirm completes the save", "watch": "was the undo feedback visible for a gloved user looking at the mouth, not the screen?" },
+    { "id": "hy-4", "title": "Tag #30 for the dentist as a finding, not a diagnosis", "flow": 2, "budget_taps": 3, "steps": ["perio.tag.add", "type 30 in perio.tag.tooth and 'suspected caries DO' in perio.tag.text", "perio.tag.save"], "success": "a tags row for enc-9001 with tooth 30 and no disposition; the copy says finding, not diagnosis", "watch": "does the licence scope feel respected rather than policed?" },
+    { "id": "hy-5", "title": "Mark ready for exam", "flow": 2, "budget_taps": 2, "steps": ["nav.chairs", "chairs.card.a-1042.ready"], "success": "an appointmentEvents write encounter.exam_requested; the Exams-to-sign queue (dentist persona) would list it", "watch": "" },
+    { "id": "hy-6", "title": "Run the screening lane", "flow": 2, "budget_taps": 2, "budget_keystrokes": 12, "steps": ["chairs.card.a-1042.perio", "perio.screening", "type 6 sextant codes", "perio.save"], "success": "a perioExams row with mode 'screening'", "watch": "is the screening lane obviously different from the full chart?" }
+  ],
+  "interview_focus": ["Could you chart a full mouth alone at your usual pace with this grammar? What key would you remap?", "Would you choose this over your last system's perio chart? Why?", "Which gloved target did you miss, if any (cite the testid)?"]
+}
