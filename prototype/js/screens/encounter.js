@@ -114,7 +114,8 @@
     lastRoute = r; const enc = Proto.store.encounter(r.id);
     if (!enc) { detachKeys(); mount(h('div', { class: 'stack' }, h('h1', { text: 'Encounter not found' }), btn('Back to Exams', { testid: 'enc.back', kind: 'reversible', onClick: () => Proto.router.go(r.persona, 'exams') }))); return; }
     const s = S(); const a = apptOf(enc); const p = Proto.store.patient(enc.patientId); const x = state(enc.id);
-    const head = pageHead(p.name, 'DOS ' + longDate(enc.dos) + ' · ' + providerShort(enc.providerId) + (a ? ' · Chair ' + a.op + ' · ' + a.type[0].toUpperCase() + a.type.slice(1) : '') + ' · DOB ' + longDate(p.dob),
+    const priv = P().privacy;
+    const head = pageHead(displayName(p.name, priv), 'DOS ' + longDate(enc.dos) + ' · ' + providerShort(enc.providerId) + (a ? ' · Chair ' + a.op + ' · ' + a.type[0].toUpperCase() + a.type.slice(1) : '') + (priv ? '' : ' · DOB ' + longDate(p.dob)),
       Proto.screens.rail ? Proto.screens.rail.button(enc.patientId, r, 'enc.rail') : null,
       btn('Back to Exams', { testid: 'enc.back', kind: 'quiet', onClick: () => Proto.router.go(r.persona, 'exams') }));
     const filed = filedOf(enc.id);

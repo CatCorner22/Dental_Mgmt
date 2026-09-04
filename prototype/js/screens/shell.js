@@ -27,7 +27,7 @@
     const loc = S.locations[0];
     const nav = h('nav', { 'aria-label': 'Primary' }, ...(NAV[r.persona] || NAV.frontdesk).map(([route, label]) => btn(label, { testid: 'nav.' + route, onClick: () => Proto.router.go(r.persona, route), class: r.route === route ? 'current' : '' })));
     nav.querySelectorAll('button').forEach((b) => { if (b.classList.contains('current')) b.setAttribute('aria-current', 'page'); });
-    const authorChip = h('button', { type: 'button', class: 'authorchip', testid: 'topbar.author', 'aria-label': 'Who is charting: ' + u.name + (u.licence ? ', ' + u.licence : '') + '. Switch author', onClick: () => openPinPad(r) }, h('span', { 'aria-hidden': 'true', text: Proto.ui.initials(u.name) }), h('span', { text: (P.device === 'shared' || P.device === 'operatory') ? (Proto.ui.initials(u.name) + (u.licence ? ' · ' + u.licence : '')) : u.short || u.name }));
+    const authorChip = h('button', { type: 'button', class: 'authorchip', testid: 'topbar.author', 'aria-label': 'Who is charting: ' + u.name + (u.licence ? ', ' + u.licence : '') + '. Switch author', onClick: () => openPinPad(r) }, h('span', { text: (P.device === 'shared' || P.device === 'operatory') ? (Proto.ui.initials(u.name) + (u.licence ? ' · ' + u.licence : '')) : (u.short || u.name) }));
     top.replaceChildren(
       h('span', { class: 'brand' }, h('span', { class: 'mark', 'aria-hidden': 'true' }), 'Riverbend'),
       btn(loc.short, { testid: 'topbar.location', ariaLabel: 'Location: ' + loc.name + '. Switch location', onClick: () => Proto.router.announce('Location switching is out of scope for the prototype') }),
@@ -60,16 +60,29 @@
     const dots = h('div', { class: 'pindots', 'aria-live': 'polite', text: '' });
     const status = h('p', { class: 'hint', text: P.device === 'desk' ? 'This desk is not shared: switching author signs you out and in as the other person.' : 'Enter the other person\'s PIN. Their session opens on this page; yours is revoked and local drafts are wiped after autosave.' });
     let close;
+    const refusalSlot = h('div', { class: 'pin-refusal' });
+    function showRefusal(v) { refusalSlot.replaceChildren(Proto.ui.refusal(v)); }
     function submit() {
       const who = S.users.find((u) => u.pin === digits);
-      if (!who) { digits = ''; dots.textContent = ''; status.textContent = 'No match for that PIN. Six digits at most; three misses lock this device for 5 minutes.'; Proto.events.refusal('pin_no_match', 'PIN did not match', null); return; }
+      digits = ''; dots.textContent = '';
+      if (!who) {
+        showRefusal({ code: 'pin_no_match', verb: 'PIN did not match — try again', control: 'Clear and retype', onControl: () => { const k = pad.querySelector('[data-testid="pin.key.1"]'); if (k) k.focus(); }, why: 'Six digits at most. Three misses lock this device for five minutes and raise a finding for the practice, never for the person.', severity: 'required' });
+        return;
+      }
       const persona = Object.entries(S.personaUser).find(([, uid]) => uid === who.id);
+      if (!persona) {
+        // No chart persona for this account in the prototype: refuse rather than write a session that changes nothing.
+        showRefusal({ code: 'no_chart_session', verb: who.short + ' has no charting session here', control: 'Keep current author', onControl: () => close(), why: 'This account can approve and post but does not chart, so there is nothing for it to open on this screen. The author stays as it was and nothing was written.', severity: 'info' });
+        return;
+      }
       Proto.events.write('sessions', 'sess-' + who.id);
       close();
-      if (persona) { const p = persona[0]; P.set({ persona: p }); location.hash = '#/' + p + '/' + (r.route === 'signin' ? Proto.router.HOME[p] : r.route) + (r.id ? '/' + r.id : ''); Proto.router.announce('Now charting as ' + who.name); }
+      const p = persona[0]; P.set({ persona: p });
+      location.hash = '#/' + p + '/' + (r.route === 'signin' ? Proto.router.HOME[p] : r.route) + (r.id ? '/' + r.id : '');
+      Proto.router.announce('Now charting as ' + who.name);
     }
     const pad = h('div', { class: 'pinpad' }, ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => btn(String(d), { testid: 'pin.key.' + d, onClick: () => { if (digits.length < 6) { digits += d; dots.textContent = '•'.repeat(digits.length); } } })), btn('⌫', { testid: 'pin.backspace', ariaLabel: 'Backspace', onClick: () => { digits = digits.slice(0, -1); dots.textContent = '•'.repeat(digits.length); } }), btn('0', { testid: 'pin.key.0', onClick: () => { if (digits.length < 6) { digits += '0'; dots.textContent = '•'.repeat(digits.length); } } }), btn('Go', { testid: 'pin.submit', kind: 'irreversible', onClick: submit }));
-    close = Proto.ui.dialog(h('div', { class: 'stack' }, h('h2', { text: 'Who is charting?' }), status, dots, pad, btn('Cancel', { testid: 'pin.cancel', onClick: () => close() })), { label: 'Switch author', focus: '[data-testid="pin.key.1"]' });
+    close = Proto.ui.dialog(h('div', { class: 'stack' }, h('h2', { text: 'Who is charting?' }), status, refusalSlot, dots, pad, btn('Cancel', { testid: 'pin.cancel', onClick: () => close() })), { label: 'Switch author', focus: '[data-testid="pin.key.1"]' });
   }
 
   function renderRail1(r) {
@@ -79,7 +92,7 @@
     const S = Proto.store.get(); const steps = Proto.store.railSteps();
     if (!bar) { bar = h('div', { class: 'rail1', id: 'rail1', 'aria-label': 'Your first shift' }); document.getElementById('andon').after(bar); }
     if (S.rail1Collapsed) { bar.replaceChildren(btn('Show first-shift steps', { testid: 'rail1.toggle', onClick: () => { S.rail1Collapsed = false; renderRail1(r); } })); return; }
-    bar.replaceChildren(h('span', { class: 'small muted', text: 'Your first shift:' }), ...steps.map(([code, label], i) => { const retired = !!S.railState[code]; return btn(retired ? label + ' ✓' : label, { testid: 'rail1.chip.' + i, dataset: { retired: retired ? '1' : '0' }, ariaLabel: label + (retired ? ', done' : ', show me'), onClick: () => pulseFor(code, r) }); }), btn('Hide', { testid: 'rail1.toggle', onClick: () => { S.rail1Collapsed = true; renderRail1(r); } }));
+    bar.replaceChildren(h('span', { class: 'small muted', text: 'Your first shift:' }), ...steps.map(([code, label], i) => { const retired = !!Proto.store.railStateFor()[code]; return btn(retired ? label + ' ✓' : label, { testid: 'rail1.chip.' + i, dataset: { retired: retired ? '1' : '0' }, ariaLabel: label + (retired ? ', done' : ', show me'), onClick: () => pulseFor(code, r) }); }), btn('Hide', { testid: 'rail1.toggle', onClick: () => { S.rail1Collapsed = true; renderRail1(r); } }));
   }
   function pulseFor(code, r) {
     const map = { arrive: '[data-testid$=".arrive"]', seat: '[data-testid$=".seat"]', checkout: '[data-testid$=".checkout"]', payment: '[data-testid="checkout.post"]', find: '[data-testid="topbar.search"]', perio: '[data-testid$=".perio"]', save: '[data-testid="perio.save"]', tag: '[data-testid="perio.tag.add"]', ready: '[data-testid$=".ready"]' };

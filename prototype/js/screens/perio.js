@@ -98,7 +98,10 @@
     st.gate = { code: 'depth_gt_15', node: refusal({ code: 'depth_gt_15', verb: 'Depth ' + depth + ' mm is above the 15 mm limit', control: 'Re-enter the depth', why: 'Probing depths above 15 mm are not recordable; the site keeps its previous value and the cursor stays here. Type 0 then a digit for 10 to 15.', onControl: () => { st.gate = null; const c = Proto.router.current(); rerender(c); focusCell(st); } }) };
   }
   function apply(st, k, r) {
-    if (st.saved) return null;
+    if (st.saved) {
+      if (!st.amendGate) { st.amendGate = Proto.ui.refusal({ code: 'exam_sealed', verb: 'Exam is filed — amend adds an addendum', control: 'Start an addendum', onControl: () => { st.saved = null; st.savedAt = null; st.amendGate = null; st.amending = true; rerender(Proto.router.current()); }, why: 'A filed exam is the record. Keys no longer change it; an amendment is a new dated entry that links to the original.', severity: 'info' }); rerender(Proto.router.current()); }
+      return 'Exam is filed; start an addendum to change it';
+    }
     if (st.mode === 'screening') return applyScreening(st, k);
     if (/^[0-9]$/.test(k)) {
       const d = Number(k);
@@ -200,6 +203,12 @@
     text.classList.toggle('invalid', xb); if (xb) text.setAttribute('aria-invalid', 'true'); else text.removeAttribute('aria-invalid');
     hint.textContent = TAG_HINT + (tb ? TOOTH_MSG : '') + (xb ? TEXT_MSG : '');
   }
+  function scrollCursorIntoView() {
+    const a = document.querySelector('.psite.active');
+    if (!a) return;
+    const b = a.getBoundingClientRect();
+    if (b.top < 90 || b.bottom > window.innerHeight - 8) a.scrollIntoView({ block: 'center', behavior: 'auto' });
+  }
   function focusCell(st) { const key = curKey(st); const b = key && document.querySelector('[data-testid="perio.grid.cell.' + key + '"]'); if (b) b.focus(); }
   function cell(st, r, t, s) {
     const key = 't' + t + '-s' + s; const v = st.sites[key]; const missing = st.missing.includes(t); const idx = st.path.indexOf(key);
@@ -232,7 +241,9 @@
   function pad(st, r) {
     const key = (k, label, tid, extra) => btn(label, { kind: 'quiet', class: 'pe-padkey' + (extra ? ' ' + extra : ''), testid: tid, ariaLabel: label === '→' ? 'Skip site, not probed' : label === '⌫' ? 'Undo last entry' : undefined, onClick: () => viaPad(st, r, k) });
     const keys = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => key(String(n), String(n), 'perio.pad.key.' + n));
-    return h('div', { class: 'pad', role: 'group', 'aria-label': 'Glove pad' }, ...keys, key(' ', 'Bleed', 'perio.pad.bleed'), key('ArrowRight', '→', 'perio.pad.skip'), key('Backspace', '⌫', 'perio.pad.undo'),
+    return h('div', { class: 'pad', role: 'group', 'aria-label': 'Glove pad' }, ...keys,
+      key('0', '10+', 'perio.pad.key.0'), key('s', 'Pus', 'perio.pad.supp'),
+      key(' ', 'Bld', 'perio.pad.bleed'), key('ArrowRight', '→', 'perio.pad.skip'), key('Backspace', '⌫', 'perio.pad.undo'),
       btn('Next tooth', { kind: 'reversible', class: 'next', testid: 'perio.pad.next', onClick: () => viaPad(st, r, 'PageDown') }));
   }
   function settings(st, r) {
@@ -295,6 +306,7 @@
   function rerender(r) {
     const ae = document.activeElement; const tid = ae && ae.getAttribute ? ae.getAttribute('data-testid') : null;
     render(r);
+    scrollCursorIntoView();
     if (!tid) return;
     let target = null;
     if (tid.startsWith('perio.grid.cell.')) { const enc = Proto.store.encounter(r.id); const st = enc && stateFor(enc); const key = st && curKey(st); target = (key && document.querySelector('[data-testid="perio.grid.cell.' + key + '"]')) || document.querySelector('[data-testid="' + tid + '"]'); }
@@ -320,7 +332,7 @@
     const padT = btn(st.padOpen ? 'Hide glove pad' : 'Glove pad', { kind: 'quiet', testid: 'perio.pad.toggle', pressed: st.padOpen, ariaLabel: 'Glove pad: 44 px keys for gloved fingers', onClick: () => { st.padOpen = !st.padOpen; rerender(r); } });
     const setT = btn('Settings', { kind: 'quiet', testid: 'perio.settings', pressed: st.settingsOpen, ariaLabel: 'Perio settings: last key pressed and probing path', onClick: () => { st.settingsOpen = !st.settingsOpen; rerender(r); } }); setT.setAttribute('aria-expanded', String(st.settingsOpen)); setT.setAttribute('aria-controls', 'perio-settings');
     let save;
-    if (st.saved) save = chip('clear', 'Exam saved', { big: true });
+    if (st.saved) save = btn('Amend this exam', { kind: 'reversible', testid: 'perio.amend', ariaLabel: 'Amend the saved exam: adds a dated addendum, never overwrites', onClick: () => { st.amendGate = Proto.ui.refusal({ code: 'exam_sealed', verb: 'Exam is filed — amend adds an addendum', control: 'Start an addendum', onControl: () => { st.saved = null; st.savedAt = null; st.amendGate = null; st.amending = true; rerender(r); }, why: 'A filed exam is the record. An amendment is a new dated entry by you that links to it; the original is never overwritten.', severity: 'info' }); rerender(r); } });
     else if (st.gate) save = btn('Held', { kind: 'held', testid: 'perio.save', ariaLabel: 'Save exam is held: ' + (st.gate.node.querySelector('.verb') || {}).textContent, onClick: () => { const c = document.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); } });
     else save = btn('Save exam', { kind: 'irreversible', testid: 'perio.save', ariaLabel: 'Save exam: one transaction, derives the note and the recall', onClick: () => doSave(st, r, null) });
 
@@ -338,9 +350,10 @@
     if (st.gate) page.append(st.gate.node);
     page.append(st.mode === 'full' ? grid(st, r) : sextants(st, r));
     page.append(h('div', { class: 'row pe-legend small muted' }, h('span', { text: 'Cell: depth (or —) · small grey = prior exam · ● bleeding · ◆ suppuration · shaded = 5 mm or deeper · x = missing tooth' }), st.stamp ? h('span', { class: 'stamp', text: st.stamp }) : null));
-    if (st.padOpen && !st.saved && st.mode === 'full') page.append(pad(st, r));
+    if (st.padOpen && !st.saved && st.mode === 'full') { const pd = pad(st, r); pd.classList.add('pad-dock'); page.append(pd); }
     if (st.settingsOpen) page.append(settings(st, r));
     if (st.licenceOpen && !st.saved) page.append(licenceChooser(st, r));
+    if (st.amendGate) page.append(st.amendGate);
     if (st.saved) page.append(savedCard(st, r)); else page.append(tagBlock(st, r));
     Proto.screens.shell.mount(page);
     if (!keysOn) { document.addEventListener('keydown', onKey); keysOn = true; }

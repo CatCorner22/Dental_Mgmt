@@ -221,7 +221,7 @@
       row.append(h('div', { class: 'row' }, h('span', { class: 'grow', text: 'Note not filed — ' + prov.short }), outage ? null : btn('Ping chair', { kind: 'reversible', class: 'compact', testid: 'board.queue.row.' + a.id + '.ping', ariaLabel: 'Ping chair ' + a.op + ' about the open note', onClick: () => doPing(a.id, r) })));
       const p = pings[a.id]; if (p) row.append(p.node || h('div', { class: 'stamp', text: p.text }));
     }
-    if (a.status === 'checked_out_unfiled') row.append(h('div', { class: 'stamp', text: 'Paid at the window · in the Filed-later lane until ' + prov.short + ' files' }));
+    if (a.status === 'checked_out_unfiled') row.append(h('div', { class: 'row' }, btn('Checkout', { kind: 'reversible', testid: 'board.queue.row.' + a.id + '.checkout', ariaLabel: 'Open checkout for ' + name + ' (already paid; charges post when the note files)', onClick: () => goCheckout(a.id, r) }), h('span', { class: 'small muted', text: 'Paid at the window · in the Filed-later lane until ' + prov.short + ' files' })));
     else if (!outage) row.append(h('div', { class: 'row' }, btn('Checkout', { kind: 'reversible', testid: 'board.queue.row.' + a.id + '.checkout', ariaLabel: 'Checkout ' + name, onClick: () => goCheckout(a.id, r) }), filed ? null : h('span', { class: 'small muted', text: 'Checkout works now; charges post when the note files.' })));
     return row;
   }

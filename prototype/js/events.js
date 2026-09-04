@@ -30,7 +30,9 @@
 
   document.addEventListener('click', (ev) => {
     const testid = testidOf(ev.target);
-    record('click', { testid });
+    // A click the browser synthesises from Enter or Space carries detail 0. The keydown was already
+    // recorded, so mark this one so the tap formula counts one activation once (CONTRACTS §5).
+    record('click', { testid, synthetic: ev.detail === 0 || undefined });
   }, true);
 
   document.addEventListener('keydown', (ev) => {

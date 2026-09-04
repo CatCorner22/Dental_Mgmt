@@ -23,7 +23,7 @@ fs.mkdirSync(path.join(OUT, 'shots'), { recursive: true });
 const PERSONAS = ['frontdesk', 'biller', 'hygienist', 'dentist', 'surgeon', 'owner', 'compliance', 'temp'];
 const HOME = { frontdesk: 'board', biller: 'money', hygienist: 'chairs', dentist: 'exams', surgeon: 'exams', owner: 'close', compliance: 'risk', temp: 'board' };
 const ROUTES = ['#/signin', ...PERSONAS.map((p) => '#/' + p + '/' + HOME[p]), '#/frontdesk/checkout/a-1044', '#/frontdesk/checkout/a-1045', '#/frontdesk/checkout/a-1046', '#/frontdesk/checkout/a-1047', '#/hygienist/perio/enc-9001', '#/dentist/encounter/enc-9002', '#/surgeon/encounter/enc-9020', '#/biller/ledger/p-303', '#/owner/roles', '#/owner/money', '#/phone/approvals', '#/frontdesk/board?outage=1', '#/frontdesk/board?privacy=1&device=shared'];
-const WIDTHS = [1280, 1024, 820];
+const WIDTHS = [1280, 1024, 820, 420]; // 420 added after the beta panel found phone-width defects the first three widths missed
 
 const results = {};
 const fail = (name, msg) => { results[name] = results[name] || { pass: true, failures: [] }; results[name].pass = false; results[name].failures.push(msg); };
@@ -91,7 +91,7 @@ async function runFlow(page, flow) {
     if (st.key) { await page.keyboard.press(st.key); keys++; continue; }
     if (st.expect) { const state = await page.evaluate(() => window.__proto.state()); const r = st.expect(state); if (r !== true) problems.push(String(r)); }
   }
-  const evTaps = await page.evaluate(() => window.__events.filter((e) => e.kind === 'click' || (e.kind === 'key' && (e.key === 'Enter' || e.key === ' ') && e.testid)).length);
+  const evTaps = await page.evaluate(() => window.__events.filter((e) => (e.kind === 'click' && !e.synthetic) || (e.kind === 'key' && (e.key === 'Enter' || e.key === ' ') && e.testid)).length);
   return { taps, keys, evTaps, problems };
 }
 

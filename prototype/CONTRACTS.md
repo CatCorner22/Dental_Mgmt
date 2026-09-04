@@ -85,7 +85,7 @@ Every entry:
 
 Tap accounting used by every check and every persona report:
 
-- `taps` = count of `click` events + count of `key` events whose key is `Enter` or ` ` (space) on an element with a `data-testid`.
+- `taps` = count of `click` events **without** `synthetic: true` + count of `key` events whose key is `Enter` or ` ` (space) on an element with a `data-testid`. A click the browser synthesises from a keyboard activation carries `synthetic: true` and `detail: 0`, so one activation counts once whether it came from a mouse or from a key.
 - `keystrokes` = count of all `key` events.
 - Perio keystrokes are counted separately from taps because the grammar is keyboard-first by design.
 

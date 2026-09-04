@@ -17,6 +17,9 @@
 
   function rowLabel(row) { return row.kind === 'patient' ? displayName(row.label, privacy()) : row.label; }
   function rowSyn(row) {
+    // A patient row never prints the date of birth or the last-4: those are what the gate asks for,
+    // and printing them here turns the second identifier into a formality (docs/13 feature 28).
+    if (row.kind === 'patient') return 'Confirm the date of birth to open the chart';
     if (row.syn) return row.syn;
     if (row.kind === 'action' && row.irreversible) return 'Opens its gate first; nothing runs from here';
     if (row.kind === 'action') return row.route ? 'Screen' : 'Opens from a patient';

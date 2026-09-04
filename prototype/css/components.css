@@ -418,3 +418,24 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 /* ---- integration: shared disclosure floor (every <summary> is a 44 px focusable target) ---- */
 .canvas summary, .rail summary, .dialog summary { min-height: var(--target); display: inline-flex; align-items: center; cursor: pointer; color: var(--link); padding: 0 var(--space-2); }
 .rail-sum summary, .ph-why summary { display: flex; }
+
+/* --- Beta round 1 fixes (2026-09-04) --- */
+/* A pressed control carries a mark as well as a fill, so selection survives grayscale. */
+.btn .pressmark { font-size: 12px; line-height: 1; }
+/* Glove-pad labels stay inside their 44 px key, keeping the 8 px gap real. */
+.pad .btn { font-size: var(--fs-1); padding: 0 2px; overflow: hidden; }
+/* The pad docks under the active-site line so a gloved hand reaches it without scrolling. */
+.pad-dock { position: sticky; bottom: 0; z-index: 5; background: var(--surface); border-top: 1px solid var(--line); padding: var(--space-2) 0; }
+/* The PIN pad's refusal sits above the keys. */
+.pin-refusal:empty { display: none; }
+/* Narrow glass: the top bar keeps one row of chrome and the odontogram wraps instead of panning. */
+@media (max-width: 640px) {
+  /* One scrollable row of chrome: the bar scrolls inside itself, the page never does. */
+  .topbar { gap: 6px; padding: 6px var(--space-2); min-height: 48px; flex-wrap: nowrap; overflow-x: auto; }
+  .topbar nav { order: 0; flex-basis: auto; flex-wrap: nowrap; }
+  .topbar .spacer { display: none; }
+  .topbar .brand { display: none; }
+  .topbar .btn, .topbar .authorchip { padding: 0 var(--space-2); }
+  .odont { grid-template-columns: repeat(8, var(--target)); }
+  .pinpad { grid-template-columns: repeat(3, 64px); }
+}

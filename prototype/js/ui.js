@@ -23,7 +23,7 @@
     return el;
   }
 
-  const GLYPH = { stop: '■', required: '▲', review: '◆', style: '●', info: '▬', clear: '●' };
+  const GLYPH = { stop: '■', required: '▲', review: '◆', style: '★', info: '▬', clear: '●' };
 
   function btn(label, opts) {
     opts = opts || {};
@@ -31,6 +31,8 @@
     // aria-pressed must be the word: h() would write boolean true as an empty attribute (aria-pressed="").
     const pressed = opts.pressed == null ? null : opts.pressed === true ? 'true' : opts.pressed === false ? 'false' : String(opts.pressed);
     const b = h('button', { type: 'button', class: 'btn ' + kind + (opts.class ? ' ' + opts.class : ''), testid: opts.testid, onClick: opts.onClick, 'aria-pressed': pressed, 'aria-label': opts.ariaLabel, 'aria-describedby': opts.describedby, title: opts.title, disabled: opts.disabled }, label);
+    // Selection is never colour alone: a pressed control carries a check mark as well as its fill.
+    if (pressed === 'true') b.prepend(h('span', { class: 'pressmark', 'aria-hidden': 'true', text: '✓' }));
     return b;
   }
 

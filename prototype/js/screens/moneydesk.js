@@ -252,7 +252,7 @@
     const page = h('div', { class: 'stack md-page' },
       pageHead('Money Desk', 'Every row is patient, amount, one-line reason, one primary action. Keys: P post matched · W write-off · A appeal'),
       tabs(r, S),
-      h('div', { class: 'stack', role: 'tabpanel', 'aria-label': (TABS.find((t) => t[0] === tab) || [])[1] }, body, (tab === 'era' || tab === 'aging') ? writeoffCard(r, S) : null),
+      h('div', { class: 'stack', role: 'tabpanel', 'aria-label': (TABS.find((t) => t[0] === tab) || [])[1] }, body, (tab === 'era' || tab === 'aging' || tab === 'denials' || tab === 'statements') ? writeoffCard(r, S) : null),
       h('p', { class: 'sr-only', 'aria-live': 'polite', text: st.announced }));
     Proto.screens.shell.mount(page);
     attachKeys();

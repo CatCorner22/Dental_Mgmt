@@ -40,7 +40,9 @@
     const p = patient(pid);
     if (p && p.id === 'p-303') insurancePending = 0;
     if (patientDue < 0) { credit = -patientDue; patientDue = 0; }
-    for (const cr of S.credits) if (cr.patientId === pid) credit += -cr.amountCents;
+    // Seeded credit rows carry money the ledger has no charge for yet. A payment already
+    // counted above (its ledger row exists) must not be counted a second time here.
+    for (const cr of S.credits) if (cr.patientId === pid && !cr.fromLedger) credit += -cr.amountCents;
     return { patientDue, insurancePending, credit };
   }
   function explain(pid) {
@@ -76,7 +78,7 @@
   }
   function seat(aid) { const a = appt(aid); if (!a) return refuse('notfound', 'Appointment not found', null); a.status = 'seated'; write('appointmentEvents', { id: id('ae'), appointmentId: aid, kind: 'appointment.seated', actor: currentUser().name }); retireChip('seat'); return { ok: true }; }
   function reverify(aid) { const a = appt(aid); a.eligibility = 'green'; a.eligibilityNote = '270/271 re-run at ' + S.clock.time + ': active, deductible met'; write('eligibilityChecks', { id: id('el'), appointmentId: aid, result: 'active' }); return { ok: true }; }
-  function pingChair(aid) { const a = appt(aid); const last = S.messages.filter((m) => m.appointmentId === aid).pop(); if (last && S.messages.length - S.messages.indexOf(last) < 2 && last.sameQuarter) return refuse('ping_rate', 'Already pinged this chair in the last 15 minutes', null); write('messages', { id: id('msg'), appointmentId: aid, kind: 'board.ping_chair', to: 'chair ' + a.op, sameQuarter: true }); return { ok: true }; }
+  function pingChair(aid) { const a = appt(aid); const last = S.messages.filter((m) => m.appointmentId === aid).pop(); if (last && S.messages.length - S.messages.indexOf(last) < 2 && last.sameQuarter) return refuse('ping_rate', 'Wait 15 minutes — chair already pinged', 'Open the chart', 'One ping per encounter per 15 minutes keeps the operatory usable. Open the chart to see what the writer has so far.'); write('messages', { id: id('msg'), appointmentId: aid, kind: 'board.ping_chair', to: 'chair ' + a.op, sameQuarter: true }); return { ok: true }; }
 
   // Checkout (flow 4). decision: collect | send_statement | payment_plan | zero_due
   function postCheckout(aid, form) {
@@ -87,6 +89,7 @@
     if (window.__proto.device === 'shared' && !form.pin) return refuse('pin_required', 'Enter your PIN to post', null, 'Shared desk: the PIN mints your own session for this posting.');
     if (form.decision === 'collect' && est.patientCents === 0) return refuse('zero_collect_refused', 'Nothing due today — choose Nothing due', 'Nothing due today', 'Collect with $0 writes nothing; the typed decision keeps the window honest.');
     if (form.decision === 'collect' && !form.tender) return refuse('tender_required', 'Choose a tender', null);
+    if (S.collectionDecisions.some((d) => d.encounterId === a.encounterId)) return refuse('already_decided', 'This visit is already checked out', 'Open the ledger', 'One typed decision per visit. To change what was collected, post a correction from the ledger: a reversal and a repost, both linked to the original.');
     const encId = a.encounterId; const enc = encounter(encId);
     const procs = S.procedures.filter((p) => p.encounterId === encId);
     // Write-off gate (dual release inside the posting transaction)
@@ -113,7 +116,7 @@
     if (form.writeoffCents > 0) write('ledger', { id: id('le'), kind: 'write_off', patientId: a.patientId, amountCents: -form.writeoffCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: a.locationId, reason: form.writeoffReason || 'courtesy', approvalRequestId: form.approvalRequestId || null });
     write('collectionDecisions', { id: 'cd-' + nextId.cd++, encounterId: encId, decision: form.decision, patientPortionCents: est.patientCents, decidedBy: u.name, decidedAt: S.tenant.today + ' ' + S.clock.time, statementDueId: null, paymentPlanId: null });
     a.status = noteFiled ? 'checked_out' : 'checked_out_unfiled';
-    if (!noteFiled) { if (!S.credits.find((c) => c.patientId === a.patientId && c.reason.includes(aid))) S.credits.push({ id: id('cr'), patientId: a.patientId, amountCents: -(form.amountCents || est.patientCents || 0), reason: 'Checked out unfiled: payment waiting for charges (' + aid + ')', intents: 'pending charges on ' + encId }); }
+    if (!noteFiled) { if (!S.credits.find((c) => c.patientId === a.patientId && c.reason.includes(aid))) S.credits.push({ id: id('cr'), patientId: a.patientId, amountCents: -(form.amountCents || est.patientCents || 0), reason: 'Checked out unfiled: payment waiting for charges (' + aid + ')', intents: 'pending charges on ' + encId, fromLedger: true }); }
     retireChip('checkout'); if (form.decision === 'collect') retireChip('payment');
     return { ok: true, taps: 0 };
   }
@@ -121,7 +124,10 @@
   // Dual release evaluator (precog evaluateRelease, simplified)
   function evaluateRelease(channel, amountCents, actor) {
     const threshold = S.tenant.dualReleaseThresholdCents;
-    const eligible = S.users.filter((x) => x.entitlements.includes('approve_second') && x.id !== actor.id).map((x) => x.short);
+    const RANK = { office_manager: 0, owner: 1, dentist: 2, surgeon: 3 };
+    const eligible = S.users.filter((x) => x.entitlements.includes('approve_second') && x.id !== actor.id)
+      .sort((a, b) => (RANK[a.role] == null ? 9 : RANK[a.role]) - (RANK[b.role] == null ? 9 : RANK[b.role]))
+      .map((x) => x.short);
     if (S.clock.afterHours && ['write_off', 'refund', 'adjustment'].includes(channel)) return { ok: false, code: 'after_hours', verb: 'Held until 7:30 am — after hours', why: 'Refunds, adjustments, and write-offs outside business hours are held regardless of amount. Policy set by Dr. Reagan, reviewed 8/4.', eligible };
     if (amountCents >= threshold) return { ok: false, code: 'needs_second', verb: 'Needs a second approver — ' + eligible.slice(0, 2).join(' or '), why: 'Write-offs at or above ' + Proto.ui.money(threshold) + ' need a distinct second approver (control policy v3, set by Dr. Reagan on 8/4, review due 9/1). Approvals here usually take about 4 minutes.', eligible };
     return { ok: true, code: 'below_threshold', eligible };
@@ -158,9 +164,19 @@
     const skipped = entries.filter(([, v]) => v && v.skipped).length;
     const bleeding = entries.filter(([, v]) => v && v.bleed).length;
     const deepest = Math.max(0, ...entries.map(([, v]) => (v && v.depth) || 0));
-    if (skipped > 0 && !(extras && extras.licence)) return refuse('omission_licence', 'Name why ' + skipped + ' sites were not probed', 'Choose a reason', 'A blank is never forced into a fabrication: pick implant, crown margin, patient could not tolerate, or third molar absent.');
-    const exam = write('perioExams', { id: 'pe-' + nextId.pe++, patientId: enc.patientId, encounterId: encId, date: S.tenant.today, sites, probed, skipped, bleeding, deepest, licence: extras && extras.licence, mode: extras && extras.mode || 'full', author: currentUser().name });
-    S.notes[encId] = S.notes[encId] || {}; S.notes[encId].perioSummary = 'Perio: ' + probed + ' sites probed, deepest ' + deepest + ' mm, bleeding at ' + bleeding + ' sites' + (skipped ? ', ' + skipped + ' not probed (' + extras.licence + ')' : '') + '.';
+    if (skipped > 0 && !(extras && extras.licence)) return refuse('omission_licence', 'Name why ' + skipped + (skipped === 1 ? ' site was' : ' sites were') + ' not probed', 'Choose a reason', 'A blank is never forced into a fabrication: pick implant, crown margin, patient could not tolerate, or third molar absent.');
+    const mode = (extras && extras.mode) || 'full';
+    const codes = entries.filter(([, v]) => v && v.code != null).map(([, v]) => v.code);
+    const exam = write('perioExams', { id: 'pe-' + nextId.pe++, patientId: enc.patientId, encounterId: encId, date: S.tenant.today, sites, probed, skipped, bleeding, deepest, sextantCodes: codes, licence: extras && extras.licence, mode, author: currentUser().name });
+    S.notes[encId] = S.notes[encId] || {};
+    if (mode === 'screening') {
+      const worst = codes.length ? Math.max(...codes.map((x) => Number(x) || 0)) : null;
+      const MEAN = { 0: 'healthy', 1: 'bleeding on probing', 2: 'calculus or defective margin', 3: 'pocket 4 to 5 mm', 4: 'pocket 6 mm or deeper' };
+      S.notes[encId].perioSummary = 'Perio screening: ' + codes.length + ' sextants scored (' + codes.join(', ') + ')' + (worst != null ? ', highest ' + worst + ' — ' + (MEAN[worst] || 'see chart') : '') + '.';
+      if (worst != null && worst >= 3) S.notes[encId].srpEvidence = 'Screening code ' + worst + ' indicates a full six-point chart before periodontal therapy.';
+    } else {
+      S.notes[encId].perioSummary = 'Perio: ' + probed + ' sites probed, deepest ' + deepest + ' mm, bleeding at ' + bleeding + (bleeding === 1 ? ' site' : ' sites') + (skipped ? ', ' + skipped + (skipped === 1 ? ' site' : ' sites') + ' not probed (' + LICENCE_WORDS[extras.licence] + ')' : '') + '.';
+    }
     if (deepest >= 5) S.notes[encId].srpEvidence = 'SRP evidence: ' + entries.filter(([, v]) => v && v.depth >= 5).length + ' sites at or above 5 mm.';
     retireChip('perio');
     return { ok: true, exam };
@@ -169,15 +185,29 @@
   function readyForExam(aid) { const a = appt(aid); a.status = 'ready_for_exam'; write('appointmentEvents', { id: id('ae'), appointmentId: aid, kind: 'encounter.exam_requested', actor: currentUser().name }); return { ok: true }; }
 
   // Encounter (flow 3)
+  // Services that belong to the visit, not to a tooth.
+  const WHOLE_PATIENT = ['d0120', 'd0140', 'd0274', 'd1110', 'd9230', 'd9243'];
   function chartPaint(encId, tooth, surfaces, cdtCode, temporality) {
     const enc = encounter(encId); if (!enc) return refuse('notfound', 'Encounter not found', null);
     const fee = (S.cdt[cdtCode] || [null, 0])[1];
+    if (WHOLE_PATIENT.includes(cdtCode)) { tooth = null; surfaces = []; }
+    const already = S.chartEvents.find((c) => c.encounterId === encId && c.cdt === cdtCode && c.tooth === tooth && (c.surfaces || []).join('') === (surfaces || []).join(''));
+    if (already) return refuse('duplicate_paint', 'Already charted this visit — ' + (S.cdt[cdtCode] || [cdtCode])[0] + (tooth ? ' #' + tooth : ''), 'Undo the first one', 'One gesture writes one chart event, one procedure, one plan line and one pending charge. Charting it twice would bill it twice.');
     const ce = write('chartEvents', { id: 'ce-' + nextId.ce++, encounterId: encId, tooth, surfaces, cdt: cdtCode, temporality: temporality || 'today', author: currentUser().name });
     let proc = null;
     if ((temporality || 'today') === 'today') proc = write('procedures', { id: 'pr-' + nextId.pr++, encounterId: encId, patientId: enc.patientId, cdt: cdtCode, tooth, surfaces, feeCents: fee, status: 'completed_pending_charge', selfPayRestricted: false, chartEventId: ce.id });
-    const plan = write('planItems', { id: id('pl'), encounterId: encId, tooth, surfaces, cdt: cdtCode, estimateCents: Math.round(fee * 0.5), ruleTrace: 'Cigna PPO: 50% after deductible (met) → patient est. ' + Proto.ui.money(Math.round(fee * 0.5)), temporality: temporality || 'today' });
+    const pat = patient(enc.patientId);
+    const carrier = pat && pat.primary ? carrierName(pat.primary) : null;
+    const share = carrier ? 0.5 : 1;
+    const est = Math.round(fee * share);
+    const trace = carrier
+      ? carrier + ' PPO: 50% after deductible (met) → patient est. ' + Proto.ui.money(est)
+      : 'Self-pay, no coverage on file → patient est. ' + Proto.ui.money(est);
+    const plan = write('planItems', { id: id('pl'), encounterId: encId, tooth, surfaces, cdt: cdtCode, estimateCents: est, ruleTrace: trace, temporality: temporality || 'today' });
     S.notes[encId] = S.notes[encId] || {};
-    S.notes[encId].procedure = (S.cdt[cdtCode] || [cdtCode])[0] + ' #' + tooth + ' ' + surfaces.join('') + (temporality === 'existing' ? ' (existing, placed elsewhere)' : temporality === 'planned' ? ' (planned)' : '');
+    const line = (S.cdt[cdtCode] || [cdtCode])[0] + (tooth ? ' #' + tooth : '') + (surfaces && surfaces.length ? ' ' + surfaces.join('') : '') + (temporality === 'existing' ? ' (existing, placed elsewhere)' : temporality === 'planned' ? ' (planned)' : '');
+    S.notes[encId].procedures = (S.notes[encId].procedures || []).concat([line]);
+    S.notes[encId].procedure = S.notes[encId].procedures.join('; ');
     for (const t of S.tags) if (t.encounterId === encId && t.tooth === tooth && !t.disposition) t.disposition = 'charted';
     return { ok: true, chartEvent: ce, procedure: proc, plan };
   }
@@ -197,7 +227,7 @@
     const enc = encounter(encId); if (!enc) return refuse('notfound', 'Encounter not found', null);
     const killers = noteKillers(encId, note);
     if (killers.length) return { ok: false, killers: killers.slice(0, 3), total: killers.length };
-    if (!readbackConfirmed) return refuse('readback', 'Filing as ' + currentUser().name + ' for ' + patient(enc.patientId).name, 'Confirm and file', 'The read-back line repeats author and patient so a stale author on a shared device is caught at the last gate.');
+    if (!readbackConfirmed) { const pr = window.__proto && window.__proto.privacy; const who = patient(enc.patientId); return refuse('readback', 'Filing as ' + currentUser().name + ' for ' + (pr ? Proto.ui.initials(who.name) : who.name), 'Confirm and file', 'The read-back line repeats author and patient so a stale author on a shared device is caught at the last gate.'); }
     enc.noteFiled = true; enc.status = 'signed';
     const a = appt(enc.appointmentId); if (a) a.status = a.status === 'checked_out_unfiled' ? 'checked_out' : 'note_filed';
     const filed = write('filedNotes', { id: 'nf-' + nextId.nf++, encounterId: encId, author: currentUser().name, filedAt: S.tenant.today + ' ' + S.clock.time, rulesetVersion: '2.25.2', byteauditOk: true, markdown: [note.assessment, note.plan, S.notes[encId] && S.notes[encId].procedure, S.notes[encId] && S.notes[encId].perioSummary].filter(Boolean).join('\n') });
@@ -257,7 +287,13 @@
   // Temp rail
   const RAIL_STEPS = { frontdesk: [['arrive', 'Arrive'], ['seat', 'Seat'], ['checkout', 'Checkout'], ['payment', 'Take payment'], ['find', 'Find a patient']], rdh: [['perio', 'Perio grammar'], ['save', 'Save exam'], ['tag', 'Tag for dentist'], ['ready', 'Ready for exam'], ['find', 'Find a patient']] };
   function railSteps() { const u = currentUser(); return RAIL_STEPS[u.role === 'hygienist' || u.role === 'rdh' ? 'rdh' : 'frontdesk']; }
-  function retireChip(step) { if (!S.railState) return; if (!S.railState[step]) { S.railState[step] = { retiredAt: S.clock.time, byEvent: Proto.events.all().length }; write('firstRunState', { id: 'frs-' + step, step, retiredAt: S.clock.time }); } }
+  function retireChip(step) {
+    if (!S.railState) return;
+    const uid = currentUser().id;                       // one bucket per user; a tablet is not a person
+    const bucket = (S.railState[uid] = S.railState[uid] || {});
+    if (!bucket[step]) { bucket[step] = { retiredAt: S.clock.time, byEvent: Proto.events.all().length }; write('firstRunState', { id: 'frs-' + uid + '-' + step, userId: uid, step, retiredAt: S.clock.time }); }
+  }
+  function railStateFor() { const uid = currentUser().id; return (S.railState && S.railState[uid]) || {}; }
 
   // Palette search
   function search(q) {
@@ -275,5 +311,6 @@
   const _reset = reset;
   reset = function (seedNum) { const s = _reset(seedNum); for (const t of TABLES) if (!s[t]) s[t] = []; return s; };
 
-  Proto.store = { reset, get, patient, appt, encounter, user, carrierName, currentUser, balances, explain, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestWriteoff, savePerio, addTag, readyForExam, chartPaint, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, sendStatement, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse };
+  const LICENCE_WORDS = { implant: 'implant', crown_margin: 'crown margin', not_tolerated: 'patient could not tolerate probing', third_molar_absent: 'third molar absent' };
+  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestWriteoff, savePerio, addTag, readyForExam, chartPaint, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, sendStatement, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse };
 })();
