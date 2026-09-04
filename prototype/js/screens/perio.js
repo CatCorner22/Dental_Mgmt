@@ -92,7 +92,7 @@
   }
   function flash(st, r, text) {
     st.flash = text; Proto.router.announce(text); clearTimeout(flashTimer);
-    flashTimer = setTimeout(() => { st.flash = null; const c = Proto.router.current(); if (c.route === 'perio' && c.id === st.encId) rerender(c); }, 2000);
+    flashTimer = setTimeout(() => { st.flash = null; const c = Proto.router.current(); if (c.route === 'perio' && c.id === st.encId) rerender(c); }, 4500);
   }
   function depthGate(st, depth) {
     st.gate = { code: 'depth_gt_15', node: refusal({ code: 'depth_gt_15', verb: 'Depth ' + depth + ' mm is above the 15 mm limit', control: 'Re-enter the depth', why: 'Probing depths above 15 mm are not recordable; the site keeps its previous value and the cursor stays here. Type 0 then a digit for 10 to 15.', onControl: () => { st.gate = null; const c = Proto.router.current(); rerender(c); focusCell(st); } }) };
@@ -102,7 +102,7 @@
       if (!st.amendGate) { st.amendGate = Proto.ui.refusal({ code: 'exam_sealed', verb: 'Exam is filed — amend adds an addendum', control: 'Start an addendum', onControl: () => { st.saved = null; st.savedAt = null; st.amendGate = null; st.amending = true; rerender(Proto.router.current()); }, why: 'A filed exam is the record. Keys no longer change it; an amendment is a new dated entry that links to the original.', severity: 'info' }); rerender(Proto.router.current()); }
       return 'Exam is filed; start an addendum to change it';
     }
-    if (st.mode === 'screening') return applyScreening(st, k);
+    if (st.mode === 'screening') { const out = applyScreening(st, k); setTimeout(() => focusSextant(st), 0); return out; }
     if (/^[0-9]$/.test(k)) {
       const d = Number(k);
       if (st.pendingZero) { st.pendingZero = false; const depth = 10 + d; if (depth > 15) { depthGate(st, depth); return 'Depth ' + depth + ' mm refused (above 15)'; } return record(st, depth); }
@@ -119,6 +119,7 @@
     if (k === 'PageUp') return nextTooth(st, -1);
     return null;
   }
+  function focusSextant(st) { const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); }
   function applyScreening(st, k) {
     if (/^[0-4]$/.test(k) || k === '*') { if (st.scur > 5) return 'All six sextants coded. Save exam.'; st.sextants[st.scur] = k; st.scur++; return 'Sextant ' + SEXTANTS[st.scur - 1][0] + ' = ' + k; }
     if (k === 'Backspace') { if (st.scur === 0) return 'Nothing to undo'; st.scur--; st.sextants[st.scur] = ''; return 'Undo: cleared sextant ' + SEXTANTS[st.scur][0]; }

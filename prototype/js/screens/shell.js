@@ -94,11 +94,18 @@
     if (S.rail1Collapsed) { bar.replaceChildren(btn('Show first-shift steps', { testid: 'rail1.toggle', onClick: () => { S.rail1Collapsed = false; renderRail1(r); } })); return; }
     bar.replaceChildren(h('span', { class: 'small muted', text: 'Your first shift:' }), ...steps.map(([code, label], i) => { const retired = !!Proto.store.railStateFor()[code]; return btn(retired ? label + ' ✓' : label, { testid: 'rail1.chip.' + i, dataset: { retired: retired ? '1' : '0' }, ariaLabel: label + (retired ? ', done' : ', show me'), onClick: () => pulseFor(code, r) }); }), btn('Hide', { testid: 'rail1.toggle', onClick: () => { S.rail1Collapsed = true; renderRail1(r); } }));
   }
+  let pointTimer = null;
   function pulseFor(code, r) {
     const map = { arrive: '[data-testid$=".arrive"]', seat: '[data-testid$=".seat"]', checkout: '[data-testid$=".checkout"]', payment: '[data-testid="checkout.post"]', find: '[data-testid="topbar.search"]', perio: '[data-testid$=".perio"]', save: '[data-testid="perio.save"]', tag: '[data-testid="perio.tag.add"]', ready: '[data-testid$=".ready"]' };
     const el = document.querySelector(map[code]);
     const verb = { arrive: 'Tap Arrive on the first card', seat: 'Seat the arrived patient', checkout: 'Open Checkout from the card', payment: 'Post after choosing a tender', find: 'Type three letters of a name', perio: 'Tap Perio on your first card', save: 'Save the exam', tag: 'Tag a tooth for the dentist', ready: 'Mark ready for exam' }[code];
-    if (el) { el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse'); el.scrollIntoView({ block: 'center' }); Proto.router.announce(verb); }
+    if (el) {
+      el.classList.remove('pulse', 'pointed'); void el.offsetWidth;
+      el.classList.add('pulse', 'pointed');                       // 'pointed' is a static ring: it survives reduced motion
+      el.scrollIntoView({ block: 'center' });
+      clearTimeout(pointTimer); pointTimer = setTimeout(() => el.classList.remove('pointed'), 6000);
+      Proto.router.announce(verb);
+    }
     else Proto.router.announce(code === 'checkout' || code === 'payment' ? 'Nothing to check out yet' : 'Nothing to do for this step yet');
   }
 
