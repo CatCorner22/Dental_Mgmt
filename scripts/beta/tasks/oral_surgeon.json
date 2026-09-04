@@ -1,0 +1,13 @@
+{
+  "group": "oral_surgeon",
+  "persona": "surgeon",
+  "start": "#/surgeon/exams",
+  "tasks": [
+    { "id": "os-1", "title": "Open the referred-in consult for Aiko Tanaka", "flow": 3, "budget_taps": 1, "steps": ["exams.row.enc-9020.open"], "success": "route surgeon/encounter/enc-9020; the referral summary shows 'Dr. Serrano', '#17 extraction, sedation requested', and 'records forwarded'", "watch": "is the referral loop visible without opening documents?" },
+    { "id": "os-2", "title": "Chart a surgical extraction #17 with IV sedation and File the sedation note", "flow": 3, "budget_taps": 8, "steps": ["enc.tooth.17", "enc.proc.d7210", "enc.proc.d9243", "enc.note.starter.3 (sedation starter)", "enc.file", "refusal.control (Confirm and file)"], "success": "two chartEvents and two procedures for enc-9020; a filedNotes row; two ledger charges released; a claim queued", "watch": "does the sedation starter read as a record, not a template? Are the surgical procedure chips first for you?" },
+    { "id": "os-3", "title": "Switch author by PIN on a shared operatory tablet", "flow": 0, "budget_taps": 6, "steps": ["(start with ?device=shared)", "topbar.author", "pin.key.4 x4 (Dana's PIN 4444) or pin.key.1 x4 (Bree)", "pin.submit"], "success": "a sessions write; the author chip shows the new initials; the route stays on the same encounter", "watch": "does the pad have 56 px keys? Is the read-back line the last gate?" },
+    { "id": "os-4", "title": "Check that the Board card reads Surgery by shape and word, not color alone", "flow": 1, "budget_taps": 1, "steps": ["nav.board (or route #/surgeon/board?grayscale=1)"], "success": "the a-1060 card carries a chip with a glyph and the word 'Surgery'; in grayscale it is still distinguishable from Hygiene and Restorative", "watch": "rank the cards by type in grayscale" },
+    { "id": "os-5", "title": "Try to file with an empty assessment", "flow": 3, "budget_taps": 2, "steps": ["(new encounter open) enc.file"], "success": "a killer row 'Assessment is empty' with one control; File did not complete", "watch": "one verb line, one control" }
+  ],
+  "interview_focus": ["Would a referral-based surgery practice run its day in this? What is missing for you specifically?", "Which gates would slow a 12-minute extraction visit?", "Does the record protect you in a Board complaint?"]
+}

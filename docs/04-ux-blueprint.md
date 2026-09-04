@@ -42,3 +42,24 @@ Adopted from `docs/13-innovation-and-intuitiveness.md` (the feature workflow's s
 - From the critique: the top-bar Andon slot has a server-unreachable state that says what still works, shows the status-page incident id and the printed support line, and renders the Board from the last successful fetch with a stamped age; nothing writes.
 - From the critique: the owner's Tied tile renders one row per location that collapses to a single glyph when all tie.
 - From the critique: patient-voice templates resolve to a guardian audience when the account's patient is a minor; the pediatric plain-word table is required before a pediatric appointment-type contract can be enabled.
+
+## Beta-test amendments (2026-09-04)
+
+Adopted from `docs/14-beta-test-report.md`, the 30-persona beta of the clickable prototype. Where an amendment conflicts with text above, the amendment governs. Each traces to a defect the panel reported and `scripts/beta/reproduce.mjs` reproduced.
+
+- **A gate names the people the actor would actually ask.** Where a control refuses because a second person is needed, the verb line names the eligible approvers in the order a requester would approach them, office manager and owner first, and the same names appear on the approver's phone card. A gate that names a different pair on each surface is a defect, not a wording choice.
+- **One typed decision per event, enforced in the service.** The posting service refuses a second collection decision for the same encounter and offers the correction path (a reversal and a repost). Hiding the control is not the mechanism; the refusal is.
+- **A duplicate clinical gesture is refused, not absorbed.** Charting the same code on the same tooth and surfaces twice in one visit is refused with a named reason. The note scaffold accumulates every procedure charted, never only the last.
+- **A service that belongs to the visit carries no tooth.** Exams, prophylaxis, radiographs, nitrous, and intravenous sedation are charted, charged, and planned against the encounter. Only tooth-scoped procedures carry a tooth.
+- **Every estimate names its own patient's carrier.** A rule trace that names one carrier for every patient is not a trace.
+- **A credential either opens a session or refuses.** A PIN that writes a session row and changes nothing is worse than a refusal: the person believes they switched. Where an account cannot chart on a screen, the pad says so through the shared refusal component and leaves the author as it was.
+- **Privacy mode covers every surface that carries a name**, including the encounter header, the read-back verb, and any gate copy, not only list rows.
+- **First-run state belongs to a person, not to a device.** A shared tablet's previous user cannot retire a new starter's steps.
+- **Six severities need six distinct marks.** Two states that share a glyph collapse into one in grayscale, whatever their fills. A selected control carries a mark as well as a fill for the same reason.
+- **A pointer that exists only as motion does not exist.** Any "show me" affordance degrades to a static ring under reduced motion.
+- **A new screen opens at its own top with the keyboard on it.** Scroll offset never carries across a route change, and focus never lands on the page body.
+- **A gloved input surface carries the whole grammar and stays in reach.** Where a keyboard grammar exists, the touch pad enters everything the keyboard can, docks within the viewport, and its labels fit inside their targets.
+- **A sealed record offers an amendment, never silence.** After a clinical artifact is filed, keys and controls that no longer act say why and offer the addendum path.
+- **The tap budget counts an activation once.** A keyboard activation and the click the browser synthesises from it are one tap. Budgets are measured on that basis (`prototype/CONTRACTS.md` §5).
+- **Narrow glass keeps one row of chrome.** Below 640 px the top bar is a single scrollable row; the page body never scrolls sideways, and wide content scrolls inside its own container.
+- **Search results never print the identifier the gate is about to ask for.** Printing the date of birth beside the name turns the second identifier into a formality.

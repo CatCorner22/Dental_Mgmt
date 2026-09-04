@@ -1,0 +1,13 @@
+{
+  "group": "dentist",
+  "persona": "dentist",
+  "start": "#/dentist/exams",
+  "tasks": [
+    { "id": "dn-1", "title": "Open the seated chart for Theo Brandt from Exams to sign", "flow": 3, "budget_taps": 1, "steps": ["exams.row.enc-9002.open"], "success": "route is dentist/encounter/enc-9002; the hygienist tag 'Suspected caries #30 DO' is the first thing on the screen", "watch": "is the queue ordered by chair wait and framed by hygiene findings?" },
+    { "id": "dn-2", "title": "Chart #30 DO composite from the tag, plan, note, and File", "flow": 3, "budget_taps": 10, "steps": ["enc.tag.tag-1.chart", "enc.surface.30.d", "enc.surface.30.o", "enc.proc.d2392", "enc.note.starter.0", "enc.file", "refusal.control (Confirm and file)"], "success": "chartEvents, procedures (completed_pending_charge then completed), planItems, filedNotes rows for enc-9002; a ledger charge of 26000 released by the File event; a claims row queued; total taps from dn-1 through File at or under 10", "watch": "did one gesture write chart, plan, note scaffold, and pending charge together? Was the killer strip at most three rows?" },
+    { "id": "dn-3", "title": "Hit the money-in-note gate and fix it with one control", "flow": 3, "budget_taps": 3, "steps": ["(before filing) type 'Patient portion $130 discussed' into enc.note.field.plan and blur", "enc.file", "enc.killer.0.fix"], "success": "a refusal event code money_in_note; after the fix the dollar text is gone from the plan field and the plan card still shows the estimate", "watch": "one verb line, one control, no sermon?" },
+    { "id": "dn-4", "title": "Review the plan card estimate and its rule trace", "flow": 3, "budget_taps": 1, "steps": ["(read the transaction card after enc.proc.d2392)"], "success": "the plan card shows the estimate with a rule trace naming the carrier and coverage rule", "watch": "could you defend the estimate chairside from what is on the screen?" },
+    { "id": "dn-5", "title": "Confirm the read-back line before File on a shared device", "flow": 3, "budget_taps": 2, "steps": ["(start with ?device=shared)", "enc.file", "refusal.control"], "success": "a refusal event code readback naming the author and the patient; File completes only after Confirm", "watch": "would this catch a stale author on a passed tablet?" }
+  ],
+  "interview_focus": ["Would you sign hygiene-drafted notes here rather than bypass to a template? Why?", "Which of the three killers would you resent, and which would you thank?", "What would make you trust the estimate the front desk quotes?"]
+}
