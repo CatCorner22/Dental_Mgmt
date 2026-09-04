@@ -136,7 +136,8 @@ for f in glob.glob('scripts/beta/tasks/*.json'):
             if not m: continue
             checked += 1
             head = m.group(1) + '.' + m.group(2); tail = m.group(3)
-            ok = (head in js) and ((("'" + tail + "'") in js) or (('.' + tail + "'") in js) or (('.' + tail + '"') in js) or (tail + '`' in js) or ((head + '.' + tail) in js))
+            dynamic_tail = tail.isdigit() or len(tail) == 1  # tooth numbers and surface letters are built at runtime
+            ok = (head in js) and (dynamic_tail or ((("'" + tail + "'") in js) or (('.' + tail + "'") in js) or (('.' + tail + '"') in js) or (tail + '`' in js) or ((head + '.' + tail) in js)))
             if not ok: probs.append(f'{os.path.basename(f)} {task["id"]}: {s}')
 report('task-script test ids have builders in prototype/js', probs, f'{checked} ids checked')
 sys.exit(1 if fails else 0)
