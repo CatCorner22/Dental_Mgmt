@@ -1,6 +1,7 @@
 /* Sign-in: persona picker plus the test-harness options (theme, device profile, privacy, outage, grayscale, motion). */
 (function () {
   const Proto = window.Proto; const { h, btn } = Proto.ui;
+  Proto.screens = Proto.screens || {}; // signin.js loads before shell.js
   const ROLES = { frontdesk: 'Lands on the Board', biller: 'Lands on Money Desk', hygienist: 'Lands on Chairs', dentist: 'Lands on Exams to sign', surgeon: 'Lands on Exams to sign', owner: 'Lands on Daily Close', compliance: 'Lands on Practice risk', temp: 'Board with the first-shift rail' };
 
   function render(r) {

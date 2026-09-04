@@ -11,10 +11,10 @@ import { parseColor, blend, contrast, required } from './lib/wcag.mjs';
 process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '/opt/pw-browsers';
 const require = createRequire(import.meta.url);
 let chromium;
-try { chromium = require('playwright').chromium; } catch (e) { chromium = require('/usr/lib/node_modules/playwright').chromium; }
+try { chromium = require('playwright').chromium; } catch (e) { try { chromium = require('/usr/lib/node_modules/playwright').chromium; } catch (e2) { chromium = require('/opt/node22/lib/node_modules/playwright').chromium; } }
 
 const args = Object.fromEntries(process.argv.slice(2).map((a, i, arr) => a.startsWith('--') ? [a.slice(2), arr[i + 1] && !arr[i + 1].startsWith('--') ? arr[i + 1] : '1'] : []).filter(Boolean));
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const ROOT = path.resolve(path.dirname(new globalThis.URL(import.meta.url).pathname), '..'); // globalThis: the module-level const URL below shadows the global (TDZ)
 const URL = args.url || ('file://' + path.join(ROOT, 'prototype', 'index.html'));
 const OUT = args.out || path.join(process.env.SCRATCH || '/tmp/claude-0/-home-user-Dental-Mgmt/4c28e93a-776f-5803-ad14-686b00bc97f0/scratchpad', 'proto-check');
 const ONLY = args.only ? args.only.split(',') : null;

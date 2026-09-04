@@ -3,12 +3,14 @@
 (function () {
   const Proto = (window.Proto = window.Proto || {});
   let S = null;
-  let nextId = { le: 5000, cd: 1, ar: 1, pe: 2, ce: 1, pr: 500, tag: 2, nf: 1, dc: 1, cl: 100, ap: 1, ue: 1, dp: 1, dec: 2, msg: 1, ai: 1 };
-  const id = (p) => p + '-' + (nextId[p]++);
+  // Every prefix write() uses starts here; seeded tables (credits cr-1, ERA lines el-1..41) start past their seed ids.
+  const ID_START = { le: 5000, cd: 1, ar: 1, pe: 2, ce: 1, pr: 500, tag: 2, nf: 1, dc: 1, cl: 100, ap: 1, ue: 1, dp: 1, dec: 2, msg: 1, ai: 1, ae: 1, el: 100, al: 1, sd: 3, pp: 1, de: 1, cr: 2, cev: 1, pl: 1, dis: 1, rm: 1, dep: 1 };
+  let nextId = Object.assign({}, ID_START);
+  const id = (p) => { if (!Number.isFinite(nextId[p])) nextId[p] = 1; return p + '-' + (nextId[p]++); };
 
   function reset(seedNum) {
     S = Proto.seed.build(seedNum);
-    nextId = { le: 5000, cd: 1, ar: 1, pe: 2, ce: 1, pr: 500, tag: 2, nf: 1, dc: 1, cl: 100, ap: 1, ue: 1, dp: 1, dec: 2, msg: 1, ai: 1 };
+    nextId = Object.assign({}, ID_START);
     S.chartEvents = []; S.planItems = []; S.notes = {}; S.filedNotes = []; S.collectionDecisions = []; S.allocations = []; S.dayPasses = []; S.controlDecisions = []; S.disclosures = []; S.railState = {}; S.appealPackets = []; S.messages = [];
     S.clock = { time: '08:40', afterHours: false };
     return S;

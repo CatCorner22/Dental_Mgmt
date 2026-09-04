@@ -181,6 +181,7 @@
     const ex = btn(expanded[a.id] ? 'Less' : 'Details', { kind: 'quiet', class: 'compact', testid: 'board.card.' + a.id + '.expand', ariaLabel: (expanded[a.id] ? 'Hide' : 'Show') + ' forms and balance for ' + name, onClick: () => { expanded[a.id] = !expanded[a.id]; render(r); const b = document.querySelector('[data-testid="board.card.' + a.id + '.expand"]'); if (b) b.focus(); } });
     ex.setAttribute('aria-expanded', String(!!expanded[a.id])); ex.setAttribute('aria-controls', 'board-details-' + a.id);
     actions.append(ex);
+    if (Proto.screens.rail) actions.append(Proto.screens.rail.button(a.patientId, r, 'board.card.' + a.id + '.rail'));
     el.append(actions);
     if (!outage && gates[a.id]) el.append(h('div', { class: 'gate' }, gates[a.id].node));
     if (expanded[a.id]) el.append(details(a));
@@ -263,6 +264,8 @@
     Proto.screens.shell.mount(page);
     if (!keysOn) { document.addEventListener('keydown', onKey); keysOn = true; }
   }
+
+  window.addEventListener('hashchange', () => { if (keysOn && Proto.router.current().route !== 'board') { document.removeEventListener('keydown', onKey); keysOn = false; } });
 
   Proto.screens.board = { render, arrive: doArrive, seat: doSeat, reverify: doReverify, ping: doPing };
   Proto.router.on('board', (r) => Proto.screens.board.render(r));

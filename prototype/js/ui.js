@@ -28,7 +28,9 @@
   function btn(label, opts) {
     opts = opts || {};
     const kind = opts.kind || 'quiet'; // irreversible | reversible | quiet | held
-    const b = h('button', { type: 'button', class: 'btn ' + kind + (opts.class ? ' ' + opts.class : ''), testid: opts.testid, onClick: opts.onClick, 'aria-pressed': opts.pressed, 'aria-label': opts.ariaLabel, 'aria-describedby': opts.describedby, title: opts.title, disabled: opts.disabled }, label);
+    // aria-pressed must be the word: h() would write boolean true as an empty attribute (aria-pressed="").
+    const pressed = opts.pressed == null ? null : opts.pressed === true ? 'true' : opts.pressed === false ? 'false' : String(opts.pressed);
+    const b = h('button', { type: 'button', class: 'btn ' + kind + (opts.class ? ' ' + opts.class : ''), testid: opts.testid, onClick: opts.onClick, 'aria-pressed': pressed, 'aria-label': opts.ariaLabel, 'aria-describedby': opts.describedby, title: opts.title, disabled: opts.disabled }, label);
     return b;
   }
 
@@ -68,7 +70,9 @@
     const box = h('div', { class: 'dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': opts.label || 'Dialog' }, content);
     const overlay = h('div', { class: 'overlay' }, box);
     const prev = document.activeElement;
-    function close() { overlay.remove(); if (prev && prev.focus) prev.focus(); document.removeEventListener('keydown', onKey, true); if (opts.onClose) opts.onClose(); }
+    let closed = false;
+    function close() { if (closed) return; closed = true; overlay.remove(); if (prev && prev.focus) prev.focus(); document.removeEventListener('keydown', onKey, true); window.removeEventListener('hashchange', close); if (opts.onClose) opts.onClose(); }
+    window.addEventListener('hashchange', close); // a dialog never outlives the route it opened on
     function onKey(ev) {
       if (ev.key === 'Escape') { ev.stopPropagation(); close(); }
       if (ev.key === 'Tab') {

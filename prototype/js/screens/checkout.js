@@ -205,7 +205,7 @@
     return h('section', { class: 'card stack co-posted', 'aria-label': 'Posted' },
       h('div', { class: 'row' }, chip('clear', 'Posted', { big: true }), h('h2', { text: 'Posted in one transaction' })),
       h('ul', { class: 'co-rows' }, ...items),
-      h('div', { class: 'btnrow' }, btn('Back to Board', { kind: 'reversible', testid: 'checkout.back', onClick: () => Proto.router.go(r.persona, 'board') }), btn('Print receipt (disclosure)', { kind: 'reversible', testid: 'checkout.receipt', pressed: pressed(st.receipt), onClick: () => { st.receipt = !st.receipt; Proto.router.announce(st.receipt ? 'Receipt shown in patient voice' : 'Receipt hidden'); rerender(r, 'checkout.receipt'); } })),
+      h('div', { class: 'btnrow' }, btn('Print receipt (disclosure)', { kind: 'reversible', testid: 'checkout.receipt', pressed: pressed(st.receipt), onClick: () => { st.receipt = !st.receipt; Proto.router.announce(st.receipt ? 'Receipt shown in patient voice' : 'Receipt hidden'); rerender(r, 'checkout.receipt'); } })),
       receipt);
   }
 
@@ -236,7 +236,8 @@
     const covers = (fee) => st.decision === 'collect' && cents(st.amountStr) >= fee;
     const name = displayName(pt.name, P.privacy);
     const sub = a.time + ' · ' + a.type + ' · ' + (S.users.find((u) => u.id === a.providerId) || {}).short + ' · ' + (pt.primary ? Proto.store.carrierName(pt.primary) + (pt.secondary ? ' + ' + Proto.store.carrierName(pt.secondary) : '') : 'Self-pay');
-    const head = pageHead('Checkout · ' + name, sub, btn('Back to Board', { kind: 'reversible', testid: 'checkout.back', onClick: () => Proto.router.go(r.persona, 'board') }));
+    const railBtn = Proto.screens.rail ? Proto.screens.rail.button(a.patientId, r, 'checkout.rail') : null;
+    const head = pageHead('Checkout · ' + name, sub, railBtn, btn('Back to Board', { kind: 'reversible', testid: 'checkout.back', onClick: () => Proto.router.go(r.persona, 'board') }));
     const status = h('div', { class: 'row' },
       enc && enc.noteFiled ? chip('clear', 'Note filed') : chip('review', 'Note unfiled — Filed-later lane'),
       procs.some((p) => NEEDS_ATTACHMENT[p.cdt]) ? chip('review', 'Claim needs pre-flight') : chip('clear', 'Claim ready'),
