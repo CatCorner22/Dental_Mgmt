@@ -76,3 +76,16 @@ These four came from the per-trait blocker lists rather than the defect fields. 
 ## Verification after the fixes
 
 `node scripts/beta/reproduce.mjs` reports 0 of 38 reproduced on the fixed prototype, and `node scripts/proto-check.mjs` passes all nine rows, including the 420 px width added because the panel found phone-width defects the original three widths missed.
+
+## Corrections after round 2
+
+Round 2 proved three of the "not reproduced" verdicts above wrong. In each case the probe accepted evidence that did not mean what I took it to mean, and the defect was real all along. The strengthened probes are in `scripts/beta/reproduce.mjs`.
+
+| # | Round-1 verdict | Why it was wrong | Now |
+|---|---|---|---|
+| R27 | not reproduced | The probe looked for the claim id in the page text. The sentence that names the claim is the same sentence announcing its removal from every worklist. | Reproduced and fixed: appealed claims stay on the denial worklist. |
+| R28 | not reproduced | The probe compared canvas text before and after. A row that vanishes changes the text. | Reproduced and fixed: a sent statement confirms in place. |
+| R30 | not reproduced | The probe measured a row whose label happened to render, and compared horizontal ranges only. | Reproduced and fixed: the row stacks below 640 px so the name it found always has a line. |
+| R15 | not reproduced | The probe pressed Space on an empty chart, where Save refused for an unrelated reason. bp-25 pressed it on a chart ready to save. | Reproduced and fixed: Space belongs to the perio grammar, not to whatever holds focus. |
+
+The round-2 defects, including the three regressions the round-1 fixes caused, are recorded in `docs/14-beta-test-report.md` under Results.

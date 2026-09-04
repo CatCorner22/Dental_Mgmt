@@ -180,8 +180,9 @@ const CHECKS = {
   // ---------- perio.js ----------
   async R15(b) { // Space activates a focused button
     const { c, p } = await ctx(b); await go(p, '#/hygienist/perio/enc-9001');
+    await p.keyboard.type('3'.repeat(168), { delay: 0 }); await p.waitForTimeout(200);  // a chart ready to save is the risky case
     await p.focus('[data-testid="perio.save"]');
-    await p.keyboard.press('Space'); await p.waitForTimeout(250);
+    await p.keyboard.press('Space'); await p.waitForTimeout(300);
     const s = await state(p);
     rec('R15', 'Space, the bleeding key, activates the irreversible Save exam whenever focus rests on the Save button', 'docs/01 principle 11 and docs/13 feature 5: a grammar key never fires an irreversible action',
       s.perioExams.some((e) => e.encounterId === 'enc-9001'), { examSaved: s.perioExams.some((e) => e.encounterId === 'enc-9001') });

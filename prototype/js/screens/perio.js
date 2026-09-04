@@ -140,7 +140,16 @@
     const st = stateFor(enc); const k = ev.key;
     const onCell = t && t.classList && t.classList.contains('psite');
     const onControl = t && !onCell && ['BUTTON', 'SUMMARY', 'A'].includes(t.tagName);
-    if (k === 'Enter' || k === 'Tab' || k === 'Escape' || (onControl && k === ' ')) return; // native activation and focus travel stay native
+    // Enter and Tab stay native so every control is still keyboard-operable. Space does not:
+    // in this screen Space is the bleeding key, and letting it activate whatever holds focus
+    // fires an irreversible Save and silently drops the bleeding mark (bp-25, round 2).
+    if (k === 'Enter' || k === 'Tab' || k === 'Escape') return;
+    if (onControl && k === ' ') {
+      ev.preventDefault();
+      const meaningSpace = apply(st, ' ', r);
+      if (meaningSpace) { st.keystrokes++; st.lastKey = { key: 'Space', meaning: meaningSpace }; rerender(r); }
+      return;
+    }
     const meaning = apply(st, k, r);
     if (!meaning) return;
     ev.preventDefault();

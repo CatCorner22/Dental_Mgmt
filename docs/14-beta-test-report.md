@@ -83,4 +83,91 @@ Respect rules, enforced by a review pass on every card before the panel runs: a 
 
 ## Results
 
-_Pending. Appended after the panel runs; nothing above this line changes._
+### Verdict
+
+**Round 1: rerun band.** Task success 84% cleared the 80% threshold, but four of six professions returned a median would-choose of 3 against a threshold of 4, and 83% of budgeted tasks finished within budget against a threshold of 90%. The registered response to that band is one fix round and a re-test of the affected personas, which is what followed.
+
+**Round 2: the direction is right and the exercise does not claim a pass.** Six personas, one per profession, re-ran their scripts. Task success rose to 88% and the median would-choose for those six moved from 3 to 4 (their round-1 scores were 3, 3, 3, 3, 4, 4; their round-2 scores are 3, 3, 4, 4, 4, 4). Within-budget fell to 77%, most of it explained by a measurement error the panel itself found: the tap formula counted a space typed into a sentence as a tap, so any task whose work is writing prose could not meet its budget. That is corrected in `prototype/CONTRACTS.md` §5, but the round-2 numbers above are reported as measured, not recomputed after the fact.
+
+**Round 2 is a six-persona re-test, not a second panel, so it cannot return "beta passed" for the panel as a whole.** Two of six professions still sit at a median of 3, and the registered threshold asks for 4 in every profession across the full panel. What round 2 does support is narrower and still worth having: on the professions and devices re-tested, the fixes landed, nothing that was working broke, and the personas who could not finish their day in round 1 now can.
+
+### The funnel
+
+| Stage | Count |
+|---|---|
+| Defect reports filed by the 30 sessions | 213 |
+| Distinct root causes after grouping | 38 |
+| Reproduced under mechanical adversarial verification | 28 |
+| Not reproduced on a clean run | 10 |
+| Additional defects taken from the per-trait accessibility findings | 4 |
+| Fixed in the round-1 fix round | 32 |
+| New root causes found by round 2 (including regressions from those fixes) | 13 |
+| Reproduction checks now guarding the product | 43, all clean |
+
+### Round 1 and round 2 by profession
+
+| Profession | R1 tasks | R1 budget | R1 median | R2 tasks | R2 budget | R2 median |
+|---|---|---|---|---|---|---|
+| Front-office administrative staff | 25/30 (83%) | 90% | 4 | 5/6 | 100% | 4 |
+| Back-office administrative staff | 23/30 (77%) | 67% | 4 | 5/6 | 67% | 4 |
+| Dentists | 25/25 (100%) | 88% | 3 | 5/5 | 80% | 4 |
+| Oral surgeons | 23/25 (92%) | 88% | 3 | 4/5 | 80% | 3 |
+| Dental hygienists | 30/32 (94%) | 85% | 3 | 6/6 | 80% | 4 |
+| Dental assistants | 15/25 (60%) | 80% | 3 | 4/5 | 50% | 3 |
+| **All** | **141/167 (84%)** | **83%** | **3** | **29/33 (88%)** | **77%** | **4** |
+
+Round 1 is thirty personas, five per profession. Round 2 is six, one per profession, chosen to stress the changed screens: a phone coordinator, a phone biller, a grayscale dentist on reduced motion, a grayscale surgeon on a shared tablet, a hygienist on a dark operatory tablet, and a new-hire assistant on an operatory tablet.
+
+### What round 2 said, in their words
+
+> "I would run my window on this now — the money on the screen finally matches the money in the store and the log counts my hands honestly — but I still cannot reach Samir's self-pay toggle without a 308 pixel drag." — bp-05, treatment coordinator, phone
+
+> "The phone is a real desk now and the second approver finally has one name I can act on, so I would run my morning in this." — bp-09, accounts receivable, phone
+
+> "I would run my day in this — the duplicate charge I asked for is refused, the note keeps every procedure and the gray chips finally rank." — bp-15, prosthodontist, grayscale
+
+> "Everything I complained about on the shared tablet is genuinely fixed — the PIN speaks, the chip counts once, the note keeps both procedures, privacy covers the gate, and the queue reads in gray — but a new rule now refuses to let me sign a surgical note." — bp-20, oral surgery resident, shared tablet
+
+> "Yes — with the cursor now following me down the lower arch, the pad on the screen where my hand is, and a screening that writes a screening into the note, I would run a hygiene day in this." — bp-25, hygienist, operatory
+
+> "Everything I do with my hands got better — the pad is where my thumb is, the page stops moving under me, the temp's rail is finally the temp's — but the tablet still cannot say my name, so I would work in this all morning and still not sign what I charted." — bp-29, assistant, operatory
+
+### What round 2 cost: three defects my own round-1 fixes caused
+
+The most useful thing the re-test produced was evidence against the fixes, not for them.
+
+- **P0.** Round 1 stopped charting whole-patient services against a tooth. The contradiction check still compared the note's tooth to every chart event, so an intravenous-sedation event with no tooth held File forever behind a control that did nothing, and the empty tooth printed as "#null" in the spoken line and the read-back. bp-20 could not sign a surgical note at all. The check now compares only tooth-scoped events.
+- **P1.** Round 1 made the PIN pad refuse an account with no charting session, which was right in shape. The seed had no assistant persona, so the one assistant in the practice was refused every time and could never be the author of what she charted. bp-29 hit it on her first task. Assistants now have a session of their own.
+- **P2.** Collapsing the phone top bar to one row clamped its buttons, so at 420 px the labels overlapped their neighbours and every pair sat 6 px apart, inside the 8 px floor. bp-05 and bp-09 found it independently.
+
+### Two corrections to the harness the panel forced
+
+- **The tap formula counted typing as tapping.** A space typed into a sentence was counted as a tap, so a task whose work is writing prose could not meet its budget. bp-15 and bp-29 found this independently. `CONTRACTS.md` §5 now excludes keys pressed inside a text field.
+- **The targets check swept one width.** Sizes and gaps were measured at 1280 px only, which is why a 6 px gap in a bar that collapses below 640 px went unseen. It now sweeps 1280, 1024, 820, and 420.
+
+Three round-1 verdicts of mine were also wrong, and the dedup file records the correction: R27, R28, and R30 were reported as "not reproduced" because the probes accepted evidence that did not mean what I took it to mean. All three were real.
+
+### Fixed after round 2, verified mechanically but not by a person
+
+These nineteen are fixed and guarded by reproduction checks, but no persona has driven them. They are not evidence of usability; they are evidence that a specific defect no longer occurs.
+
+The P0 contradiction and the null tooth; the assistant's session; the seeded Filed-later decision and its allocation intent; the duplicate guard comparing surfaces; the duplicate refusal's control that undid nothing; privacy in the read-back detail line; the addendum's link to the exam it amends; the invisible skipped site; appealed claims staying on the worklist; the statement's in-place confirmation; the appeal drawer's Close; the ERA write-off amount on the visible row; focus following the tab it selects; the phone top bar's gaps and labels; the palette row that hid the word it found; the write-off gate on every worklist; the pressed mark on a tooth; the refusal-code list; and Space belonging to the perio grammar rather than to whatever holds focus.
+
+That last one deserves naming. bp-25 reported that Space, the bleeding key, activated the irreversible Save when focus rested on it, losing the bleeding mark. My round-1 probe had called it not reproduced, because it pressed Space on an empty chart where Save refused for a different reason. She was right and the probe was wrong.
+
+### Open after round 2
+
+The registered cap is two rounds. These were reported in round 2 and are not fixed. They are listed rather than chased.
+
+**Layout and reach.** Self-pay toggles and the estimate column sit off the right edge at 420 px; the ledger's Amount column does the same; the ERA read-back rows are tall enough that one of three is on screen at a time; the read-back's control lands just below the fold at 1280 × 900; the perio settings drawer opens off-screen; the first Arrive on an operatory tablet is 1062 px down the page; the surgery card sits below a readiness list that is not the surgeon's.
+
+**Focus and keyboard.** Focus drops to the page body after "Move to plan card"; Seat moves focus off the card to the chair strip; the Patient Rail does not take focus when it opens; the active-site line leaves the screen once the grid auto-scrolls.
+
+**Copy and vocabulary.** Half of the incumbent vocabulary a Dentrix biller types still finds nothing (family file, guarantor, aging, account, claim, appeal, denial); the palette lands on the last-used Money Desk tab rather than the one it named; the product's own nouns are still on screen (killer strip, note scaffold, byteaudit); the `depth_gt_15` verb runs to nine words against the eight-word rule; the omission gate takes four taps; the PIN hint warns a new hire about wiped drafts before her first digit.
+
+**Gates and states.** The read-back gate still shows three buttons for one gate and fires on a desk profile where the author never changes; focus after a killer parks on Held rather than the fix control; a filed exam's Screening button still looks live; the screening lane still shows full-chart hints; money in a note is only caught at File, not on blur; the plan card carries no allowed amount, annual maximum, or frequency limit; the perio tag prefills the deepest pocket instead of the tooth being tagged; rail chips no longer carry their retired attribute.
+
+**Contrast and shape.** In grayscale a required killer row and an informational read-back row still measure the same on the left rail, and refusal rows carry no glyph; two Board rails differ only by glyph and word.
+
+**Not attempted, and why.** The incumbent-vocabulary catalog is tenant-editable content by design (`docs/13` feature 28). Filling it now would flatter the next round rather than test anything.
+
