@@ -285,24 +285,39 @@ const CHECKS = {
       !has, { writeoffOnDenialsTab: has });
     await c.close();
   },
-  async R27(b) { // appealed claim disappears from the worklist
+  async R27(b) { // an appealed claim is on no worklist (strengthened after bp-09 round 2)
     const { c, p } = await ctx(b); await go(p, '#/biller/money');
-    await click(p, 'money.tab.denials'); await click(p, 'money.denial.c-88.appeal'); await click(p, 'money.appeal.send'); await p.waitForTimeout(200);
-    await click(p, 'money.tab.denials'); await p.waitForTimeout(150);
-    const stillThere = await p.evaluate(() => document.getElementById('canvas').textContent.includes('c-88'));
-    rec('R27', 'Once appealed, claim c-88 is on no worklist: the biller cannot see or act on it again', 'docs/13 feature 16: the denial worklist tracks the appeal to its outcome with a next action',
-      !stillThere, { claimVisibleAfterAppeal: stillThere });
+    await click(p, 'money.tab.denials'); await click(p, 'money.denial.c-88.appeal'); await click(p, 'money.appeal.send'); await p.waitForTimeout(250);
+    // A confirmation sentence that merely names the claim is not a worklist row: look for an actionable row on any tab.
+    const rows = await p.evaluate(() => {
+      const out = {};
+      for (const tab of ['denials', 'aging', 'approvals', 'statements', 'credits', 'variances']) {
+        const b = document.querySelector('[data-testid="money.tab.' + tab + '"]'); if (!b) continue;
+        b.click();
+        out[tab] = !!document.querySelector('[data-testid^="money.denial.c-88"], [data-testid^="money.aging.row.c-88"], [data-testid*="c-88."]');
+      }
+      return out;
+    });
+    rec('R27', 'Once appealed, claim c-88 is on no worklist: the biller cannot see or act on what she just sent', 'docs/13 feature 16: the denial worklist tracks the appeal to its outcome with a next action',
+      !Object.values(rows).some(Boolean), { actionableRowByTab: rows });
     await c.close();
   },
-  async R28(b) { // statement send has no in-place confirmation
+  async R28(b) { // Send confirms only to a screen reader (strengthened after bp-09 round 2)
     const { c, p } = await ctx(b); await go(p, '#/biller/money');
-    await click(p, 'money.tab.statements'); const before = await p.evaluate(() => document.getElementById('canvas').textContent);
-    await click(p, 'money.statement.sd-1.send'); await p.waitForTimeout(200);
-    const after = await p.evaluate(() => document.getElementById('canvas').textContent);
-    rec('R28', 'Sending a statement gives no visible in-place confirmation; only a screen-reader announcement changes', 'docs/01: an irreversible action confirms in place, where the actor is looking',
-      before === after, { canvasTextChanged: before !== after });
+    await click(p, 'money.tab.statements');
+    await click(p, 'money.statement.sd-1.send'); await p.waitForTimeout(250);
+    // A row that vanishes is not a confirmation. Require a VISIBLE node that says it went.
+    const vis = await p.evaluate(() => {
+      // A leaf node whose own words say the statement went. Substring matches inside unrelated copy do not count.
+      const PHRASE = /(statement sent|disclosure recorded|sent to)/i;
+      const els = [...document.querySelectorAll('#canvas *')].filter((e) => e.children.length === 0 && PHRASE.test((e.textContent || '').trim()));
+      return els.filter((e) => { const b = e.getBoundingClientRect(); const cs = getComputedStyle(e); return b.height > 4 && b.width > 4 && cs.visibility !== 'hidden' && !e.closest('.sr-only'); }).map((e) => e.textContent.trim().slice(0, 60));
+    });
+    rec('R28', 'Sending a statement gives no visible in-place confirmation; the only text is a 1 px screen-reader line', 'docs/01: an irreversible action confirms in place, where the actor is looking',
+      vis.length === 0, { visibleConfirmations: vis });
     await c.close();
   },
+
   // ---------- palette.js ----------
   async R29(b) { // palette shows the second identifier before asking for it
     const { c, p } = await ctx(b); await go(p, '#/frontdesk/board');
@@ -312,14 +327,21 @@ const CHECKS = {
       !!row && /\d{1,2}\/\d{1,2}\/\d{4}/.test(row), { firstRow: row });
     await c.close();
   },
-  async R30(b) { // palette row collapses at phone width
+  async R30(b) { // the palette row hides the word it found (strengthened after bp-09 round 2)
     const { c, p } = await ctx(b, 420, 860); await go(p, '#/frontdesk/board');
-    await click(p, 'topbar.search'); await p.keyboard.type('walk'); await p.waitForTimeout(200);
-    const o = await p.evaluate(() => { const r = document.querySelector('[data-testid="palette.row.0"]'); if (!r) return null; const l = r.querySelector('.lbl, .label, span'); return { rowW: Math.round(r.getBoundingClientRect().width), labelW: l ? Math.round(l.getBoundingClientRect().width) : null, text: r.textContent.trim().slice(0, 60) }; });
-    rec('R30', 'At phone width the palette row hides the target name: the label collapses to nothing', 'docs/04: text that can outgrow its track wraps or scrolls; clipped text is a bug',
-      !!o && o.labelW !== null && o.labelW < 20, o);
+    await click(p, 'topbar.search'); await p.keyboard.type('walkout'); await p.waitForTimeout(250);
+    const o = await p.evaluate(() => {
+      const r = document.querySelector('[data-testid="palette.row.0"]'); if (!r) return null;
+      const lbl = r.querySelector('.lbl'); const syn = r.querySelector('.syn'); const chip = r.querySelector('.chip');
+      const bx = (e) => e ? (() => { const b = e.getBoundingClientRect(); return { l: Math.round(b.left), r: Math.round(b.right), w: Math.round(b.width) }; })() : null;
+      const L = bx(lbl), S = bx(syn), C = bx(chip);
+      return { label: L, syn: S, chip: C, overlap: C && S ? Math.max(0, C.r - S.l) : 0, text: r.textContent.trim().slice(0, 50) };
+    });
+    rec('R30', 'At phone width the palette row hides the target name: the label collapses to nothing and the chip overlaps the synonym', 'docs/04: text that can outgrow its track wraps or scrolls; clipped text is a bug',
+      !!o && ((o.label && o.label.w < 20) || o.overlap > 4), o);
     await c.close();
   },
+
   // ---------- cross-cutting ----------
   async R31(b) { // the tap formula double-counts keyboard activation
     const { c, p } = await ctx(b); await go(p, '#/frontdesk/board');
@@ -393,6 +415,76 @@ const CHECKS = {
     const coAmt = (canvas.match(/\$\d[\d,]*\.\d\d/g) || []);
     rec('R38', 'The Board card balance and the checkout patient portion disagree for the same visit ($180.00 against $168.00)', 'docs/01 principle 2 and docs/04: one canonical view per fact',
       cardAmt.includes('$180.00') && !coAmt.includes('$180.00'), { boardAmounts: cardAmt.slice(0, 4), checkoutAmounts: coAmt.slice(0, 6) });
+    await c.close();
+  },
+
+  // ---------- found by bp-09 in round 2 ----------
+  async R39(b) { // regression: the one-row top bar lets labels overlap
+    const { c, p } = await ctx(b, 420, 860); await go(p, '#/frontdesk/board');
+    const o = await p.evaluate(() => {
+      const bar = document.getElementById('topbar');
+      const kids = [...bar.querySelectorAll('button, nav')].filter((e) => e.offsetParent !== null);
+      const over = [];
+      for (const e of kids) { if (e.scrollWidth > e.clientWidth + 1) over.push({ el: (e.getAttribute('data-testid') || e.tagName), needs: e.scrollWidth, has: e.clientWidth, text: (e.textContent || '').trim().slice(0, 14) }); }
+      return { overflowing: over, barHeight: Math.round(bar.getBoundingClientRect().height) };
+    });
+    rec('R39', 'The one-row phone top bar clamps its buttons so the labels overflow and collide: "Main St" runs into "Search"', 'docs/04: clipped or overlapping text is a bug; the visible target is the real target',
+      o.overflowing.length > 0, o);
+    await c.close();
+  },
+  async R40(b) { // the Held state is off-screen while its own refusal control stays live
+    const { c, p } = await ctx(b, 420, 860); await go(p, '#/biller/money');
+    await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await click(p, 'money.writeoff.post'); await p.waitForTimeout(250);
+    const o = await p.evaluate(() => {
+      const held = [...document.querySelectorAll('.btn.held')][0];
+      const ctl = document.querySelector('[data-testid="refusal.control"]');
+      const bx = (e) => e ? Math.round(e.getBoundingClientRect().top) : null;
+      return { heldTop: bx(held), controlTop: bx(ctl), viewport: window.innerHeight, requestWritten: window.__proto.state().approvals.length };
+    });
+    rec('R40', 'After Post the request is already written and the primary switches to Held below the fold, while the refusal\u2019s live control stays in view: two controls for one gate', 'CONTRACTS \u00a76: one verb line and one control; the state the actor must read is on screen',
+      o.requestWritten > 0 && o.controlTop != null && (o.heldTop == null || o.heldTop > o.viewport), o);
+    await c.close();
+  },
+  async R41(b) { // the appeal packet's way out is off the top
+    const { c, p } = await ctx(b, 420, 860); await go(p, '#/biller/money');
+    await click(p, 'money.tab.denials'); await click(p, 'money.denial.c-88.appeal'); await p.waitForTimeout(250);
+    const o = await p.evaluate(() => {
+      const close = document.querySelector('[data-testid="money.appeal.close"], [data-testid^="money.appeal"][data-testid$="close"]');
+      if (!close) return { closeMissing: true };
+      const b = close.getBoundingClientRect();
+      return { top: Math.round(b.top), viewport: window.innerHeight, inView: b.top >= 0 && b.bottom <= window.innerHeight };
+    });
+    rec('R41', 'Opening the appeal packet scrolls Send into view and pushes its Close control off the top of the screen', 'docs/04: the way out of a drawer is reachable without hunting',
+      !!o && (o.closeMissing === true || o.inView === false), o);
+    await c.close();
+  },
+  async R42(b) { // the amount being agreed to is only in an accessible name
+    const { c, p } = await ctx(b); await go(p, '#/biller/money');
+    await click(p, 'money.era.era-1.postmatched'); await p.waitForTimeout(250);
+    const o = await p.evaluate(() => {
+      const row = document.querySelector('[data-testid="money.era.line.el-14.confirm"]');
+      if (!row) return null;
+      const card = row.closest('.card, .wrow, li, div');
+      return { visibleText: (card ? card.textContent : '').replace(/\s+/g, ' ').trim().slice(0, 200), ariaLabel: row.getAttribute('aria-label') || '' };
+    });
+    const amountInAria = !!o && /write-off/i.test(o.ariaLabel) && /\$\s?50/.test(o.ariaLabel);
+    const amountVisible = !!o && /\$\s?50\.00/.test(o.visibleText);
+    rec('R42', 'The contractual write-off the biller agrees to appears only in the button\u2019s accessible name, not on the row she reads', 'docs/13 feature 14: the read-back names what differs, in the words and numbers the actor is agreeing to',
+      amountInAria && !amountVisible, o);
+    await c.close();
+  },
+  async R43(b) { // focus moves to a tab that does not become the selected tab
+    const { c, p } = await ctx(b); await go(p, '#/biller/money');
+    await click(p, 'money.era.era-1.postmatched');
+    await click(p, 'money.era.line.el-14.confirm'); await click(p, 'money.era.line.el-22.confirm'); await click(p, 'money.era.line.el-31.hold'); await p.waitForTimeout(300);
+    const o = await p.evaluate(() => {
+      const a = document.activeElement;
+      const tid = a && a.getAttribute ? a.getAttribute('data-testid') : null;
+      const sel = [...document.querySelectorAll('[data-testid^="money.tab."]')].filter((e) => e.getAttribute('aria-selected') === 'true').map((e) => e.getAttribute('data-testid'));
+      return { focused: tid, selectedTabs: sel };
+    });
+    rec('R43', 'After the batch, focus moves to the Denials tab but the selected tab stays on ERA, so reaching the denial costs a tap', 'docs/04: the next action is one key away; focus and state do not disagree',
+      !!o.focused && /money\.tab\./.test(o.focused) && !o.selectedTabs.includes(o.focused), o);
     await c.close();
   },
 };
