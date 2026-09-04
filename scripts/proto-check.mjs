@@ -91,7 +91,7 @@ async function runFlow(page, flow) {
     if (st.key) { await page.keyboard.press(st.key); keys++; continue; }
     if (st.expect) { const state = await page.evaluate(() => window.__proto.state()); const r = st.expect(state); if (r !== true) problems.push(String(r)); }
   }
-  const evTaps = await page.evaluate(() => window.__events.filter((e) => (e.kind === 'click' && !e.synthetic) || (e.kind === 'key' && (e.key === 'Enter' || e.key === ' ') && e.testid)).length);
+  const evTaps = await page.evaluate(() => window.__events.filter((e) => (e.kind === 'click' && !e.synthetic) || (e.kind === 'key' && (e.key === 'Enter' || e.key === ' ') && e.testid && !e.field)).length);
   return { taps, keys, evTaps, problems };
 }
 
@@ -114,7 +114,13 @@ const FOCUSABLE = 'button, a[href], input, select, textarea, summary, [tabindex]
 
 async function checkTargets(browser) {
   note('targets');
-  const { ctx, page } = await fresh(browser, 1280);
+  // Every width, not just the widest: the beta panel found a 6 px gap in a bar that only
+  // collapses below 640 px, which a 1280-only sweep could never have seen.
+  for (const width of WIDTHS) await checkTargetsAt(browser, width);
+}
+
+async function checkTargetsAt(browser, width) {
+  const { ctx, page } = await fresh(browser, width);
   await page.goto(URL + '#/signin'); await page.waitForFunction(() => window.__proto && window.__proto.ready);
   for (const r of ROUTES) {
     await page.evaluate((h) => { location.hash = h; }, r); await page.waitForTimeout(150);
@@ -126,7 +132,7 @@ async function checkTargets(browser) {
       for (const p of parents) { const kids = [...p.children].filter((k) => k.matches(sel) && k.offsetParent !== null); for (let i = 0; i < kids.length; i++) for (let j = i + 1; j < kids.length; j++) { const a = kids[i].getBoundingClientRect(), b = kids[j].getBoundingClientRect(); const dx = Math.max(0, Math.max(a.left, b.left) - Math.min(a.right, b.right)); const dy = Math.max(0, Math.max(a.top, b.top) - Math.min(a.bottom, b.bottom)); const overlapX = a.left < b.right && b.left < a.right, overlapY = a.top < b.bottom && b.top < a.bottom; if (overlapX && overlapY) { out.push('overlap ' + (kids[i].getAttribute('data-testid') || '?') + ' / ' + (kids[j].getAttribute('data-testid') || '?')); continue; } const gap = overlapY ? dx : overlapX ? dy : Math.hypot(dx, dy); if (gap < 8) out.push('gap ' + Math.round(gap) + 'px ' + (kids[i].getAttribute('data-testid') || '?') + ' / ' + (kids[j].getAttribute('data-testid') || '?')); } }
       return out;
     }, FOCUSABLE);
-    for (const b of bad) fail('targets', `${r}: ${b}`);
+    for (const b of bad) fail('targets', `${width}px ${r}: ${b}`);
   }
   await ctx.close();
 }

@@ -40,7 +40,7 @@
       { id: 'u-cl-1', name: 'Noor Ali', short: 'Noor', role: 'compliance', licence: null, entitlements: ['review_logs'], pin: '7777' },
       { id: 'u-cpa', name: 'Reyes & Co. CPA', short: 'CPA seat', role: 'cpa', licence: null, entitlements: ['view_reports', 'bank_reconcile'], pin: null },
     ];
-    const personaUser = { frontdesk: 'u-fd-1', biller: 'u-bl-1', hygienist: 'u-hy-1', dentist: 'u-dr-2', surgeon: 'u-dr-3', owner: 'u-dr-1', compliance: 'u-cl-1', temp: 'u-temp' };
+    const personaUser = { frontdesk: 'u-fd-1', biller: 'u-bl-1', hygienist: 'u-hy-1', assistant: 'u-da-1', dentist: 'u-dr-2', surgeon: 'u-dr-3', owner: 'u-dr-1', compliance: 'u-cl-1', temp: 'u-temp' };
 
     const carriers = [{ id: 'car-delta', name: 'Delta Dental' }, { id: 'car-cigna', name: 'Cigna' }, { id: 'car-metlife', name: 'MetLife' }, { id: 'car-tenncare', name: 'TennCare (excluded at launch)' }];
 

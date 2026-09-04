@@ -11,7 +11,9 @@
   function reset(seedNum) {
     S = Proto.seed.build(seedNum);
     nextId = Object.assign({}, ID_START);
-    S.chartEvents = []; S.planItems = []; S.notes = {}; S.filedNotes = []; S.collectionDecisions = []; S.allocations = []; S.dayPasses = []; S.controlDecisions = []; S.disclosures = []; S.railState = {}; S.appealPackets = []; S.messages = [];
+    S.chartEvents = []; S.planItems = []; S.notes = {}; S.filedNotes = [];
+    S.collectionDecisions = [{ id: 'cd-0', encounterId: 'enc-9010', decision: 'collect', patientPortionCents: 9500, decidedBy: 'Priya Raman', decidedAt: S.tenant.today + ' 07:52', statementDueId: null, paymentPlanId: null }];
+    S.allocationIntents = [{ id: 'ai-0', paymentId: 'le-window-9010', encounterId: 'enc-9010', amountCents: 9500 }]; S.allocations = []; S.dayPasses = []; S.controlDecisions = []; S.disclosures = []; S.railState = {}; S.appealPackets = []; S.messages = [];
     S.clock = { time: '08:40', afterHours: false };
     return S;
   }
@@ -167,7 +169,9 @@
     if (skipped > 0 && !(extras && extras.licence)) return refuse('omission_licence', 'Name why ' + skipped + (skipped === 1 ? ' site was' : ' sites were') + ' not probed', 'Choose a reason', 'A blank is never forced into a fabrication: pick implant, crown margin, patient could not tolerate, or third molar absent.');
     const mode = (extras && extras.mode) || 'full';
     const codes = entries.filter(([, v]) => v && v.code != null).map(([, v]) => v.code);
-    const exam = write('perioExams', { id: 'pe-' + nextId.pe++, patientId: enc.patientId, encounterId: encId, date: S.tenant.today, sites, probed, skipped, bleeding, deepest, sextantCodes: codes, licence: extras && extras.licence, mode, author: currentUser().name });
+    const prior = S.perioExams.filter((e) => e.encounterId === encId).pop();
+    const amends = (extras && extras.amending && prior) ? prior.id : null;
+    const exam = write('perioExams', { id: 'pe-' + nextId.pe++, patientId: enc.patientId, encounterId: encId, date: S.tenant.today, sites, probed, skipped, bleeding, deepest, sextantCodes: codes, licence: extras && extras.licence, mode, author: currentUser().name, amendsExamId: amends, kind: amends ? 'addendum' : 'exam' });
     S.notes[encId] = S.notes[encId] || {};
     if (mode === 'screening') {
       const worst = codes.length ? Math.max(...codes.map((x) => Number(x) || 0)) : null;
@@ -175,7 +179,7 @@
       S.notes[encId].perioSummary = 'Perio screening: ' + codes.length + ' sextants scored (' + codes.join(', ') + ')' + (worst != null ? ', highest ' + worst + ' — ' + (MEAN[worst] || 'see chart') : '') + '.';
       if (worst != null && worst >= 3) S.notes[encId].srpEvidence = 'Screening code ' + worst + ' indicates a full six-point chart before periodontal therapy.';
     } else {
-      S.notes[encId].perioSummary = 'Perio: ' + probed + ' sites probed, deepest ' + deepest + ' mm, bleeding at ' + bleeding + (bleeding === 1 ? ' site' : ' sites') + (skipped ? ', ' + skipped + (skipped === 1 ? ' site' : ' sites') + ' not probed (' + LICENCE_WORDS[extras.licence] + ')' : '') + '.';
+      S.notes[encId].perioSummary = (amends ? 'Perio addendum to exam ' + amends + ' (' + currentUser().name + ', ' + S.tenant.today + '): ' : 'Perio: ') + probed + ' sites probed, deepest ' + deepest + ' mm, bleeding at ' + bleeding + (bleeding === 1 ? ' site' : ' sites') + (skipped ? ', ' + skipped + (skipped === 1 ? ' site' : ' sites') + ' not probed (' + LICENCE_WORDS[extras.licence] + ')' : '') + '.';
     }
     if (deepest >= 5) S.notes[encId].srpEvidence = 'SRP evidence: ' + entries.filter(([, v]) => v && v.depth >= 5).length + ' sites at or above 5 mm.';
     retireChip('perio');
@@ -191,7 +195,7 @@
     const enc = encounter(encId); if (!enc) return refuse('notfound', 'Encounter not found', null);
     const fee = (S.cdt[cdtCode] || [null, 0])[1];
     if (WHOLE_PATIENT.includes(cdtCode)) { tooth = null; surfaces = []; }
-    const already = S.chartEvents.find((c) => c.encounterId === encId && c.cdt === cdtCode && c.tooth === tooth && (c.surfaces || []).join('') === (surfaces || []).join(''));
+    const already = S.chartEvents.find((c) => c.encounterId === encId && c.cdt === cdtCode && c.tooth === tooth);
     if (already) return refuse('duplicate_paint', 'Already charted this visit — ' + (S.cdt[cdtCode] || [cdtCode])[0] + (tooth ? ' #' + tooth : ''), 'Undo the first one', 'One gesture writes one chart event, one procedure, one plan line and one pending charge. Charting it twice would bill it twice.');
     const ce = write('chartEvents', { id: 'ce-' + nextId.ce++, encounterId: encId, tooth, surfaces, cdt: cdtCode, temporality: temporality || 'today', author: currentUser().name });
     let proc = null;
@@ -217,8 +221,12 @@
     for (const t of S.tags) if (t.encounterId === encId && !t.disposition) killers.push({ code: 'tag_undispositioned', verb: 'Hygienist tag #' + t.tooth + ' has no disposition', control: 'Chart it or dismiss', fix: 'tag' });
     const text = ((note && note.assessment) || '') + ' ' + ((note && note.plan) || '');
     if (/\$\s?\d/.test(text) || /\b(fee|cost|price|estimate|copay)\b/i.test(text)) killers.push({ code: 'money_in_note', verb: 'Money stays out of the note', control: 'Move to plan card', fix: 'money' });
-    const ces = S.chartEvents.filter((c) => c.encounterId === encId);
-    for (const c of ces) { const m = text.match(/#(\d{1,2})/); if (m && Number(m[1]) !== c.tooth) killers.push({ code: 'contradiction', verb: 'Note says #' + m[1] + ', chart says #' + c.tooth, control: 'Use chart tooth', fix: 'contradiction' }); }
+    const toothed = S.chartEvents.filter((c) => c.encounterId === encId && c.tooth != null);
+    const m = text.match(/#(\d{1,2})/);
+    if (m && toothed.length && !toothed.some((c) => c.tooth === Number(m[1]))) {
+      const c = toothed[0];
+      killers.push({ code: 'contradiction', verb: 'Note says #' + m[1] + ', chart says #' + c.tooth, control: 'Use chart tooth', fix: 'contradiction', noteTooth: Number(m[1]), chartTooth: c.tooth });
+    }
     if (!(note && note.assessment && note.assessment.trim().length)) killers.push({ code: 'assessment_required', verb: 'Assessment is empty', control: 'Add assessment', fix: 'assessment' });
     if (u.role !== 'dentist' && u.role !== 'owner' && u.role !== 'surgeon') killers.push({ code: 'licence_scope', verb: 'Filing needs a dentist\'s licence', control: 'Send to Exams to sign', fix: 'licence' });
     return killers;

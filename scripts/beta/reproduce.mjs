@@ -333,9 +333,11 @@ const CHECKS = {
     const o = await p.evaluate(() => {
       const r = document.querySelector('[data-testid="palette.row.0"]'); if (!r) return null;
       const lbl = r.querySelector('.lbl'); const syn = r.querySelector('.syn'); const chip = r.querySelector('.chip');
-      const bx = (e) => e ? (() => { const b = e.getBoundingClientRect(); return { l: Math.round(b.left), r: Math.round(b.right), w: Math.round(b.width) }; })() : null;
+      const bx = (e) => e ? (() => { const b = e.getBoundingClientRect(); return { l: Math.round(b.left), r: Math.round(b.right), t: Math.round(b.top), b: Math.round(b.bottom), w: Math.round(b.width) }; })() : null;
       const L = bx(lbl), S = bx(syn), C = bx(chip);
-      return { label: L, syn: S, chip: C, overlap: C && S ? Math.max(0, C.r - S.l) : 0, text: r.textContent.trim().slice(0, 50) };
+      // A true overlap needs both axes: a stacked row is not an overlapping row.
+      const inter = (a, z) => (a && z) ? Math.max(0, Math.min(a.r, z.r) - Math.max(a.l, z.l)) * (Math.min(a.b, z.b) > Math.max(a.t, z.t) ? 1 : 0) : 0;
+      return { label: L, syn: S, chip: C, overlap: inter(C, S), text: r.textContent.trim().slice(0, 50) };
     });
     rec('R30', 'At phone width the palette row hides the target name: the label collapses to nothing and the chip overlaps the synonym', 'docs/04: text that can outgrow its track wraps or scrolls; clipped text is a bug',
       !!o && ((o.label && o.label.w < 20) || o.overlap > 4), o);
@@ -347,7 +349,7 @@ const CHECKS = {
     const { c, p } = await ctx(b); await go(p, '#/frontdesk/board');
     await press(p, 'board.card.a-1042.arrive');
     const ev = await events(p);
-    const taps = ev.filter((e) => (e.kind === 'click' && !e.synthetic) || (e.kind === 'key' && (e.key === 'Enter' || e.key === ' ') && e.testid)).length;
+    const taps = ev.filter((e) => (e.kind === 'click' && !e.synthetic) || (e.kind === 'key' && (e.key === 'Enter' || e.key === ' ') && e.testid && !e.field)).length;
     rec('R31', 'One keyboard activation is counted as two taps: the Enter keydown and the click the browser synthesises from it', 'CONTRACTS §5 tap accounting, which every budget in docs/04 is measured against',
       taps > 1, { tapsCountedForOneActivation: taps, kinds: ev.filter((e) => e.testid === 'board.card.a-1042.arrive').map((e) => e.kind + ':' + (e.key || '')) });
     await c.close();

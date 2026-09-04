@@ -85,7 +85,7 @@ Every entry:
 
 Tap accounting used by every check and every persona report:
 
-- `taps` = count of `click` events **without** `synthetic: true` + count of `key` events whose key is `Enter` or ` ` (space) on an element with a `data-testid`. A click the browser synthesises from a keyboard activation carries `synthetic: true` and `detail: 0`, so one activation counts once whether it came from a mouse or from a key.
+- `taps` = count of `click` events **without** `synthetic: true` + count of `key` events whose key is `Enter` or ` ` (space) on an element with a `data-testid` **that is not a text field** (`field: true` marks a key pressed inside an input or textarea). A click the browser synthesises from a keyboard activation carries `synthetic: true` and `detail: 0`, so one activation counts once whether it came from a mouse or from a key; and a space typed into a sentence is a keystroke, not a tap, so writing prose can never exhaust a click budget. Both corrections came from the beta panel: the first from every persona who worked by keyboard, the second from bp-15 and bp-29 independently.
 - `keystrokes` = count of all `key` events.
 - Perio keystrokes are counted separately from taps because the grammar is keyboard-first by design.
 
@@ -93,7 +93,7 @@ A finding without a `seq` range is not a finding.
 
 ## 6. Refusals
 
-One shared component renders every gate: a verb line (`refusal.verb`, verb first, at most eight words), one 44 px control (`refusal.control`), a `Why` disclosure (`refusal.why`), an `aria-live="polite"` announcement. The primary button never dims; it switches to the Held identity (outlined, lock glyph, the word Held). Codes: `needs_second`, `after_hours`, `zero_collect_refused`, `note_unfiled`, `sod_conflict`, `licence_not_on_file`, `depth_gt_15`, `tag_undispositioned`, `money_in_note`, `contradiction`, `readback`, `consent_scope`, `outage`, `clear_not_independent`, `pin_required`, `second_identifier`.
+One shared component renders every gate: a verb line (`refusal.verb`, verb first, at most eight words), one 44 px control (`refusal.control`), a `Why` disclosure (`refusal.why`), an `aria-live="polite"` announcement. The primary button never dims; it switches to the Held identity (outlined, lock glyph, the word Held). Codes: `needs_second`, `after_hours`, `zero_collect_refused`, `note_unfiled`, `sod_conflict`, `licence_not_on_file`, `depth_gt_15`, `tag_undispositioned`, `money_in_note`, `contradiction`, `readback`, `consent_scope`, `outage`, `clear_not_independent`, `pin_required`, `second_identifier`, `tender_required`, `already_decided`, `duplicate_paint`, `exam_sealed`, `omission_licence`, `no_chart_session`, `pin_no_match`, `ping_rate`, `denial_suppression`, `assessment_required`, `tooth_required`, `licence_scope`, `entitlement`, `already_closed`, `notfound`. The list is the contract: a code the product raises and this list omits is a defect in one of the two (bp-05 and bp-20, round 2).
 
 ## 7. The five flows as key sequences (see `scripts/lib/flows.mjs`)
 

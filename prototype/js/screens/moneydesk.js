@@ -40,9 +40,9 @@
     const by = (s) => lines.filter((l) => l.status === s);
     return { b, lines, deltas: by('delta'), posted: by('posted'), held: by('held'), disputed: by('disputed'), denied: by('denied') };
   }
-  const denials = (S) => S.claims.filter((c) => c.status === 'denied');
+  const denials = (S) => S.claims.filter((c) => c.status === 'denied' || c.status === 'appealed');
   const aging = (S) => S.claims.filter((c) => c.status === 'submitted' || c.status === 'pended');
-  const statements = (S) => S.statementsDue.filter((s) => !s.sent);
+  const statements = (S) => S.statementsDue;   // a sent row stays, carrying its confirmation
   const myVariances = (S) => { const u = Proto.store.currentUser(); return S.variances.filter((v) => v.status === 'open').filter((v) => { const rr = S.reconciliation.find((x) => x.id === v.reconciliationId); return rr && (rr.closer === u.name || u.role === 'biller' || u.role === 'owner' || u.role === 'office_manager'); }); };
   function counts(S) {
     const e = eraView(S);
@@ -69,6 +69,7 @@
     if (!res.ok) { say(res.verb); return; }
     const S = Proto.store.get(); const left = eraView(S).deltas;
     say(word + ' line ' + lineId.replace('el-', '') + (left.length ? '. ' + left.length + ' left.' : '. Batch complete.'));
+    if (!left.length) tab = 'denials';                       // the batch is done: go where the work went
     rerender(r, left.length ? 'money.era.line.' + left[0].id + '.confirm' : 'money.tab.denials');
   }
   function eraTab(r, S) {
@@ -96,7 +97,7 @@
       h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, l.patientId) }), h('span', { class: 'muted', text: 'Line ' + l.id.replace('el-', '') + ' · ' + cdtLine(S, l.cdt, l.tooth) }), chip(isVariance ? 'review' : 'style', isVariance ? 'Contract variance' : 'Downcoded')),
       h('p', { class: 'md-delta', text: 'expected ' + money(l.expectedCents) + ', ERA says ' + money(l.paidCents) + ' · CARC ' + l.carc + ' (' + carc + ')' }),
       h('div', { class: 'btnrow' },
-        btn('Confirm', { kind: 'irreversible', testid: 'money.era.line.' + l.id + '.confirm', ariaLabel: 'Confirm line ' + l.id.replace('el-', '') + ': post ' + money(l.paidCents) + ' and a contractual write-off of ' + money(l.expectedCents - l.paidCents), onClick: () => handleLine(r, Proto.store.eraConfirm, l.id, 'Confirmed') }),
+        btn('Confirm · post ' + money(l.paidCents) + ', write off ' + money(l.expectedCents - l.paidCents), { kind: 'irreversible', testid: 'money.era.line.' + l.id + '.confirm', ariaLabel: 'Confirm line ' + l.id.replace('el-', '') + ': post ' + money(l.paidCents) + ' and a contractual write-off of ' + money(l.expectedCents - l.paidCents), onClick: () => handleLine(r, Proto.store.eraConfirm, l.id, 'Confirmed') }),
         btn('Hold', { kind: 'reversible', testid: 'money.era.line.' + l.id + '.hold', onClick: () => handleLine(r, Proto.store.eraHold, l.id, 'Held') }),
         btn(isVariance ? 'Dispute contract variance' : 'Dispute', { kind: 'reversible', testid: 'money.era.line.' + l.id + '.dispute', onClick: () => handleLine(r, Proto.store.eraDispute, l.id, 'Disputed') })),
       h('details', { class: 'md-details' }, h('summary', { text: 'Why', testid: 'money.era.line.' + l.id + '.why' }), h('p', { class: 'muted', text: isVariance ? 'Paid ' + money(l.paidCents) + '; the Delta PPO fee schedule allows ' + money(l.expectedCents) + ' for ' + l.cdt.toUpperCase() + '. Dispute creates an appeal row citing the fee-schedule line. Confirm accepts it as contractual and posts the write-off with the frozen delta.' : 'The payer paid a different code than was billed. Confirm posts what was paid and the difference as contractual; Hold keeps the line out of the ledger until you look at the note.' })));
@@ -119,7 +120,8 @@
     const post = held
       ? btn('Held', { kind: 'held', testid: 'money.writeoff.post', ariaLabel: 'Held: waiting on a second approver', onClick: () => say('Held. Waiting on ' + (st.woHeldReq.eligible || []).slice(0, 2).join(' or ') + ' for request ' + st.woHeldReq.id) })
       : btn('Post', { kind: 'irreversible', testid: 'money.writeoff.post', onClick: () => postWriteoff(r) });
-    const postRow = h('div', { class: 'btnrow' }, post, held && st.woRequested ? h('span', { class: 'row' }, chip('review', 'Request ' + st.woHeldReq.id + ' waiting'), h('span', { class: 'small muted', text: 'Dana or Dr. Reagan will see it on their phone; this flips to Posted when they approve.' })) : null);
+    const postRow = h('div', { class: 'btnrow' }, post, held ? h('span', { class: 'row' }, chip('review', 'Request ' + st.woHeldReq.id + ' waiting'), h('span', { class: 'small muted', text: 'Dana or Dr. Reagan will see it on their phone; this flips to Posted when they approve.' })) : null);
+    if (held) { st.woRefusal = null; setTimeout(() => { const el = document.querySelector('[data-testid="money.writeoff.post"]'); if (el) { const b = el.getBoundingClientRect(); if (b.bottom > window.innerHeight || b.top < 0) el.scrollIntoView({ block: 'center' }); } }, 0); }
     card.append(h('div', { class: 'md-two' }, h('div', { class: 'field' }, h('label', { for: 'md-wo-amt', text: 'Write-off amount' }), amt, hint), h('div', { class: 'field' }, h('label', { text: 'Reason code' }), reasons)), st.woRefusal, postRow, held ? h('p', { class: 'small muted', text: 'Approvals here usually take about 4 minutes (practice-level, last 30 days).' }) : null);
     amt.id = 'md-wo-amt';
     return card;
@@ -179,7 +181,7 @@
     const list = h('ul', { class: 'md-slots' }, ...slots.map(([k, label, detail]) => h('li', { class: 'row' }, chip(pk.slots[k] ? 'clear' : 'required', pk.slots[k] ? 'Clear' : 'Required'), h('span', null, h('b', { text: label }), h('span', { class: 'muted', text: ' · ' + (pk.slots[k] ? detail : 'not on the record; add before sending') })))));
     const missing = slots.filter(([k]) => !pk.slots[k]).length;
     const drawer = h('div', { class: 'md-drawer stack', role: 'region', 'aria-label': 'Appeal packet ' + pk.id },
-      h('div', { class: 'row' }, h('h3', { class: 'grow', text: 'Appeal packet · ' + pk.id + ' · built from the record' }), btn('Close', { kind: 'quiet', class: 'compact', testid: 'money.appeal.close', onClick: () => { st.appealFor = null; st.appealPacket = null; rerender(r, 'money.denial.' + c.id + '.appeal'); } })),
+      h('div', { class: 'row drawer-head' }, h('h3', { class: 'grow', text: 'Appeal packet · ' + pk.id + ' · built from the record' }), btn('Close', { kind: 'quiet', class: 'compact', testid: 'money.appeal.close', onClick: () => { st.appealFor = null; st.appealPacket = null; rerender(r, 'money.denial.' + c.id + '.appeal'); } })),
       list,
       h('div', { class: 'md-sentence' }, h('span', { class: 'small muted', text: 'What the patient reads: ' }), h('span', { text: pk.patientSentence })));
     if (st.appealSent === c.id) { drawer.append(h('div', { class: 'row' }, chip('clear', 'Sent'), h('span', { text: 'Sent · disclosure recorded (clearinghouse, payment purpose, artifact hashes).' }))); return drawer; }
@@ -209,8 +211,10 @@
     const rows = statements(S);
     if (!rows.length) return section('Statements due', h('div', { class: 'row' }, chip('clear', 'Nothing due'), h('span', { class: 'muted', text: 'Statements sent today are disclosure rows on the ledger.' })));
     return section('Statements due', h('div', { class: 'worklist' }, ...rows.map((s) => {
-      const row = h('div', { class: 'md-row' }, h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, s.patientId) }), h('span', { class: 'amt', text: money(s.amountCents) }), chip('info', 'held: window deferral'), h('span', { class: 'muted', text: 'deferred at the window ' + shortDate(s.created) + ' so insurance could settle first' })),
-        h('div', { class: 'btnrow' }, btn('Send', { kind: 'irreversible', testid: 'money.statement.' + s.id + '.send', onClick: () => { const res = Proto.store.sendStatement(s.id); say(res.ok ? 'Statement sent · disclosure recorded' : res.verb); rerender(r, 'money.tab.statements'); } }), btn('Preview', { kind: 'reversible', testid: 'money.statement.' + s.id + '.preview', pressed: pressed(st.previewFor === s.id), onClick: () => { st.previewFor = st.previewFor === s.id ? null : s.id; rerender(r, 'money.statement.' + s.id + '.preview'); } })));
+      const row = h('div', { class: 'md-row' + (s.sent ? ' sent' : '') }, h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, s.patientId) }), h('span', { class: 'amt', text: money(s.amountCents) }), chip('info', 'held: window deferral'), h('span', { class: 'muted', text: 'deferred at the window ' + shortDate(s.created) + ' so insurance could settle first' })),
+        s.sent
+          ? h('div', { class: 'row' }, Proto.ui.chip('clear', 'Statement sent'), h('span', { class: 'small muted', text: 'Sent to ' + pname(S, s.patientId) + ' · disclosure recorded · ' + S.tenant.today }))
+          : h('div', { class: 'btnrow' }, btn('Send', { kind: 'irreversible', testid: 'money.statement.' + s.id + '.send', onClick: () => { const res = Proto.store.sendStatement(s.id); say(res.ok ? 'Statement sent · disclosure recorded' : res.verb); rerender(r, 'money.tab.statements'); } }), btn('Preview', { kind: 'reversible', testid: 'money.statement.' + s.id + '.preview', pressed: pressed(st.previewFor === s.id), onClick: () => { st.previewFor = st.previewFor === s.id ? null : s.id; rerender(r, 'money.statement.' + s.id + '.preview'); } })));
       if (st.previewFor === s.id) { const ex = Proto.store.explain(s.patientId); row.append(h('div', { class: 'explain', 'aria-label': 'Patient-voice preview' }, h('p', { class: 'sentence', text: ex.length ? ex.map((x) => x.patientVoice).join(' ') : 'Your share is ' + money(s.amountCents) + ' after insurance. We held this statement so your plan could settle first; nothing here is an estimate.' }), h('p', { class: 'small muted', text: 'Same rows the biller sees, rendered in the patient voice: no reason codes, no poster names.' }))); }
       return row;
     })));
@@ -252,7 +256,7 @@
     const page = h('div', { class: 'stack md-page' },
       pageHead('Money Desk', 'Every row is patient, amount, one-line reason, one primary action. Keys: P post matched · W write-off · A appeal'),
       tabs(r, S),
-      h('div', { class: 'stack', role: 'tabpanel', 'aria-label': (TABS.find((t) => t[0] === tab) || [])[1] }, body, (tab === 'era' || tab === 'aging' || tab === 'denials' || tab === 'statements') ? writeoffCard(r, S) : null),
+      h('div', { class: 'stack', role: 'tabpanel', 'aria-label': (TABS.find((t) => t[0] === tab) || [])[1] }, body, writeoffCard(r, S)),
       h('p', { class: 'sr-only', 'aria-live': 'polite', text: st.announced }));
     Proto.screens.shell.mount(page);
     attachKeys();

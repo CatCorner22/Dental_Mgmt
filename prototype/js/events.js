@@ -37,7 +37,10 @@
 
   document.addEventListener('keydown', (ev) => {
     const testid = testidOf(ev.target);
-    record('key', { testid, key: ev.key });
+    // A key pressed inside a text field is typing, not tapping (CONTRACTS §5).
+    const el = ev.target;
+    const field = !!(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) || undefined;
+    record('key', { testid, key: ev.key, field });
   }, true);
 
   document.addEventListener('focusin', (ev) => {

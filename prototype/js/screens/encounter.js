@@ -46,7 +46,12 @@
   const clock12 = (t) => { const [hh, mm] = t.split(':').map(Number); return ((hh + 11) % 12 + 1) + ':' + String(mm).padStart(2, '0') + (hh < 12 ? ' am' : ' pm'); };
   const surfLabel = (tooth, s) => (s === 'O' && ANTERIOR.includes(tooth)) ? 'I' : s;
   const surfWord = { M: 'Mesial', O: 'Occlusal', D: 'Distal', B: 'Buccal', L: 'Lingual', I: 'Incisal' };
-  function scaffoldLine(ce) { const s = S(); return (s.cdt[ce.cdt] || [ce.cdt])[0] + ' #' + ce.tooth + ' ' + (ce.surfaces || []).join('') + (ce.temporality === 'existing' ? ' (existing, placed elsewhere)' : ce.temporality === 'planned' ? ' (planned)' : ''); }
+  function scaffoldLine(ce) {
+    const s = S();
+    const name = (s.cdt[ce.cdt] || [ce.cdt])[0];
+    const site = ce.tooth != null ? ' #' + ce.tooth + (ce.surfaces && ce.surfaces.length ? ' ' + ce.surfaces.join('') : '') : '';
+    return name + site + (ce.temporality === 'existing' ? ' (existing, placed elsewhere)' : ce.temporality === 'planned' ? ' (planned)' : '');
+  }
 
   // ---- mount with focus kept on the same control across re-renders ---------------------------
   function mount(node) {
@@ -206,7 +211,14 @@
     if (!x.tooth) { x.gateNode = refusal({ code: 'tooth_required', verb: 'Pick a tooth before the procedure', control: 'Go to teeth', onControl: () => { const t = document.querySelector('[data-testid="enc.tooth.' + (openTags(enc.id)[0] || { tooth: 30 }).tooth + '"]'); if (t) t.focus(); }, why: 'The procedure strip never auto-selects and never guesses a tooth; the chart event, plan item, and pending charge all point at the tooth you pick.' }); rerender(r); return; }
     const surfaces = x.surfaces.map((o) => o.s);
     const res = Proto.store.chartPaint(enc.id, x.tooth, surfaces, code, x.temporality);
-    if (!res.ok) { x.gateNode = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: () => rerender(r) }); rerender(r); return; }
+    if (!res.ok) {
+      // The control has to do what its words say. For a duplicate paint that means undoing the first one.
+      const act = res.code === 'duplicate_paint'
+        ? () => { undo(r, enc, x); x.gateNode = null; rerender(r); const b = document.querySelector('[data-testid="enc.proc.' + code + '"]'); if (b) b.focus(); }
+        : () => { x.gateNode = null; rerender(r); };
+      x.gateNode = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: act });
+      rerender(r); return;
+    }
     x.gateNode = null; x.lastPaint = res; x.surfaces = x.surfaces.map((o) => ({ s: o.s, mixed: false }));
     if (x.checked) x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3);
     rerender(r);
@@ -302,7 +314,9 @@
     } else if (x.checked) wrap.append(h('div', { class: 'row' }, chip('clear', 'Nothing outstanding'), h('span', { class: 'small muted', text: 'Ruleset 2.25.2 · File runs the same audit server-side.' })));
     else wrap.append(h('p', { class: 'small muted', text: 'The killer strip appears after you leave a field: at most three rows, each with one fix.' }));
     const p = Proto.store.patient(enc.patientId); const ces = eventsOf(enc.id); const lastCe = ces[ces.length - 1];
-    const detail = 'Filing as ' + Proto.store.currentUser().name + ' for ' + Proto.ui.initials(p.name) + ', DOB ' + p.dob.slice(5, 7) + '/' + p.dob.slice(0, 4) + (lastCe ? ', #' + lastCe.tooth + ' ' + lastCe.surfaces.join('') : '');
+    const priv = P().privacy;
+    const site = lastCe && lastCe.tooth != null ? ', #' + lastCe.tooth + ' ' + (lastCe.surfaces || []).join('') : '';
+    const detail = 'Filing as ' + Proto.store.currentUser().name + ' for ' + Proto.ui.initials(p.name) + (priv ? '' : ', DOB ' + p.dob.slice(5, 7) + '/' + p.dob.slice(0, 4)) + site;
     if (x.readback && !(x.checked && x.killers.length)) {
       const res = Proto.store.fileNote(enc.id, x.note, false);
       if (res.ok === false && res.code === 'readback') {

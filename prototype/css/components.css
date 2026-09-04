@@ -430,12 +430,14 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 .pin-refusal:empty { display: none; }
 /* Narrow glass: the top bar keeps one row of chrome and the odontogram wraps instead of panning. */
 @media (max-width: 640px) {
-  /* One scrollable row of chrome: the bar scrolls inside itself, the page never does. */
-  .topbar { gap: 6px; padding: 6px var(--space-2); min-height: 48px; flex-wrap: nowrap; overflow-x: auto; }
-  .topbar nav { order: 0; flex-basis: auto; flex-wrap: nowrap; }
+  /* One scrollable row of chrome: the bar scrolls inside itself, the page never does.
+     The gap stays at the 8 px floor and every button keeps its own intrinsic width, so
+     labels never overlap their neighbours (found by bp-05 and bp-09 in round 2). */
+  .topbar { gap: var(--gap); padding: 6px var(--space-2); min-height: 48px; flex-wrap: nowrap; overflow-x: auto; }
+  .topbar nav { order: 0; flex-basis: auto; flex-wrap: nowrap; gap: var(--gap); }
   .topbar .spacer { display: none; }
   .topbar .brand { display: none; }
-  .topbar .btn, .topbar .authorchip { padding: 0 var(--space-2); }
+  .topbar .btn, .topbar .authorchip { padding: 0 var(--space-3); min-width: max-content; flex: 0 0 auto; }
   .odont { grid-template-columns: repeat(8, var(--target)); }
   .pinpad { grid-template-columns: repeat(3, 64px); }
 }
@@ -443,3 +445,25 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 .pointed { outline: 3px dashed var(--focus); outline-offset: 3px; }
 /* The day-pass disclosure keeps its 8 px gap from the entitlement toggles above it. */
 .roles-extra > summary, [data-testid="roles.daypass.extra.why"] { margin-top: var(--gap); }
+
+/* A site that was passed over reads as passed over, by mark as well as by fill (bp-25, round 2). */
+.psite.skipped { background: var(--info-soft); color: var(--ink-2); border-style: dashed; }
+.psite.skipped::before { content: "⌀"; font-size: 13px; }
+.psite.skipped { font-size: 0; }
+.psite.skipped::before { font-size: 15px; }
+
+/* Selection is one language across the product: the tooth carries the same mark as any pressed control. */
+.tooth[aria-pressed="true"]::after { content: "✓"; font-size: 11px; position: absolute; top: 1px; right: 3px; }
+.tooth { position: relative; }
+
+/* A search row must always show the word it found. Below 640 px it stacks instead of
+   squeezing the label to nothing (bp-09 round 1 and round 2, bp-05 round 2). */
+@media (max-width: 640px) {
+  .palette-row { flex-direction: column; align-items: flex-start; gap: 2px; padding: var(--space-2) var(--space-3); }
+  .palette-row .pal-left { width: 100%; flex-wrap: wrap; }
+  .palette-row .lbl { white-space: normal; overflow: visible; flex: 1 1 auto; min-width: 0; }
+  .palette-row .syn { text-align: left; width: 100%; }
+}
+
+/* A drawer's way out stays reachable however the drawer is scrolled (bp-09, round 2). */
+.drawer-head { position: sticky; top: 0; z-index: 3; background: var(--surface); padding: var(--space-2) 0; }
