@@ -1,0 +1,10 @@
+// Template for an audit check module. Copy to <file-slug>.mjs (for example encounter.mjs).
+// Check ids: A-<file-slug>-<n>. Default position is NOT reproduced: the check must measure the breach.
+export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => ({
+  async 'A-example-1'(b) {
+    const { c, p } = await ctx(b); await go(p, '#/frontdesk/board');
+    const value = await txt(p, 'some.testid');
+    rec('A-example-1', 'claim in one sentence', 'rule id and source', value === 'the broken value', { value });
+    await c.close();
+  },
+});
