@@ -140,5 +140,21 @@ for f in glob.glob('scripts/beta/tasks/*.json'):
             ok = (head in js) and (dynamic_tail or ((("'" + tail + "'") in js) or (('.' + tail + "'") in js) or (('.' + tail + '"') in js) or (tail + '`' in js) or ((head + '.' + tail) in js)))
             if not ok: probs.append(f'{os.path.basename(f)} {task["id"]}: {s}')
 report('task-script test ids have builders in prototype/js', probs, f'{checked} ids checked')
+# 10. function audit (docs/15): rules registered before results, inventory total matches the code, every function has a row once results exist
+if os.path.exists('docs/15-function-audit.md'):
+    d15 = open('docs/15-function-audit.md').read(); probs = []
+    if not re.search(r'^Status: rules and inventory registered 2026-09-05 before any audit agent ran', d15, re.M): probs.append('docs/15 lacks the dated registration line')
+    if '\n## Results' not in d15: probs.append('docs/15 lacks the Results line')
+    r = subprocess.run(['node', 'scripts/audit/inventory.mjs', '--json'], capture_output=True, text=True)
+    inv = json.loads(r.stdout); total = sum(len(v) for v in inv.values())
+    m = re.search(r'^\| \*\*Total\*\* \| \*\*(\d+)\*\* \|', d15, re.M)
+    if not m or int(m.group(1)) != total: probs.append(f'docs/15 inventory total {m.group(1) if m else "missing"} vs {total} functions in prototype/js')
+    results = d15.split('\n## Results', 1)[1] if '\n## Results' in d15 else ''
+    if 'Pending' not in results.split('\n## ', 1)[0]:
+        missing = [f'{f}:{fn["name"]}' for f, fns in inv.items() for fn in fns if not re.search(r'^\| `' + re.escape(fn['name']) + r'` \| `' + re.escape(f.replace('prototype/js/', '')) + r'`', results, re.M)]
+        probs += [f'no results row for {x}' for x in missing]
+    report('docs/15 function audit: registration, inventory total, one row per function', probs, f'{total} functions')
+else:
+    print('SKIP function audit check (no docs/15 yet)')
 sys.exit(1 if fails else 0)
 PY
