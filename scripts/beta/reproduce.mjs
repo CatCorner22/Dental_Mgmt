@@ -492,6 +492,20 @@ const CHECKS = {
   },
 };
 
+/* Function-audit checks live beside this file, one module per prototype file, so a fix and its
+   regression guard land together without every guard editing this one file. Each module exports
+   `default (helpers) => ({ [checkId]: async (browser) => {...} })` and uses the same helpers. */
+const AUDIT_DIR = path.join(ROOT, 'scripts', 'beta', 'audit');
+if (fs.existsSync(AUDIT_DIR)) {
+  const helpers = { ctx, go, hop, press, click, txt, box, state, events, rec, FILE };
+  for (const f of fs.readdirSync(AUDIT_DIR).filter((x) => x.endsWith('.mjs')).sort()) {
+    const mod = await import(path.join(AUDIT_DIR, f));
+    const extra = mod.default(helpers);
+    for (const id of Object.keys(extra)) if (CHECKS[id]) throw new Error(`duplicate check id ${id} in ${f}`);
+    Object.assign(CHECKS, extra);
+  }
+}
+
 const browser = await chromium.launch({ headless: true });
 try {
   for (const [id, fn] of Object.entries(CHECKS)) {
