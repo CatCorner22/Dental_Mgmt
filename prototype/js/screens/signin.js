@@ -9,7 +9,11 @@
     let persona = P.persona && Proto.router.PERSONAS.includes(P.persona) ? P.persona : 'frontdesk';
     const list = h('div', { class: 'personas', role: 'radiogroup', 'aria-label': 'Who are you today?' });
     function paint() {
+      // replaceChildren throws the focused button away, so the keyboard landed on the body after every
+      // choice. Put it back on the persona the person just picked.
+      const had = document.activeElement && document.activeElement.getAttribute && document.activeElement.getAttribute('data-testid');
       list.replaceChildren(...Proto.router.PERSONAS.map((p) => btn([h('span', { text: Proto.router.LABEL[p] }), h('span', { class: 'role', text: ROLES[p] })], { testid: 'signin.persona.' + p, pressed: persona === p, onClick: () => { persona = p; paint(); } })));
+      if (had && /^signin\.persona\./.test(had)) { const back = list.querySelector('[data-testid="signin.persona.' + persona + '"]'); if (back) back.focus(); }
     }
     paint();
     const opt = (label, testid, pressed, onClick) => btn(label, { testid, pressed, onClick });
@@ -25,7 +29,9 @@
       opt('Simulate outage', 'signin.outage', P.outage, () => { P.set({ outage: !P.outage }); render(r); }),
       opt('After hours', 'signin.afterhours', Proto.store.get().clock.afterHours, () => { P.set({ afterHours: !Proto.store.get().clock.afterHours }); render(r); }),
     );
-    const go = btn('Open my home', { testid: 'signin.go', kind: 'irreversible', onClick: () => { P.set({ persona }); location.hash = '#/' + persona + '/' + Proto.router.HOME[persona]; } });
+    // Signing in is reversible: Sign out returns here with the persona still chosen, so it carries the
+    // reversible identity. The irreversible identity belongs to Post, File, Save exam, Close day and Send.
+    const go = btn('Open my home', { testid: 'signin.go', kind: 'reversible', onClick: () => { P.set({ persona }); location.hash = '#/' + persona + '/' + Proto.router.HOME[persona]; } });
     Proto.screens.shell.mount(h('div', { class: 'signin' },
       h('div', null, h('h1', { text: 'Riverbend Dental' }), h('p', { class: 'muted', text: 'Prototype for the beta panel. Synthetic data, one tenant, three locations, today is Thursday 9/3/2026, 8:40 am.' })),
       h('h2', { text: 'Who are you today?' }), list,

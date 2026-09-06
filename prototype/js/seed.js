@@ -52,13 +52,19 @@
       ['p-304', 'Ruth Adler', '1954-01-30', '615-555-0199', 'car-delta', null, ['Latex allergy']],
       ['p-305', 'Samir Haddad', '1996-09-15', '615-555-0133', 'car-cigna', null, []],
       ['p-306', 'Lena Fischer', '1969-07-08', '615-555-0126', 'car-metlife', null, []],
-      ['p-307', 'Devon Price', '2014-03-19', '615-555-0160', 'car-delta', null, ['Minor: guardian Alicia Price']],
+      // The guardian is a person, so their name is a field privacy mode can hide, not prose baked into an
+      // alert. The alert said "Minor: guardian Alicia Price" and printed verbatim on operatory glass.
+      ['p-307', 'Devon Price', '2014-03-19', '615-555-0160', 'car-delta', null, ['Minor: guardian on file'], 'Alicia Price'],
       ['p-320', 'Aiko Tanaka', '1982-12-05', '615-555-0187', 'car-cigna', null, ['Referred in: Dr. Serrano (GP) for #17 extraction; ASA II']],
     ];
-    const patients = fixed.map(([id, name, dob, phone, primary, secondary, alerts]) => ({ id, name, dob, phone, mrn: 'MRN-' + id.slice(2), primary, secondary, alerts, selfPay: false }));
+    const patients = fixed.map(([id, name, dob, phone, primary, secondary, alerts, guardian]) => ({ id, name, dob, phone, mrn: 'MRN-' + id.slice(2), primary, secondary, alerts, guardian: guardian || null, selfPay: false }));
+    // Skip the ids the contract patients already own: the generated run started at p-308 and walked over
+    // p-320, so two people shared one id and Aiko Tanaka's ledger showed another patient's balance.
+    const taken = new Set(patients.map((p) => p.id));
     let n = 308;
     while (patients.length < 40) {
-      const id = 'p-' + n++;
+      while (taken.has('p-' + n)) n++;
+      const id = 'p-' + n++; taken.add(id);
       const name = pick(FIRST) + ' ' + pick(LAST);
       const dob = between(1948, 2016) + '-' + String(between(1, 12)).padStart(2, '0') + '-' + String(between(1, 28)).padStart(2, '0');
       const selfPay = rnd() < 0.06;
@@ -183,7 +189,9 @@
 
     // Approvals, exceptions, decisions
     const approvals = []; // filled at runtime
-    const decisions = [{ id: 'd-1', kind: 'raise_threshold', text: 'Write-off threshold raised from $150 to $300 for vacation cover', decidedBy: 'Dr. Blake Reagan', decidedAt: '2026-08-04', reviewBy: '2026-09-01', measuredEffect: 'Held write-offs fell from 6/week to 1/week; approvals median 4 min', status: 'review_due' }];
+    // The card said the threshold was raised to $300 while the tenant carried $150 and Retire set it back to
+    // $150, so the decision described a state the practice was never in. The raise is the live threshold.
+    const decisions = [{ id: 'd-1', kind: 'raise_threshold', text: 'Write-off threshold raised from $100 to $150 for vacation cover', fromCents: 10000, toCents: 15000, decidedBy: 'Dr. Blake Reagan', decidedAt: '2026-08-04', reviewBy: '2026-09-01', measuredEffect: 'Held write-offs fell from 6/week to 1/week; approvals median 4 min', status: 'review_due' }];
 
     // ERA batch era-1: Delta Dental 835, 41 lines
     const eraLines = [];
@@ -206,7 +214,16 @@
       { id: 'c-51', patientId: 'p-322', status: 'submitted', cdt: 'd4341', tooth: null, amountCents: 28500, payer: 'Delta Dental', submitted: '2026-07-02', age: 63, nextAction: 'Timely filing at 90 days: escalate' },
     ];
 
-    const statementsDue = [{ id: 'sd-1', patientId: 'p-316', amountCents: 8400, reason: 'window_deferred', createdBy: 'Priya Raman', created: YESTERDAY }, { id: 'sd-2', patientId: 'p-319', amountCents: 21200, reason: 'window_deferred', createdBy: 'Priya Raman', created: YESTERDAY }];
+    /* A statement bills what the account owes, so the amount is read off the ledger rather than asserted
+       beside it. Both rows used to name a figure of their own: sd-1 billed $84.00 to an account with no
+       ledger row at all, so opening it refused with "Nothing due — no statement to send". */
+    const netOwed = (pid) => ledger.filter((e) => e.patientId === pid).reduce((s, e) => s + e.amountCents, 0);
+    const statementFor = (sid, pid, floorCents) => {
+      let owed = netOwed(pid);
+      if (owed <= 0) { L({ kind: 'charge', patientId: pid, amountCents: floorCents, effective: '2026-08-25', posted: '2026-08-25', actor: 'Sam Dawson', actorKind: 'user', locationId: 'loc-1', cdt: 'd1110' }); owed = netOwed(pid); }
+      return { id: sid, patientId: pid, amountCents: owed, reason: 'window_deferred', createdBy: 'Priya Raman', created: YESTERDAY };
+    };
+    const statementsDue = [statementFor('sd-1', 'p-316', 8400), statementFor('sd-2', 'p-319', 21200)];
     const credits = [{ id: 'cr-1', patientId: 'p-307', amountCents: -9500, reason: 'Checked out unfiled: payment waiting for charges (a-1050)', intents: 'pending charges on enc-9010' }];
 
     // Roles and SoD rules

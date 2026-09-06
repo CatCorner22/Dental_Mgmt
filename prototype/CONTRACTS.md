@@ -127,7 +127,7 @@ Tenant Riverbend Dental; locations `loc-1` Main Street, `loc-2` Riverbend East, 
 | `a-1043` / `enc-9002` / `p-302` | Theo Brandt, 9:00 restorative with Dr. Kim, chair 2, hygienist tag `tag-1` "Suspected caries #30 DO" |
 | `a-1044` / `p-303` | Ines Okoro, checkout with a $44 patient portion (dual coverage) |
 | `a-1045` / `p-304` | Ruth Adler, checkout with a $0 patient portion (fully covered prophy) |
-| `a-1046` / `p-305` | Samir Haddad, pays a $180 exam in full and asks that it stay off insurance |
+| `a-1046` / `p-305` | Samir Haddad, pays a $168 visit in full and asks that it stay off insurance (limited exam $90 plus four bitewings $78, from the fee schedule; this line said $180 and the fee schedule is what the screen adds up) |
 | `a-1047` / `p-306` | Lena Fischer, $410 balance, courtesy write-off (needs a second approver: Dana or Dr. Reagan) |
 | `a-1050` / `enc-9010` | Checked out with the note unfiled (Filed-later lane) |
 | `a-1060` / `enc-9020` / `p-320` | Referred-in oral surgery consult for Dr. Okafor (sedation note) |
