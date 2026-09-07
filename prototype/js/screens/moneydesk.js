@@ -52,7 +52,7 @@
      confirmation, but it is no longer counted — Statements read 2 and Denials 1 with nothing left to do. */
   function counts(S) {
     const e = eraView(S);
-    return { era: e.b.status === 'review' ? 1 : e.deltas.length, aging: aging(S).length, denials: denials(S).filter((c) => c.status === 'denied').length, statements: statements(S).filter((s) => !s.sent).length, credits: S.credits.length, variances: myVariances(S).length, approvals: S.approvals.filter((a) => a.status === 'pending').length };
+    return { era: e.b.status === 'review' ? 1 : e.deltas.length, aging: aging(S).length, denials: denials(S).filter((c) => c.status === 'denied').length, statements: statements(S).filter((s) => !s.sent).length, credits: S.credits.length, variances: myVariances(S).length, approvals: Proto.store.pendingApprovalsFor().length };
   }
 
   /* ---- tabs ---- */

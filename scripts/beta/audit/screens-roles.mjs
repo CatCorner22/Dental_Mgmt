@@ -28,8 +28,17 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
   // (A Tab inside a type=time input only moves between its hour/minute segments, so focus is released by blurring the active field directly.)
   const settle = async (p) => { await p.evaluate(() => { const a = document.activeElement; if (a && a !== document.body && a.blur) a.blur(); }); await p.waitForTimeout(150); };
   const sec6Codes = () => { const m = /Codes:\s*([^\n]*)/.exec(CONTRACTS); return m ? [...m[1].matchAll(/`([a-z_]+)`/g)].map((x) => x[1]) : []; };
-  const sec4Roles = () => { const line = CONTRACTS.split('\n').find((l) => /^\|\s*Roles\s*\|/.test(l)) || ''; return [...line.matchAll(/`([^`]+)`/g)].map((x) => x[1]); };
-  const toPattern = (id) => new RegExp('^' + id.replace(/[.]/g, '\\.').replace(/<([^>]+)>/g, (m, inner) => inner.includes('|') ? '(?:' + inner.split('|').join('|') + ')' : '[a-z0-9-]+') + '$');
+  /* Every §4 row that can list a roles.* id, not the Roles worklist row alone: `roles.row.<userId>.why` and
+     the two day-pass disclosures sit under "Why disclosures" and `roles.daypass.signin` under "screen-local
+     returns and closers". This is the fifth check module found reading one row. The placeholder class also
+     admitted no underscore, so §4's own `roles.daypass.entitlement.write_off` scored as unlisted against the
+     row that lists it. */
+  const sec4Roles = () => {
+    const sec = CONTRACTS.slice(CONTRACTS.indexOf('## 4.'), CONTRACTS.indexOf('## 5.'));
+    const rows = sec.split('\n').filter((l) => l.startsWith('|') && /`roles\./.test(l)).join(' ');
+    return [...rows.matchAll(/`([^`]+)`/g)].map((x) => x[1]).filter((x) => x.startsWith('roles.'));
+  };
+  const toPattern = (id) => new RegExp('^' + id.replace(/[.]/g, '\\.').replace(/<([^>]+)>/g, (m, inner) => inner.includes('|') ? '(?:' + inner.split('|').join('|') + ')' : '[a-z0-9_-]+') + '$');
 
   return {
     // RC-197 · A2/A1/B10 · roles.js:196 onBlur → refreshPreview(r, true) → :162-163 replace the preview node and roles.daypass.save while the pointer is down.
@@ -53,14 +62,20 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         await p.mouse.up(); await p.waitForTimeout(200);
         const ev1 = await after(p, seq0);
         const first = { events: kinds(ev1), clicksOnSave: ev1.filter((e) => e.kind === 'click' && e.testid === 'roles.daypass.save').length, refusals: refusalEvents(ev1), writes: writes(ev1), dayPasses: (await state(p)).dayPasses.length, focus: await active(p), announcement: await live(p), seqRange: range(ev1, seq0) };
-        // The swallowed press also built the preview, which moves the button down the page; the second press is aimed at the button where it now is.
+        /* The second press only exists if the first was swallowed: a press that works issues the pass and closes
+           the form, so the control is gone by design. Reading its box unconditionally threw once the swallow was
+           fixed, and a crashed check reports "not reproduced" — a pass for the wrong reason. When the control is
+           gone the leg is skipped and says so; `firstSwallowed` is already false, so the verdict is unchanged. */
         const seq1 = await lastSeq(p);
         const bx2 = await box(p, 'roles.daypass.save');
-        await p.mouse.click(bx2.x + bx2.w / 2, bx2.y + bx2.h / 2); await p.waitForTimeout(200);
-        const ev2 = await after(p, seq1);
-        const second = { events: kinds(ev2), clicksOnSave: ev2.filter((e) => e.kind === 'click' && e.testid === 'roles.daypass.save').length, refusals: refusalEvents(ev2), writes: writes(ev2), dayPasses: (await state(p)).dayPasses.length, focus: await active(p), announcement: await live(p), seqRange: range(ev2, seq1) };
+        let second = { skipped: 'the first press issued the pass and closed the form, so there is no second press to make' };
+        if (bx2) {
+          await p.mouse.click(bx2.x + bx2.w / 2, bx2.y + bx2.h / 2); await p.waitForTimeout(200);
+          const ev2 = await after(p, seq1);
+          second = { events: kinds(ev2), clicksOnSave: ev2.filter((e) => e.kind === 'click' && e.testid === 'roles.daypass.save').length, refusals: refusalEvents(ev2), writes: writes(ev2), dayPasses: (await state(p)).dayPasses.length, focus: await active(p), announcement: await live(p), seqRange: range(ev2, seq1) };
+        }
         const firstSwallowed = first.clicksOnSave === 0 && first.refusals.length === 0 && first.writes.length === 0 && first.dayPasses === dpBefore;
-        const secondWorked = second.writes.some((w) => w.startsWith('dayPasses/')) && second.dayPasses === dpBefore + 1;
+        const secondWorked = !!second.writes && second.writes.some((w) => w.startsWith('dayPasses/')) && second.dayPasses === dpBefore + 1;
         const reproduced = focusBefore.testid === 'roles.daypass.name' && replacedDuringPress && firstSwallowed && secondWorked;
         rec('A-screens-roles-1', 'With the caret in roles.daypass.name, the first mouse press on Issue day pass is swallowed (the blur handler replaces the button between mousedown and mouseup: no click, no refusal, no write, focus on body) while the identical second press writes dayPasses/dp-1', 'A2, A1, B10 — the control does what its label promises on the first press and focus never lands on body; roles.js:196/199 onBlur → refreshPreview(r, true) → :162-163',
           reproduced, { focusBeforePress: focusBefore, saveLabelBefore: labelBefore, saveBoxBefore: bx, replacedDuringPress, saveBoxDuringPress: boxDuringPress, saveBoxAtSecondPress: bx2, dayPassesBefore: dpBefore, firstPress: first, secondPress: second, pageErrors: errs.slice(0, 3) });
@@ -126,7 +141,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const listedPresent = listed.filter((l) => Object.keys(byId).some((id) => toPattern(l).test(id)));
         const reproduced = listed.length > 0 && claimed.every((id) => unlisted.some((u) => u.id === id));
         rec('A-screens-roles-3', 'Four clickable Roles test ids rendered in reachable states (roles.daypass.signin, roles.daypass.expiry.why, roles.daypass.extra.why, roles.row.<userId>.why) match no entry or pattern in the CONTRACTS §4 Roles row', 'B1 / CONTRACTS §4 — every id in the DOM matches a §4 entry or pattern; roles.js:231, :232, :206, :79',
-          reproduced, { sec4RolesIdsSearched: listed, sec4RolesRowText: (CONTRACTS.split('\n').find((l) => /^\|\s*Roles\s*\|/.test(l)) || '').trim(), issuePressed: issuedPressed, dayPassesIssued: issued, domIdsFound: byId, unlistedClickableIds: unlisted, sec4EntriesSeenInDom: listedPresent });
+          reproduced, { sec4RolesIdsSearched: listed, sec4RowsSearched: 'CONTRACTS.md §4, every row carrying a roles.* id', issuePressed: issuedPressed, dayPassesIssued: issued, domIdsFound: byId, unlistedClickableIds: unlisted, sec4EntriesSeenInDom: listedPresent });
       } finally { await c.close(); }
     },
 

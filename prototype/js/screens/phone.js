@@ -60,7 +60,7 @@
     const el = document.querySelector(q); if (el) el.focus();
   }
   function nextSim() {
-    const open = S().approvals.filter((a) => a.status === 'pending');
+    const open = Proto.store.pendingApprovalsFor();         // the requests this approver may decide
     return SIMS.find((x) => !open.some((a) => a.kind === 'write_off' && a.patientId === x.pid && a.amountCents === x.cents)) || SIMS[0];
   }
   function simWords(x) { return money(x.cents) + ' ' + (REASON_LABEL[x.reason] || x.reason).toLowerCase() + ' write-off'; }
@@ -236,7 +236,7 @@
     // checkout, encounter and ledger, not the Approvals screen wearing someone else's id.
     if (r && r.id && r.id !== 'approvals') { renderNotFound(r); return; }
     const s = S(); const who = me(); const cards = st();
-    const pending = s.approvals.filter((a) => a.status === 'pending');
+    const pending = Proto.store.pendingApprovalsFor();
     const decided = s.approvals.filter((a) => a.status !== 'pending');
     const root = h('div', { class: 'phone ph-page' });
     root.append(pageHead('Approvals', 'Signed in as ' + who.name + (iAmEligible() ? ' · eligible second approver' : ' · not an approver')));

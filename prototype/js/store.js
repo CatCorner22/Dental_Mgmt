@@ -182,7 +182,7 @@
     if (!req) return '';
     const who = patient(req.patientId);
     const name = who ? Proto.ui.displayName(who.name, !!(window.__proto && window.__proto.privacy)) : 'this account';
-    return 'Write-off ' + Proto.ui.money(req.amountCents) + ' on ' + name + ' (' + (req.reason || 'courtesy') + ') requested by ' + req.requestedBy + ' at ' + (req.requestedAt || S.clock.time);
+    return 'Write-off ' + Proto.ui.money(req.amountCents) + ' on ' + name + ' (' + (req.reason || 'courtesy') + ') requested by ' + req.requestedBy + ' at ' + Proto.ui.time(req.requestedAt || S.clock.time);
   }
 
   // Dual release evaluator (precog evaluateRelease, simplified)
@@ -345,6 +345,15 @@
     if (prior) { prior.endedAt = S.clock.time; prior.endedBy = who.name; touch('sessions', prior.id); }
     const row = write('sessions', { id: 'ses-' + nextId.ses++, userId: who.id, actor: who.name, device: (window.__proto && window.__proto.device) || 'desk', startedAt: S.clock.time, supersedes: prior ? prior.id : null, endedAt: null });
     return { ok: true, session: row };
+  }
+  /* The approvals one person is waiting on. Four surfaces counted this and disagreed: the Andon filtered by
+     entitlement and requester, the phone card and the Money Desk tab counted every pending row, so with two
+     requests open the owner's Andon said one while the phone beside it showed two. A request is yours to
+     decide when you carry the second-approver entitlement and did not raise it yourself. */
+  function pendingApprovalsFor(who) {
+    const u = who || currentUser();
+    if (!u || !u.entitlements || !u.entitlements.includes('approve_second')) return [];
+    return S.approvals.filter((a) => a.status === 'pending' && a.requestedById !== u.id);
   }
   function noteKillers(encId, note) {
     const enc = encounter(encId); const killers = [];
@@ -530,5 +539,5 @@
   reset = function (seedNum) { const s = _reset(seedNum); for (const t of TABLES) if (!s[t]) s[t] = []; return s; };
 
   const LICENCE_WORDS = { implant: 'implant', crown_margin: 'crown margin', not_tolerated: 'patient could not tolerate probing', third_molar_absent: 'third molar absent' };
-  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, addTag, readyForExam, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, sendStatement, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
+  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, addTag, readyForExam, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, sendStatement, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
 })();

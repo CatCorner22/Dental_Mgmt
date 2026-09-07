@@ -55,7 +55,7 @@
       return;
     }
     const S = Proto.store.get();
-    const pending = S.approvals.filter((x) => x.status === 'pending' && Proto.store.currentUser().entitlements.includes('approve_second') && x.requestedById !== Proto.store.currentUser().id);
+    const pending = Proto.store.pendingApprovalsFor();      // one count for the Andon, the phone and the tab
     if (pending.length) { a.replaceChildren(chip('review', pending.length + ' approval' + (pending.length > 1 ? 's' : '') + ' waiting', {}), h('span', { class: 'grow', text: pending[0].frozenSentence }), btn('Open approvals', { testid: 'andon.control', kind: 'reversible', onClick: () => { location.hash = '#/phone/approvals'; } })); return; }
     a.replaceChildren();
   }
