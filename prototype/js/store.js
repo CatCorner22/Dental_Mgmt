@@ -329,6 +329,11 @@
     touch('tags', t.id);
     return { ok: true, tag: t };
   }
+  /* Which procedures a payer wants an attachment for. The Board and Checkout each held their own copy of this
+     list and they had drifted apart, so one filed surgical extraction read "Needs: attachment" on the Board
+     queue row and "Ready" on Checkout for the same visit. One rule, one table. */
+  const ATTACHMENT_CDT = { d4341: true, d2740: true, d7210: true };
+  const needsAttachment = (p) => !!(p && ATTACHMENT_CDT[typeof p === 'string' ? p : p.cdt]);
   function noteKillers(encId, note) {
     const enc = encounter(encId); const killers = [];
     const u = currentUser();
@@ -419,13 +424,22 @@
     if (!rr) return notFound('request');
     // Whoever posted the day cannot clear it; the verb says what to do, and the Why names who can.
     if (rr.closer === u.name || rr.posters === u.name || (u.role === 'biller' && rr.locationId === 'loc-3')) return refuse('clear_not_independent', 'Ask an independent seat to clear', 'Send to Dana or the CPA', 'You posted or prepared the deposit for that day, so clearing your own variance would leave nobody checking the money. ' + (rr.closer === u.name ? 'Dr. Reagan' : 'Dana') + ' or the CPA seat can clear it.');
+    /* Independence is not enough on its own: clearing a variance is a money control, so the seat also needs
+       the entitlement for it. The screen applies this test to decide who is offered the control; the rule is
+       enforced here too, because a control that never renders is not a control that cannot be reached. */
+    if (!u.entitlements.includes('bank_reconcile') && !u.entitlements.includes('close_day')) return refuse('entitlement', 'Ask a seat that reconciles the bank', 'Send to Dana or the CPA', 'Clearing a variance signs off on the day\'s money. The seats that carry bank reconciliation or day close can do it; yours does not.');
     if (v.status !== 'open') return refuse('already_decided', 'Open the day to see the match', 'Open the day', 'This variance was already ' + v.status + '.');
     v.status = 'cleared'; touch('variances', v.id);
     rr.state = 'tied'; rr.clearedBy = u.name; touch('reconciliation', rr.id);
     write('reconciliationMatches', { id: id('rm'), varianceId: vid, basis: 'cleared_with_reason', actor: u.name });
     return { ok: true };
   }
-  function reviewDecision(did, action) { const d = S.decisions.find((x) => x.id === did); if (!d) return notFound('request'); const off = offline('Wait for the server — decisions are read-only'); if (off) return off; d.status = action; touch('decisions', d.id); write('controlDecisions', { id: 'dec-' + nextId.dec++, supersedes: did, action, by: currentUser().name, at: S.tenant.today }); if (action === 'retire') S.tenant.dualReleaseThresholdCents = 15000; if (action === 'tighten') S.tenant.dualReleaseThresholdCents = 10000; return { ok: true }; }
+  function reviewDecision(did, action) { const d = S.decisions.find((x) => x.id === did); if (!d) return notFound('request'); const off = offline('Wait for the server — decisions are read-only'); if (off) return off; d.status = action; touch('decisions', d.id); write('controlDecisions', { id: 'dec-' + nextId.dec++, supersedes: did, action, by: currentUser().name, at: S.tenant.today }); if (action === 'retire') S.tenant.dualReleaseThresholdCents = 15000; if (action === 'tighten') S.tenant.dualReleaseThresholdCents = 10000;
+    /* A decision that is kept or tightened comes back for review; the store sets the date so the sentence on
+       screen and the row underneath it cannot disagree. The screen used to compute today + 90 itself. */
+    let reviewBy = d.reviewBy || null;
+    if (action === 'keep' || action === 'tighten') { const t = new Date(S.tenant.today + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + 90); reviewBy = t.toISOString().slice(0, 10); d.reviewBy = reviewBy; }
+    return { ok: true, reviewBy }; }
   function closeDay(locId) {
     const u = currentUser();
     const off = offline('Wait for the server — the day cannot close'); if (off) return off;
@@ -504,5 +518,5 @@
   reset = function (seedNum) { const s = _reset(seedNum); for (const t of TABLES) if (!s[t]) s[t] = []; return s; };
 
   const LICENCE_WORDS = { implant: 'implant', crown_margin: 'crown margin', not_tolerated: 'patient could not tolerate probing', third_molar_absent: 'third molar absent' };
-  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, addTag, readyForExam, chartPaint, chartUndo, dismissTag, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, sendStatement, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
+  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, addTag, readyForExam, chartPaint, chartUndo, dismissTag, needsAttachment, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, sendStatement, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
 })();

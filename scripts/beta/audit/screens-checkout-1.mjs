@@ -28,12 +28,16 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
   const hash = (p) => p.evaluate(() => location.hash);
   const h1 = (p) => p.evaluate(() => ((document.querySelector('#canvas h1') || document.querySelector('h1') || {}).textContent || '').trim());
   const testids = (p) => p.evaluate(() => [...document.querySelectorAll('[data-testid]')].map((e) => e.getAttribute('data-testid')));
-  // The Checkout row of CONTRACTS §4, parsed from the file so the check follows the contract, not a copy of it.
+  /* Every CONTRACTS §4 row that can list a checkout.* id, parsed from the file so the check follows the
+     contract rather than a copy of it. Reading the Checkout worklist row alone stopped being enough once §4
+     gained its cross-cutting rows: `checkout.rail` sits under Patient Rail openers and `checkout.estimate.why`
+     under Why disclosures, so a screen fully obeying §4 could never make this check report no. This is the
+     fourth module found carrying the same one-row assumption. */
   const s4Checkout = () => {
     const text = fs.readFileSync(new URL('../../../prototype/CONTRACTS.md', import.meta.url), 'utf8');
     const sec = text.slice(text.indexOf('## 4.'), text.indexOf('## 5.'));
-    const row = sec.split('\n').find((l) => /^\|\s*Checkout\s*\|/.test(l)) || '';
-    const entries = [...row.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+    const row = sec.split('\n').filter((l) => l.startsWith('|') && /`checkout\./.test(l)).join(' ');
+    const entries = [...row.matchAll(/`([^`]+)`/g)].map((m) => m[1]).filter((e) => e.startsWith('checkout.'));
     // A bare placeholder such as <procId> or <code> admits any seed id or code token (letters, digits, '-', '_'); an enumerated one is exact.
     const patterns = entries.map((e) => new RegExp('^' + e.replace(/\./g, '\\.').replace(/<([^>]+)>/g, (m, inner) => inner.includes('|') ? '(?:' + inner.split('|').join('|') + ')' : '[a-z0-9_-]+') + '$'));
     return { row: row.trim(), entries, patterns };

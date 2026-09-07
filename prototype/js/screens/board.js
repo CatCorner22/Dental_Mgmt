@@ -17,7 +17,7 @@
   const IN_CHAIR = ['seated', 'in_chart', 'ready_for_exam'];
   const ARRIVABLE = ['scheduled', 'confirmed'];
   const CHECKOUTABLE = ['in_chart', 'note_filed'];
-  const ATTACHMENT_CDT = ['d2740', 'd4341', 'd7210'];
+
   const CACHE_TIME = '07:58'; // last successful fetch shown by the Andon slot during an outage
   const SUPPORT = 'Support: 615-555-0100, answered 7 am to 6 pm Central';
   const OUTAGE_WHY = 'Nothing posts while the server is unreachable: the controls that gate money and records cannot be enforced without it.';
@@ -44,7 +44,9 @@
   const minutesBetween = (a, b) => { const [ah, am] = a.split(':').map(Number); const [bh, bm] = b.split(':').map(Number); return (bh * 60 + bm) - (ah * 60 + am); };
   const provInitials = (u) => (u ? initials(u.name.replace(/^Dr\.\s+/, '')) : '—');
   const noteFiled = (a) => { const enc = Proto.store.encounter(a.encounterId); return !!(enc && enc.noteFiled) || S().filedNotes.some((f) => f.encounterId === a.encounterId); };
-  const needsAttachment = (a) => S().procedures.some((p) => p.encounterId === a.encounterId && ATTACHMENT_CDT.includes(p.cdt));
+  // Which codes want an attachment is the store's rule, not this screen's: the two lists had drifted, so one
+  // filed surgical extraction read "Needs: attachment" here and "Ready" on Checkout for the same visit.
+  const needsAttachment = (a) => S().procedures.some((p) => p.encounterId === a.encounterId && Proto.store.needsAttachment(p));
   /* The strip is one person's working state, so it is keyed by the user reading it and never written to a
      store table: a mark the front desk makes on a shared desk is not the temp's mark and records nothing. */
   const uiState = () => { const uid = Proto.store.currentUser().id; return (boardUi[uid] = boardUi[uid] || { collapsed: false, labCalled: null, deviceReset: null, eligRerun: 0 }); };

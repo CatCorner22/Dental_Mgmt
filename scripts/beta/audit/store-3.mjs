@@ -163,7 +163,16 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         await hop(p, '#/biller/close'); await p.waitForTimeout(150);
         await click(p, 'close.tied.tile'); await p.waitForTimeout(150);
         const clearBeforeInject = await p.evaluate(() => !!document.querySelector('[data-testid="close.variance.v-1.clear"]'));
-        const injected = await p.evaluate(() => { const rr = Proto.store.get().reconciliation.find((r) => r.id === 'rr-loc-3'); rr.closer = 'Dana Whitfield'; Proto.router.render(); return { closer: rr.closer, me: Proto.store.currentUser().name, role: Proto.store.currentUser().role }; });
+        /* Clearing a variance now needs the entitlement as well as independence, and the screen offers the
+           control only to a seat that carries it. Injecting the closer alone left the button unrendered, so
+           the press found nothing and the check measured no gate at all — a probe that has stopped being
+           able to fail. Both conditions are injected, and the evidence records that the control appeared. */
+        const injected = await p.evaluate(() => {
+          const rr = Proto.store.get().reconciliation.find((r) => r.id === 'rr-loc-3'); rr.closer = 'Dana Whitfield';
+          const u = Proto.store.currentUser(); if (!u.entitlements.includes('bank_reconcile')) u.entitlements.push('bank_reconcile');
+          Proto.router.render();
+          return { closer: rr.closer, me: u.name, role: u.role, entitlements: u.entitlements.slice() };
+        });
         await p.waitForTimeout(200);
         const clearAfterInject = await p.evaluate(() => !!document.querySelector('[data-testid="close.variance.v-1.clear"]'));
         const seq0 = await lastSeq(p);

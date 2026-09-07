@@ -169,7 +169,7 @@
       rerender(r, 'close.variance.' + v.id + '.clear');
     } }));
     card.append(controls);
-    if (!mayClear) card.append(h('p', { class: 'small muted', text: (isCloser ? 'Same hands closed ' + locOf(S, rr.locationId).name + ' on ' + shortDate(rr.date) + '. ' : 'Clearing is held to a seat that reconciles the bank or closes the books. ') + (clearers.length ? orList(clearers) + ' can clear. ' : '') + 'Match these and Investigate stay open to you.' }));
+    if (!mayClear) card.append(h('p', { class: 'small muted', text: (isCloser ? 'Same hands closed ' + locOf(S, rr.locationId).name + ' on ' + shortDate(rr.date) + '. ' : 'Clearing belongs to a seat that reconciles the bank or closes the books. ') + (clearers.length ? orList(clearers) + ' can clear. ' : '') + 'Match these and Investigate stay open to you.' }));
     if (st.varRefusal[v.id]) card.append(st.varRefusal[v.id]);
     if (st.invOpen[v.id]) {
       const rows = S.ledger.filter((e) => e.locationId === v.locationId && e.kind === 'patient_payment' && e.tender === v.tender && e.posted === rr.date).slice(-(pm.ledgerEntries || 2));
@@ -200,7 +200,9 @@
       const act = (action, label, kind) => btn(label, { kind, testid: 'close.decision.' + d.id + '.' + action, onClick: () => {
         const res = Proto.store.reviewDecision(d.id, action);
         if (res.ok) {
-          const T = Proto.store.get().tenant; const next = shortDate(addDays(T.today, 90));
+          // The store sets the next review date when a decision is kept or tightened; printing a second
+          // computation of it here is how the sentence and the row underneath it come to disagree.
+          const next = shortDate(res.reviewBy);
           st.decisionResult[d.id] = action === 'keep' ? 'Kept 90 more days; review on ' + next + '.'
             : action === 'tighten' ? 'Tightened: write-off threshold back to ' + money(T.dualReleaseThresholdCents) + '; review on ' + next + '.'
               : 'Retired: write-off threshold back to ' + money(T.dualReleaseThresholdCents) + '. Nothing auto-renews.';
@@ -267,7 +269,7 @@
             if (res.ok) { st.closeStep = 'done'; st.closeRefusal = null; say('Day closed — deposit slip prepared'); rerender(r, 'close.closeday'); return; }
             st.closeStep = 'idle';
             // The gate's own words, and its control goes where the control says: the screen adds neither.
-            st.closeRefusal = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why || 'Closing freezes totals and prepares the deposit, so it is held to the seats that carry it.', onControl: res.code === 'entitlement' ? () => { location.hash = '#/phone/approvals'; } : null });
+            st.closeRefusal = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why || 'Closing freezes totals and prepares the deposit, so only the seats that carry it can close.', onControl: res.code === 'entitlement' ? () => { location.hash = '#/phone/approvals'; } : null });
             rerender(r, 'close.closeday');
           } }),
           btn('Cancel', { kind: 'quiet', testid: 'close.closeday.cancel', onClick: () => { st.closeStep = 'idle'; rerender(r, 'close.closeday'); } }))));

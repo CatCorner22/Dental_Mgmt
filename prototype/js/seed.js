@@ -191,7 +191,7 @@
     const approvals = []; // filled at runtime
     // The card said the threshold was raised to $300 while the tenant carried $150 and Retire set it back to
     // $150, so the decision described a state the practice was never in. The raise is the live threshold.
-    const decisions = [{ id: 'd-1', kind: 'raise_threshold', text: 'Write-off threshold raised from $100 to $150 for vacation cover', fromCents: 10000, toCents: 15000, decidedBy: 'Dr. Blake Reagan', decidedAt: '2026-08-04', reviewBy: '2026-09-01', measuredEffect: 'Held write-offs fell from 6/week to 1/week; approvals median 4 min', status: 'review_due' }];
+    const decisions = [{ id: 'd-1', kind: 'raise_threshold', text: 'Write-off threshold raised from $100 to $150 for vacation cover', fromCents: 10000, toCents: 15000, decidedBy: 'Dr. Blake Reagan', decidedAt: '2026-08-04', reviewBy: '2026-09-01', measuredEffect: 'Write-offs waiting on a second approver fell from 6/week to 1/week; approvals median 4 min', status: 'review_due' }];
 
     // ERA batch era-1: Delta Dental 835, 41 lines
     const eraLines = [];

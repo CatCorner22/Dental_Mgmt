@@ -8,7 +8,7 @@
 
   /* The same list the Board's queue row asks: a filed D7210 cannot read "Needs: attachment" there and
      "Claim ready" here. Two copies of one rule drifted; they now hold the same three codes. */
-  const NEEDS_ATTACHMENT = { d4341: true, d2740: true, d7210: true };
+  const needsAttachment = Proto.store.needsAttachment;  // one rule, one table (store.js)
   const REASONS = [['courtesy', 'Courtesy'], ['hardship', 'Hardship'], ['prior_period', 'Prior period'], ['contractual_ppo', 'Contractual PPO']];
   const CADENCES = [['weekly', 'Weekly'], ['biweekly', 'Every two weeks'], ['monthly', 'Monthly']];
   const SEG = { collect: 'collect', 'send-statement': 'send_statement', 'payment-plan': 'payment_plan', 'zero-due': 'zero_due' };
@@ -128,7 +128,7 @@
     const feeTotal = procs.reduce((s, p) => s + p.feeCents, 0);
     const rows = procs.map((p, i) => {
       const name = (S.cdt[p.cdt] || [p.cdt])[0];
-      const pre = p.selfPayRestricted ? chip('info', 'Restricted — no claim') : NEEDS_ATTACHMENT[p.cdt] ? chip('review', 'Needs: attachment') : chip('clear', 'Ready');
+      const pre = p.selfPayRestricted ? chip('info', 'Restricted — no claim') : needsAttachment(p) ? chip('review', 'Needs: attachment') : chip('clear', 'Ready');
       const on = st.selfPay.has(p.id);
       const toggle = btn('Paid in full — don\'t send to insurance', { kind: 'reversible', class: 'compact co-selfpay', testid: 'checkout.line.' + p.id + '.selfpay', pressed: pressed(on), ariaLabel: 'Paid in full, do not send ' + name + ' to insurance', onClick: () => { if (on) st.selfPay.delete(p.id); else st.selfPay.add(p.id); rerender(null, 'checkout.line.' + p.id + '.selfpay'); } });
       toggle.dataset.fee = p.feeCents; toggle.hidden = !coversNow(p.feeCents) || !!p.selfPayRestricted;
@@ -300,7 +300,7 @@
     const head = pageHead('Checkout · ' + name, sub, railBtn, btn('Back to Board', { kind: 'reversible', testid: 'checkout.back', onClick: () => Proto.router.go(r.persona, 'board') }));
     const status = h('div', { class: 'row' },
       enc && enc.noteFiled ? chip('clear', 'Note filed') : chip('review', 'Note unfiled — Filed later'),
-      procs.some((p) => NEEDS_ATTACHMENT[p.cdt]) ? chip('review', 'Claim needs pre-flight') : chip('clear', 'Claim ready'),
+      procs.some((p) => needsAttachment(p)) ? chip('review', 'Claim needs pre-flight') : chip('clear', 'Claim ready'),
       !st.posted && String(a.status).startsWith('checked_out') ? chip('info', 'Already checked out') : null);
     // The decision and its finish control come before the line-by-line detail, so Post is on screen without
     // scrolling at 1280×900, 1024×768 and 420×860; the completed procedures read below it.
