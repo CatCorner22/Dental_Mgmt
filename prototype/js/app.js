@@ -15,7 +15,9 @@
     if (opts.persona) P.persona = opts.persona;
     if (opts.afterHours != null) Proto.store.get().clock.afterHours = !!opts.afterHours && opts.afterHours !== '0';
   };
-  P.reset = function (seed) { Proto.store.reset(seed); Proto.events.reset(); Proto.router.render(); };
+  // reset() rebuilds the store, so the outage flag it carried has to be put back or the Andon says the server
+  // is unreachable while every posting verb happily writes.
+  P.reset = function (seed) { Proto.store.reset(seed); Proto.store.get().outage = P.outage; Proto.events.reset(); if (Proto.ui.resetGates) Proto.ui.resetGates(); Proto.router.render(); };
   P.state = function () { return JSON.parse(JSON.stringify(Proto.store.get())); };
   P.events = function () { return Proto.events.all(); };
 
@@ -33,16 +35,26 @@
     const changed = lastRoute !== r.raw.split('?')[0];
     applyQuery(r.query);
     if (r.persona) P.persona = r.persona;
+    if (changed && Proto.ui.resetGates) Proto.ui.resetGates();   // a new screen starts with no gate already announced
     Proto.screens.shell.render(r);
     Proto.router.render();
     if (changed) {
       // A new screen opens at its own top with its heading in view, and the keyboard lands on it.
       const c = document.getElementById('canvas');
       c.scrollTop = 0; window.scrollTo(0, 0);
-      const first = c.querySelector('h1, [data-testid]');
-      if (first && typeof first.focus === 'function') { const restore = first.getAttribute('tabindex'); if (restore == null) first.setAttribute('tabindex', '-1'); first.focus({ preventScroll: true }); }
+      // Focus the heading, never the first control: stamping tabindex="-1" on whatever came first took a real
+      // button (the Daily Close tile) out of the Tab order for the rest of the session.
+      const head = c.querySelector('h1');
+      if (head) { if (head.getAttribute('tabindex') == null) head.setAttribute('tabindex', '-1'); head.focus({ preventScroll: true }); }
       else c.focus({ preventScroll: true });
       lastRoute = r.raw.split('?')[0];
+    } else {
+      // Re-rendering the same path still replaces the canvas, so the keyboard has to be put back on it.
+      const c = document.getElementById('canvas');
+      if (document.activeElement === document.body || !c.contains(document.activeElement)) {
+        const head = c.querySelector('h1');
+        if (head) { if (head.getAttribute('tabindex') == null) head.setAttribute('tabindex', '-1'); head.focus({ preventScroll: true }); }
+      }
     }
     P.ready = true;
   }

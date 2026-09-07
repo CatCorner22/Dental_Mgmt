@@ -439,7 +439,10 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
   .topbar .brand { display: none; }
   .topbar .btn, .topbar .authorchip { padding: 0 var(--space-3); min-width: max-content; flex: 0 0 auto; }
   .odont { grid-template-columns: repeat(8, var(--target)); }
+  /* The keys have to fit the tracks they sit in: 72 px buttons in 64 px columns overflowed and touched,
+     leaving no gap at all between digits on a phone. Both narrow to the same width, so the gap survives. */
   .pinpad { grid-template-columns: repeat(3, 64px); }
+  .pinpad .btn { min-width: 64px; }
 }
 /* A static ring, so the "show me" pointer still exists when motion is off. */
 .pointed { outline: 3px dashed var(--focus); outline-offset: 3px; }

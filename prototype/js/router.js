@@ -10,7 +10,9 @@
     const [path, qs] = h.split('?');
     const parts = path.split('/').filter(Boolean);
     const query = {};
-    (qs || '').split('&').filter(Boolean).forEach((kv) => { const [k, v] = kv.split('='); query[decodeURIComponent(k)] = decodeURIComponent(v == null ? '1' : v); });
+    // A malformed escape in the address threw out of parse(), and every listener on the page went with it.
+    const unescape = (s) => { try { return decodeURIComponent(s); } catch { return String(s); } };
+    (qs || '').split('&').filter(Boolean).forEach((kv) => { const [k, v] = kv.split('='); query[unescape(k)] = unescape(v == null ? '1' : v); });
     if (parts[0] === 'phone') return { persona: (window.__proto && window.__proto.persona) || 'owner', route: 'phone', id: parts[1] || 'approvals', query, raw: h };
     if (!parts.length || parts[0] === 'signin') return { persona: null, route: 'signin', id: null, query, raw: h };
     const persona = PERSONAS.includes(parts[0]) ? parts[0] : null;

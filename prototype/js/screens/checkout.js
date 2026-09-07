@@ -6,7 +6,9 @@
   const Proto = window.Proto; const { h, btn, chip, refusal, money, section, pageHead, displayName } = Proto.ui;
   Proto.screens = Proto.screens || {};
 
-  const NEEDS_ATTACHMENT = { d4341: true, d2740: true };
+  /* The same list the Board's queue row asks: a filed D7210 cannot read "Needs: attachment" there and
+     "Claim ready" here. Two copies of one rule drifted; they now hold the same three codes. */
+  const needsAttachment = Proto.store.needsAttachment;  // one rule, one table (store.js)
   const REASONS = [['courtesy', 'Courtesy'], ['hardship', 'Hardship'], ['prior_period', 'Prior period'], ['contractual_ppo', 'Contractual PPO']];
   const CADENCES = [['weekly', 'Weekly'], ['biweekly', 'Every two weeks'], ['monthly', 'Monthly']];
   const SEG = { collect: 'collect', 'send-statement': 'send_statement', 'payment-plan': 'payment_plan', 'zero-due': 'zero_due' };
@@ -15,12 +17,17 @@
   const state = {}; // per appointment id: form state, last refusal node, held request, posted rows
   let stateOwner = null; // the store instance the state belongs to; a store reset clears it
 
-  const dollars = (c) => (c / 100).toFixed(2);
-  const cents = (s) => { const n = Number(String(s == null ? '' : s).replace(/[^0-9.]/g, '')); return isFinite(n) ? Math.round(n * 100) : 0; };
+  /* A prefill is never a negative number: a credit balance means nothing is due, so the field starts at 0.00
+     and the decision starts on Nothing due today. Negatives on this screen read one way, through money(). */
+  const dollars = (c) => ((Number.isFinite(c) && c > 0 ? c : 0) / 100).toFixed(2);
+  /* An amount is the number the person typed or nothing at all. The old parser stripped every character it did
+     not like, so "abc" and "" became 0 (and the store posted the estimate instead) and "-50" became +$50.00. */
+  const MONEY_RE = /^-?(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/;
+  const cents = (s) => { const t = String(s == null ? '' : s).trim().replace(/[$,\s]/g, '').replace(/−/g, '-'); return MONEY_RE.test(t) ? Math.round(Number(t) * 100) : NaN; };
   const pressed = (b) => (b ? 'true' : 'false');
 
   function fresh(patientCents) {
-    return { decision: patientCents === 0 ? 'zero_due' : 'collect', tender: null, amountStr: dollars(patientCents), cardStr: '', selfPay: new Set(), writeoffOpen: false, writeoffStr: '', writeoffReason: null, cadence: 'monthly', pin: '', explainOpen: false, patientVoice: false, receipt: false, refusalNode: null, heldReq: null, requested: false, posted: null };
+    return { decision: patientCents > 0 ? 'collect' : 'zero_due', tender: null, amountStr: dollars(patientCents), cardStr: '', selfPay: new Set(), writeoffOpen: false, writeoffStr: '', writeoffReason: null, cadence: 'monthly', pin: '', explainOpen: false, patientVoice: false, receipt: false, refusalNode: null, heldReq: null, requested: false, posted: null };
   }
 
   /* Per-line estimate: the appointment-level patient portion spread by fee so the column sums to it. */
@@ -42,26 +49,44 @@
   }
 
   /* Every gate has one control. The store leaves a few controls null; supply the obvious one. */
-  function withControl(res, r, st) {
+  function withControl(res, r, a, st) {
     const v = { code: res.code, verb: res.verb, control: res.control, why: res.why };
     if (res.code === 'zero_collect_refused') { v.control = res.control || 'Nothing due today'; v.onControl = () => { st.decision = 'zero_due'; st.refusalNode = null; rerender(r, 'checkout.collect.seg.zero-due'); }; }
     else if (res.code === 'pin_required') { v.control = 'Enter PIN'; v.onControl = () => { const el = document.querySelector('[data-testid="checkout.pin"]'); if (el) el.focus(); }; }
     else if (res.code === 'tender_required') { v.control = 'Choose card'; v.onControl = () => { st.tender = 'card'; st.refusalNode = null; rerender(r, 'checkout.card.number'); }; }
+    // The control that says "Open the ledger" opens the ledger. Every unnamed code used to fall through to the
+    // Board, so the one gate whose label named a destination landed somewhere else.
+    else if (res.code === 'already_decided') { v.control = res.control || 'Open the ledger'; v.onControl = () => Proto.router.go(r.persona, 'ledger', a.patientId); }
     else if (res.code === 'outage') { v.control = res.control || 'Support line'; v.severity = 'stop'; v.onControl = () => Proto.router.announce('Support: 615-555-0100, answered 7 am to 6 pm Central'); }
     else { v.control = res.control || 'Back to Board'; v.onControl = () => Proto.router.go(r.persona, 'board'); }
     return v;
   }
 
+  /* A gate this screen raises: one verb line, one control, and the control goes to the field it names. */
+  function gate(r, st, v, focusTestid) {
+    st.refusalNode = refusal(Object.assign({}, v, { onControl: () => { const el = document.querySelector('[data-testid="' + focusTestid + '"]'); if (el && el.focus) el.focus(); } }));
+    rerender(r, 'refusal.control');
+  }
+  const AMOUNT_WHY = 'A payment posts the number in the field against the balance, so it cannot be blank, negative, or a value that is not a number. To take nothing at the window, choose Nothing due today.';
+  const WRITEOFF_WHY = 'A write-off posts the number in the field against the balance, so it cannot be blank, negative, or a value that is not a number. Remove the write-off to post without one.';
+
   function doPost(r, a, st) {
     const S = Proto.store.get();
     const before = snapshot(S);
     const approved = st.heldReq && st.heldReq.status === 'approved';
+    // The amount is read before anything posts: the store falls back to the estimate when the form says 0,
+    // so a blank field used to post $44.00 nobody entered.
+    const payCents = st.decision === 'collect' ? cents(st.amountStr) : 0;
+    if (st.decision === 'collect' && !(payCents > 0)) return gate(r, st, { code: 'amount_required', verb: 'Type an amount above zero', control: 'Go to amount', why: AMOUNT_WHY }, 'checkout.amount');
+    const woTyped = !approved && st.writeoffOpen && String(st.writeoffStr).trim() !== '';
+    const woCents = woTyped ? cents(st.writeoffStr) : 0;
+    if (woTyped && !(woCents > 0)) return gate(r, st, { code: 'amount_required', verb: 'Type an amount above zero', control: 'Go to amount', why: WRITEOFF_WHY }, 'checkout.writeoff.amount');
     const form = {
       decision: st.decision,
       tender: st.decision === 'collect' ? st.tender : null,
-      amountCents: st.decision === 'collect' ? cents(st.amountStr) : 0,
+      amountCents: st.decision === 'collect' ? payCents : 0,
       selfPay: [...st.selfPay],
-      writeoffCents: approved ? 0 : (st.writeoffOpen ? cents(st.writeoffStr) : 0),
+      writeoffCents: woCents,
       writeoffReason: st.writeoffReason || 'courtesy',
       cadence: st.cadence,
       pin: st.pin || null,
@@ -70,21 +95,25 @@
     const res = Proto.store.postCheckout(a.id, form);
     if (res.ok) {
       st.posted = diff(S, before); st.posted.form = form; st.refusalNode = null;
-      Proto.router.announce('Posted. ' + st.posted.ledger.length + ' ledger rows and the collection decision are written.');
+      Proto.router.announce('Posted');
       rerender(r, 'checkout.back');
       return;
     }
     if (res.held) {
-      st.heldReq = S.approvals.find((x) => x.id === res.requestId) || null;
+      // The request row is written when this control is pressed, by the store verb that owns it. Post writes
+      // nothing here, so a control labelled "Request approval" performs the request it names.
       st.refusalNode = refusal({ code: res.code, verb: res.verb, control: res.control || 'Request approval', why: res.why, onControl: () => {
-        st.requested = true;
-        Proto.router.announce('Approval requested — Dana or Dr. Reagan will see it on their phone. Request ' + res.requestId);
+        const out = Proto.store.requestApproval(res.pendingRequest);
+        if (!out.ok) { st.refusalNode = refusal(withControl(out, r, a, st)); rerender(r, 'refusal.control'); return; }
+        st.heldReq = Proto.store.get().approvals.find((x) => x.id === out.requestId) || null;
+        st.requested = true; st.refusalNode = null;
+        Proto.router.announce('Approval requested');
         rerender(r, 'checkout.post');
       } });
       rerender(r, 'refusal.control');
       return;
     }
-    st.refusalNode = refusal(withControl(res, r, st));
+    st.refusalNode = refusal(withControl(res, r, a, st));
     rerender(r, 'refusal.control');
   }
 
@@ -99,7 +128,7 @@
     const feeTotal = procs.reduce((s, p) => s + p.feeCents, 0);
     const rows = procs.map((p, i) => {
       const name = (S.cdt[p.cdt] || [p.cdt])[0];
-      const pre = p.selfPayRestricted ? chip('info', 'Restricted — no claim') : NEEDS_ATTACHMENT[p.cdt] ? chip('review', 'Needs: attachment') : chip('clear', 'Ready');
+      const pre = p.selfPayRestricted ? chip('info', 'Restricted — no claim') : needsAttachment(p) ? chip('review', 'Needs: attachment') : chip('clear', 'Ready');
       const on = st.selfPay.has(p.id);
       const toggle = btn('Paid in full — don\'t send to insurance', { kind: 'reversible', class: 'compact co-selfpay', testid: 'checkout.line.' + p.id + '.selfpay', pressed: pressed(on), ariaLabel: 'Paid in full, do not send ' + name + ' to insurance', onClick: () => { if (on) st.selfPay.delete(p.id); else st.selfPay.add(p.id); rerender(null, 'checkout.line.' + p.id + '.selfpay'); } });
       toggle.dataset.fee = p.feeCents; toggle.hidden = !coversNow(p.feeCents) || !!p.selfPayRestricted;
@@ -115,9 +144,14 @@
       h('thead', null, h('tr', null, h('th', { text: 'Procedure' }), h('th', { class: 'num', text: 'Tooth' }), h('th', { class: 'num', text: 'Fee' }), h('th', { class: 'num co-est', text: 'Patient portion (estimate)' }), h('th', { text: 'Pre-flight' }), h('th', { text: 'Self-pay' }))),
       h('tbody', null, ...rows),
       h('tfoot', null, h('tr', null, h('th', { text: 'Totals' }), h('th'), h('th', { class: 'num', text: money(feeTotal) }), h('th', { class: 'num co-est', text: money(est.patientCents) + ' est.' }), h('th', { colspan: '2', class: 'small muted', text: 'Estimate is separate from the balance above; it never enters the ledger.' })))));
-    const why = h('details', null, h('summary', { class: 'co-summary', testid: 'checkout.estimate.why' }, 'How the estimate was built'),
+    const why = h('details', null, h('summary', { class: 'co-summary', testid: 'checkout.estimate.why' }, 'Why this estimate'),
       h('p', { class: 'hint', text: (est.note || 'No plan estimate on file.') + (est.insuranceCents ? ' Insurance est. ' + money(est.insuranceCents) + '.' : '') + (est.writeoffCents ? ' PPO write-off est. ' + money(est.writeoffCents) + '.' : '') }));
-    return section('Completed today', procs.length ? table : h('p', { class: 'muted', text: 'No completed procedures on this encounter.' }), why);
+    // An empty state says why it is empty and what to do next: with nothing charted there is nothing to bill,
+    // so the next move is the chart or a typed Nothing due today.
+    const empty = h('div', { class: 'stack' },
+      h('p', { class: 'muted', text: 'No completed procedures on this encounter.' }),
+      h('p', { class: 'hint', text: 'Open the chart to record what was done, or choose Nothing due today and send the patient on.' }));
+    return section('Completed today', procs.length ? table : empty, why);
   }
 
   function field(label, input, hint) {
@@ -127,8 +161,10 @@
     return { node: h('div', { class: 'field' }, h('label', { for: id, text: label }), input, hintEl), hint: hintEl, input };
   }
 
-  function paymentCard(r, a, st, est, procs) {
-    const zero = est.patientCents === 0;
+  function paymentCard(r, a, st, est, procs, finishRow) {
+    const S = Proto.store.get();
+    const policy = [];   // policy sentences live behind Why, never on the finish path (C6)
+    const zero = est.patientCents <= 0;
     const segs = (zero ? [['zero-due', 'Nothing due today']] : [['collect', 'Collect']]).concat([['send-statement', 'Send statement'], ['payment-plan', 'Set up payment plan']]);
     const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Collection decision' }, ...segs.map(([code, label]) => btn(label, { testid: 'checkout.collect.seg.' + code, pressed: pressed(st.decision === SEG[code]), onClick: () => { st.decision = SEG[code]; st.refusalNode = null; rerender(r, 'checkout.collect.seg.' + code); } })));
     const body = h('div', { class: 'stack' });
@@ -141,36 +177,50 @@
         card.addEventListener('blur', () => { const d = st.cardStr.replace(/\D/g, ''); const bad = d.length > 0 && d.length < 12; card.classList.toggle('invalid', bad); cf.hint.textContent = bad ? 'That looks short for a card number; the hosted field will confirm before Post.' : 'Processor vault, PCI SAQ-A. Any digits are accepted in the prototype.'; });
         body.append(cf.node);
       }
-      const amt = h('input', { class: 'input co-amount', type: 'text', inputmode: 'decimal', testid: 'checkout.amount', value: st.amountStr, onInput: (ev) => { st.amountStr = ev.target.value; const c = cents(st.amountStr); document.querySelectorAll('.co-selfpay').forEach((b) => { const restricted = b.closest('tr') && b.closest('tr').querySelector('.chip.info'); b.hidden = !(c >= Number(b.dataset.fee)) || !!restricted; }); } });
+      const amt = h('input', { class: 'input co-amount', type: 'text', inputmode: 'decimal', testid: 'checkout.amount', value: st.amountStr, onInput: (ev) => { st.amountStr = ev.target.value; if (st.refusalNode) { st.refusalNode = null; rerender(r, 'checkout.amount'); return; } const c = cents(st.amountStr); document.querySelectorAll('.co-selfpay').forEach((b) => { const restricted = b.closest('tr') && b.closest('tr').querySelector('.chip.info'); b.hidden = !(c >= Number(b.dataset.fee)) || !!restricted; }); } });
       const af = field('Amount', amt, 'Prefilled with the patient portion estimate.');
       amt.addEventListener('blur', () => { const c = cents(st.amountStr); const bad = !(c > 0); amt.classList.toggle('invalid', bad); af.hint.textContent = bad ? 'Enter an amount above $0, or choose Nothing due today.' : 'Prefilled with the patient portion estimate.'; });
-      body.append(h('div', { class: 'co-two' }, af.node, h('p', { class: 'hint co-alloc', text: 'Allocates to oldest open charge first' + (procs.length && !(Proto.store.encounter(a.encounterId) || {}).noteFiled ? '; the note is not filed yet, so the payment waits as credit until charges post.' : '.') })));
+      const unfiled = procs.length && !(Proto.store.encounter(a.encounterId) || {}).noteFiled;
+      body.append(h('div', { class: 'co-two' }, af.node, unfiled ? h('p', { class: 'hint co-alloc', text: 'The note is not filed yet: this payment waits as credit until the charges post.' }) : null));
+      policy.push('Allocates to oldest open charge first' + (unfiled ? '; until the note is filed the payment waits as credit rather than landing on a charge.' : '.'));
     } else if (st.decision === 'send_statement') {
-      body.append(h('p', { class: 'muted', text: 'No ledger entry today. A statement-due row for ' + money(est.patientCents) + ' appears on Money Desk → Statements due, reason "window deferred". Reversible until the statement job runs.' }));
+      body.append(h('p', { class: 'muted', text: 'No ledger entry today. A statement-due row for ' + money(est.patientCents) + ' appears on Money Desk → Statements due.' }));
+      policy.push('The window defers the balance to a statement, and the decision is reversible until the statement job runs.');
     } else if (st.decision === 'payment_plan') {
-      body.append(h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Cadence' }, ...CADENCES.map(([code, label]) => btn(label, { testid: 'checkout.plan.cadence.' + code, pressed: pressed(st.cadence === code), onClick: () => { st.cadence = code; rerender(r, 'checkout.plan.cadence.' + code); } }))));
-      body.append(h('p', { class: 'muted', text: 'Only patient-due charges are eligible; Waiting-on-insurance charges greyed. Plan for ' + money(est.patientCents) + ', ' + CADENCES.find((c) => c[0] === st.cadence)[1].toLowerCase() + ', on the processor token.' }));
+      body.append(h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Cadence' }, ...CADENCES.map(([code, label]) => btn(label, { testid: 'checkout.plan.cadence.' + code, pressed: pressed(st.cadence === code), onClick: () => { st.cadence = code; st.refusalNode = null; rerender(r, 'checkout.plan.cadence.' + code); } }))));
+      body.append(h('p', { class: 'muted', text: 'Plan for ' + money(est.patientCents) + ', ' + CADENCES.find((c) => c[0] === st.cadence)[1].toLowerCase() + ', on the processor token.' }));
+      policy.push('Only patient-due charges are eligible; charges waiting on insurance are greyed.');
     } else {
-      body.append(h('p', { class: 'muted', text: 'Patient portion is $0. Post still writes the collection decision (reason zero_due) so the day\'s "Not collected at window" line stays honest.' }));
+      body.append(h('p', { class: 'muted', text: 'Nothing due today; there is nothing to collect at the window.' }));
+      policy.push('Post still writes the typed decision, so the day\'s "Not collected at window" line stays honest.');
     }
-    return section('Payment', seg, body, writeoffBlock(r, st));
+    const wo = writeoffBlock(r, st, policy);
+    // Why: the same sentences, one tap away, off the path between the decision and Post (C6).
+    const why = h('details', null, h('summary', { class: 'co-summary', testid: 'checkout.payment.why' }, 'Why this decision'),
+      ...policy.map((t) => h('p', { class: 'hint', text: t })));
+    return section('Payment', seg, body, wo, finishRow, why);
   }
 
-  function writeoffBlock(r, st) {
+  function writeoffBlock(r, st, policy) {
     const S = Proto.store.get();
     if (st.heldReq && st.heldReq.status === 'approved') return h('div', { class: 'row' }, chip('clear', 'Write-off ' + money(st.heldReq.amountCents) + ' approved by ' + st.heldReq.decidedBy), h('span', { class: 'small muted', text: 'Already on the ledger; Post writes the rest.' }));
-    if (!st.writeoffOpen) return h('div', null, btn('Add write-off or adjustment', { kind: 'reversible', testid: 'checkout.writeoff.add', onClick: () => { st.writeoffOpen = true; rerender(r, 'checkout.writeoff.amount'); } }));
-    const amt = h('input', { class: 'input co-amount', type: 'text', inputmode: 'decimal', testid: 'checkout.writeoff.amount', value: st.writeoffStr, onInput: (ev) => { st.writeoffStr = ev.target.value; } });
-    const wf = field('Write-off amount', amt, 'At or above ' + money(S.tenant.dualReleaseThresholdCents) + ' a second approver is needed; the posting is held, never silently allowed.');
+    if (!st.writeoffOpen) return h('div', null, btn('Add write-off or adjustment', { kind: 'reversible', testid: 'checkout.writeoff.add', onClick: () => { st.writeoffOpen = true; st.refusalNode = null; rerender(r, 'checkout.writeoff.amount'); } }));
+    policy.push('At or above ' + money(S.tenant.dualReleaseThresholdCents) + ' a second approver is needed; the posting is held, never silently allowed.');
+    const amt = h('input', { class: 'input co-amount', type: 'text', inputmode: 'decimal', testid: 'checkout.writeoff.amount', value: st.writeoffStr, onInput: (ev) => { st.writeoffStr = ev.target.value; if (st.refusalNode) { st.refusalNode = null; rerender(r, 'checkout.writeoff.amount'); } } });
+    const wf = field('Write-off amount', amt, 'The dollar amount to write off this account.');
     amt.addEventListener('blur', () => { const bad = st.writeoffStr.trim() !== '' && !(cents(st.writeoffStr) > 0); amt.classList.toggle('invalid', bad); if (bad) wf.hint.textContent = 'Enter a dollar amount, or remove the write-off.'; });
-    const reasons = h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Reason code' }, ...REASONS.map(([code, label]) => btn(label, { testid: 'checkout.writeoff.reason.' + code, pressed: pressed(st.writeoffReason === code), onClick: () => { st.writeoffReason = code; rerender(r, 'checkout.writeoff.reason.' + code); } })));
-    const remove = btn('Remove write-off', { kind: 'quiet', class: 'compact', testid: 'checkout.writeoff.add', pressed: 'true', onClick: () => { st.writeoffOpen = false; st.writeoffStr = ''; st.writeoffReason = null; rerender(r, 'checkout.writeoff.add'); } });
+    const reasons = h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Reason code' }, ...REASONS.map(([code, label]) => btn(label, { testid: 'checkout.writeoff.reason.' + code, pressed: pressed(st.writeoffReason === code), onClick: () => { st.writeoffReason = code; st.refusalNode = null; rerender(r, 'checkout.writeoff.reason.' + code); } })));
+    // One id, one verb: the control that removes the write-off is not the control that adds it.
+    const remove = btn('Remove write-off', { kind: 'quiet', class: 'compact', testid: 'checkout.writeoff.remove', onClick: () => { st.writeoffOpen = false; st.writeoffStr = ''; st.writeoffReason = null; st.refusalNode = null; rerender(r, 'checkout.writeoff.add'); } });
     return h('div', { class: 'stack co-writeoff', 'aria-label': 'Write-off or adjustment' }, h('div', { class: 'co-two' }, wf.node, h('div', { class: 'field' }, h('label', { text: 'Reason code' }), reasons)), remove);
   }
 
   function postRow(r, a, st) {
     const P = window.__proto;
     const held = st.heldReq && st.heldReq.status === 'pending';
+    // While a gate is on screen the primary never keeps the irreversible identity: it switches to Held, and the
+    // verb line beside it says what to do next (CONTRACTS §6).
+    const gated = !held && !!st.refusalNode;
     const row = h('div', { class: 'co-postrow' });
     if (P.device === 'shared') {
       const pin = h('input', { class: 'input co-pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', testid: 'checkout.pin', value: st.pin, onInput: (ev) => { st.pin = ev.target.value; } });
@@ -178,8 +228,10 @@
       row.append(field('Your PIN', pin, 'Shared desk: the PIN makes you the frozen poster for this posting.').node);
     }
     if (held) {
-      row.append(btn('Held', { kind: 'held', testid: 'checkout.post', ariaLabel: 'Held: waiting on a second approver', onClick: () => Proto.router.announce('Held. Waiting on ' + (st.heldReq.eligible || []).slice(0, 2).join(' or ') + ' for request ' + st.heldReq.id) }));
+      row.append(btn('Post', { kind: 'held', testid: 'checkout.post', ariaLabel: 'Held: waiting on a second approver', onClick: () => Proto.router.announce('Waiting on ' + ((st.heldReq.eligible || []).slice(0, 2).join(' or ') || 'a second approver')) }));
       if (st.requested) row.append(h('span', { class: 'row' }, chip('review', 'Request ' + st.heldReq.id + ' waiting'), h('span', { class: 'small muted', text: 'Dana or Dr. Reagan will see it on their phone; this screen flips to Post when they approve.' })));
+    } else if (gated) {
+      row.append(btn('Post', { kind: 'held', testid: 'checkout.post', ariaLabel: 'Held: Post', onClick: () => { const el = document.querySelector('[data-testid="refusal.control"]'); if (el && el.focus) el.focus(); } }));
     } else {
       row.append(btn('Post', { kind: 'irreversible', testid: 'checkout.post', onClick: () => doPost(r, a, st) }));
       if (st.heldReq && st.heldReq.status !== 'approved') row.append(chip('info', 'Write-off ' + st.heldReq.status.replace(/_/g, ' ') + ' by ' + (st.heldReq.decidedBy || 'approver')));
@@ -191,13 +243,17 @@
     const S = Proto.store.get(); const p = st.posted;
     const li = (t) => h('li', { text: t });
     const items = [];
-    p.ledger.forEach((e) => items.push(li((KIND_WORD[e.kind] || e.kind) + ' ' + money(Math.abs(e.amountCents)) + (e.tender ? ' by ' + e.tender : '') + (e.cdt ? ' · ' + (S.cdt[e.cdt] || [e.cdt])[0] : '') + (e.gl === 'unapplied_credit' ? ' · held as credit until the note is filed' : '') + ' · ' + e.id)));
-    p.allocations.forEach((x) => items.push(li('Allocation ' + money(x.amountCents) + ' from ' + x.paymentId + ' to ' + x.chargeId)));
-    p.intents.forEach((x) => items.push(li('Allocation intent ' + money(x.amountCents) + ' waits for charges on ' + x.encounterId + ' (Filed-later lane)')));
-    p.statements.forEach((x) => items.push(li('Statement due ' + money(x.amountCents) + ' · window deferred · ' + x.id)));
-    p.plans.forEach((x) => items.push(li('Payment plan ' + money(x.amountCents) + ' ' + x.cadence + ' · ' + x.id)));
-    p.events.forEach((x) => items.push(li('Self-pay restriction on ' + x.procedureId + ': claim assembly refuses it')));
-    p.decisions.forEach((d) => items.push(li('Collection decision ' + d.id + ': ' + DECISION_WORD[d.decision] + ', patient portion ' + money(d.patientPortionCents) + ', decided by ' + d.decidedBy)));
+    // The card names what was written in the words a person reads: storage row ids stay out of it (C3).
+    const procName = (pid) => { const x = S.procedures.find((y) => y.id === pid); return x ? (S.cdt[x.cdt] || [x.cdt])[0] + (x.tooth ? ' #' + x.tooth : '') : 'this procedure'; };
+    const chargeName = (lid) => { const e = S.ledger.find((y) => y.id === lid); return e && e.cdt ? (S.cdt[e.cdt] || [e.cdt])[0] + (e.tooth ? ' #' + e.tooth : '') : 'the oldest open charge'; };
+    const cadenceWord = (code) => ((CADENCES.find((c) => c[0] === code) || [null, code])[1] || '').toLowerCase();
+    p.ledger.forEach((e) => items.push(li((KIND_WORD[e.kind] || e.kind) + ' ' + money(Math.abs(e.amountCents)) + (e.tender ? ' by ' + e.tender : '') + (e.cdt ? ' · ' + (S.cdt[e.cdt] || [e.cdt])[0] : '') + (e.gl === 'unapplied_credit' ? ' · held as credit until the note is filed' : ''))));
+    p.allocations.forEach((x) => items.push(li('Applied ' + money(x.amountCents) + ' to ' + chargeName(x.chargeId))));
+    p.intents.forEach((x) => items.push(li('Allocation intent ' + money(x.amountCents) + ' waits for this visit\'s charges (Filed-later lane)')));
+    p.statements.forEach((x) => items.push(li('Statement due ' + money(x.amountCents) + ' · goes out on the next statement run')));
+    p.plans.forEach((x) => items.push(li('Payment plan ' + money(x.amountCents) + ', ' + cadenceWord(x.cadence))));
+    p.events.forEach((x) => items.push(li('Self-pay restriction on ' + procName(x.procedureId) + ': claim assembly refuses it')));
+    p.decisions.forEach((d) => items.push(li('Collection decision: ' + DECISION_WORD[d.decision] + ', patient portion ' + money(d.patientPortionCents) + ', decided by ' + d.decidedBy)));
     const receipt = st.receipt ? h('div', { class: 'explain', 'aria-label': 'Receipt, patient voice' }, h('p', { class: 'small muted', text: 'Receipt for ' + displayName(pt.name, window.__proto.privacy) + ' · ' + Proto.ui.longDate(S.tenant.today) + ' · patient voice, no reason codes or poster names' }),
       ...p.ledger.filter((e) => e.kind === 'patient_payment').map((e) => h('p', { class: 'sentence', text: 'You paid ' + money(-e.amountCents) + ' today by ' + e.tender + '.' })),
       ...Proto.store.explain(a.patientId).map((s) => h('p', { class: 'sentence', text: s.patientVoice })),
@@ -216,7 +272,9 @@
       h('p', { class: 'small muted', text: st.patientVoice ? 'Patient voice: no reason codes, no poster names; estimates labelled "estimate". Turn the screen or print.' : 'Staff voice: one sentence per charge from ledger rows and allocations; estimates never join.' })) : null;
     return section('Balance', h('div', { class: 'btnrow' },
       btn('Explain', { kind: 'reversible', testid: 'checkout.explain', pressed: pressed(st.explainOpen), onClick: () => { st.explainOpen = !st.explainOpen; rerender(r, 'checkout.explain'); } }),
-      st.explainOpen ? btn(st.patientVoice ? 'Show staff' : 'Show patient', { kind: 'reversible', testid: 'checkout.showpatient', pressed: pressed(st.patientVoice), onClick: () => { st.patientVoice = !st.patientVoice; rerender(r, 'checkout.showpatient'); } }) : null), panel);
+      // One toggle, one label, on Checkout and on the Ledger alike: the press mark and aria-pressed carry the
+      // state, and the accessible name says how to get back.
+      st.explainOpen ? btn('Show patient', { kind: 'reversible', testid: 'checkout.showpatient', pressed: pressed(st.patientVoice), ariaLabel: st.patientVoice ? 'Patient view on. Switch back to the staff view' : 'Show the patient view: same rows, plain words, no reason codes or poster names', onClick: () => { st.patientVoice = !st.patientVoice; rerender(r, 'checkout.showpatient'); } }) : null), panel);
   }
 
   /* --- screen --- */
@@ -226,7 +284,9 @@
     const S = Proto.store.get(); const P = window.__proto; const aid = r.id;
     if (stateOwner !== S) { for (const k of Object.keys(state)) delete state[k]; stateOwner = S; }
     const a = Proto.store.appt(aid);
-    if (!a) { Proto.screens.shell.mount(h('div', { class: 'stack' }, h('h1', { text: 'No appointment ' + (aid || '') }), btn('Back to Board', { kind: 'reversible', testid: 'checkout.back', onClick: () => Proto.router.go(r.persona, 'board') }))); return; }
+    // An id in the address that names no visit lands on the shell's Nothing-here screen, not on a fifth
+    // private heading that reads the raw id back to whoever typed it (A6).
+    if (!a) { Proto.router.go(r.persona, 'notfound'); return; }
     const pt = Proto.store.patient(a.patientId); const enc = Proto.store.encounter(a.encounterId);
     const est = S.estimates[aid] || { patientCents: a.balanceCents || 0, insuranceCents: 0, writeoffCents: 0, note: 'No plan estimate on file; the patient portion shown is the appointment balance.' };
     const st = state[aid] || (state[aid] = fresh(est.patientCents));
@@ -239,13 +299,15 @@
     const railBtn = Proto.screens.rail ? Proto.screens.rail.button(a.patientId, r, 'checkout.rail') : null;
     const head = pageHead('Checkout · ' + name, sub, railBtn, btn('Back to Board', { kind: 'reversible', testid: 'checkout.back', onClick: () => Proto.router.go(r.persona, 'board') }));
     const status = h('div', { class: 'row' },
-      enc && enc.noteFiled ? chip('clear', 'Note filed') : chip('review', 'Note unfiled — Filed-later lane'),
-      procs.some((p) => NEEDS_ATTACHMENT[p.cdt]) ? chip('review', 'Claim needs pre-flight') : chip('clear', 'Claim ready'),
+      enc && enc.noteFiled ? chip('clear', 'Note filed') : chip('review', 'Note unfiled — Filed later'),
+      procs.some((p) => needsAttachment(p)) ? chip('review', 'Claim needs pre-flight') : chip('clear', 'Claim ready'),
       !st.posted && String(a.status).startsWith('checked_out') ? chip('info', 'Already checked out') : null);
-    const page = h('div', { class: 'stack co-page' }, head, threeNumbers(bal), status, proceduresCard(S, a, st, procs, est, covers));
+    // The decision and its finish control come before the line-by-line detail, so Post is on screen without
+    // scrolling at 1280×900, 1024×768 and 420×860; the completed procedures read below it.
+    const page = h('div', { class: 'stack co-page' }, head, threeNumbers(bal), status);
     if (st.posted) page.append(postedCard(r, a, st, pt));
-    else page.append(paymentCard(r, a, st, est, procs), postRow(r, a, st));
-    page.append(explainCard(r, a, st));
+    else page.append(paymentCard(r, a, st, est, procs, postRow(r, a, st)));
+    page.append(proceduresCard(S, a, st, procs, est, covers), explainCard(r, a, st));
     Proto.screens.shell.mount(page);
   }
 

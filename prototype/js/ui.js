@@ -30,7 +30,12 @@
     const kind = opts.kind || 'quiet'; // irreversible | reversible | quiet | held
     // aria-pressed must be the word: h() would write boolean true as an empty attribute (aria-pressed="").
     const pressed = opts.pressed == null ? null : opts.pressed === true ? 'true' : opts.pressed === false ? 'false' : String(opts.pressed);
-    const b = h('button', { type: 'button', class: 'btn ' + kind + (opts.class ? ' ' + opts.class : ''), testid: opts.testid, onClick: opts.onClick, 'aria-pressed': pressed, 'aria-label': opts.ariaLabel, 'aria-describedby': opts.describedby, title: opts.title, disabled: opts.disabled }, label);
+    // A held primary reads exactly "Held". It used to keep whatever label it was given — "Close day",
+    // "Choose a reason above", "Held · day closed" — so the one word that names the identity was optional.
+    // What is held stays in the accessible name; the verb line beside it says what to do next.
+    const held = kind === 'held';
+    const visible = held ? 'Held' : label;
+    const b = h('button', { type: 'button', class: 'btn ' + kind + (opts.class ? ' ' + opts.class : ''), testid: opts.testid, onClick: opts.onClick, 'aria-pressed': pressed, 'aria-label': opts.ariaLabel || (held ? 'Held: ' + label : null), 'aria-describedby': opts.describedby, title: opts.title || (held ? String(label) : null), disabled: opts.disabled, dataset: opts.dataset }, visible);
     // Selection is never colour alone: a pressed control carries a check mark as well as its fill.
     if (pressed === 'true') b.prepend(h('span', { class: 'pressmark', 'aria-hidden': 'true', text: '✓' }));
     return b;
@@ -42,14 +47,29 @@
       h('span', { class: 'glyph', 'aria-hidden': 'true', text: GLYPH[severity] || '●' }), word);
   }
 
-  /* Refusal: one verb line, one control, a Why disclosure, an aria-live announcement. */
+  /* Refusal: one verb line, one control, a Why disclosure, an aria-live announcement of the verb alone. */
   let refusalSeq = 0;
+  let lastGate = null;                                  // the gate this screen has already logged and announced
+  function resetGates() { lastGate = null; }
   function refusal(v) {
     // v: {code, verb, control, onControl, why, severity}
     const id = 'ref-' + (++refusalSeq);
-    Proto.events.refusal(v.code, v.verb, v.control);
-    Proto.router.announce(v.verb + (v.control ? '. ' + v.control : ''));
-    const el = h('div', { class: 'refusal ' + (v.severity || 'required'), role: 'group', 'aria-labelledby': id, dataset: { code: v.code } },
+    const sev = v.severity || 'required';
+    // A screen that re-renders rebuilds the gate it is already showing. Logging and announcing on every
+    // construction turned one visible gate into six refusal events and read the verb aloud again each time,
+    // so the event log counted gates that were never raised. The same gate is logged once until it changes.
+    const key = v.code + '|' + v.verb + '|' + (v.control || '');
+    if (lastGate !== key) {
+      lastGate = key;
+      Proto.events.refusal(v.code, v.verb, v.control);
+      Proto.router.announce(v.verb);                    // one verb line: the control label is not read as a second sentence
+    }
+    // Two gates can stand on one page (a dialog over a screen). The contract selectors name the live one,
+    // so any gate already on the page gives them up rather than shadowing it.
+    for (const prior of document.querySelectorAll('[data-testid^="refusal."]')) prior.setAttribute('data-testid', prior.getAttribute('data-testid').replace('refusal.', 'refusal.prior.'));
+    const el = h('div', { class: 'refusal ' + sev, role: 'group', 'aria-labelledby': id, dataset: { code: v.code, severity: sev } },
+      h('span', { class: 'glyph', 'aria-hidden': 'true', text: GLYPH[sev] || '▲' }),   // severity three ways: glyph, word, fill
+      h('span', { class: 'sevword sr-only', text: sev === 'stop' ? 'Stop' : sev === 'required' ? 'Required' : sev === 'review' ? 'Review' : sev === 'clear' ? 'Clear' : 'Note' }),
       h('span', { class: 'verb', id, testid: 'refusal.verb', text: v.verb }),
       v.control ? btn(v.control, { kind: v.controlKind || 'reversible', testid: 'refusal.control', onClick: v.onControl, describedby: id }) : null,
       v.why ? h('details', null, h('summary', { testid: 'refusal.why' }, 'Why'), h('div', { class: 'whytext', text: v.why })) : null);
@@ -57,13 +77,32 @@
   }
 
   function money(cents) {
+    if (!Number.isFinite(cents)) return '—';
     const neg = cents < 0; const a = Math.abs(cents);
     return (neg ? '−' : '') + '$' + (a / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
-  function shortDate(iso) { const [y, m, d] = iso.split('-'); return Number(m) + '/' + Number(d); }
-  function longDate(iso) { const [y, m, d] = iso.split('-'); return Number(m) + '/' + Number(d) + '/' + y; }
-  function initials(name) { return name.split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase(); }
-  function displayName(name, privacy) { return privacy ? initials(name) : name; }
+  /* A formatter is called with whatever the record holds, including nothing. These returned "$NaN", threw,
+     or mis-parsed a stored timestamp; each now answers with an em dash rather than putting NaN on screen. */
+  function dateParts(v) { const s = String(v == null ? '' : v).trim().split(/[ T]/)[0]; const p = s.split('-'); return p.length === 3 && p.every((x) => x !== '' && Number.isFinite(Number(x))) ? p : null; }
+  function shortDate(iso) { const p = dateParts(iso); return p ? Number(p[1]) + '/' + Number(p[2]) : '—'; }
+  function longDate(iso) { const p = dateParts(iso); return p ? Number(p[1]) + '/' + Number(p[2]) + '/' + p[0] : '—'; }
+  // A stored "2026-09-03 08:40" reads as a date and a clock time, never as the raw string.
+  function dateTime(v) { const s = String(v == null ? '' : v).trim(); const t = (s.split(/[ T]/)[1] || '').slice(0, 5); const d = longDate(s); return d === '—' ? '—' : d + (t ? ' at ' + t : ''); }
+  /* One clock for every screen. The store holds 24-hour times; a person reads a 12-hour one. Chairs and the
+     Board each carried a private copy of this and the Patient Rail carried none, so the same 9 am appointment
+     read "9:00 am" on two screens and "09:00" on the third. */
+  function time(hhmm) {
+    const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm == null ? '' : hhmm).trim());
+    if (!m) return '—';
+    const hh = Number(m[1]); const mm = m[2];
+    if (!(hh >= 0 && hh <= 23) || Number(mm) > 59) return '—';
+    return ((hh + 11) % 12 + 1) + ':' + mm + (hh < 12 ? ' am' : ' pm');
+  }
+  const HONORIFIC = /^(dr|mr|mrs|ms|mx|prof|sr|fr)\.?$/i;
+  // Initials name the person, not the title: "Dr. Hana Kim" read "DH" in the author chip and "HK" in the
+  // chair strip, so one shared device showed the same dentist two ways.
+  function initials(name) { const parts = String(name == null ? '' : name).split(/\s+/).filter((p) => p && !HONORIFIC.test(p)); return parts.map((p) => p[0]).join('').slice(0, 2).toUpperCase() || '—'; }
+  function displayName(name, privacy) { return privacy ? initials(name) : (name == null ? '—' : name); }
 
   /* Dialog: focus trapped, Escape closes, returns close() */
   function dialog(content, opts) {
@@ -86,6 +125,8 @@
       }
     }
     document.addEventListener('keydown', onKey, true);
+    // The backdrop closes the dialog, so it is a control and carries an id like every other control.
+    overlay.setAttribute('data-testid', 'dialog.backdrop');
     overlay.addEventListener('click', (ev) => { if (ev.target === overlay && !opts.modal) close(); });
     root.append(overlay);
     const f = box.querySelector(opts.focus || 'input, button, [tabindex]');
@@ -101,5 +142,5 @@
     return h('div', { class: 'page-head' }, h('div', null, h('h1', { text: title }), sub ? h('p', { class: 'sub', text: sub }) : null), controls.length ? h('div', { class: 'btnrow' }, ...controls) : null);
   }
 
-  Proto.ui = { h, btn, chip, refusal, money, shortDate, longDate, initials, displayName, dialog, section, pageHead, GLYPH };
+  Proto.ui = { h, btn, chip, refusal, resetGates, money, shortDate, longDate, dateTime, time, initials, displayName, dialog, section, pageHead, GLYPH };
 })();
