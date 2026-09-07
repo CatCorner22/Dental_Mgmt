@@ -43,8 +43,7 @@
     return { formOpen: false, expanded: {}, form: { name: '', role: 'frontdesk', location: 'loc-1', end: '17:30', extra: [] }, touched: {}, previewOn: false, decision: null, saveGate: null, issued: null, credentialNote: false, previewKey: null, previewNode: null };
   }
   function state() { const s = S(); if (s !== lastStore) { lastStore = s; st = freshState(); } return st; }
-
-  const clock12 = (t) => { if (!/^\d{2}:\d{2}$/.test(t || '')) return t || '—'; const [hh, mm] = t.split(':').map(Number); return ((hh + 11) % 12 + 1) + ':' + String(mm).padStart(2, '0') + (hh < 12 ? ' am' : ' pm'); };
+  const clock12 = Proto.ui.time;                       // one clock for every screen (ui.js)
   const template = (code) => S().roleTemplates.find((t) => t.code === code);
   const roleLabel = (code) => { const t = template(code); return t ? t.label : (ROLE_LABEL[code] || code); };
   const entLabel = (e) => ENT_LABEL[e] || e;

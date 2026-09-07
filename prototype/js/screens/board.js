@@ -39,8 +39,8 @@
   const P = () => window.__proto;
   const byTime = (a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : a.id < b.id ? -1 : 1);
   const todays = () => S().appointments.filter((a) => a.locationId === 'loc-1');
-  const clock12 = (t) => { const [hh, mm] = t.split(':').map(Number); return ((hh + 11) % 12 + 1) + ':' + String(mm).padStart(2, '0') + (hh < 12 ? ' am' : ' pm'); };
-  const fmtTime = clock12;
+  const fmtTime = Proto.ui.time;                       // one clock for every screen (ui.js)
+  const clock12 = fmtTime;
   const minutesBetween = (a, b) => { const [ah, am] = a.split(':').map(Number); const [bh, bm] = b.split(':').map(Number); return (bh * 60 + bm) - (ah * 60 + am); };
   const provInitials = (u) => (u ? initials(u.name.replace(/^Dr\.\s+/, '')) : '—');
   const noteFiled = (a) => { const enc = Proto.store.encounter(a.encounterId); return !!(enc && enc.noteFiled) || S().filedNotes.some((f) => f.encounterId === a.encounterId); };

@@ -51,7 +51,7 @@
   const eventsOf = (encId) => S().chartEvents.filter((c) => c.encounterId === encId && c.kind !== 'reversal' && !c.reversed);
   const filedOf = (encId) => S().filedNotes.filter((f) => f.encounterId === encId).pop() || null;
   const referralLine = (a) => a.referral ? 'Referred by ' + a.referral.from + ': ' + a.referral.reason + (a.referral.recordsForwarded ? '; records forwarded' : '; records not yet received') : null;
-  const clock12 = (t) => { const [hh, mm] = t.split(':').map(Number); return ((hh + 11) % 12 + 1) + ':' + String(mm).padStart(2, '0') + (hh < 12 ? ' am' : ' pm'); };
+  const clock12 = Proto.ui.time;                       // one clock for every screen (ui.js)
   const surfLabel = (tooth, s) => (s === 'O' && ANTERIOR.includes(tooth)) ? 'I' : s;
   const surfWord = { M: 'Mesial', O: 'Occlusal', D: 'Distal', B: 'Buccal', L: 'Lingual', I: 'Incisal' };
   function scaffoldLine(ce) {

@@ -88,6 +88,16 @@
   function longDate(iso) { const p = dateParts(iso); return p ? Number(p[1]) + '/' + Number(p[2]) + '/' + p[0] : '—'; }
   // A stored "2026-09-03 08:40" reads as a date and a clock time, never as the raw string.
   function dateTime(v) { const s = String(v == null ? '' : v).trim(); const t = (s.split(/[ T]/)[1] || '').slice(0, 5); const d = longDate(s); return d === '—' ? '—' : d + (t ? ' at ' + t : ''); }
+  /* One clock for every screen. The store holds 24-hour times; a person reads a 12-hour one. Chairs and the
+     Board each carried a private copy of this and the Patient Rail carried none, so the same 9 am appointment
+     read "9:00 am" on two screens and "09:00" on the third. */
+  function time(hhmm) {
+    const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm == null ? '' : hhmm).trim());
+    if (!m) return '—';
+    const hh = Number(m[1]); const mm = m[2];
+    if (!(hh >= 0 && hh <= 23) || Number(mm) > 59) return '—';
+    return ((hh + 11) % 12 + 1) + ':' + mm + (hh < 12 ? ' am' : ' pm');
+  }
   const HONORIFIC = /^(dr|mr|mrs|ms|mx|prof|sr|fr)\.?$/i;
   // Initials name the person, not the title: "Dr. Hana Kim" read "DH" in the author chip and "HK" in the
   // chair strip, so one shared device showed the same dentist two ways.
@@ -132,5 +142,5 @@
     return h('div', { class: 'page-head' }, h('div', null, h('h1', { text: title }), sub ? h('p', { class: 'sub', text: sub }) : null), controls.length ? h('div', { class: 'btnrow' }, ...controls) : null);
   }
 
-  Proto.ui = { h, btn, chip, refusal, resetGates, money, shortDate, longDate, dateTime, initials, displayName, dialog, section, pageHead, GLYPH };
+  Proto.ui = { h, btn, chip, refusal, resetGates, money, shortDate, longDate, dateTime, time, initials, displayName, dialog, section, pageHead, GLYPH };
 })();

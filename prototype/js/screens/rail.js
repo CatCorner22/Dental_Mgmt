@@ -112,7 +112,7 @@
     const next = as.find((a) => !['checked_out', 'checked_out_unfiled', 'note_filed'].includes(a.status));
     const prov = (a) => (Proto.store.user(a.providerId) || {}).short || '—';
     const word = (a) => STATUS_WORD[a.status] || humanize(a.status);
-    const nextLine = next ? 'Next: today ' + next.time + ' ' + next.type + ' with ' + prov(next) + ', chair ' + next.op + ' (' + word(next) + ')' : as.length ? 'Next: nothing further today (' + word(as[as.length - 1]) + ')' : 'Next: nothing booked';
+    const nextLine = next ? 'Next: today ' + Proto.ui.time(next.time) + ' ' + next.type + ' with ' + prov(next) + ', chair ' + next.op + ' (' + word(next) + ')' : as.length ? 'Next: nothing further today (' + word(as[as.length - 1]) + ')' : 'Next: nothing booked';
     const lastCharge = st.ledger.filter((e) => e.patientId === pid && e.kind === 'charge' && e.effective < today()).sort((a, b) => b.effective.localeCompare(a.effective))[0];
     const lastLine = lastCharge ? 'Last: ' + longDate(lastCharge.effective) + (lastCharge.cdt ? ' ' + cdtName(lastCharge.cdt) + (lastCharge.tooth ? ' #' + lastCharge.tooth : '') : '') : 'Last: no prior visit on record';
     return [h('div', { text: nextLine }), h('div', { class: 'muted', text: lastLine })];

@@ -1,7 +1,9 @@
 /* Chairs (mine): hygienist home. One card per appointment in time order with the since-last-visit
    delta strip (what changed, what is due, what helped), alerts as stop chips, the recall chip,
-   Perio / Note / Ready-for-exam, an expander for coverage and forms, and the practice-level
-   perio completion line. P / N / R accelerators are active only while this route is mounted. */
+   one primary verb per card (Ready for exam once there is exam content, otherwise Chart perio),
+   an expander for coverage and forms, and the practice-level perio line counted from the rows.
+   P and N open the grid and the note; R moves the keyboard to Ready for exam and writes nothing
+   (an irreversible verb never executes from a bare key). Keys are live only while this route is mounted. */
 (function () {
   const Proto = window.Proto; const { h, btn, chip, refusal, money, displayName, pageHead } = Proto.ui;
   Proto.screens = Proto.screens || {};
@@ -13,12 +15,12 @@
     note_filed: ['clear', 'Note filed'], checked_out: ['clear', 'Done'], checked_out_unfiled: ['review', 'Filed later'],
   };
   const TYPE = { hygiene: ['clear', 'Hygiene'], restorative: ['style', 'Restorative'], exam: ['info', 'Exam'], surgery: ['stop', 'Surgery'], emergency: ['required', 'Emergency'] };
-  const ELIG = { green: ['clear', 'Eligible'], amber: ['review', 'Verify'], none: ['info', 'Self-pay'] };
+  // The same eligibility words the Patient Rail and the Board print: one word per stored value.
+  const ELIG = { green: ['clear', 'Active'], amber: ['review', 'Re-verify'], red: ['required', 'Inactive'], none: ['info', 'Self-pay'] };
   const READY_FROM = ['seated', 'in_chart'];
   const DONE = ['note_filed', 'checked_out', 'checked_out_unfiled', 'ready_for_exam'];
   const MED_HX = /anticoagulant|premed|apixaban|warfarin|antibiotic/i;
   const SUPPORT = 'Support: 615-555-0100, answered 7 am to 6 pm Central';
-  const PRACTICE_LINE = 'Perio completion this week: 71% (practice)';
 
   // Per-screen UI state; cleared whenever the store is rebuilt (window.__proto.reset).
   let lastStore = null;
@@ -29,16 +31,20 @@
   const S = () => Proto.store.get();
   const P = () => window.__proto;
   const byTime = (a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : a.id < b.id ? -1 : 1);
-  const fmtTime = (t) => { const [hh, mm] = t.split(':'); return Number(hh) + ':' + mm; };
-  const clock12 = (t) => { const [hh, mm] = t.split(':').map(Number); return ((hh + 11) % 12 + 1) + ':' + String(mm).padStart(2, '0') + (hh < 12 ? ' am' : ' pm'); };
+  // One shape for a clock time on this screen: the card head, the aria-label and the sub line read alike.
+  const fmtTime = Proto.ui.time;                       // one clock for every screen (ui.js)
   const ordinal = (n) => n + (n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th');
   const isHygienist = (u) => u.role === 'hygienist' || u.role === 'rdh';
 
   function syncStore() { const s = S(); if (s !== lastStore) { lastStore = s; gates = {}; expanded = {}; } }
 
-  /* Whole months between an ISO date and today (2026-09-03); 2025-07-01 -> 14. */
+  /* Whole months between an ISO date and today (2026-09-03); 2025-07-01 -> 14.
+     A record holds a date, an empty string or nothing at all: anything that is not an ISO date
+     answers null, so a missing last-visit date never throws and never prints NaN on a card. */
   function monthsAgo(iso) {
-    const [y1, m1, d1] = iso.split('-').map(Number); const [y2, m2, d2] = TODAY.split('-').map(Number);
+    const p = String(iso == null ? '' : iso).trim().split('-').map(Number);
+    if (p.length !== 3 || p.some((n) => !Number.isFinite(n))) return null;
+    const [y1, m1, d1] = p; const [y2, m2, d2] = TODAY.split('-').map(Number);
     let n = (y2 - y1) * 12 + (m2 - m1); if (d2 < d1) n -= 1; return Math.max(0, n);
   }
 
@@ -68,12 +74,23 @@
     if (today) out.push({ sev: 'clear', word: 'Perio charted today', text: today.probed + ' sites probed, deepest ' + today.deepest + ' mm' });
     for (const alert of pt.alerts || []) if (MED_HX.test(alert)) out.push({ sev: 'stop', word: 'Med hx changed', text: alert });
     const lp = lastPerio(a);
-    if (lp) { const m = monthsAgo(lp); out.push({ sev: m >= 12 ? 'review' : 'info', word: 'Perio', text: m + ' mo ago' }); }
+    const lpm = lp ? monthsAgo(lp) : null;
+    if (lpm != null) out.push({ sev: lpm >= 12 ? 'review' : 'info', word: 'Perio', text: lpm + ' mo ago' });
     if (a.bwxDue) out.push({ sev: 'review', word: 'BWX due', text: 'practice rule: 12 mo' });
     if (a.helpedLastTime) out.push({ sev: 'clear', word: 'What helped last time', text: a.helpedLastTime });
     return out;
   }
-  function recallDue(a) { const lp = lastPerio(a); return a.type === 'hygiene' && ((lp && monthsAgo(lp) >= 6) || !!a.bwxDue); }
+  function recallDue(a) { const m = lastPerio(a) ? monthsAgo(lastPerio(a)) : null; return a.type === 'hygiene' && ((m != null && m >= 6) || !!a.bwxDue); }
+
+  /* The practice line is counted from the rows the screen already reads, so a perio exam saved this
+     morning moves it: hygiene chairs at this location today, and how many of them are charted. */
+  function practiceLine() {
+    const s = S(); const today = s.tenant.today; const place = s.locations[0].name;
+    const hyg = s.appointments.filter((a) => a.locationId === 'loc-1' && a.type === 'hygiene');
+    if (!hyg.length) return 'Perio charted today (practice): no hygiene chairs at ' + place;
+    const charted = hyg.filter((a) => s.perioExams.some((e) => e.encounterId === a.encounterId && e.date === today)).length;
+    return 'Perio charted today (practice): ' + charted + ' of ' + hyg.length + ' hygiene chairs at ' + place;
+  }
 
   // ---- Re-render after a mutation ----------------------------------------------------------
   function after(r, announce, focusTestid) {
@@ -92,19 +109,17 @@
   // ---- Actions -----------------------------------------------------------------------------
   function goPerio(id, r) { const a = Proto.store.appt(id); if (a) Proto.router.go(r.persona, 'perio', a.encounterId); }
   function goNote(id, r) { const a = Proto.store.appt(id); if (a) Proto.router.go(r.persona, 'encounter', a.encounterId); }
+  /* The outage is the store's gate, not the screen's: readyForExam refuses while the server is
+     unreachable, with the verb the whole product uses, so the chair never invents a second one. */
   function doReady(id, r) {
     const a = Proto.store.appt(id); if (!a || !canReady(a)) return;
     const focusId = 'chairs.card.' + id + '.ready';
-    if (P().outage) {
-      gates[id] = gateFor({ code: 'outage', verb: 'Server unreachable — nothing writes', control: 'Support line', why: 'The exam request is an appointment event. During the outage the chair reads from the last fetch and accepts no writes; the request goes when the connection returns.' });
-      render(r); const b = document.querySelector('[data-testid="' + focusId + '"]'); if (b) b.focus(); return;
-    }
     const res = Proto.store.readyForExam(id);
     if (!res.ok) { gates[id] = gateFor(res); render(r); const b = document.querySelector('[data-testid="' + focusId + '"]'); if (b) b.focus(); return; }
     delete gates[id];
     Proto.store.retireChip('ready');
     const name = displayName(Proto.store.patient(a.patientId).name, P().privacy);
-    after(r, name + ' ready for exam: ' + ordinal(queuePosition(a)) + ' in queue. The Board chair strip shows Exam requested.', 'chairs.card.' + id + '.note');
+    after(r, name + ' ready for exam, ' + ordinal(queuePosition(a)) + ' in queue', 'chairs.card.' + id + '.note');
   }
   function toggleExpand(id, r) { expanded[id] = !expanded[id]; render(r); const el = document.querySelector('[data-testid="chairs.card.' + id + '.expand"]'); if (el) el.focus(); }
 
@@ -146,12 +161,16 @@
     det.append(h('details', null, h('summary', { class: 'small', testid: 'chairs.card.' + a.id + '.why' }, 'Why this strip'), h('p', { class: 'small muted', text: 'Deltas come from stored rows only: the medical-history alert on the patient, the last perio exam date, the bitewing interval (the practice\'s rule), and the last filed what-helped field. Nothing here is an AI guess. Card order is seat order; no per-person metric appears.' })));
     el.append(det);
 
+    /* One primary verb per card: Ready for exam once there is exam content to hand over, otherwise
+       Chart perio, the work that comes first. Write note stays a quiet second so the card names one
+       next step rather than two nouns of equal weight. */
+    const ready = canReady(a);
     const actions = h('div', { class: 'actions ch-actions' });
-    actions.append(btn('Perio', { kind: 'reversible', testid: 'chairs.card.' + a.id + '.perio', ariaLabel: 'Perio for ' + name + ', opens the grid at UR site 1', onClick: () => goPerio(a.id, r) }));
-    actions.append(btn('Note', { kind: 'reversible', testid: 'chairs.card.' + a.id + '.note', ariaLabel: 'Note for ' + name, onClick: () => goNote(a.id, r) }));
+    actions.append(btn('Chart perio', { kind: ready ? 'quiet' : 'reversible', testid: 'chairs.card.' + a.id + '.perio', ariaLabel: 'Chart perio for ' + name + ', opens the grid at UR site 1', onClick: () => goPerio(a.id, r) }));
+    actions.append(btn('Write note', { kind: 'quiet', testid: 'chairs.card.' + a.id + '.note', ariaLabel: 'Write the note for ' + name, onClick: () => goNote(a.id, r) }));
     if (Proto.screens.rail) actions.append(Proto.screens.rail.button(a.patientId, r, 'chairs.card.' + a.id + '.rail'));
-    if (canReady(a)) {
-      if (gates[a.id]) actions.append(btn('Held', { kind: 'held', testid: 'chairs.card.' + a.id + '.ready', ariaLabel: 'Ready for exam is held: ' + gates[a.id].verb, onClick: () => { const c = el.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); } }));
+    if (ready) {
+      if (gates[a.id]) actions.append(btn('Ready for exam', { kind: 'held', testid: 'chairs.card.' + a.id + '.ready', onClick: () => { const c = el.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); } }));
       else actions.append(btn('Ready for exam', { kind: 'irreversible', testid: 'chairs.card.' + a.id + '.ready', ariaLabel: 'Ready for exam: ' + name + ' joins the dentist\'s queue', onClick: () => doReady(a.id, r) }));
     }
     el.append(actions);
@@ -172,18 +191,28 @@
     const list = mine(); const open = list.filter((a) => !DONE.includes(a.status));
     if (k === 'p') { const a = open[0] || list[0]; if (a) goPerio(a.id, r); else Proto.router.announce('No chairs assigned to you today'); }
     if (k === 'n') { const a = open[0] || list[0]; if (a) goNote(a.id, r); else Proto.router.announce('No chairs assigned to you today'); }
-    if (k === 'r') { const a = list.find(canReady); if (a) doReady(a.id, r); else Proto.router.announce('Nobody is seated with exam content yet'); }
+    // R is an accelerator, not the verb: it puts the keyboard on Ready for exam, which is irreversible
+    // and is pressed on purpose. A bare key never writes an appointment event.
+    if (k === 'r') {
+      const a = list.find(canReady);
+      const b = a && document.querySelector('[data-testid="chairs.card.' + a.id + '.ready"]');
+      if (b) b.focus(); else Proto.router.announce('Nobody is seated with exam content yet');
+    }
   }
 
   // ---- Screen ------------------------------------------------------------------------------
   function render(r) {
     syncStore();
     const s = S(); const u = Proto.store.currentUser(); const list = mine(); const hyg = isHygienist(u);
-    const sub = clock12(s.clock.time) + ' · ' + list.length + ' chair' + (list.length === 1 ? '' : 's') + (hyg ? ' · yours' : ' · all hygiene chairs at ' + s.locations[0].name) + (P().outage ? ' · read-only during the outage' : '') + ' · keys: P perio, N note, R ready';
-    const page = h('div', { class: 'stack chairspage' }, pageHead('Chairs · mine', sub));
+    // The gate the outage raised belongs to the outage: once the server answers again the card offers the verb.
+    for (const id of Object.keys(gates)) if (gates[id].code === 'outage' && !s.outage) delete gates[id];
+    const sub = fmtTime(s.clock.time) + ' · ' + list.length + ' chair' + (list.length === 1 ? '' : 's') + (hyg ? ' · yours' : ' · all hygiene chairs at ' + s.locations[0].name + ' and yours') + (P().outage ? ' · read-only during the outage' : '') + ' · keys: P perio, N note, R focus Ready for exam';
+    // The heading names the set below it: for a hygienist that is her own chairs, for anyone else
+    // every hygiene chair at this location plus their own.
+    const page = h('div', { class: 'stack chairspage' }, pageHead(hyg ? 'Chairs · mine' : 'Chairs · hygiene and my own', sub));
     if (list.length) page.append(h('div', { class: 'ch-list', role: 'list', 'aria-label': 'Your chairs in seat order' }, ...list.map((a) => { const c = card(a, r); c.setAttribute('role', 'listitem'); return c; })));
     else page.append(h('section', { class: 'card stack', 'aria-label': 'No chairs' }, h('h2', { text: 'No chairs assigned to you today' }), h('p', { class: 'muted', text: 'The Board shows every chair at ' + s.locations[0].name + '.' }), h('div', { class: 'btnrow' }, btn('Open the Board', { kind: 'reversible', testid: 'chairs.empty.board', onClick: () => Proto.router.go(r.persona, 'board') }))));
-    page.append(h('p', { class: 'small muted practice-line', text: PRACTICE_LINE }));
+    page.append(h('p', { class: 'small muted practice-line', text: practiceLine() }));
     Proto.screens.shell.mount(page);
     if (!keysOn) { document.addEventListener('keydown', onKey); keysOn = true; }
   }

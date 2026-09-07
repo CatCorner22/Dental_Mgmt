@@ -23,7 +23,7 @@
   let lastStore = null; let states = {}; let keysOn = false; let pathPref = 'facial_lingual'; let flashTimer = null;
   const toothOf = (key) => Number(key.slice(1, key.indexOf('-')));
   const siteOf = (key) => Number(key.slice(key.indexOf('-s') + 2));
-  const clock12 = (t) => { const [hh, mm] = t.split(':').map(Number); return ((hh + 11) % 12 + 1) + ':' + String(mm).padStart(2, '0') + (hh < 12 ? ' am' : ' pm'); };
+  const clock12 = Proto.ui.time;                       // one clock for every screen (ui.js)
 
   function syncStore() { const s = S(); if (s !== lastStore) { lastStore = s; states = {}; } }
   function priorExam(pid) { return S().perioExams.filter((e) => e.patientId === pid && e.date < TODAY).sort((a, b) => (a.date < b.date ? 1 : -1))[0] || null; }
