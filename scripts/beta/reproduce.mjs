@@ -507,17 +507,33 @@ if (fs.existsSync(AUDIT_DIR)) {
   }
 }
 
+/* A check that throws, or that finishes without recording anything, has measured nothing. It used to be
+   filed as reproduced:false, which prints and reads exactly like a refutation, so a probe disarmed by a
+   renamed control reported the defect fixed. Five of those were found by hand during the fix round. A check
+   that did not run is now its own outcome: printed as CRASH or NOTHING, counted apart from the refutations,
+   and enough on its own to fail the run. */
 const browser = await chromium.launch({ headless: true });
 try {
   for (const [id, fn] of Object.entries(CHECKS)) {
     if (ONLY && !ONLY.includes(id)) continue;
-    try { await fn(browser); } catch (e) { rec(id, 'check crashed', '', false, { error: e.message }); }
+    const before = results.length;
+    try {
+      await fn(browser);
+      if (!results.slice(before).some((r) => r.id === id)) rec(id, 'check recorded no result', '', false, { unmeasured: 'the check ran to completion without calling rec(), so nothing was measured' });
+    } catch (e) { rec(id, 'check crashed', '', false, { error: e.message }); }
   }
 } finally { await browser.close(); }
+for (const r of results) if (r.claim === 'check crashed' || r.claim === 'check recorded no result') r.measured = false;
 
 const out = args.json || path.join('/tmp/claude-0/-home-user-Dental-Mgmt/4c28e93a-776f-5803-ad14-686b00bc97f0/scratchpad', 'reproduce.json');
 fs.writeFileSync(out, JSON.stringify({ at: new Date().toISOString(), results }, null, 2));
 const yes = results.filter((r) => r.reproduced);
+const unmeasured = results.filter((r) => r.measured === false);
 console.log('id   reproduced  claim');
-for (const r of results) console.log(r.id.padEnd(4), (r.reproduced ? 'YES' : 'no ').padEnd(11), r.claim.slice(0, 95));
+for (const r of results) console.log(r.id.padEnd(4), (r.measured === false ? (r.claim === 'check crashed' ? 'CRASH' : 'NOTHING') : r.reproduced ? 'YES' : 'no ').padEnd(11), r.claim.slice(0, 95));
 console.log(`\n${yes.length} of ${results.length} reproduced. Detail: ${out}`);
+if (unmeasured.length) {
+  console.log(`\n${unmeasured.length} check${unmeasured.length === 1 ? '' : 's'} measured nothing and cannot be read as clean:`);
+  for (const r of unmeasured) console.log('  ' + r.id + ' — ' + (r.evidence.error || r.evidence.unmeasured));
+  process.exitCode = 1;
+}

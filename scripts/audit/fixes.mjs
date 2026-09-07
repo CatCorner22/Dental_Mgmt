@@ -25,13 +25,16 @@ const result = new Map((repro.results || repro).map((r) => [r.id, r]));
 const ev = (r) => { const e = r.evidence; return (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 200); };
 
 const out = {};
-const counts = { fixed: 0, open: 0, wontfix: 0, no_check: 0 };
+const counts = { fixed: 0, open: 0, wontfix: 0, no_check: 0, unmeasured: 0 };
 for (const [file, entries] of Object.entries(plan)) {
   for (const e of entries) {
     const declined = notes[e.root_id];
     if (declined && declined.status === 'wontfix') { out[e.root_id] = { status: 'wontfix', check: e.check, note: declined.note, file }; counts.wontfix++; continue; }
     const r = result.get(e.check);
     if (!r) { out[e.root_id] = { status: 'open', check: e.check, note: 'the check did not run', file }; counts.no_check++; continue; }
+    /* A check that crashed or recorded nothing carries reproduced:false, which would otherwise read as a fix.
+       It measured nothing, so it proves nothing: the root cause stays open and the run says why. */
+    if (r.measured === false) { out[e.root_id] = { status: 'open', check: e.check, note: 'the check measured nothing: ' + ev(r), file }; counts.unmeasured++; continue; }
     if (r.reproduced) { out[e.root_id] = { status: 'open', check: e.check, note: 'still reproduced: ' + ev(r), file }; counts.open++; continue; }
     out[e.root_id] = { status: 'fixed', check: e.check, note: ev(r), file };
     counts.fixed++;
@@ -39,5 +42,5 @@ for (const [file, entries] of Object.entries(plan)) {
 }
 
 fs.writeFileSync(need('out'), JSON.stringify(out, null, 1));
-console.error(`fixes: ${Object.keys(out).length} root causes — ${counts.fixed} fixed, ${counts.open} open, ${counts.wontfix} declined, ${counts.no_check} without a check result`);
+console.error(`fixes: ${Object.keys(out).length} root causes — ${counts.fixed} fixed, ${counts.open} open, ${counts.wontfix} declined, ${counts.unmeasured} whose check measured nothing, ${counts.no_check} without a check result`);
 if (counts.no_check) console.error('fixes: without a check result — ' + Object.entries(out).filter(([, v]) => v.note === 'the check did not run').map(([k, v]) => k + ' (' + v.check + ')').join(', '));
