@@ -181,11 +181,11 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         return { sectionAria: s.getAttribute('aria-label'), h2: (s.querySelector('h2') || {}).textContent || null,
           blurb: (s.querySelector('p') || {}).textContent || null,
           segAria: (s.querySelector('.seg') || {}).getAttribute ? s.querySelector('.seg').getAttribute('aria-label') : null,
-          confirmBefore: (s.querySelector('[data-testid="perio.licence.confirm"]') || {}).textContent || null };
+          reasonButtons: [...s.querySelectorAll('[data-testid^="perio.licence."]')].map((e) => e.getAttribute('data-testid')) };
       });
-      await click(p, 'perio.licence.not_tolerated'); await p.waitForTimeout(120);
-      const confirmAfter = await TXTOF(p, '[data-testid="perio.licence.confirm"]');
-      await click(p, 'perio.licence.confirm'); await p.waitForTimeout(350);
+      const confirmAfter = await TXTOF(p, '[data-testid="perio.licence.not_tolerated"]');
+      // Choosing the reason saves; the separate Confirm step was collapsed by the fix round (§7 tap budget).
+      await click(p, 'perio.licence.not_tolerated'); await p.waitForTimeout(350);
       const saved = await p.evaluate(() => {
         const s = document.querySelector('#canvas .pe-saved'); if (!s) return null;
         return { chip: (s.querySelector('.chip') || {}).textContent || null, h2: (s.querySelector('h2') || {}).textContent || null,
@@ -306,8 +306,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       const atSave = await ST(p, 'enc-9001');
       await click(p, 'perio.save'); await p.waitForTimeout(250);      // omission gate: 138 sites unprobed
       await click(p, 'refusal.control'); await p.waitForTimeout(200);
-      await click(p, 'perio.licence.implant'); await p.waitForTimeout(120);
-      await click(p, 'perio.licence.confirm'); await p.waitForTimeout(350);
+      await click(p, 'perio.licence.implant'); await p.waitForTimeout(350);   // the reason saves; Confirm was collapsed
       const afterSave = await ST(p, 'enc-9001');
       await click(p, 'perio.tag.add'); await p.waitForTimeout(200);
       const inputValue = await p.evaluate(() => { const e = document.querySelector('[data-testid="perio.tag.tooth"]'); return e ? e.value : null; });
@@ -337,22 +336,24 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       const seq0 = await SEQ(p);
       await click(p, 'perio.save'); await p.waitForTimeout(250);
       const gate = await GATE(p, 'omission_licence');
-      const licenceBtnsBeforeControl = await p.evaluate(() => document.querySelectorAll('[data-testid^="perio.licence."]').length);
-      await click(p, 'refusal.control'); await p.waitForTimeout(200);
-      const confirmBefore = await p.evaluate(() => { const e = document.querySelector('[data-testid="perio.licence.confirm"]'); return e ? { text: e.textContent.trim(), held: e.classList.contains('held') } : null; });
-      await click(p, 'perio.licence.implant'); await p.waitForTimeout(120);
-      await click(p, 'perio.licence.confirm'); await p.waitForTimeout(350);
+      /* Counts what the save actually costs rather than the old four-step shape. The original predicate
+         required taps === 4 AND a held `perio.licence.confirm`; once the fix round collapsed that step the
+         conjunction could never be true again, so the check would have reported clean even at five taps.
+         What §7 flow 2 budgets is Save plus one reason tap, so that is what is measured: the reasons must
+         stand on the page with the gate (no intervening control press) and the save must cost two taps. */
+      const licenceBtnsWithGate = await p.evaluate(() => document.querySelectorAll('[data-testid^="perio.licence."]:not([data-testid="perio.licence.cancel"])').length);
+      await click(p, 'perio.licence.implant'); await p.waitForTimeout(350);
       const evs = await AFTER(p, seq0);
       const taps = TAPS(evs).map((e) => ({ seq: e.seq, testid: e.testid }));
       const writes = WRITES(evs);
+      const wrote = writes.some((w) => w.table === 'perioExams');
       rec('A-screens-perio-2-7',
-        'Saving a chart with skipped sites costs four taps (Save, Choose a reason, the licence, Save exam with this reason) where CONTRACTS §7 flow 2 budgets Save plus one licence tap',
+        'Saving a chart with skipped sites costs more taps than CONTRACTS §7 flow 2 budgets (Save plus one reason tap), because the reasons do not stand on the page with the gate',
         'CHECKLIST A2 / CONTRACTS §7 flow 2 and §5 tap accounting',
-        taps.length === 4 && writes.some((w) => w.table === 'perioExams')
-          && licenceBtnsBeforeControl === 0 && !!confirmBefore && confirmBefore.held === true,
+        wrote && (taps.length > 2 || licenceBtnsWithGate === 0),
         { tapsFromSaveToWrite: taps, tapCount: taps.length, budgetedTaps: 2, contractsS7Flow2: S7_FLOW2,
-          writesInRange: writes, gate: gate,
-          licenceButtonsBeforeRefusalControl: licenceBtnsBeforeControl, confirmBeforeLicencePicked: confirmBefore });
+          writesInRange: writes, gate: gate, examWritten: wrote,
+          reasonButtonsStandingWithTheGate: licenceBtnsWithGate });
     } finally { await c.close(); }
   },
 

@@ -230,7 +230,8 @@ const CHECKS = {
     await click(p, 'perio.save'); await p.waitForTimeout(200);
     const verb = await txt(p, 'refusal.verb');
     await click(p, 'refusal.control'); await p.waitForTimeout(120);
-    await click(p, 'perio.licence.not_tolerated'); await click(p, 'perio.licence.confirm'); await p.waitForTimeout(200);
+    // Choosing the reason saves: the separate Confirm step was collapsed by the fix round (§7 tap budget).
+    await click(p, 'perio.licence.not_tolerated'); await p.waitForTimeout(200);
     const note = await p.evaluate(() => (window.__proto.state().notes['enc-9001'] || {}).perioSummary || '');
     rec('R20', 'The omission gate says "1 sites" and the derived note carries the raw licence code (not_tolerated)', 'docs/01: named omission licences read as words a patient-facing record can carry',
       /\b1 sites\b/.test(verb || '') || /_/.test(note), { verb, perioSummary: note });

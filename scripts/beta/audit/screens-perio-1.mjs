@@ -6,9 +6,12 @@ import fs from 'node:fs';
 const CONTRACTS = (() => { try { return fs.readFileSync(new URL('../../../prototype/CONTRACTS.md', import.meta.url), 'utf8'); } catch { return ''; } })();
 const section = (n) => { const m = CONTRACTS.match(new RegExp('\\n## ' + n + '\\.[^\\n]*\\n([\\s\\S]*?)(?=\\n## |$)')); return m ? m[1] : ''; };
 const S6_CODES = (() => { const t = section(6); const m = t.match(/Codes:([^\n]*)/); return m ? [...m[1].matchAll(/`([a-z_]+)`/g)].map((x) => x[1]) : []; })();
-const S4_PERIO_ROW = (() => { const t = section(4); const m = t.match(/\| Perio \|([^\n]*)\|/); return m ? m[1].trim() : ''; })();
+/* Every §4 row, not the Perio row alone: an id Perio renders can be listed on a cross-cutting row instead
+   (`perio.back` under screen-local returns and closers, `perio.saved.why` under Why disclosures,
+   `perio.full` under Perio beyond the grid). Reading one row made the check report ids the contract lists. */
+const S4_PERIO_ROW = (() => { const t = section(4); return t.split('\n').filter((l) => l.startsWith('|') && /`perio\.|`refusal\./.test(l)).join(' '); })();
 // §4 entries as patterns: `<1-9>` → [1-9], `<1-6>` → [1-6], any other `<name>` → one lowercase segment.
-const S4_PERIO_PATTERNS = [...S4_PERIO_ROW.matchAll(/`([^`]+)`/g)].map((m) => m[1]).map((id) => {
+const S4_PERIO_PATTERNS = [...S4_PERIO_ROW.matchAll(/`([^`]+)`/g)].map((m) => m[1]).filter((x) => /^(perio|refusal)\./.test(x)).map((id) => {
   const src = id.split(/(<[^>]+>)/).map((part) => {
     if (!part) return '';
     const rng = part.match(/^<(\d)-(\d)>$/); if (rng) return '[' + rng[1] + '-' + rng[2] + ']';

@@ -287,6 +287,41 @@
     for (const t of S.tags) if (t.encounterId === encId && t.tooth === tooth && !t.disposition) { t.disposition = 'charted'; touch('tags', t.id); }
     return { ok: true, chartEvent: ce, procedure: proc, plan };
   }
+  /* Undo reverses the last paint; it never deletes. The screen used to splice the chart event, its procedure
+     and its plan item out of their tables and log one write for an id no table held, which erased part of a
+     clinical record and left the note line behind. A reversal is written the way every other correction is:
+     a reversing chart event that names what it supersedes, the procedure and plan item marked reversed, the
+     note line withdrawn, the tag put back to open, and one event per table it touched (A3, A5). */
+  function chartUndo(encId) {
+    const enc = encounter(encId); if (!enc) return notFound('encounter');
+    const off = offline('Wait for the server — charting is paused'); if (off) return off;
+    const live = S.chartEvents.filter((c) => c.encounterId === encId && !c.reversed && c.kind !== 'reversal');
+    if (!live.length) return refuse('already_decided', 'Chart something before undoing it', 'Chart a tooth', 'Nothing has been painted on this visit yet, so there is nothing to reverse.');
+    const ce = live[live.length - 1];
+    if (enc.noteFiled) return refuse('already_decided', 'Amend the filed note instead', 'Open the note', 'The note is filed, so the paint is sealed. A correction after filing is an addendum that supersedes it, not an undo.');
+    ce.reversed = true; touch('chartEvents', ce.id);
+    const rev = write('chartEvents', { id: 'ce-' + nextId.ce++, encounterId: encId, kind: 'reversal', supersedes: ce.id, tooth: ce.tooth, surfaces: ce.surfaces, cdt: ce.cdt, temporality: ce.temporality, author: currentUser().name });
+    const proc = S.procedures.find((p) => p.chartEventId === ce.id && !p.reversed);
+    if (proc) { if (charged(proc)) { ce.reversed = false; touch('chartEvents', ce.id); return refuse('already_decided', 'Correct this visit from the ledger', 'Open the ledger', 'This procedure is already on the ledger. A charged procedure is corrected by a reversal and a repost from the ledger, both linked to the original.'); } proc.reversed = true; proc.status = 'reversed'; touch('procedures', proc.id); }
+    const plan = S.planItems.filter((pl) => pl.encounterId === encId && pl.cdt === ce.cdt && pl.tooth === ce.tooth && !pl.reversed).pop();
+    if (plan) { plan.reversed = true; touch('planItems', plan.id); }
+    const n = S.notes[encId];
+    if (n && n.procedures && n.procedures.length) { n.procedures = n.procedures.slice(0, -1); n.procedure = n.procedures.join('; '); }
+    for (const t of S.tags) if (t.encounterId === encId && t.tooth === ce.tooth && t.disposition === 'charted') { t.disposition = null; touch('tags', t.id); }
+    return { ok: true, reversal: rev, supersedes: ce.id, procedure: proc || null, plan: plan || null };
+  }
+  /* Dismissing a hygienist's finding is a change to the record, so the store writes it and the reason is
+     required: the screen used to set the disposition on the seed row itself. */
+  function dismissTag(tagId, reason) {
+    const t = S.tags.find((x) => x.id === tagId); if (!t) return notFound('request');
+    const off = offline('Wait for the server — the tag cannot be dismissed'); if (off) return off;
+    if (t.disposition) return refuse('already_decided', 'Open the tag to see its disposition', 'Open the tag', 'This finding already carries a disposition (' + t.disposition + '). Changing it is a new note, not a second dismissal.');
+    const text = String(reason || '').trim();
+    if (!text) return refuse('reason_required', 'Give a one-line reason', 'Type the reason', 'A dismissed hygienist finding stays in the record with why it was dismissed; the hygienist sees the reason on her card.');
+    t.disposition = 'dismissed'; t.reason = text; t.dispositionBy = currentUser().name; t.dispositionAt = S.tenant.today + ' ' + S.clock.time;
+    touch('tags', t.id);
+    return { ok: true, tag: t };
+  }
   function noteKillers(encId, note) {
     const enc = encounter(encId); const killers = [];
     const u = currentUser();
@@ -462,5 +497,5 @@
   reset = function (seedNum) { const s = _reset(seedNum); for (const t of TABLES) if (!s[t]) s[t] = []; return s; };
 
   const LICENCE_WORDS = { implant: 'implant', crown_margin: 'crown margin', not_tolerated: 'patient could not tolerate probing', third_molar_absent: 'third molar absent' };
-  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, addTag, readyForExam, chartPaint, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, sendStatement, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
+  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, addTag, readyForExam, chartPaint, chartUndo, dismissTag, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, sendStatement, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
 })();

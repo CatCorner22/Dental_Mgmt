@@ -4,10 +4,15 @@
    CSS consequences are measured through getComputedStyle only — document.styleSheets.cssRules throws
    over file:// and a swallowed error would silently report "no rules". */
 
-// CONTRACTS §4, the two rows that can put an id inside #canvas on an encounter route, quoted verbatim.
-const S4_ENCOUNTER_ROW = '`exams.row.<encId>`, `exams.row.<encId>.open`, `enc.tag.<tagId>.chart`, `enc.tag.<tagId>.dismiss`, `enc.tooth.<1-32>`, `enc.surface.<tooth>.<m|o|d|b|l>`, `enc.proc.<cdt>`, `enc.temporality.<today|planned|existing>`, `enc.note.field.<id>`, `enc.note.starter.<n>`, `enc.killer.<n>.fix`, `enc.readback.switch`, `enc.file`, `enc.undo`';
-const S4_REFUSAL_ROW = '`refusal.verb`, `refusal.control`, `refusal.why`';
-const S4_ENTRIES = (S4_ENCOUNTER_ROW + ', ' + S4_REFUSAL_ROW).match(/`([^`]+)`/g).map((x) => x.slice(1, -1));
+/* CONTRACTS §4, read from the file rather than quoted into this source. The check used to carry its own
+   copy of the Encounter and Refusal rows, so when §4 grew the cross-cutting rows (Patient Rail openers, Why
+   disclosures, screen-local returns and closers) the check went on measuring a contract that no longer
+   existed and reported four ids the contract does list. Every §4 row is read, because an id an encounter
+   route renders can be listed on a cross-cutting row rather than the Encounter one. */
+import fs from 'node:fs';
+const CONTRACTS = (() => { try { return fs.readFileSync(new URL('../../../prototype/CONTRACTS.md', import.meta.url), 'utf8'); } catch { return ''; } })();
+const S4_TEXT = (() => { const m = CONTRACTS.match(/\n## 4\.[^\n]*\n([\s\S]*?)(?=\n## |$)/); return m ? m[1] : ''; })();
+const S4_ENTRIES = [...new Set([...S4_TEXT.matchAll(/`([^`]+)`/g)].map((m) => m[1]).filter((x) => /^[a-z][a-z0-9]*(\.[a-z0-9<>|_-]+)+$/i.test(x)))];
 const s4Matcher = (entry) => new RegExp('^' + entry.split(/(<[^>]+>)/).map((piece) => {
   if (!piece.startsWith('<')) return piece.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const inner = piece.slice(1, -1);
@@ -431,7 +436,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         'CHECKLIST B1 / CONTRACTS §4 (every id in the DOM matches a §4 entry or pattern)',
         matcherControlOk && unmatched.length > 0,
         { unmatchedIds: unmatched, matchedCount: matched.length, totalIdsSeen: seen.length,
-          s4TextSearched: { encounterRow: S4_ENCOUNTER_ROW, refusalRow: S4_REFUSAL_ROW },
+          s4TextSearched: { rows: (S4_TEXT.match(/^\|/gm) || []).length, source: 'prototype/CONTRACTS.md §4, every row' },
           s4EntriesUsed: S4_ENTRIES, matcherControl: { ids: controls, allMatched: matcherControlOk },
           statesDriven: ['encounter/enc-9999 (not found)', 'encounter/enc-9002 (open)', 'enc.tag.tag-1.dismiss', 'after one paint'] });
     } finally { await c.close(); }

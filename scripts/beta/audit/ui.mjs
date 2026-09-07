@@ -81,12 +81,15 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const perioRefusal = refusalEvents(await after(p, seqB));
         const perioSave = await identity(p, 'perio.save');
         await clickIn(p, '#canvas', 'refusal.control'); await p.waitForTimeout(200);
-        const licenceConfirm = await identity(p, 'perio.licence.confirm');
+        /* Scored on whatever held button the gate actually leaves on the page, not on a named control: the
+           fix round collapsed the licence step, so `perio.licence.confirm` is gone and naming it made this
+           half of the check measure nothing at all while still reporting a clean result. */
         const perioHeldLabels = await heldButtons(p);
         const isHeld = (i) => !!i && i.held && /🔒/.test(i.before || '');
         const hasWordHeld = (i) => !!i && /\bHeld\b/.test(i.label);
+        const licenceConfirm = perioHeldLabels[0] || null;
         const closeScored = closeRefusal.some((e) => e.code === 'entitlement') && isHeld(closeBtn) && !hasWordHeld(closeBtn);
-        const perioScored = perioRefusal.some((e) => e.code === 'omission_licence') && isHeld(licenceConfirm) && !hasWordHeld(licenceConfirm);
+        const perioScored = perioRefusal.some((e) => e.code === 'omission_licence') && perioHeldLabels.length > 0 && perioHeldLabels.some((x) => !/\bHeld\b/.test(x.label));
         const allHeld = [...closeHeldLabels, ...perioHeldLabels];
         const offLabel = allHeld.filter((x) => !/\bHeld\b/.test(x.label));
         const distinctHeldLabels = [...new Set(allHeld.map((x) => x.label))];

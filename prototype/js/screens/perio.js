@@ -15,7 +15,8 @@
   const PATHS = [['facial_lingual', 'Facial around, then lingual'], ['quadrant', 'Quadrant by quadrant'], ['arch', 'Arch by arch']];
   const SEXTANTS = [['UR', '1–5'], ['UA', '6–11'], ['UL', '12–16'], ['LL', '17–21'], ['LA', '22–27'], ['LR', '28–32']];
   const OBS = [['caries', 'Suspected caries'], ['fracture', 'Fractured restoration'], ['recession', 'Recession ≥3 mm'], ['mobility', 'Mobility'], ['lesion', 'Soft-tissue lesion'], ['other', 'Other observation']];
-  const MEANING = { ' ': 'Bleeding toggled on the last site', s: 'Suppuration toggled on the last site', Backspace: 'Undo, step back', ArrowRight: 'Skip site (not probed)', ArrowDown: 'Skip site (not probed)', ArrowLeft: 'Step back', ArrowUp: 'Step back', PageDown: 'Next tooth', PageUp: 'Previous tooth' };
+  // The key meanings live in apply(), which returns the sentence the Settings echo and the announcement read.
+  // A second table of the same meanings was defined here and referenced nowhere, so the two wordings drifted.
 
   const S = () => Proto.store.get();
   const P = () => window.__proto;
@@ -44,15 +45,18 @@
     const prior = priorExam(enc.patientId);
     const missing = (prior && prior.missing) || [];
     const st = { encId: enc.id, prior: (prior && prior.sites) || {}, priorDate: prior ? prior.date : null, missing, path: buildPath(missing, pathPref), cur: 0, sites: {}, history: [], last: null, pendingZero: false,
-      mode: 'full', sextants: ['', '', '', '', '', ''], scur: 0, padOpen: false, settingsOpen: false, lastKey: null, keystrokes: 0, flash: null, stamp: null, gate: null, licenceOpen: false, licence: null, saved: null, savedAt: null,
-      tagOpen: false, tagTooth: '', tagText: '', tagTouched: false, tagged: [] };
+      mode: 'full', sextants: ['', '', '', '', '', ''], scur: 0, padOpen: false, settingsOpen: false, lastKey: null, keystrokes: 0, flash: null, stamp: null, gate: null, licenceOpen: false, saved: null, savedAt: null, amending: false,
+      tagOpen: false, tagTooth: '', tagText: '', tagToothTouched: false, tagTextTouched: false, tagged: [] };
     states[enc.id] = st; return st;
   }
   const curKey = (st) => st.path[st.cur] || null;
   const siteLabel = (key) => 'tooth ' + toothOf(key) + ' site ' + siteOf(key);
   const total = (st) => st.path.length;
   const probedCount = (st) => Object.values(st.sites).filter((v) => v.depth != null).length;
-  const skippedCount = (st) => Object.values(st.sites).filter((v) => v.skipped).length;
+  /* One count of "not probed", the one the save writes: every site on the path that carries no depth, whether it
+     was skipped with the arrow or never reached. Counting only arrow-skips made the gate say 165 and the chooser
+     it opened say 0 for the same chart. */
+  const skippedCount = (st) => st.path.filter((k) => !(st.sites[k] && st.sites[k].depth != null)).length;
   const deepest = (st) => Math.max(0, ...Object.values(st.sites).map((v) => v.depth || 0));
 
   // ---- Grammar core (shared by keys and the glove pad); returns the meaning shown in Settings ----
@@ -95,13 +99,17 @@
     flashTimer = setTimeout(() => { st.flash = null; const c = Proto.router.current(); if (c.route === 'perio' && c.id === st.encId) rerender(c); }, 4500);
   }
   function depthGate(st, depth) {
-    st.gate = { code: 'depth_gt_15', node: refusal({ code: 'depth_gt_15', verb: 'Depth ' + depth + ' mm is above the 15 mm limit', control: 'Re-enter the depth', why: 'Probing depths above 15 mm are not recordable; the site keeps its previous value and the cursor stays here. Type 0 then a digit for 10 to 15.', onControl: () => { st.gate = null; const c = Proto.router.current(); rerender(c); focusCell(st); } }) };
+    // Verb-first and eight words at most: the measured depth stays in the Why, where it cannot push the line over.
+    st.gate = { code: 'depth_gt_15', node: refusal({ code: 'depth_gt_15', verb: 'Type a depth of 15 mm or less', control: 'Re-enter the depth', why: 'Probing depths above 15 mm are not recordable; ' + depth + ' mm was refused, the site keeps its previous value and the cursor stays here. Type 0 then a digit for 10 to 15.', onControl: () => { st.gate = null; const c = Proto.router.current(); rerender(c); focusCell(st); } }) };
+  }
+  /* One sealed-exam gate for every way of reaching it: a grammar key, the Amend control, a lane segment. */
+  function openAmendGate(st, r) {
+    if (!st.amendGate) st.amendGate = refusal({ code: 'exam_sealed', verb: 'Amend the saved exam with an addendum', control: 'Start an addendum', onControl: () => { st.saved = null; st.savedAt = null; st.amendGate = null; st.amending = true; rerender(Proto.router.current()); }, why: 'A saved exam is the record. Keys no longer change it; an amendment is a new dated entry by you that links to the original, and the original is never overwritten.', severity: 'info' });
+    rerender(r || Proto.router.current());
+    return 'Exam is saved; start an addendum to change it';
   }
   function apply(st, k, r) {
-    if (st.saved) {
-      if (!st.amendGate) { st.amendGate = Proto.ui.refusal({ code: 'exam_sealed', verb: 'Exam is filed — amend adds an addendum', control: 'Start an addendum', onControl: () => { st.saved = null; st.savedAt = null; st.amendGate = null; st.amending = true; rerender(Proto.router.current()); }, why: 'A filed exam is the record. Keys no longer change it; an amendment is a new dated entry that links to the original.', severity: 'info' }); rerender(Proto.router.current()); }
-      return 'Exam is filed; start an addendum to change it';
-    }
+    if (st.saved) return openAmendGate(st, r);
     if (st.mode === 'screening') { const out = applyScreening(st, k); setTimeout(() => focusSextant(st), 0); return out; }
     if (/^[0-9]$/.test(k)) {
       const d = Number(k);
@@ -134,10 +142,13 @@
     if (r.route !== 'perio') { document.removeEventListener('keydown', onKey); keysOn = false; return; }
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
     const t = ev.target;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
-    if (document.querySelector('.overlay')) return;
+    if (document.querySelector('.overlay')) return;          // a real dialog owns Escape and every other key
     const enc = Proto.store.encounter(r.id); if (!enc) return;
     const st = stateFor(enc); const k = ev.key;
+    // Escape dismisses the inline sub-forms as it dismisses a dialog, from inside their fields too, and hands
+    // focus back to the control that opened them.
+    if (k === 'Escape' && (st.licenceOpen || st.tagOpen)) { ev.preventDefault(); closeInline(st, r); return; }
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
     const onCell = t && t.classList && t.classList.contains('psite');
     const onControl = t && !onCell && ['BUTTON', 'SUMMARY', 'A'].includes(t.tagName);
     // Enter and Tab stay native so every control is still keyboard-operable. Space does not:
@@ -167,48 +178,62 @@
     return out;
   }
   function mkGate(st, res, onControl) { st.gate = { code: res.code, node: refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, severity: res.code === 'outage' ? 'stop' : 'required', onControl: onControl || (() => {}) }) }; }
+  // A gate names the next thing to do, so the keyboard lands on it rather than on the Held primary behind it.
+  function focusGateControl() { const c = document.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); }
+  /* Who may author an exam: a clinical licence on the account, or a day pass that grants perio. The old test read
+     the device, so the same licence-less author was refused on shared glass and saved a clinical exam on a desk. */
+  const mayChart = (u) => !!u.licence || ((u.entitlements || []).indexOf('perio') >= 0);
   function doSave(st, r, licence) {
     const u = Proto.store.currentUser();
-    if (P().device === 'shared' && !u.licence) { mkGate(st, { code: 'pin_required', verb: 'Switch author to the hygienist before Save', control: 'Who is charting?', why: 'On a shared tablet the exam is attributed to the PIN author. ' + u.name + ' holds no clinical licence, so Save waits until the hygienist enters her PIN.' }, () => Proto.screens.shell.openPinPad(r)); rerender(r); return; }
-    if (st.mode === 'screening' && st.sextants.some((c) => c === '')) { const n = st.sextants.filter((c) => c === '').length; mkGate(st, { code: 'screening_incomplete', verb: 'Code ' + n + ' more sextant' + (n > 1 ? 's' : '') + ' before Save', control: 'Go to the first empty sextant', why: 'Screening saves six codes (0 to 4, or * for furcation, mobility, or recession). An empty box would read as 0.' }, () => { st.gate = null; st.scur = st.sextants.indexOf(''); rerender(r); const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); }); rerender(r); return; }
-    const res = Proto.store.savePerio(st.encId, buildSites(st), { mode: st.mode, licence: licence || undefined });
+    // The remedy here is "hand the chart to someone licensed", not "type your own PIN", so the code is the licence
+    // one and the control carries the one label this action has everywhere (Encounter, Phone, the pad's own dialog).
+    if (!mayChart(u)) { mkGate(st, { code: 'licence_scope', verb: 'Switch to a licensed author before Save', control: 'Switch author', why: 'The exam is attributed to the author who is signed in, and only a clinical licence or a day pass that grants perio can carry one. Switching author opens the PIN pad; nothing is written until then.' }, () => Proto.screens.shell.openPinPad(r)); rerender(r); focusGateControl(); return; }
+    if (st.mode === 'screening' && st.sextants.some((c) => c === '')) { const n = st.sextants.filter((c) => c === '').length; mkGate(st, { code: 'screening_incomplete', verb: 'Code ' + n + ' more sextant' + (n > 1 ? 's' : '') + ' before Save', control: 'Go to the first empty sextant', why: 'Screening saves six codes (0 to 4, or * for furcation, mobility, or recession). An empty box would read as 0.' }, () => { st.gate = null; st.scur = st.sextants.indexOf(''); rerender(r); const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); }); rerender(r); focusGateControl(); return; }
+    const res = Proto.store.savePerio(st.encId, buildSites(st), { mode: st.mode, licence: licence || undefined, amending: !!st.amending });
     if (!res.ok) {
-      if (res.code === 'omission_licence') mkGate(st, res, () => { st.licenceOpen = true; rerender(r); const b = document.querySelector('[data-testid="perio.licence.' + LICENCES[0][0] + '"]'); if (b) b.focus(); });
+      // The reasons open with the gate: the chart is finished, so the remaining decision is one tap, not three.
+      if (res.code === 'omission_licence') { st.licenceOpen = true; mkGate(st, res, () => { const b = document.querySelector('[data-testid="perio.licence.' + LICENCES[0][0] + '"]'); if (b) b.focus(); }); }
       else mkGate(st, res);
-      rerender(r); const c = document.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); return;
+      rerender(r); focusGateControl(); return;
     }
-    st.gate = null; st.licenceOpen = false; st.saved = res.exam; st.savedAt = S().clock.time; st.padOpen = false;
-    if (!st.tagTooth) { const deep = Object.entries(st.sites).filter(([, v]) => v.depth >= 5).sort((a, b) => b[1].depth - a[1].depth)[0]; st.tagTooth = deep ? String(toothOf(deep[0])) : ''; }
+    st.gate = null; st.licenceOpen = false; st.amending = false; st.saved = res.exam; st.savedAt = S().clock.time; st.padOpen = false;
     Proto.screens.shell.refreshAndon(r); if (Proto.screens.shell.refreshRail1) Proto.screens.shell.refreshRail1(r);
     rerender(r);
-    const note = S().notes[st.encId] || {};
-    Proto.router.announce('Exam saved. ' + (note.perioSummary || '') + ' ' + recallLine(st));
+    Proto.router.announce('Exam saved');   // one line; the card beside it carries the note, the recall and the count
     const b = document.querySelector('[data-testid="perio.tag.add"]'); if (b) b.focus();
   }
   function recallLine(st) {
     if (st.mode === 'screening') return st.sextants.some((c) => c === '3' || c === '4') ? 'Full chart due: a full six-point chart is booked into the next hygiene visit' : '6-month recall';
     return deepest(st) >= 5 ? '4-month perio maintenance with BWX' : '6-month recall';
   }
+  /* Escape leaves an inline sub-form the way it leaves a dialog, and focus returns to the control that opened it. */
+  function closeInline(st, r, which) {
+    const w = which || (st.licenceOpen ? 'reason' : 'tag');
+    if (w === 'reason' && st.licenceOpen) { st.licenceOpen = false; st.gate = null; rerender(r); const b = document.querySelector('[data-testid="perio.save"]'); if (b) b.focus(); return; }
+    if (st.tagOpen) { st.tagOpen = false; st.tagToothTouched = false; st.tagTextTouched = false; rerender(r); const b = document.querySelector('[data-testid="perio.tag.add"]'); if (b) b.focus(); }
+  }
   function saveTag(st, r) {
     const tooth = Number(st.tagTooth); const bad = !st.tagTooth || !Number.isInteger(tooth) || tooth < 1 || tooth > 32 || st.missing.includes(tooth) || !st.tagText.trim();
-    st.tagTouched = true;
+    st.tagToothTouched = true; st.tagTextTouched = true;
     if (bad) { rerender(r); const el = document.querySelector('[data-testid="' + (!st.tagText.trim() && st.tagTooth ? 'perio.tag.text' : 'perio.tag.tooth') + '"]'); if (el) el.focus(); return; }
     const res = Proto.store.addTag(st.encId, tooth, [], st.tagText.trim());
     if (!res.ok) { mkGate(st, res); rerender(r); return; }
-    st.tagged.push(res.tag); st.tagOpen = false; st.tagText = ''; st.tagTouched = false; Proto.store.retireChip('tag');
+    st.tagged.push(res.tag); st.tagOpen = false; st.tagText = ''; st.tagToothTouched = false; st.tagTextTouched = false; Proto.store.retireChip('tag');
     Proto.screens.shell.refreshAndon(r); if (Proto.screens.shell.refreshRail1) Proto.screens.shell.refreshRail1(r);
     rerender(r); Proto.router.announce('Tagged tooth ' + tooth + ' for the dentist. A finding, not a diagnosis.');
     const b = document.querySelector('[data-testid="perio.tag.add"]'); if (b) b.focus();
   }
 
   // ---- Pieces ----------------------------------------------------------------------------------
-  const TAG_HINT = 'A finding, not a diagnosis. The tag lands as a checklist row on the dentist\'s exam; sign refuses until it has a disposition.';
+  const TAG_HINT = 'A finding, not a diagnosis. The tag lands as a checklist row on the dentist\'s exam; the note cannot be filed until it has a disposition.';
   const TOOTH_MSG = ' Tooth must be 1 to 32 and present in the mouth.'; const TEXT_MSG = ' Say what you saw.';
   const toothInvalid = (st) => { const t = Number(st.tagTooth); return !st.tagTooth || !Number.isInteger(t) || t < 1 || t > 32 || st.missing.includes(t); };
   function validateTag(st) {
     const tooth = document.querySelector('[data-testid="perio.tag.tooth"]'); const text = document.querySelector('[data-testid="perio.tag.text"]'); const hint = document.getElementById('pe-tag-hint');
     if (!tooth || !text || !hint) return;
-    const tb = st.tagTouched && toothInvalid(st); const xb = st.tagTouched && !st.tagText.trim();
+    // One flag per field: a shared one marked the Observation invalid the moment the Tooth field was left,
+    // while the person was still typing into it.
+    const tb = st.tagToothTouched && toothInvalid(st); const xb = st.tagTextTouched && !st.tagText.trim();
     tooth.classList.toggle('invalid', tb); if (tb) tooth.setAttribute('aria-invalid', 'true'); else tooth.removeAttribute('aria-invalid');
     text.classList.toggle('invalid', xb); if (xb) text.setAttribute('aria-invalid', 'true'); else text.removeAttribute('aria-invalid');
     hint.textContent = TAG_HINT + (tb ? TOOTH_MSG : '') + (xb ? TEXT_MSG : '');
@@ -217,7 +242,10 @@
     const a = document.querySelector('.psite.active');
     if (!a) return;
     const b = a.getBoundingClientRect();
-    if (b.top < 90 || b.bottom > window.innerHeight - 8) a.scrollIntoView({ block: 'center', behavior: 'auto' });
+    /* The smallest scroll that reveals the cursor, so the glove pad above the grid stays on screen with it:
+       centring the cursor pushed the pad off the top, and the browser then scrolled it back when the tapped
+       key took focus, leaving the cursor below the fold. */
+    if (b.top < 90 || b.bottom > window.innerHeight - 8) a.scrollIntoView({ block: 'nearest', behavior: 'auto' });
   }
   function focusCell(st) { const key = curKey(st); const b = key && document.querySelector('[data-testid="perio.grid.cell.' + key + '"]'); if (b) b.focus(); }
   function cell(st, r, t, s) {
@@ -249,21 +277,25 @@
     }));
   }
   function pad(st, r) {
-    const key = (k, label, tid, extra) => btn(label, { kind: 'quiet', class: 'pe-padkey' + (extra ? ' ' + extra : ''), testid: tid, ariaLabel: label === '→' ? 'Skip site, not probed' : label === '⌫' ? 'Undo last entry' : undefined, onClick: () => viaPad(st, r, k) });
+    // The two word keys say Bleed and Supp, the words the legend and the announcements use; they carry the
+    // pad's small type rather than the digit type so the word fits inside its own 44 px key.
+    const key = (k, label, tid, cls) => btn(label, { kind: 'quiet', class: cls == null ? 'pe-padkey' : cls, testid: tid, ariaLabel: label === '→' ? 'Skip site, not probed' : label === '⌫' ? 'Undo last entry' : undefined, onClick: () => viaPad(st, r, k) });
     const keys = [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => key(String(n), String(n), 'perio.pad.key.' + n));
     return h('div', { class: 'pad', role: 'group', 'aria-label': 'Glove pad' }, ...keys,
-      key('0', '10+', 'perio.pad.key.0'), key('s', 'Pus', 'perio.pad.supp'),
-      key(' ', 'Bld', 'perio.pad.bleed'), key('ArrowRight', '→', 'perio.pad.skip'), key('Backspace', '⌫', 'perio.pad.undo'),
+      key('0', '10+', 'perio.pad.key.0'), key('s', 'Supp', 'perio.pad.supp', ''),
+      key(' ', 'Bleed', 'perio.pad.bleed', ''), key('ArrowRight', '→', 'perio.pad.skip'), key('Backspace', '⌫', 'perio.pad.undo'),
       btn('Next tooth', { kind: 'reversible', class: 'next', testid: 'perio.pad.next', onClick: () => viaPad(st, r, 'PageDown') }));
   }
   function settings(st, r) {
     const lk = st.lastKey;
-    return h('section', { class: 'card stack pe-settings', 'aria-label': 'Perio settings', id: 'perio-settings' },
+    // The drawer opens below the grid, so it takes focus and scrolls itself in: opening a drawer the actor
+    // cannot see is the same as not opening it. tabindex -1 keeps it out of the Tab order.
+    return h('section', { class: 'card stack pe-settings', 'aria-label': 'Perio settings', id: 'perio-settings', tabindex: '-1' },
       h('h2', { text: 'Perio settings' }),
       h('p', { class: 'pe-lastkey', 'aria-live': 'polite', text: 'Last key pressed: ' + (lk ? lk.key + ' → ' + lk.meaning : 'none yet. Press any key on a clicker or pedal to see how it maps.') }),
       h('p', { class: 'small muted', text: 'Any HID device that emits keystrokes works without a driver. Keystrokes this exam: ' + st.keystrokes + ' (counted, never scored per person).' }),
       h('div', { class: 'field' }, h('span', { class: 'small muted', id: 'pe-pathlab', text: 'Probing path (your preference, chosen once)' }),
-        h('div', { class: 'seg', role: 'group', 'aria-labelledby': 'pe-pathlab' }, ...PATHS.map(([code, label]) => { const b = btn(label, { kind: 'quiet', testid: 'perio.path.' + code, onClick: () => { pathPref = code; const key = curKey(st); st.path = buildPath(st.missing, code); st.cur = key ? Math.max(0, st.path.indexOf(key)) : 0; rerender(r); } }); b.setAttribute('aria-pressed', String(pathPref === code)); return b; }))),
+        h('div', { class: 'seg', role: 'group', 'aria-labelledby': 'pe-pathlab' }, ...PATHS.map(([code, label]) => btn(label, { kind: 'quiet', testid: 'perio.path.' + code, pressed: pathPref === code, onClick: () => { pathPref = code; const key = curKey(st); st.path = buildPath(st.missing, code); st.cur = key ? Math.max(0, st.path.indexOf(key)) : 0; rerender(r); } })))),
       h('details', null, h('summary', { class: 'pe-summary', testid: 'perio.settings.grammar' }, 'The five-key grammar'), h('ul', { class: 'pe-list small' },
         h('li', { text: '1–9 record the depth and advance; 0 then a digit records 10 to 15; above 15 is refused.' }),
         h('li', { text: 'Space toggles bleeding and S suppuration on the last recorded site.' }),
@@ -271,41 +303,56 @@
         h('li', { text: 'Right or Down arrow skips the site as not probed (never 0); Left or Up steps back; PageDown jumps to the next tooth.' }),
         h('li', { text: 'Every keystroke autosaves to this session only; the stamp under the grid names the last complete tooth.' }))));
   }
+  /* The reasons open with the gate and each one saves: §7 budgets Save plus one reason tap, and the old
+     shape cost four (Save, Choose a reason, the reason, Save with this reason). One word for the concept
+     too: the store's control says "Choose a reason", so nothing here says "licence" at a person. */
   function licenceChooser(st, r) {
-    return h('section', { class: 'card stack pe-licence', 'aria-label': 'Reason the skipped sites were not probed' },
-      h('h2', { text: 'Why were ' + skippedCount(st) + ' sites not probed?' }),
-      h('p', { class: 'small muted', text: 'One licence covers the skipped set. The note will say which sites were not probed and why; a blank never reads as a full chart.' }),
-      h('div', { class: 'seg', role: 'group', 'aria-label': 'Omission licence' }, ...LICENCES.map(([code, label]) => { const b = btn(label, { kind: 'quiet', testid: 'perio.licence.' + code, onClick: () => { st.licence = code; rerender(r); const c = document.querySelector('[data-testid="perio.licence.confirm"]'); if (c) c.focus(); } }); b.setAttribute('aria-pressed', String(st.licence === code)); return b; })),
-      h('div', { class: 'btnrow' }, btn(st.licence ? 'Save exam with this reason' : 'Choose a reason above', { kind: st.licence ? 'irreversible' : 'held', testid: 'perio.licence.confirm', onClick: () => { if (st.licence) doSave(st, r, st.licence); else { const b = document.querySelector('[data-testid="perio.licence.' + LICENCES[0][0] + '"]'); if (b) b.focus(); } } })));
+    const n = skippedCount(st);
+    return h('section', { class: 'card stack pe-licence', 'aria-label': 'Reason the sites were not probed' },
+      h('h2', { text: 'Why were ' + n + (n === 1 ? ' site' : ' sites') + ' not probed?' }),
+      h('p', { class: 'small muted', text: 'One reason covers every site left unprobed, and saves the exam. The note says which sites were not probed and why; a blank never reads as a full chart.' }),
+      h('div', { class: 'seg', role: 'group', 'aria-label': 'Reason not probed' }, ...LICENCES.map(([code, label]) => btn(label, { kind: 'irreversible', testid: 'perio.licence.' + code, ariaLabel: 'Save exam — ' + label, onClick: () => doSave(st, r, code) }))),
+      h('div', { class: 'btnrow' }, btn('Cancel', { kind: 'quiet', testid: 'perio.licence.cancel', ariaLabel: 'Cancel: keep charting, nothing is saved', onClick: () => closeInline(st, r, 'reason') })));
   }
   function tagBlock(st, r) {
-    const dentist = (() => { const a = S().appointments.find((x) => x.encounterId === st.encId); const u = a && Proto.store.user(a.providerId); return u && u.role !== 'hygienist' ? u.short : 'Dr. Kim'; })();
+    // Read from the record, and say "the dentist" when the record names none: a literal fallback headed every
+    // hygiene visit "Tag for Dr. Kim", who was not on any of them.
+    const dentist = (() => { const a = S().appointments.find((x) => x.encounterId === st.encId); const u = a && Proto.store.user(a.providerId); return u && u.role !== 'hygienist' && u.role !== 'assistant' ? u.short : null; })();
     const wrap = h('div', { class: 'stack pe-tag' });
     if (st.tagged.length) wrap.append(h('div', { class: 'row' }, ...st.tagged.map((t) => chip('review', 'Tagged #' + t.tooth + ' · waiting for dentist'))));
-    if (!st.tagOpen) { wrap.append(h('div', { class: 'btnrow' }, btn('Tag for dentist', { kind: 'reversible', testid: 'perio.tag.add', ariaLabel: 'Tag a tooth for the dentist: a finding, not a diagnosis', onClick: () => { st.tagOpen = true; if (!st.tagTooth && curKey(st)) st.tagTooth = String(toothOf(curKey(st))); rerender(r); const el = document.querySelector('[data-testid="perio.tag.tooth"]'); if (el) el.focus(); } }))); return wrap; }
-    const tooth = Number(st.tagTooth); const toothBad = st.tagTouched && (!st.tagTooth || !Number.isInteger(tooth) || tooth < 1 || tooth > 32 || st.missing.includes(tooth));
-    const textBad = st.tagTouched && !st.tagText.trim();
+    // The tooth the operator is on, not the deepest pocket in the mouth: doSave used to overwrite this with
+    // the deepest tooth, so every tag opened on #8 whatever the hygienist was looking at.
+    const atCursor = curKey(st) || st.last;
+    if (!st.tagOpen) { wrap.append(h('div', { class: 'btnrow' }, btn('Tag for dentist', { kind: 'reversible', testid: 'perio.tag.add', ariaLabel: 'Tag a tooth for the dentist: a finding, not a diagnosis', onClick: () => { st.tagOpen = true; if (!st.tagTooth && atCursor) st.tagTooth = String(toothOf(atCursor)); rerender(r); const el = document.querySelector('[data-testid="perio.tag.tooth"]'); if (el) el.focus(); } }))); return wrap; }
+    const tooth = Number(st.tagTooth); const toothBad = st.tagToothTouched && (!st.tagTooth || !Number.isInteger(tooth) || tooth < 1 || tooth > 32 || st.missing.includes(tooth));
+    const textBad = st.tagTextTouched && !st.tagText.trim();
     // Validation is silent until blur, and blur validates in place (no re-render: that would detach the field being typed into).
-    const toothIn = h('input', { class: 'input pe-toothin' + (toothBad ? ' invalid' : ''), type: 'number', min: '1', max: '32', inputmode: 'numeric', id: 'pe-tag-tooth', testid: 'perio.tag.tooth', value: st.tagTooth, 'aria-invalid': toothBad ? 'true' : null, 'aria-describedby': 'pe-tag-hint', onInput: (ev) => { st.tagTooth = ev.target.value; }, onBlur: () => { st.tagTouched = true; validateTag(st); } });
-    const textIn = h('input', { class: 'input' + (textBad ? ' invalid' : ''), type: 'text', id: 'pe-tag-text', testid: 'perio.tag.text', value: st.tagText, maxlength: '140', placeholder: 'What you saw, in observation words', 'aria-invalid': textBad ? 'true' : null, 'aria-describedby': 'pe-tag-hint', onInput: (ev) => { st.tagText = ev.target.value; }, onBlur: () => { st.tagTouched = true; validateTag(st); } });
+    const toothIn = h('input', { class: 'input pe-toothin' + (toothBad ? ' invalid' : ''), type: 'number', min: '1', max: '32', inputmode: 'numeric', id: 'pe-tag-tooth', testid: 'perio.tag.tooth', value: st.tagTooth, 'aria-invalid': toothBad ? 'true' : null, 'aria-describedby': 'pe-tag-hint', onInput: (ev) => { st.tagTooth = ev.target.value; }, onBlur: () => { st.tagToothTouched = true; validateTag(st); } });
+    const textIn = h('input', { class: 'input' + (textBad ? ' invalid' : ''), type: 'text', id: 'pe-tag-text', testid: 'perio.tag.text', value: st.tagText, maxlength: '140', placeholder: 'What you saw, in observation words', 'aria-invalid': textBad ? 'true' : null, 'aria-describedby': 'pe-tag-hint', onInput: (ev) => { st.tagText = ev.target.value; }, onBlur: () => { st.tagTextTouched = true; validateTag(st); } });
     wrap.append(h('section', { class: 'card stack', 'aria-label': 'Tag for dentist' },
-      h('h2', { text: 'Tag for ' + dentist }),
+      h('h2', { text: 'Tag for ' + (dentist || 'the dentist') }),
       h('p', { class: 'small muted', id: 'pe-tag-hint', text: TAG_HINT + (toothBad ? TOOTH_MSG : '') + (textBad ? TEXT_MSG : '') }),
       h('div', { class: 'row', role: 'group', 'aria-label': 'Observation vocabulary' }, ...OBS.map(([code, label]) => btn(label, { kind: 'quiet', class: 'compact', testid: 'perio.tag.obs.' + code, onClick: () => { st.tagText = label + (code === 'caries' ? ' #' + (st.tagTooth || '?') + ' — surface: ' : (code === 'lesion' ? ' — site: ' : '')); rerender(r); const el = document.querySelector('[data-testid="perio.tag.text"]'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } } }))),
       h('div', { class: 'pe-tagfields' }, h('div', { class: 'field' }, h('label', { for: 'pe-tag-tooth', text: 'Tooth' }), toothIn), h('div', { class: 'field grow' }, h('label', { for: 'pe-tag-text', text: 'Observation' }), textIn)),
-      h('div', { class: 'btnrow' }, btn('Save tag', { kind: 'irreversible', testid: 'perio.tag.save', onClick: () => saveTag(st, r) }), btn('Cancel', { kind: 'quiet', testid: 'perio.tag.cancel', onClick: () => { st.tagOpen = false; st.tagTouched = false; rerender(r); const b = document.querySelector('[data-testid="perio.tag.add"]'); if (b) b.focus(); } }))));
+      h('div', { class: 'btnrow' }, btn('Save tag', { kind: 'irreversible', testid: 'perio.tag.save', onClick: () => saveTag(st, r) }), btn('Cancel', { kind: 'quiet', testid: 'perio.tag.cancel', onClick: () => closeInline(st, r, 'tag') }))));
     return wrap;
   }
   function savedCard(st, r) {
     const note = S().notes[st.encId] || {}; const deep = deepest(st);
+    // The row id is how the store finds the exam, never how a person names it: the card says what was saved,
+    // by whom and when, and the note reads the same three facts.
     const card = h('section', { class: 'card stack pe-saved', 'aria-label': 'Exam saved' },
-      h('div', { class: 'row' }, chip('clear', 'Saved'), h('h2', { text: (st.mode === 'screening' ? 'Screening' : 'Full chart') + ' saved · exam ' + st.saved.id })),
-      h('p', { class: 'small muted', text: 'Derived into the hygiene note from exam ' + clock12(st.savedAt) + ' · author ' + st.saved.author + '. Read-only there; the exam is the source.' }));
+      h('div', { class: 'row' }, chip('clear', 'Saved'), h('h2', { text: (st.mode === 'screening' ? 'Screening' : 'Full chart') + ' saved' })),
+      h('p', { class: 'small muted', text: 'Derived into the hygiene note at ' + clock12(st.savedAt) + ' · author ' + st.saved.author + '. Read-only there; the exam is the source.' }));
     if (st.mode === 'screening') card.append(h('p', { text: 'Screening codes: ' + SEXTANTS.map(([lab], i) => lab + ' ' + st.sextants[i]).join(' · ') + (st.sextants.some((c) => c === '3' || c === '4') ? ' · Full chart due' : '') }));
     else { card.append(h('p', { class: 'pe-note', text: note.perioSummary || '' })); if (note.srpEvidence) card.append(h('p', { class: 'pe-note', text: note.srpEvidence })); }
     if (st.mode === 'full' && !st.saved.skipped) card.append(h('p', { class: 'small muted', text: 'Chart status: full-mouth six-point chart recorded on ' + total(st) + ' sites.' }));
     if (st.mode === 'full' && st.saved.skipped) card.append(h('p', { class: 'small muted', text: 'Chart status: partial chart; ' + st.saved.skipped + ' sites not probed (' + (LICENCES.find(([c]) => c === st.saved.licence) || ['', st.saved.licence])[1] + '). This never reads as a full chart.' }));
-    card.append(h('div', { class: 'row pe-next' }, chip(st.mode === 'full' && deep >= 5 ? 'required' : 'clear', st.mode === 'full' && deep >= 5 ? 'Perio maintenance' : 'Recall'), h('span', { text: 'Next visit (practice policy, not a recommendation): ' + recallLine(st) })));
+    // The chip labels the sentence beside it: a screening that books a full chart is not a clear Recall.
+    const fullChartDue = st.mode === 'screening' && st.sextants.some((c) => c === '3' || c === '4');
+    const deepPockets = st.mode === 'full' && deep >= 5;
+    const chipWord = fullChartDue ? 'Full chart due' : deepPockets ? 'Perio maintenance' : 'Recall';
+    card.append(h('div', { class: 'row pe-next' }, chip(fullChartDue || deepPockets ? 'required' : 'clear', chipWord), h('span', { text: 'Next visit (practice policy, not a recommendation): ' + recallLine(st) })));
     card.append(h('details', null, h('summary', { class: 'pe-summary', testid: 'perio.saved.why' }, 'How this was derived'), h('p', { class: 'small muted', text: 'Deepest depth, bleeding count, and the chart-status sentence are computed from the frozen site rows in one transaction. The recall interval comes from the practice rule (4 months with BWX when any site is 5 mm or deeper, else 6 months); the dentist\'s plan supersedes it. No quadrant count proposes a billable code.' })));
     card.append(tagBlock(st, r));
     card.append(h('div', { class: 'btnrow' }, btn('Back to Chairs', { kind: 'reversible', testid: 'perio.back', onClick: () => Proto.router.go(r.persona, 'chairs') })));
@@ -316,12 +363,23 @@
   function rerender(r) {
     const ae = document.activeElement; const tid = ae && ae.getAttribute ? ae.getAttribute('data-testid') : null;
     render(r);
-    scrollCursorIntoView();
-    if (!tid) return;
+    const enc = Proto.store.encounter(r.id); const st = enc ? stateFor(enc) : null;
     let target = null;
-    if (tid.startsWith('perio.grid.cell.')) { const enc = Proto.store.encounter(r.id); const st = enc && stateFor(enc); const key = st && curKey(st); target = (key && document.querySelector('[data-testid="perio.grid.cell.' + key + '"]')) || document.querySelector('[data-testid="' + tid + '"]'); }
-    else target = document.querySelector('[data-testid="' + tid + '"]');
+    if (tid && tid.startsWith('perio.grid.cell.')) { const key = st && curKey(st); target = (key && document.querySelector('[data-testid="perio.grid.cell.' + key + '"]')) || document.querySelector('[data-testid="' + tid + '"]'); }
+    else if (tid) target = document.querySelector('[data-testid="' + tid + '"]');
     if (target && !target.disabled) target.focus();
+    /* Nothing to give the focus back to: the h1 held it after a route change, or the control that was pressed
+       has left the page with the gate it belonged to. The grammar is the work here, so the keyboard lands on
+       the cursor rather than on the body, where the next key would be read by nobody. */
+    else if (st) focusCursor(st);
+    scrollCursorIntoView();   // last word on the scroll: focusing a control must not park the cursor off-screen
+  }
+  function focusCursor(st) {
+    const sel = st.mode === 'screening'
+      ? '[data-testid="perio.sextant.' + Math.min(st.scur + 1, SEXTANTS.length) + '"]'
+      : (curKey(st) ? '[data-testid="perio.grid.cell.' + curKey(st) + '"]' : null);
+    const el = (sel && document.querySelector(sel)) || document.querySelector('[data-testid="perio.save"]') || document.querySelector('[data-testid="perio.amend"]');
+    if (el && !el.disabled) el.focus();
   }
   let rendering = false; // mount() replaces the canvas; a blur fired by that removal must not re-enter render
   function render(r) {
@@ -332,17 +390,35 @@
   function renderInner(r) {
     syncStore();
     const enc = Proto.store.encounter(r.id);
-    if (!enc) { Proto.screens.shell.mount(h('div', { class: 'stack' }, h('h1', { text: 'No encounter ' + (r.id || '') }), h('div', { class: 'btnrow' }, btn('Back to Chairs', { kind: 'reversible', testid: 'perio.back', onClick: () => Proto.router.go(r.persona, 'chairs') })))); return; }
+    /* An id that names no encounter is the shell's Nothing-here screen, not a screen-local page that reads the
+       raw id back to the person who mistyped it. */
+    if (!enc) {
+      const nf = Proto.store.notFound('encounter');
+      Proto.screens.shell.mount(h('div', { class: 'stack' }, h('h1', { text: 'Nothing here' }),
+        h('p', { class: 'small muted', text: nf.why }),
+        h('div', { class: 'btnrow' }, btn('Back to home', { kind: 'reversible', testid: 'notfound.home', onClick: () => Proto.router.go(r.persona, Proto.router.HOME[r.persona]) }))));
+      return;
+    }
     const st = stateFor(enc); const pt = Proto.store.patient(enc.patientId); const a = S().appointments.find((x) => x.encounterId === enc.id);
+    // A gate answers a condition, and clears when the condition does: switching to a licensed author used to
+    // leave Save reading Held with a refusal nothing could clear, and coding the last sextant left it too.
+    if (st.gate && st.gate.code === 'licence_scope' && mayChart(Proto.store.currentUser())) st.gate = null;
+    if (st.gate && st.gate.code === 'screening_incomplete' && !st.sextants.some((c) => c === '')) st.gate = null;
     const name = displayName(pt.name, P().privacy); const key = curKey(st);
-    const sub = (a ? 'Chair ' + a.op + ' · ' : '') + (st.priorDate ? 'Prior exam ' + longDate(st.priorDate) + ' ghosted' : 'No prior exam on file') + ' · ' + (32 - st.missing.length) + ' teeth' + (st.missing.length ? ' (x = missing: ' + st.missing.join(', ') + ')' : '') + ' · Keys: 1–9 depth · Space bleed · S suppuration · ⌫ undo · → skip · PgDn next tooth';
+    // The lane the operator is in is the lane the instructions describe.
+    const keyHints = st.mode === 'screening'
+      ? ' · Keys: 0–4 or * per sextant · ⌫ undo · → next sextant'
+      : ' · Keys: 1–9 depth · Space bleeding · S suppuration · ⌫ undo · → skip · PgDn next tooth';
+    const sub = (a ? 'Chair ' + a.op + ' · ' : '') + (st.priorDate ? 'Prior exam ' + longDate(st.priorDate) + ' ghosted' : 'No prior exam on file') + ' · ' + (32 - st.missing.length) + ' teeth' + (st.missing.length ? ' (x = missing: ' + st.missing.join(', ') + ')' : '') + keyHints;
 
-    const segFull = btn('Full chart', { kind: 'quiet', testid: 'perio.full', onClick: () => { if (!st.saved) { st.mode = 'full'; st.gate = null; rerender(r); } } }); segFull.setAttribute('aria-pressed', String(st.mode === 'full'));
-    const segScr = btn('Screening', { kind: 'quiet', testid: 'perio.screening', ariaLabel: 'Screening lane: six sextant codes in at most 12 keystrokes', onClick: () => { if (!st.saved) { st.mode = 'screening'; st.gate = null; rerender(r); const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); } } }); segScr.setAttribute('aria-pressed', String(st.mode === 'screening'));
-    const padT = btn(st.padOpen ? 'Hide glove pad' : 'Glove pad', { kind: 'quiet', testid: 'perio.pad.toggle', pressed: st.padOpen, ariaLabel: 'Glove pad: 44 px keys for gloved fingers', onClick: () => { st.padOpen = !st.padOpen; rerender(r); } });
-    const setT = btn('Settings', { kind: 'quiet', testid: 'perio.settings', pressed: st.settingsOpen, ariaLabel: 'Perio settings: last key pressed and probing path', onClick: () => { st.settingsOpen = !st.settingsOpen; rerender(r); } }); setT.setAttribute('aria-expanded', String(st.settingsOpen)); setT.setAttribute('aria-controls', 'perio-settings');
+    // Selection carries its ✓ press mark, not fill alone: opts.pressed is the only way to get both.
+    const segFull = btn('Full chart', { kind: 'quiet', testid: 'perio.full', pressed: st.mode === 'full', onClick: () => { if (st.saved) { openAmendGate(st, r); return; } st.mode = 'full'; st.gate = null; rerender(r); } });
+    const segScr = btn('Screening', { kind: 'quiet', testid: 'perio.screening', pressed: st.mode === 'screening', ariaLabel: 'Screening lane: six sextant codes in at most 12 keystrokes', onClick: () => { if (st.saved) { openAmendGate(st, r); return; } st.mode = 'screening'; st.gate = null; st.padOpen = false; rerender(r); const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); } });
+    // The pad carries the full-chart grammar, so it is offered in the lane that has one.
+    const padT = st.mode === 'full' ? btn(st.padOpen ? 'Hide glove pad' : 'Glove pad', { kind: 'quiet', testid: 'perio.pad.toggle', pressed: st.padOpen, ariaLabel: 'Glove pad: 44 px keys for gloved fingers', onClick: () => { st.padOpen = !st.padOpen; rerender(r); } }) : null;
+    const setT = btn('Settings', { kind: 'quiet', testid: 'perio.settings', pressed: st.settingsOpen, ariaLabel: 'Perio settings: last key pressed and probing path', onClick: () => { st.settingsOpen = !st.settingsOpen; rerender(r); if (st.settingsOpen) { const sec = document.getElementById('perio-settings'); if (sec) { sec.scrollIntoView({ block: 'nearest', behavior: 'auto' }); sec.focus(); } } } }); setT.setAttribute('aria-expanded', String(st.settingsOpen)); setT.setAttribute('aria-controls', 'perio-settings');
     let save;
-    if (st.saved) save = btn('Amend this exam', { kind: 'reversible', testid: 'perio.amend', ariaLabel: 'Amend the saved exam: adds a dated addendum, never overwrites', onClick: () => { st.amendGate = Proto.ui.refusal({ code: 'exam_sealed', verb: 'Exam is filed — amend adds an addendum', control: 'Start an addendum', onControl: () => { st.saved = null; st.savedAt = null; st.amendGate = null; st.amending = true; rerender(r); }, why: 'A filed exam is the record. An amendment is a new dated entry by you that links to it; the original is never overwritten.', severity: 'info' }); rerender(r); } });
+    if (st.saved) save = btn('Amend this exam', { kind: 'reversible', testid: 'perio.amend', ariaLabel: 'Amend the saved exam: adds a dated addendum, never overwrites', onClick: () => openAmendGate(st, r) });
     else if (st.gate) save = btn('Held', { kind: 'held', testid: 'perio.save', ariaLabel: 'Save exam is held: ' + (st.gate.node.querySelector('.verb') || {}).textContent, onClick: () => { const c = document.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); } });
     else save = btn('Save exam', { kind: 'irreversible', testid: 'perio.save', ariaLabel: 'Save exam: one transaction, derives the note and the recall', onClick: () => doSave(st, r, null) });
 
@@ -358,12 +434,17 @@
     }
     page.append(h('p', { class: 'pe-flash', 'aria-live': 'polite', 'aria-atomic': 'true', role: 'status', text: st.flash || '' }));
     if (st.gate) page.append(st.gate.node);
-    page.append(st.mode === 'full' ? grid(st, r) : sextants(st, r));
-    page.append(h('div', { class: 'row pe-legend small muted' }, h('span', { text: 'Cell: depth (or —) · small grey = prior exam · ● bleeding · ◆ suppuration · shaded = 5 mm or deeper · x = missing tooth' }), st.stamp ? h('span', { class: 'stamp', text: st.stamp }) : null));
-    if (st.padOpen && !st.saved && st.mode === 'full') { const pd = pad(st, r); pd.classList.add('pad-dock'); page.append(pd); }
-    if (st.settingsOpen) page.append(settings(st, r));
-    if (st.licenceOpen && !st.saved) page.append(licenceChooser(st, r));
     if (st.amendGate) page.append(st.amendGate);
+    // The reasons stand with the gate that asked for them, above the chart, where the actor is already reading.
+    if (st.licenceOpen && !st.saved) page.append(licenceChooser(st, r));
+    /* The pad sits above the grid instead of sticking to the bottom of the scroller: docked there it covered
+       64 lower-arch cells, and once the cursor reached them it covered the active cell itself. */
+    if (st.padOpen && !st.saved && st.mode === 'full') page.append(pad(st, r));
+    page.append(st.mode === 'full' ? grid(st, r) : sextants(st, r));
+    page.append(h('div', { class: 'row pe-legend small muted' }, h('span', { text: st.mode === 'full'
+      ? 'Cell: depth (or —) · small grey = prior exam · ● bleeding · ◆ suppuration · shaded = 5 mm or deeper · x = missing tooth'
+      : 'Sextant code: 0 healthy · 1 bleeds on probing · 2 calculus or defective margin · 3 pocket 4 to 5 mm · 4 pocket 6 mm or deeper · * furcation, mobility, or recession' }), st.stamp ? h('span', { class: 'stamp', text: st.stamp }) : null));
+    if (st.settingsOpen) page.append(settings(st, r));
     if (st.saved) page.append(savedCard(st, r)); else page.append(tagBlock(st, r));
     Proto.screens.shell.mount(page);
     if (!keysOn) { document.addEventListener('keydown', onKey); keysOn = true; }

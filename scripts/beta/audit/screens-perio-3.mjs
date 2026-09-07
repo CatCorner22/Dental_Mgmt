@@ -118,8 +118,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const s = document.querySelector('#canvas .pe-licence'); if (!s) return null;
         return { sectionAria: s.getAttribute('aria-label'), h2: (s.querySelector('h2') || {}).textContent || null };
       });
-      await click(p, 'perio.licence.implant'); await p.waitForTimeout(120);
-      await click(p, 'perio.licence.confirm'); await p.waitForTimeout(400);
+      await click(p, 'perio.licence.implant'); await p.waitForTimeout(400);   // the reason saves; Confirm was collapsed
       const evs = await AFTER(p, seq0);
       const card = await p.evaluate(() => {
         const s = document.querySelector('#canvas .pe-saved'); if (!s) return null;
@@ -457,10 +456,26 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       await p.keyboard.press('Escape'); await p.waitForTimeout(200);
       const chooserAfterEscape = await surface('#canvas .pe-licence');
       const chooserStateAfterEscape = (await ST(p, 'enc-9001')).licenceOpen;
-      await p.focus('[data-testid="perio.licence.confirm"]');      // the last focusable inside the chooser
-      await p.keyboard.press('Tab'); await p.waitForTimeout(150);
-      const afterTab = await ACTIVE(p);
-      const tabLeftSection = await p.evaluate(() => { const s = document.querySelector('#canvas .pe-licence'); return !!(s && document.activeElement && !s.contains(document.activeElement)); });
+      /* The last focusable inside the chooser, read from the surface rather than named: the fix round
+         collapsed the two-step licence step (choose a reason, then Confirm) into one, so a hard-coded
+         `perio.licence.confirm` timed out and the whole check crashed — and a crashed check reports
+         "not reproduced", which is a false pass. */
+      /* The last focusable is read from the surface as it stands after Escape, not named and not read from
+         the earlier snapshot. Two things changed under this leg: the fix round collapsed the two-step
+         licence step, so the hard-coded `perio.licence.confirm` timed out, and Escape now closes the
+         chooser, so the control from the pre-Escape snapshot is gone too. Either way the probe crashed, and
+         a crashed check reports "not reproduced" — a false pass. When the chooser is already gone the Tab
+         leg has nothing to measure and stays null; the predicate below already requires it to be present. */
+      let afterTab = null, tabLeftSection = null, chooserLast = null;
+      if (chooserAfterEscape.present) {
+        chooserLast = (chooserAfterEscape.focusables || []).map((e) => e.testid).filter(Boolean).pop();
+        if (chooserLast) {
+          await p.focus('[data-testid="' + chooserLast + '"]');
+          await p.keyboard.press('Tab'); await p.waitForTimeout(150);
+          afterTab = await ACTIVE(p);
+          tabLeftSection = await p.evaluate(() => { const s = document.querySelector('#canvas .pe-licence'); return !!(s && document.activeElement && !s.contains(document.activeElement)); });
+        }
+      }
 
       // Inline surface 2: the tag form (clean document, so the chart is not mid-gate).
       await reopen(p, go, '#/hygienist/perio/enc-9001');
