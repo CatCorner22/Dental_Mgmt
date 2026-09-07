@@ -147,10 +147,15 @@ if os.path.exists('docs/15-function-audit.md'):
     if '\n## Results' not in d15: probs.append('docs/15 lacks the Results line')
     r = subprocess.run(['node', 'scripts/audit/inventory.mjs', '--json'], capture_output=True, text=True)
     inv = json.loads(r.stdout); total = sum(len(v) for v in inv.values())
+    # The Inventory table above the Results line is the registered audited universe and never moves: it is
+    # what the agents were given. The fix round adds functions, so the live count is checked against a line
+    # inside Results instead, and the two are reconciled there function by function.
     m = re.search(r'^\| \*\*Total\*\* \| \*\*(\d+)\*\* \|', d15, re.M)
-    if not m or int(m.group(1)) != total: probs.append(f'docs/15 inventory total {m.group(1) if m else "missing"} vs {total} functions in prototype/js')
+    if not m or int(m.group(1)) != 497: probs.append(f'docs/15 registered inventory total {m.group(1) if m else "missing"}, expected the registered 497')
     results = d15.split('\n## Results', 1)[1] if '\n## Results' in d15 else ''
     if 'Pending' not in results.split('\n## ', 1)[0]:
+        live = re.search(r'^\| Functions in `prototype/js` \(`scripts/audit/inventory\.mjs`\) \| (\d+) \|', results, re.M)
+        if not live or int(live.group(1)) != total: probs.append(f'docs/15 Results coverage total {live.group(1) if live else "missing"} vs {total} functions in prototype/js')
         missing = [f'{f}:{fn["name"]}' for f, fns in inv.items() for fn in fns if not re.search(r'^\| `' + re.escape(fn['name']) + r'` \| `' + re.escape(f.replace('prototype/js/', '')) + r'`', results, re.M)]
         probs += [f'no results row for {x}' for x in missing]
     report('docs/15 function audit: registration, inventory total, one row per function', probs, f'{total} functions')

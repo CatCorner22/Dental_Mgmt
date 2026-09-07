@@ -42,15 +42,31 @@ const fixes = args.fixes ? readJson(args.fixes) || {} : {};
 const rows = units.flatMap((u) => u.functions.map((f) => ({ ...f, unit: u.unit })));
 const byKey = new Map();
 for (const r of rows) { const k = r.file + '::' + r.name; if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(r); }
+/* A function's identity is its file and its name; the line is only a tiebreaker between two functions that
+   share both. The fix round moves lines — store.js alone moved by more than 60 — so a line window as the
+   matcher would have orphaned a row for every function a fix touched and reported it as unaudited. Pass one
+   takes the near matches, pass two takes the rest by nearest line, so a same-named pair stays in order. */
 const used = new Set();
-const matched = universe.map((fn) => {
+const near = universe.map((fn) => {
   const cands = (byKey.get(fn.file + '::' + fn.name) || []).filter((r) => !used.has(r)).sort((a, b) => Math.abs(a.line - fn.line) - Math.abs(b.line - fn.line));
   const row = cands.find((r) => Math.abs(r.line - fn.line) <= 8) || null;
   if (row) used.add(row);
   return { ...fn, row };
 });
+const matched = near.map((m) => {
+  if (m.row) return m;
+  const cands = (byKey.get(m.file + '::' + m.name) || []).filter((r) => !used.has(r)).sort((a, b) => Math.abs(a.line - m.line) - Math.abs(b.line - m.line));
+  const row = cands[0] || null;
+  if (row) { used.add(row); return { ...m, row, drifted: Math.abs(row.line - m.line) }; }
+  return m;
+});
 const unmatchedRows = rows.filter((r) => !used.has(r));
-const noRow = matched.filter((m) => !m.row);
+/* A function with no row is one the audit never saw, because a fix in this round introduced it. Its status
+   comes from --added, filled in by hand-auditing each one; it is never silently counted as operational. */
+const added = args.added ? readJson(args.added) || {} : {};
+const addedOf = (m) => added[rel(m.file) + '::' + m.name] || added[m.file + '::' + m.name] || null;
+const noRow = matched.filter((m) => !m.row && !addedOf(m));
+const newFns = matched.filter((m) => !m.row && addedOf(m));
 
 // ---- findings → root causes → verdicts → fixes ----
 const allFindings = [...units.flatMap((u) => u.findings || []), ...lenses.flatMap((l) => l.findings || [])];
@@ -66,7 +82,7 @@ const rootState = (rc) => {
   return 'open';
 };
 const statusText = (m) => {
-  if (!m.row) return 'no row';
+  if (!m.row) { const a = addedOf(m); return a ? a.status : 'no row'; }
   if (m.row.status !== 'broken') return m.row.status;
   const roots = [...new Set((m.row.finding_ids || []).map((id) => findingToRoot.get(id)).filter(Boolean))];
   if (!roots.length) return 'broken';
@@ -90,7 +106,8 @@ const L = [];
 L.push(`### Coverage`, '');
 L.push(`| Measure | Count |`, `|---|---|`);
 L.push(`| Functions in \`prototype/js\` (\`scripts/audit/inventory.mjs\`) | ${universe.length} |`);
-L.push(`| Functions with an audit row | ${universe.length - noRow.length} |`);
+L.push(`| Functions in the registered audited universe | ${universe.length - newFns.length - noRow.length} |`);
+L.push(`| Functions added by the fix round, audited by hand | ${newFns.length} |`);
 L.push(`| Functions with no row | ${noRow.length} |`);
 L.push(`| Audit rows that match no inventoried function | ${unmatchedRows.length} |`);
 L.push(`| Per-file audits returned | ${units.length} of 13 |`);
@@ -105,6 +122,7 @@ L.push(`| Status | Functions |`, `|---|---|`);
 for (const [k, v] of Object.entries(statusCounts).sort((a, b) => b[1] - a[1])) L.push(`| ${k} | ${v} |`);
 L.push('');
 if (noRow.length) { L.push(`Functions with no audit row: ${noRow.map((m) => '`' + rel(m.file) + ':' + m.name + '`').join(', ')}.`, ''); }
+if (newFns.length) { L.push(`Functions the fix round introduced, which the audit could not have seen because they did not exist when it ran. Each was driven by hand after the fixes landed and carries its own evidence in the table below: ${newFns.map((m) => '`' + rel(m.file) + ':' + m.name + '`').join(', ')}.`, ''); }
 if (unmatchedRows.length) { L.push(`Audit rows that match no inventoried function (renamed or mis-lined): ${unmatchedRows.map((r) => '`' + rel(r.file) + ':' + r.name + '@' + r.line + '`').join(', ')}.`, ''); }
 
 L.push(`### By file`, '');
@@ -146,7 +164,7 @@ L.push(`### Every function`, '');
 L.push(`One row per function in \`prototype/js\`, in file order. Status is the audited state; "broken → fixed" means every root cause behind the row was reproduced and fixed in this round, with its check named in the root-cause table. Evidence is the auditor's own measurement, clipped; the full text is in the audit's result files under \`knowledge/reviews/function-audit/\`.`, '');
 L.push(`| Function | File | Line | Status | Reached by | Evidence |`, `|---|---|---|---|---|---|`);
 for (const m of matched) {
-  const r = m.row;
+  const r = m.row || addedOf(m);
   L.push(`| \`${m.name}\` | \`${rel(m.file)}\` | ${m.line} | ${statusText(m)} | ${r ? clip(r.reached_by, 90) : '—'} | ${r ? clip(r.evidence, 110) : 'no audit row'} |`);
 }
 L.push('');
