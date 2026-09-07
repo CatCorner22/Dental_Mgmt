@@ -25,6 +25,15 @@ const s4Entries = () => s4Rows().flatMap((row) => [...row.matchAll(/`([^`]+)`/g)
 const s4Regex = (e) => new RegExp('^' + e.replace(/\./g, '\\.').replace(/<([^>]+)>/g, (m, inner) => (inner.includes('|') ? '(?:' + inner.split('|').join('|') + ')' : '[a-z0-9_-]+')) + '$');
 
 export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => {
+
+// The readiness row ids carry seed id segments (`board.readiness.row.<seedId>.<control>`), and a fix round
+// can legitimately change which seed id a row names. A probe that hard-codes one stops pressing anything the
+// day that happens — silently, because click() returns false rather than throwing — so each row is found by
+// its control suffix instead. Trap 2: a rename disarms a check without crashing it.
+const readinessRow = (p, control) => p.evaluate((c) => {
+  const e = document.querySelector('[data-testid^="board.readiness.row."][data-testid$=".' + c + '"]');
+  return e ? e.getAttribute('data-testid') : null;
+}, control);
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
   const since = async (p, seq) => (await events(p)).filter((e) => e.seq > seq);
   const range = (ev, seq0) => [seq0 + 1, ev.length ? ev[ev.length - 1].seq : seq0];
@@ -46,7 +55,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       rowLabels: [...sec.querySelectorAll('.rdrow')].map((r) => r.getAttribute('aria-label')),
       rowControls: [...sec.querySelectorAll('.rdrow [data-testid]')].map((b) => b.getAttribute('data-testid') + '="' + b.textContent.trim() + '"'),
       headChip: (sec.querySelector('.chip') || {}).textContent ? sec.querySelector('.chip').textContent.replace(/^[■▲◆★▬●]\s*/, '').trim() : null,
-      tempRowPresent: !!sec.querySelector('[data-testid="board.readiness.row.temp.add"]'),
+      tempRowPresent: !!sec.querySelector('[data-testid^="board.readiness.row."][data-testid$=".add"]'),
       handledSummaryPresent: !!sec.querySelector('[data-testid="board.readiness.handled"]'),
       bodyHidden: body ? body.hidden : null,
       toggleLabel: toggle ? toggle.textContent.trim() : null,
@@ -320,9 +329,9 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const fresh = (await ids(p)).filter((t) => t.startsWith('board.'));
         // Handle every readiness row so the "What was handled" disclosure renders.
         const handledSteps = {};
-        handledSteps.elig = await tap(p, 'board.readiness.row.elig.reverify-all');
-        handledSteps.lab = await tap(p, 'board.readiness.row.lab-op3.call');
-        handledSteps.device = await tap(p, 'board.readiness.row.device.reset');
+        handledSteps.elig = await tap(p, await readinessRow(p, 'reverify-all'));
+        handledSteps.lab = await tap(p, await readinessRow(p, 'call'));
+        handledSteps.device = await tap(p, await readinessRow(p, 'reset'));
         await hop(p, '#/frontdesk/roles');
         handledSteps.daypassOpen = await tap(p, 'roles.daypass.add');
         handledSteps.daypassName = await type(p, 'roles.daypass.name', 'Alex Rivera');
@@ -337,7 +346,10 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const boardRow = (s4Rows().find((r) => /^\|\s*Board\s*\|/.test(r)) || '').trim();
         rec('A-screens-board-2-6', 'The Board renders three test ids CONTRACTS §4 does not list: board.card.<apptId>.rail on every card, board.queue.why on the queue disclosure, and board.readiness.handled once every readiness row is handled',
           'B1 (CHECKLIST: every id in the DOM matches a §4 entry or pattern); board.js:184, :233, :126',
-          entries.length > 0 && claimedPresent.length === 3 && claimedUnmatched.length === 3,
+          /* Any Board id §4 does not list, not all three of the ids the claim happened to name. Requiring
+             three meant that listing two of them in §4 turned the check green while the third stood
+             unlisted and rendered — an all-or-nothing predicate hiding a partial breach. */
+          entries.length > 0 && unmatched.length > 0,
           { idsClaimed: claimed, idsPresentInDom: claimedPresent, idsPresentAndUnmatchedBySection4: claimedUnmatched, everyUnmatchedBoardId: unmatched, boardIdsObserved: observed, section4BoardRowSearched: boardRow, section4EntryCount: entries.length, section4EntriesSearched: entries, section4TextLength: sectionOf(4).length, matchedExamples: observed.filter((t) => matchS4(t).length > 0).slice(0, 8).map((t) => t + ' → ' + matchS4(t)[0]), railIdCount: observed.filter((t) => /\.rail$/.test(t)).length, handledStateSteps: handledSteps, note: 'The whole §4 table is searched, not only the Board row: an id that matched any screen\'s entry would count as listed.' });
       } finally { await c.close(); }
     },

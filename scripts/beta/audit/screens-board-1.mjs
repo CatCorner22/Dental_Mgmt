@@ -4,6 +4,15 @@
 // Each check closes its browser context in `finally` so one failure cannot hang the run.
 
 export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => {
+
+// The readiness row ids carry seed id segments (`board.readiness.row.<seedId>.<control>`), and a fix round
+// can legitimately change which seed id a row names. A probe that hard-codes one stops pressing anything the
+// day that happens — silently, because click() returns false rather than throwing — so each row is found by
+// its control suffix instead. Trap 2: a rename disarms a check without crashing it.
+const readinessRow = (p, control) => p.evaluate((c) => {
+  const e = document.querySelector('[data-testid^="board.readiness.row."][data-testid$=".' + c + '"]');
+  return e ? e.getAttribute('data-testid') : null;
+}, control);
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
   const after = async (p, seq) => (await events(p)).filter((e) => e.seq > seq);
   const range = (ev, seq0) => [seq0 + 1, ev.length ? ev[ev.length - 1].seq : seq0];
@@ -207,15 +216,15 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const before = await ui();
         const rowsBefore = await p.evaluate(() => [...document.querySelectorAll('.rdrow button')].map((b) => b.getAttribute('data-testid')));
         const seq0 = await lastSeq(p);
-        const labPressed = await click(p, 'board.readiness.row.lab-op3.call'); await p.waitForTimeout(150);
+        const labPressed = await click(p, await readinessRow(p, 'call')); await p.waitForTimeout(150);
         const labEv = await after(p, seq0);
         const afterLab = await ui(); const labLive = await live(p);
         const seq1 = await lastSeq(p);
-        const devPressed = await click(p, 'board.readiness.row.device.reset'); await p.waitForTimeout(150);
+        const devPressed = await click(p, await readinessRow(p, 'reset')); await p.waitForTimeout(150);
         const devEv = await after(p, seq1);
         const afterDev = await ui(); const devLive = await live(p);
         const seq2 = await lastSeq(p);
-        const rvPressed = await click(p, 'board.readiness.row.elig.reverify-all'); await p.waitForTimeout(150);
+        const rvPressed = await click(p, await readinessRow(p, 'reverify-all')); await p.waitForTimeout(150);
         const rvEv = await after(p, seq2);
         const handled = await p.evaluate(() => { const d = [...document.querySelectorAll('summary')].find((s) => /What was handled/.test(s.textContent)); return d ? d.parentElement.textContent.replace(/\s+/g, ' ').trim() : null; });
         const rowsAfter = await p.evaluate(() => [...document.querySelectorAll('.rdrow button')].map((b) => b.getAttribute('data-testid')));

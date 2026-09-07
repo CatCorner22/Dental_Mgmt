@@ -18,6 +18,15 @@
 import fs from 'node:fs';
 
 export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => {
+
+// The readiness row ids carry seed id segments (`board.readiness.row.<seedId>.<control>`), and a fix round
+// can legitimately change which seed id a row names. A probe that hard-codes one stops pressing anything the
+// day that happens — silently, because click() returns false rather than throwing — so each row is found by
+// its control suffix instead. Trap 2: a rename disarms a check without crashing it.
+const readinessRow = (p, control) => p.evaluate((c) => {
+  const e = document.querySelector('[data-testid^="board.readiness.row."][data-testid$=".' + c + '"]');
+  return e ? e.getAttribute('data-testid') : null;
+}, control);
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
   const since = async (p, seq) => (await events(p)).filter((e) => e.seq > seq);
   const range = (ev, seq0) => [seq0 + 1, ev.length ? ev[ev.length - 1].seq : seq0];
@@ -375,7 +384,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const seeded = await l5.p.evaluate(() => { const r = Proto.store.addDayPass({ name: 'Alex Rivera', role: 'frontdesk', location: 'loc-1', end: '17:30', extra: [] }, null); return { ok: !!r.ok, dayPasses: window.__proto.state().dayPasses.length }; });
         await hop(l5.p, '#/frontdesk/chairs'); await hop(l5.p, '#/frontdesk/board');
         const cleared = [];
-        for (const t of ['board.readiness.row.elig.reverify-all', 'board.readiness.row.lab-op3.call', 'board.readiness.row.device.reset']) cleared.push({ testid: t, clicked: await click(l5.p, t) });
+        for (const c of ['reverify-all', 'call', 'reset']) { const t = await readinessRow(l5.p, c); cleared.push({ control: c, testid: t, clicked: t ? await click(l5.p, t) : false }); }
         found.push({ leg: 'board.handled', at: 'readiness cleared (day pass seeded through the store, not the UI)', seeded, cleared, got: await summaries(l5.p) });
 
         const flat = [];

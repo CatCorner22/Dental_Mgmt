@@ -239,7 +239,7 @@
     const railBtn = Proto.screens.rail ? Proto.screens.rail.button(a.patientId, r, 'checkout.rail') : null;
     const head = pageHead('Checkout · ' + name, sub, railBtn, btn('Back to Board', { kind: 'reversible', testid: 'checkout.back', onClick: () => Proto.router.go(r.persona, 'board') }));
     const status = h('div', { class: 'row' },
-      enc && enc.noteFiled ? chip('clear', 'Note filed') : chip('review', 'Note unfiled — Filed-later lane'),
+      enc && enc.noteFiled ? chip('clear', 'Note filed') : chip('review', 'Note unfiled — Filed later'),
       procs.some((p) => NEEDS_ATTACHMENT[p.cdt]) ? chip('review', 'Claim needs pre-flight') : chip('clear', 'Claim ready'),
       !st.posted && String(a.status).startsWith('checked_out') ? chip('info', 'Already checked out') : null);
     const page = h('div', { class: 'stack co-page' }, head, threeNumbers(bal), status, proceduresCard(S, a, st, procs, est, covers));

@@ -14,7 +14,7 @@
   const NOW = '08:40';             // the seed clock; a shift end must be later
   const DIGEST_BASE = 3;           // passes already issued this month before this session
 
-  const ROLE_LABEL = { owner: 'Owner', dentist: 'Dentist', surgeon: 'Oral surgeon', hygienist: 'Hygienist', assistant: 'Assistant', office_manager: 'Office manager', frontdesk: 'Front desk', biller: 'Biller', compliance: 'Compliance lead', cpa: 'CPA seat' };
+  const ROLE_LABEL = { owner: 'Owner', dentist: 'Dentist', surgeon: 'Oral surgeon', hygienist: 'Hygienist', assistant: 'Assistant', office_manager: 'Office manager', frontdesk: 'Front-desk coordinator', biller: 'Biller', compliance: 'Compliance lead', cpa: 'CPA seat' };
   const ENT_LABEL = { approve_second: 'Second approver', post_payment: 'Post payments', refund: 'Refund', write_off: 'Write off', bank_reconcile: 'Reconcile bank', grant_roles: 'Grant roles', close_day: 'Close day', prepare_deposit: 'Prepare deposit', schedule: 'Schedule', submit_claims: 'Submit claims', post_era: 'Post ERA', review_logs: 'Review audit log', view_reports: 'View reports', chart: 'Chart', perio: 'Perio', note_draft: 'Draft notes', chart_assist: 'Chart (assist)' };
   const ENT_DESC = {
     approve_second: 'Can be the second approver on refunds and write-offs, never on their own request.',
@@ -129,12 +129,12 @@
         const node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, onControl: () => { s.credentialNote = true; rerender(r, 'roles.daypass.save'); } });
         const c = node.querySelector('[data-testid="refusal.control"]'); if (c) c.setAttribute('data-testid', 'roles.daypass.credential.add');
         box.append(node);
-        if (s.credentialNote) box.append(h('p', { class: 'rl-note', text: 'Credential intake: licence number, state, expiry; verified by Dana; takes about a day. This pass stays Front desk only until the credential is verified.' }));
+        if (s.credentialNote) box.append(h('p', { class: 'rl-note', text: 'Credential intake: licence number, state, expiry; verified by Dana; takes about a day. This pass stays Front-desk coordinator only until the credential is verified.' }));
       } else {
         box.append(h('div', { class: 'row' }, credentialChip(pv.credential)));
       }
     } else {
-      box.append(h('div', { class: 'row' }, chip('info', 'Nonclinical role · no licence needed'), h('span', { class: 'small muted', text: 'The Front desk template carries no refund, write-off, or reconciliation entitlement.' })));
+      box.append(h('div', { class: 'row' }, chip('info', 'Nonclinical role · no licence needed'), h('span', { class: 'small muted', text: 'The Front-desk coordinator template carries no refund, write-off, or reconciliation entitlement.' })));
     }
 
     // Segregation of duties, shown before save.

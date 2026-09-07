@@ -14,6 +14,15 @@
 //     screen" walkers skip the body of a closed <details> explicitly (only its <summary> is on screen).
 
 export default ({ ctx, go, hop, press, click, txt, box, state, events, rec, FILE }) => {
+
+// The readiness row ids carry seed id segments (`board.readiness.row.<seedId>.<control>`), and a fix round
+// can legitimately change which seed id a row names. A probe that hard-codes one stops pressing anything the
+// day that happens — silently, because click() returns false rather than throwing — so each row is found by
+// its control suffix instead. Trap 2: a rename disarms a check without crashing it.
+const readinessRow = (p, control) => p.evaluate((c) => {
+  const e = document.querySelector('[data-testid^="board.readiness.row."][data-testid$=".' + c + '"]');
+  return e ? e.getAttribute('data-testid') : null;
+}, control);
   const CONTRACTS_URL = FILE.replace(/index\.html$/, 'CONTRACTS.md');
 
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
@@ -70,7 +79,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec, FILE
           board.appointment = await p.evaluate(() => { const a = window.__proto.state().appointments.find((x) => x.id === 'a-1042'); return a ? { id: a.id, eligibility: a.eligibility, status: a.status, patientId: a.patientId } : null; });
           board.cardChips = await chipWords(p, '[data-testid="board.card.a-1042"] .chip');
           board.reverifyButton = await label(p, 'board.card.a-1042.reverify');
-          board.readinessControl = await label(p, 'board.readiness.row.elig.reverify-all');
+          board.readinessControl = await label(p, await readinessRow(p, 'reverify-all'));
           // Rail, same patient, same appointment. The Coverage summary is a closed <details> on open: its box
           // measures non-zero either way (rule 3), so it is opened explicitly and `open` is asserted.
           await click(p, 'board.card.a-1042.rail'); await p.waitForTimeout(150);
