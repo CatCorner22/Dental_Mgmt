@@ -385,18 +385,36 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const why = explainers.filter((x) => x.segment === 'why');
         const nonWhy = explainers.filter((x) => x.segment !== 'why');
         const whyFamilies = new Set(why.map((x) => x.testid.replace(/\b(a-\d+|c-\d+|el-\d+|era-\d+|u-[a-z0-9-]+|d-\d+|ar-\d+|p-\d+)\b/g, '<id>'))).size;
-        const drift = whyFamilies >= 2 && nonWhy.some((x) => x.testid === 'palette.how');
+        /* Scored on the summary a person reads, not on the id segment. B4 governs user-facing words; ids are
+           B1's business, and CONTRACTS §4 has since listed `palette.how`, `perio.settings.grammar` and
+           `board.readiness.handled` under "Why disclosures", so the old predicate — which fired on the id
+           `palette.how` alone — asked for a rename the contract forbids. The measured labels also show the
+           id and the label are independent: three `.why` ids carry summaries that open with "How" or "What".
+           What B4 does govern is the opening word of the summary, and that is what is measured here. */
+        /* One concept, and only one: a disclosure that explains how a number or a state on screen was derived.
+           CONTRACTS §4 already separates those — its "Why disclosures" row lists them — from a mechanism
+           disclosure (`palette.how`, how search matches) and a reference one (`perio.settings.grammar`, the
+           key legend). Those are different concepts, and making all three open with the same word would read
+           worse, not clearer, so they are excluded rather than forced. Within the derivation family the
+           opening word is what a person reads first, and B4 gives one concept one word: "Why". */
+        const derivation = explainers.filter((x) => /\.why$/.test(x.testid));
+        const opener = (label) => (String(label || '').trim().split(/\s+/)[0] || '').replace(/[^A-Za-z]/g, '');
+        const openers = [...new Set(derivation.map((x) => opener(x.label)).filter(Boolean))];
+        const offWord = derivation.filter((x) => opener(x.label) !== 'Why').map((x) => x.testid + ' "' + x.label + '"');
+        const drift = derivation.length >= 2 && offWord.length > 0;
         rec('A-screens-palette-2-6',
-          'One concept, several control words: the disclosure that explains a derivation is ".why" on most screens but "palette.how" in the palette, with "perio.settings.grammar" and "board.readiness.handled" drifting the same way',
-          'B4/B1 (CHECKLIST): one canonical word per concept; every id in the DOM matches a §4 entry or pattern',
+          'The disclosures that explain how a number on screen was derived open with several different words — "Why" on some, "How" or "What" on others — so one concept reads differently on each screen',
+          'B4 (CHECKLIST): one canonical word per concept; CONTRACTS §4 names the family "Why disclosures"',
           drift,
+          Object.assign({ derivationSummaries: derivation.map((x) => x.testid + ' "' + x.label + '"'), summaryOpeningWords: openers, notOpeningWithWhy: offWord,
+            excludedAsADifferentConcept: explainers.filter((x) => !/\.why$/.test(x.testid)).map((x) => x.testid + ' "' + x.label + '" (mechanism or reference, not a derivation)') },
           { censusByLeg: found.map((f) => ({ leg: f.leg, at: f.at, ids: f.got.map((s) => s.testid + ' "' + s.label + '"'), seeded: f.seeded || null, cleared: f.cleared || null })),
             whySummaries: why.map((x) => x.testid + ' "' + x.label + '"'),
             nonWhySummaries: nonWhy.map((x) => x.testid + ' "' + x.label + '"'),
             distinctWhyFamilies: whyFamilies,
             railSectionSummariesExcluded: flat.filter((x) => /^rail\.sum\./.test(x.testid)).map((x) => x.testid),
             s4Membership: Object.fromEntries(['refusal.why', 'palette.how', 'perio.settings.grammar', 'board.readiness.handled', 'board.queue.why', 'checkout.estimate.why'].map((id) => [id, s4t.has(id)])),
-            s4TextSearched: s4t.rows.filter((r) => /Palette|Refusal|Board|Perio/.test(r)).map((r) => r.slice(0, 260)) });
+            s4TextSearched: s4t.rows.filter((r) => /Palette|Refusal|Board|Perio/.test(r)).map((r) => r.slice(0, 260)) }));
       } finally { for (const l of legs) await l.c.close(); }
     },
 
@@ -449,14 +467,26 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const prevOpen = await l4.p.$('[data-testid="ledger.statement.preview.close"]');
         if (prevOpen) controls.push(Object.assign({ dialog: 'Statement preview', step: 'preview a statement' }, await labelOf(l4.p, 'ledger.statement.preview.close'))); else notOpened.push('statement preview');
 
+        /* Scored against the split the glossary decided, not against "one word for all four". Cancel, Close and
+           "Back to <place>" name three different things — a dialog that would otherwise commit, a read-only
+           surface, and leaving a place — so a product that obeys the rule shows all three, and the old
+           predicate (two distinct words, one of them Cancel and one Close) fired on exactly that compliance.
+           What the rule forbids is a dismissal that reads as none of the three: "Close preview" where the word
+           is Close, "Dismiss" for a dialog, a bare "Back". */
         const words = controls.filter(Boolean).map((x) => x.text);
         const distinct = [...new Set(words)];
-        const drift = distinct.length > 1 && words.includes('Close') && words.includes('Cancel');
+        const COMMITTING = /pin\.|stepup/;                       // a dialog that would otherwise commit
+        const wrong = controls.filter(Boolean).filter((x) => {
+          const t = (x.text || '').trim();
+          if (COMMITTING.test(x.testid || '')) return t !== 'Cancel';
+          if (/\.back$/.test(x.testid || '')) return !/^Back to \S/.test(t);
+          return t !== 'Close';                                  // a read-only surface
+        }).map((x) => ({ testid: x.testid, text: x.text, dialog: x.dialog, expected: COMMITTING.test(x.testid || '') ? 'Cancel' : /\.back$/.test(x.testid || '') ? 'Back to <place>' : 'Close' }));
         rec('A-screens-palette-2-7',
-          'One concept, four words: a dialog is dismissed by "Close" in the palette, "Cancel" on the PIN pad and the phone step-up, "Close preview" in the statement preview, and "Back to results" on the palette\'s confirm step',
-          'B4 (CHECKLIST): one canonical word per concept across all screens (Cancel / Back / Close is named in the rule)',
-          drift,
-          { dismissControls: controls, distinctWords: distinct, dialogsThatDidNotOpen: notOpened });
+          'A surface is dismissed by a word the glossary does not give it: Cancel belongs to a dialog that would otherwise commit, Close to a read-only surface, "Back to <place>" to leaving a place',
+          'B4 (CHECKLIST) and the wave-1 glossary row "Dismissing a surface"',
+          wrong.length > 0,
+          { dismissControls: controls, distinctWords: distinct, wrongWord: wrong, dialogsThatDidNotOpen: notOpened });
       } finally { for (const l of legs) await l.c.close(); }
     },
   };

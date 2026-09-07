@@ -157,7 +157,7 @@
     return h('div', { class: 'stack' },
       ...line('close.changed', 'Yesterday changed after close', pairs.length, st.changedOpen, () => { st.changedOpen = !st.changedOpen; rerender(r, 'close.changed'); }, pairs.map((p) => pairSentence(S, p))),
       ...line('close.late', 'Postings into closed days', late.length, st.lateOpen, () => { st.lateOpen = !st.lateOpen; rerender(r, 'close.late'); }, late.map((e) => lateSentence(S, e))),
-      h('details', null, h('summary', { class: 'small', testid: 'close.counts.why' }, 'How these are counted'), h('p', { class: 'small muted', text: 'A correction is a reversal plus a repost, both linked to the original row; pairs by human actors are counted. A late first posting has nothing to correct and posts today marked after close; worker rows from an overnight 835 or import are excluded from both counts. Both counts are practice-level.' })));
+      h('details', null, h('summary', { class: 'small', testid: 'close.counts.why' }, 'Why these counts'), h('p', { class: 'small muted', text: 'A correction is a reversal plus a repost, both linked to the original row; pairs by human actors are counted. A late first posting has nothing to correct and posts today marked after close; worker rows from an overnight 835 or import are excluded from both counts. Both counts are practice-level.' })));
   }
 
   /* ---- Decisions due, approvals, exceptions ---- */

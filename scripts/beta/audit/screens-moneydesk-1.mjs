@@ -24,12 +24,16 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
   const live = (p) => p.evaluate(() => ({ live: ((document.getElementById('live') || {}).textContent || '').trim(), moneyLive: ((document.querySelector('#canvas .sr-only[aria-live]') || {}).textContent || '').trim() }));
   const testids = (p) => p.evaluate(() => [...document.querySelectorAll('#canvas [data-testid]')].map((e) => e.getAttribute('data-testid')));
   const contracts = () => fs.readFileSync(new URL('../../../prototype/CONTRACTS.md', import.meta.url), 'utf8');
-  // The Money Desk row of CONTRACTS §4, parsed from the file so the check follows the contract, not a copy of it.
+  /* Every CONTRACTS §4 row that can list a money.* id, parsed from the file so the check follows the contract
+     rather than a copy of it. Reading the Money Desk worklist row alone was not enough once §4 gained its
+     cross-cutting rows: money.appeal.close sits under screen-local returns and closers, money.era.<batchId>.why
+     and money.denial.<claimId>.why under Why disclosures, money.variance.<id>.open under Money Desk and phone.
+     One row made the check report five ids the contract does list. */
   const s4MoneyDesk = () => {
     const text = contracts();
     const sec = text.slice(text.indexOf('## 4.'), text.indexOf('## 5.'));
-    const row = sec.split('\n').find((l) => /^\|\s*Money Desk\s*\|/.test(l)) || '';
-    const entries = [...row.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+    const row = sec.split('\n').filter((l) => l.startsWith('|') && /`money\./.test(l)).join(' ');
+    const entries = [...row.matchAll(/`([^`]+)`/g)].map((m) => m[1]).filter((e) => e.startsWith('money.'));
     // A bare placeholder such as <batchId> or <code> admits any seed id or code token (letters, digits, '-', '_'); an enumerated one is exact.
     const patterns = entries.map((e) => new RegExp('^' + e.replace(/\./g, '\\.').replace(/<([^>]+)>/g, (m, inner) => inner.includes('|') ? '(?:' + inner.split('|').join('|') + ')' : '[a-z0-9_-]+') + '$'));
     return { row: row.trim(), entries, patterns };

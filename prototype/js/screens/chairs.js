@@ -143,7 +143,7 @@
     det.append(h('div', { class: 'row' }, h('span', { text: 'Coverage: ' + (pt.selfPay || !pt.primary ? 'Self-pay' : Proto.store.carrierName(pt.primary) + (pt.secondary ? ' · secondary ' + Proto.store.carrierName(pt.secondary) : '')) }), chip(esev, eword)));
     det.append(h('div', { class: 'row' }, h('span', { text: 'Forms: ' + (a.formsDone ? 'complete' : 'outstanding') }), a.formsDone ? chip('clear', 'Complete') : chip('review', 'Outstanding')));
     det.append(h('span', { text: 'Balance before today: ' + money(a.balanceCents || 0) + ' · Provider ' + prov.short }));
-    det.append(h('details', null, h('summary', { class: 'small', testid: 'chairs.card.' + a.id + '.why' }, 'How this strip is derived'), h('p', { class: 'small muted', text: 'Deltas come from stored rows only: the medical-history alert on the patient, the last perio exam date, the bitewing interval (the practice\'s rule), and the last filed what-helped field. Nothing here is an AI guess. Card order is seat order; no per-person metric appears.' })));
+    det.append(h('details', null, h('summary', { class: 'small', testid: 'chairs.card.' + a.id + '.why' }, 'Why this strip'), h('p', { class: 'small muted', text: 'Deltas come from stored rows only: the medical-history alert on the patient, the last perio exam date, the bitewing interval (the practice\'s rule), and the last filed what-helped field. Nothing here is an AI guess. Card order is seat order; no per-person metric appears.' })));
     el.append(det);
 
     const actions = h('div', { class: 'actions ch-actions' });

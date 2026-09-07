@@ -353,7 +353,7 @@
     const deepPockets = st.mode === 'full' && deep >= 5;
     const chipWord = fullChartDue ? 'Full chart due' : deepPockets ? 'Perio maintenance' : 'Recall';
     card.append(h('div', { class: 'row pe-next' }, chip(fullChartDue || deepPockets ? 'required' : 'clear', chipWord), h('span', { text: 'Next visit (practice policy, not a recommendation): ' + recallLine(st) })));
-    card.append(h('details', null, h('summary', { class: 'pe-summary', testid: 'perio.saved.why' }, 'How this was derived'), h('p', { class: 'small muted', text: 'Deepest depth, bleeding count, and the chart-status sentence are computed from the frozen site rows in one transaction. The recall interval comes from the practice rule (4 months with BWX when any site is 5 mm or deeper, else 6 months); the dentist\'s plan supersedes it. No quadrant count proposes a billable code.' })));
+    card.append(h('details', null, h('summary', { class: 'pe-summary', testid: 'perio.saved.why' }, 'Why these numbers'), h('p', { class: 'small muted', text: 'Deepest depth, bleeding count, and the chart-status sentence are computed from the frozen site rows in one transaction. The recall interval comes from the practice rule (4 months with BWX when any site is 5 mm or deeper, else 6 months); the dentist\'s plan supersedes it. No quadrant count proposes a billable code.' })));
     card.append(tagBlock(st, r));
     card.append(h('div', { class: 'btnrow' }, btn('Back to Chairs', { kind: 'reversible', testid: 'perio.back', onClick: () => Proto.router.go(r.persona, 'chairs') })));
     return card;

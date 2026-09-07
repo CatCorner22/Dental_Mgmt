@@ -115,7 +115,7 @@
       h('thead', null, h('tr', null, h('th', { text: 'Procedure' }), h('th', { class: 'num', text: 'Tooth' }), h('th', { class: 'num', text: 'Fee' }), h('th', { class: 'num co-est', text: 'Patient portion (estimate)' }), h('th', { text: 'Pre-flight' }), h('th', { text: 'Self-pay' }))),
       h('tbody', null, ...rows),
       h('tfoot', null, h('tr', null, h('th', { text: 'Totals' }), h('th'), h('th', { class: 'num', text: money(feeTotal) }), h('th', { class: 'num co-est', text: money(est.patientCents) + ' est.' }), h('th', { colspan: '2', class: 'small muted', text: 'Estimate is separate from the balance above; it never enters the ledger.' })))));
-    const why = h('details', null, h('summary', { class: 'co-summary', testid: 'checkout.estimate.why' }, 'How the estimate was built'),
+    const why = h('details', null, h('summary', { class: 'co-summary', testid: 'checkout.estimate.why' }, 'Why this estimate'),
       h('p', { class: 'hint', text: (est.note || 'No plan estimate on file.') + (est.insuranceCents ? ' Insurance est. ' + money(est.insuranceCents) + '.' : '') + (est.writeoffCents ? ' PPO write-off est. ' + money(est.writeoffCents) + '.' : '') }));
     return section('Completed today', procs.length ? table : h('p', { class: 'muted', text: 'No completed procedures on this encounter.' }), why);
   }

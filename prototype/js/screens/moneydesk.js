@@ -23,8 +23,12 @@
   const pname = (S, pid) => { const p = S.patients.find((x) => x.id === pid); return displayName(p ? p.name : pid, priv()); };
   const cdtName = (S, code) => (S.cdt[code] || [code.toUpperCase()])[0];
   const cdtLine = (S, code, tooth) => code.toUpperCase() + ' ' + cdtName(S, code) + (tooth ? ' · #' + tooth : '');
-  const cents = (s) => { const n = Number(String(s == null ? '' : s).replace(/[^0-9.]/g, '')); return isFinite(n) ? Math.round(n * 100) : 0; };
+  /* A typed amount is read as typed or not at all: stripping every character but digits and '.' turned
+     '-50' into a $50 write-off and '1e3' into $13. Anything that is not a plain positive decimal is NaN,
+     which the blur hint flags and Post refuses. */
+  const cents = (s) => { const t = String(s == null ? '' : s).trim().replace(/[$,\s]/g, ''); return /^\d+(?:\.\d+)?$/.test(t) ? Math.round(Number(t) * 100) : NaN; };
   const pressed = (b) => (b ? 'true' : 'false');
+  const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
   const say = (text) => { st.announced = text; Proto.router.announce(text); };
 
   function rerender(r, focusTestid) {
@@ -44,16 +48,18 @@
   const aging = (S) => S.claims.filter((c) => c.status === 'submitted' || c.status === 'pended');
   const statements = (S) => S.statementsDue;   // a sent row stays, carrying its confirmation
   const myVariances = (S) => { const u = Proto.store.currentUser(); return S.variances.filter((v) => v.status === 'open').filter((v) => { const rr = S.reconciliation.find((x) => x.id === v.reconciliationId); return rr && (rr.closer === u.name || u.role === 'biller' || u.role === 'owner' || u.role === 'office_manager'); }); };
+  /* One meaning for every badge: work still open on that tab. A finished row stays on its tab carrying its
+     confirmation, but it is no longer counted — Statements read 2 and Denials 1 with nothing left to do. */
   function counts(S) {
     const e = eraView(S);
-    return { era: e.b.status === 'review' ? 1 : e.deltas.length, aging: aging(S).length, denials: denials(S).length, statements: statements(S).length, credits: S.credits.length, variances: myVariances(S).length, approvals: S.approvals.filter((a) => a.status === 'pending').length };
+    return { era: e.b.status === 'review' ? 1 : e.deltas.length, aging: aging(S).length, denials: denials(S).filter((c) => c.status === 'denied').length, statements: statements(S).filter((s) => !s.sent).length, credits: S.credits.length, variances: myVariances(S).length, approvals: S.approvals.filter((a) => a.status === 'pending').length };
   }
 
   /* ---- tabs ---- */
   function tabs(r, S) {
     const c = counts(S);
     return h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Worklists' }, ...TABS.map(([code, label]) => {
-      const b = btn([label, h('span', { class: 'count', 'aria-label': c[code] + ' items', text: String(c[code]) })], { testid: 'money.tab.' + code, onClick: () => { tab = code; rerender(r, 'money.tab.' + code); } });
+      const b = btn([label, h('span', { class: 'count', 'aria-label': plural(c[code], 'item'), text: String(c[code]) })], { testid: 'money.tab.' + code, onClick: () => { tab = code; rerender(r, 'money.tab.' + code); } });
       b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', pressed(tab === code)); return b;
     }));
   }
@@ -61,32 +67,34 @@
   /* ---- ERA tab ---- */
   function postMatched(r) {
     const res = Proto.store.eraPostMatched('era-1');
-    if (res.ok) say(res.readback.length ? res.readback.length + ' lines differ from the claim. Read each back: Confirm, Hold, or Dispute.' : 'Batch posted.');
+    // One verb line, no storage id: an announcement is read aloud, not skimmed.
+    if (res.ok) say(res.readback.length ? 'Read back ' + plural(res.readback.length, 'line') + ' that differ' : 'Posted the batch');
+    else say(res.verb);
     rerender(r, res.readback && res.readback.length ? 'money.era.line.' + res.readback[0].id + '.confirm' : 'money.tab.era');
   }
   function handleLine(r, fn, lineId, word) {
     const res = fn(lineId);
     if (!res.ok) { say(res.verb); return; }
     const S = Proto.store.get(); const left = eraView(S).deltas;
-    say(word + ' line ' + lineId.replace('el-', '') + (left.length ? '. ' + left.length + ' left.' : '. Batch complete.'));
+    say(word + ' line ' + lineId.replace('el-', '') + (left.length ? ' — ' + plural(left.length, 'line') + ' left' : ' — batch complete'));
     if (!left.length) tab = 'denials';                       // the batch is done: go where the work went
     rerender(r, left.length ? 'money.era.line.' + left[0].id + '.confirm' : 'money.tab.denials');
   }
   function eraTab(r, S) {
     const e = eraView(S); const b = e.b;
-    const head = h('p', { class: 'md-batchline', text: 'Delta 835 · ' + b.lines + ' lines · ' + b.postedLines + ' posted before you sat down · EFT ' + money(b.eftCents) + ' · ' + b.trn + ' · matched to bank line' });
-    const status = h('div', { class: 'row' }, chip('clear', e.posted.length + ' posted'), e.deltas.length ? chip('review', e.deltas.length + ' deltas') : null, e.held.length ? chip('info', e.held.length + ' held') : null, e.disputed.length ? chip('style', e.disputed.length + ' disputed') : null, e.denied.length ? chip('required', e.denied.length + ' denial') : null);
+    const head = h('p', { class: 'md-batchline', text: 'Delta 835 · ' + plural(b.lines, 'line') + ' · ' + b.postedLines + ' posted before you sat down · EFT ' + money(b.eftCents) + ' · ' + b.trn + ' · matched to bank line' });
+    const status = h('div', { class: 'row' }, chip('clear', e.posted.length + ' posted'), e.deltas.length ? chip('review', plural(e.deltas.length, 'delta')) : null, e.held.length ? chip('info', e.held.length + ' set aside') : null, e.disputed.length ? chip('style', e.disputed.length + ' disputed') : null, e.denied.length ? chip('required', plural(e.denied.length, 'denial')) : null);
     const card = h('section', { class: 'card stack md-batch', 'aria-label': 'ERA batch era-1' }, h('h2', { text: 'Delta Dental 835 · era-1' }), head, status);
     if (b.status === 'review') {
-      card.append(h('div', { class: 'btnrow' }, btn('Post matched', { kind: 'irreversible', testid: 'money.era.era-1.postmatched', ariaLabel: 'Post matched lines (P)', onClick: () => postMatched(r) }), h('span', { class: 'small muted', text: 'Posts the 37 matched lines; only lines that differ from the claim will ask you.' })),
-        h('details', { class: 'md-details' }, h('summary', { text: 'Why are 37 already posted?', testid: 'money.era.' + b.id + '.why' }), h('p', { class: 'muted', text: 'The worker posted every clean line before you opened the batch. Each insurance payment and computed contractual write-off links to its 835 segment, claim line, and fee-schedule row; "Why did this post?" on any ledger row shows the four-line trace.' })));
+      card.append(h('div', { class: 'btnrow' }, btn('Post matched', { kind: 'irreversible', testid: 'money.era.era-1.postmatched', ariaLabel: 'Post matched lines (P)', onClick: () => postMatched(r) }), h('span', { class: 'small muted', text: 'Posts the ' + b.postedLines + ' matched lines; only lines that differ from the claim will ask you.' })),
+        h('details', { class: 'md-details' }, h('summary', { text: 'Why are ' + b.postedLines + ' already posted?', testid: 'money.era.' + b.id + '.why' }), h('p', { class: 'muted', text: 'The worker posted every clean line before you opened the batch. Each insurance payment and computed contractual write-off links to its 835 segment, claim line, and fee-schedule row; "Why did this post?" on any ledger row shows the four-line trace.' })));
       return card;
     }
     if (e.deltas.length) {
       card.append(h('h3', { text: 'Read back: ' + e.deltas.length + ' line' + (e.deltas.length > 1 ? 's' : '') + ' differ from the claim' }), h('div', { class: 'worklist' }, ...e.deltas.map((l) => deltaRow(r, S, l))));
       return card;
     }
-    const parts = [e.posted.length + ' posted']; if (e.held.length) parts.push(e.held.length + ' held'); if (e.disputed.length) parts.push(e.disputed.length + ' disputed'); parts.push(e.denied.length + ' denial moved to Denials');
+    const parts = [e.posted.length + ' posted']; if (e.held.length) parts.push(e.held.length + ' set aside'); if (e.disputed.length) parts.push(e.disputed.length + ' disputed'); parts.push(plural(e.denied.length, 'denial') + ' moved to Denials');
     card.append(h('div', { class: 'row md-complete' }, chip('clear', 'Batch complete'), h('span', { text: 'Batch complete: ' + parts.join(', ') })), h('p', { class: 'small muted', text: 'The denied line is on the Denials tab with its plain reason and next action.' }));
     return card;
   }
@@ -97,10 +105,11 @@
       h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, l.patientId) }), h('span', { class: 'muted', text: 'Line ' + l.id.replace('el-', '') + ' · ' + cdtLine(S, l.cdt, l.tooth) }), chip(isVariance ? 'review' : 'style', isVariance ? 'Contract variance' : 'Downcoded')),
       h('p', { class: 'md-delta', text: 'expected ' + money(l.expectedCents) + ', ERA says ' + money(l.paidCents) + ' · CARC ' + l.carc + ' (' + carc + ')' }),
       h('div', { class: 'btnrow' },
-        btn('Confirm · post ' + money(l.paidCents) + ', write off ' + money(l.expectedCents - l.paidCents), { kind: 'irreversible', testid: 'money.era.line.' + l.id + '.confirm', ariaLabel: 'Confirm line ' + l.id.replace('el-', '') + ': post ' + money(l.paidCents) + ' and a contractual write-off of ' + money(l.expectedCents - l.paidCents), onClick: () => handleLine(r, Proto.store.eraConfirm, l.id, 'Confirmed') }),
-        btn('Hold', { kind: 'reversible', testid: 'money.era.line.' + l.id + '.hold', onClick: () => handleLine(r, Proto.store.eraHold, l.id, 'Held') }),
+        btn('Confirm · post ' + money(l.paidCents) + ', write-off ' + money(l.expectedCents - l.paidCents), { kind: 'irreversible', testid: 'money.era.line.' + l.id + '.confirm', ariaLabel: 'Confirm line ' + l.id.replace('el-', '') + ': post ' + money(l.paidCents) + ' and a contractual write-off of ' + money(l.expectedCents - l.paidCents), onClick: () => handleLine(r, Proto.store.eraConfirm, l.id, 'Confirmed') }),
+        // "Held" is the gated primary's identity (CONTRACTS §6); an ERA line that waits for a look is set aside.
+        btn('Set aside', { kind: 'reversible', testid: 'money.era.line.' + l.id + '.hold', ariaLabel: 'Set aside line ' + l.id.replace('el-', '') + ' until you look at the note', onClick: () => handleLine(r, Proto.store.eraHold, l.id, 'Set aside') }),
         btn(isVariance ? 'Dispute contract variance' : 'Dispute', { kind: 'reversible', testid: 'money.era.line.' + l.id + '.dispute', onClick: () => handleLine(r, Proto.store.eraDispute, l.id, 'Disputed') })),
-      h('details', { class: 'md-details' }, h('summary', { text: 'Why', testid: 'money.era.line.' + l.id + '.why' }), h('p', { class: 'muted', text: isVariance ? 'Paid ' + money(l.paidCents) + '; the Delta PPO fee schedule allows ' + money(l.expectedCents) + ' for ' + l.cdt.toUpperCase() + '. Dispute creates an appeal row citing the fee-schedule line. Confirm accepts it as contractual and posts the write-off with the frozen delta.' : 'The payer paid a different code than was billed. Confirm posts what was paid and the difference as contractual; Hold keeps the line out of the ledger until you look at the note.' })));
+      h('details', { class: 'md-details' }, h('summary', { text: 'Why', testid: 'money.era.line.' + l.id + '.why' }), h('p', { class: 'muted', text: isVariance ? 'Paid ' + money(l.paidCents) + '; the Delta PPO fee schedule allows ' + money(l.expectedCents) + ' for ' + l.cdt.toUpperCase() + '. Dispute creates an appeal row citing the fee-schedule line. Confirm accepts it as contractual and posts the write-off with the frozen delta.' : 'The payer paid a different code than was billed. Confirm posts what was paid and the difference as contractual; Set aside keeps the line out of the ledger until you look at the note.' })));
   }
 
   /* ---- Open balances / write-off ---- */
@@ -111,18 +120,30 @@
     const card = section('Open balances', row);
     if (st.woPosted) { card.append(h('div', { class: 'row' }, chip('clear', 'Write-off posted'), h('span', { class: 'muted', text: 'On the ledger with its reason code.' }))); return card; }
     if (st.woHeldReq && st.woHeldReq.status === 'approved') { card.append(h('div', { class: 'row' }, chip('clear', 'Write-off ' + money(st.woHeldReq.amountCents) + ' approved by ' + st.woHeldReq.decidedBy), h('span', { class: 'muted', text: 'Posted to the ledger by the approval.' }))); return card; }
+    // A request that came back says so here, in the approver's word: the card used to fall through to a plain
+    // Post with nothing to show that the phone had already answered.
+    if (st.woHeldReq && (st.woHeldReq.status === 'declined' || st.woHeldReq.status === 'sent_back')) {
+      card.append(h('div', { class: 'row' }, chip('required', 'Sent back'), h('span', { class: 'muted', text: 'Sent back by ' + st.woHeldReq.decidedBy + ' · nothing posted. Their line is on the approvals card; Post requests it again.' })));
+    }
     if (!st.writeoffOpen) { card.append(h('div', { class: 'btnrow' }, btn('Write-off or adjustment', { kind: 'reversible', testid: 'money.writeoff.' + WRITEOFF_PID, ariaLabel: 'Write-off or adjustment for ' + pname(S, WRITEOFF_PID) + ' (W)', onClick: () => openWriteoff(r) }))); return card; }
     const amt = h('input', { class: 'input md-amount', type: 'text', inputmode: 'decimal', testid: 'money.writeoff.amount', value: st.writeoffStr, 'aria-label': 'Write-off amount in dollars', onInput: (ev) => { st.writeoffStr = ev.target.value; } });
     const hint = h('p', { class: 'hint', text: 'At or above ' + money(S.tenant.dualReleaseThresholdCents) + ' a second approver is needed; the posting is held, never silently allowed.' });
     amt.addEventListener('blur', () => { const bad = st.writeoffStr.trim() !== '' && !(cents(st.writeoffStr) > 0); amt.classList.toggle('invalid', bad); if (bad) hint.textContent = 'Enter a dollar amount above zero.'; });
     const reasons = h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Reason code' }, ...REASONS.map(([code, label]) => btn(label, { testid: 'money.writeoff.reason.' + code, pressed: pressed(st.writeoffReason === code), onClick: () => { st.writeoffReason = code; st.woRefusal = null; rerender(r, 'money.writeoff.reason.' + code); } })));
     const held = st.woHeldReq && st.woHeldReq.status === 'pending';
+    // The eligible approvers are one list, the one the request was written with; the biller is not told a
+    // different set of names from the one the phone card and the verb line read.
+    const approvers = held ? (st.woHeldReq.eligible || []).join(' or ') : '';
     const post = held
-      ? btn('Held', { kind: 'held', testid: 'money.writeoff.post', ariaLabel: 'Held: waiting on a second approver', onClick: () => say('Held. Waiting on ' + (st.woHeldReq.eligible || []).slice(0, 2).join(' or ') + ' for request ' + st.woHeldReq.id) })
+      ? btn('Held', { kind: 'held', testid: 'money.writeoff.post', ariaLabel: 'Held: waiting on a second approver', onClick: () => say('Waiting on ' + approvers) })
       : btn('Post', { kind: 'irreversible', testid: 'money.writeoff.post', onClick: () => postWriteoff(r) });
-    const postRow = h('div', { class: 'btnrow' }, post, held ? h('span', { class: 'row' }, chip('review', 'Request ' + st.woHeldReq.id + ' waiting'), h('span', { class: 'small muted', text: 'Dana or Dr. Reagan will see it on their phone; this flips to Posted when they approve.' })) : null);
-    if (held) { st.woRefusal = null; setTimeout(() => { const el = document.querySelector('[data-testid="money.writeoff.post"]'); if (el) { const b = el.getBoundingClientRect(); if (b.bottom > window.innerHeight || b.top < 0) el.scrollIntoView({ block: 'center' }); } }, 0); }
-    card.append(h('div', { class: 'md-two' }, h('div', { class: 'field' }, h('label', { for: 'md-wo-amt', text: 'Write-off amount' }), amt, hint), h('div', { class: 'field' }, h('label', { text: 'Reason code' }), reasons)), st.woRefusal, postRow, held ? h('p', { class: 'small muted', text: 'Approvals here usually take about 4 minutes (practice-level, last 30 days).' }) : null);
+    const postRow = h('div', { class: 'btnrow' }, post, held ? h('span', { class: 'row' }, chip('review', 'Approval requested'), h('span', { class: 'small muted', text: approvers + ' will see it on their phone; this flips to Posted when they approve.' })) : null);
+    // The gate stays on screen while the request is open: the refusal is the only thing that says what is
+    // holding the posting and where to go next, and nulling it here left the Held button with no verb line.
+    if (held) setTimeout(() => { const el = document.querySelector('[data-testid="money.writeoff.post"]'); if (el) { const b = el.getBoundingClientRect(); if (b.bottom > window.innerHeight || b.top < 0) el.scrollIntoView({ block: 'center' }); } }, 0);
+    // h() skips a null child; Element.append stringifies one, which put the word "null" on the card twice.
+    const tail = [h('div', { class: 'md-two' }, h('div', { class: 'field' }, h('label', { for: 'md-wo-amt', text: 'Write-off amount' }), amt, hint), h('div', { class: 'field' }, h('label', { text: 'Reason code' }), reasons)), st.woRefusal, postRow, held ? h('p', { class: 'small muted', text: 'Approvals here usually take about 4 minutes (practice-level, last 30 days).' }) : null];
+    card.append(...tail.filter(Boolean));
     amt.id = 'md-wo-amt';
     return card;
   }
@@ -136,10 +157,10 @@
     if (!(amountCents > 0)) { st.woRefusal = refusal({ code: 'amount_required', verb: 'Enter an amount above zero', control: 'Fix amount', why: 'A write-off needs a dollar amount; the balance is prefilled.', onControl: () => { st.woRefusal = null; rerender(r, 'money.writeoff.amount'); } }); rerender(r, 'refusal.control'); return; }
     if (!st.writeoffReason) { st.woRefusal = refusal({ code: 'reason_required', verb: 'Choose a reason code', control: 'Courtesy', why: 'Every write-off carries a reason code so the ledger sentence and the reason digest can explain it.', onControl: () => { st.writeoffReason = 'courtesy'; st.woRefusal = null; rerender(r, 'money.writeoff.post'); } }); rerender(r, 'refusal.control'); return; }
     const res = Proto.store.requestWriteoff(WRITEOFF_PID, amountCents, st.writeoffReason);
-    if (res.ok) { st.woPosted = true; st.woRefusal = null; say('Write-off ' + money(amountCents) + ' posted.'); rerender(r, 'money.tab.' + tab); return; }
+    if (res.ok) { st.woPosted = true; st.woRefusal = null; say('Posted the ' + money(amountCents) + ' write-off'); rerender(r, 'money.tab.' + tab); return; }
     if (res.held) {
       const S = Proto.store.get(); st.woHeldReq = S.approvals.find((x) => x.id === res.requestId) || null;
-      st.woRefusal = refusal({ code: res.code, verb: res.verb, control: res.control || 'Request approval', why: res.why, onControl: () => { st.woRequested = true; say('Approval requested; Dana or Dr. Reagan will see it on their phone'); rerender(r, 'money.writeoff.post'); } });
+      st.woRefusal = refusal({ code: res.code, verb: res.verb, control: res.control || 'Request approval', why: res.why, onControl: () => { st.woRequested = true; say('Requested approval from ' + ((st.woHeldReq && st.woHeldReq.eligible) || []).join(' or ')); rerender(r, 'money.writeoff.post'); } });
       rerender(r, 'refusal.control'); return;
     }
     st.woRefusal = refusal({ code: res.code, verb: res.verb, control: res.control || 'Back to ERA', why: res.why, onControl: () => { tab = 'era'; st.woRefusal = null; rerender(r, 'money.tab.era'); } });
@@ -151,7 +172,7 @@
     const res = Proto.store.buildAppeal(claimId);
     if (!res.ok) { say(res.verb); return; }
     st.appealFor = claimId; st.appealPacket = res.packet; st.denialRefusal[claimId] = null;
-    say('Appeal packet built from the record for claim ' + claimId + '. Review the four slots, then Send.');
+    say('Built the appeal packet from the record');
     rerender(r, 'money.appeal.send');
   }
   function denialsTab(r, S) {
@@ -159,6 +180,8 @@
     if (!rows.length) return section('Denials', h('div', { class: 'row' }, chip('clear', 'No open denials'), h('span', { class: 'muted', text: st.appealSent ? 'Appeal for ' + st.appealSent + ' sent · disclosure recorded.' : 'Denied lines from an ERA land here with a plain reason and one next action.' })));
     return section('Denials', h('div', { class: 'worklist' }, ...rows.map((c) => denialRow(r, S, c))));
   }
+  // The done-word names its object once, the way a sent statement does.
+  const sentLine = () => h('div', { class: 'row' }, chip('clear', 'Appeal sent'), h('span', { text: 'Disclosure recorded (clearinghouse, payment purpose, artifact hashes).' }));
   function denialRow(r, S, c) {
     const row = h('div', { class: 'md-row', role: 'group', 'aria-label': 'Denied claim ' + c.id },
       h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, c.patientId) }), h('span', { class: 'amt', text: money(c.amountCents) }), h('span', { class: 'muted', text: c.id + ' · ' + cdtLine(S, c.cdt, c.tooth) + ' · ' + c.payer }), chip('review', 'Appeal by ' + shortDate(c.appealBy))),
@@ -172,24 +195,27 @@
           rerender(r, 'refusal.control');
         } })),
       st.denialRefusal[c.id] || null,
+      st.appealSent === c.id ? sentLine() : null,
       h('details', { class: 'md-details' }, h('summary', { text: 'Why this code', testid: 'money.denial.' + c.id + '.why' }), h('p', { class: 'muted', text: 'CARC ' + c.carc + (c.rarc ? ' / RARC ' + c.rarc : '') + ' · ' + (CARC[c.carc] || 'payer reason') + '. Translated once by the versioned CARC dictionary with the ' + c.payer + ' overlay; the action is chosen by the table, not decoded by hand. Bill patient is offered only for PR group codes.' })));
     if (st.appealFor === c.id && st.appealPacket) row.append(appealDrawer(r, S, c));
     return row;
   }
   function appealDrawer(r, S, c) {
-    const pk = st.appealPacket; const slots = [['perioChart', 'Perio chart', 'six-point exam pe-1, 7/1/2025, 4 sites ≥ 5 mm in the quadrant'], ['narrative', 'Narrative from the note', 'filed-note excerpt for the periodontal module, quoted verbatim'], ['radiograph', 'Radiograph', 'bitewings with interpretation, from the encounter'], ['letter', 'Letter', 'restates CARC ' + c.carc + ' and cites the fee-schedule line']];
+    const pk = st.appealPacket; const slots = [['perioChart', 'Perio chart', 'six-point exam, 7/1/2025, 4 sites ≥ 5 mm in the quadrant'], ['narrative', 'Narrative from the note', 'filed-note excerpt for the periodontal module, quoted verbatim'], ['radiograph', 'Radiograph', 'bitewings with interpretation, from the encounter'], ['letter', 'Letter', 'restates CARC ' + c.carc + ' and cites the fee-schedule line']];
     const list = h('ul', { class: 'md-slots' }, ...slots.map(([k, label, detail]) => h('li', { class: 'row' }, chip(pk.slots[k] ? 'clear' : 'required', pk.slots[k] ? 'Clear' : 'Required'), h('span', null, h('b', { text: label }), h('span', { class: 'muted', text: ' · ' + (pk.slots[k] ? detail : 'not on the record; add before sending') })))));
     const missing = slots.filter(([k]) => !pk.slots[k]).length;
-    const drawer = h('div', { class: 'md-drawer stack', role: 'region', 'aria-label': 'Appeal packet ' + pk.id },
-      h('div', { class: 'row drawer-head' }, h('h3', { class: 'grow', text: 'Appeal packet · ' + pk.id + ' · built from the record' }), btn('Close', { kind: 'quiet', class: 'compact', testid: 'money.appeal.close', onClick: () => { st.appealFor = null; st.appealPacket = null; rerender(r, 'money.denial.' + c.id + '.appeal'); } })),
+    const drawer = h('div', { class: 'md-drawer stack', role: 'region', 'aria-label': 'Appeal packet for claim ' + c.id },
+      h('div', { class: 'row drawer-head' }, h('h3', { class: 'grow', text: 'Appeal packet · built from the record' }), btn('Close', { kind: 'quiet', class: 'compact', testid: 'money.appeal.close', onClick: () => { st.appealFor = null; st.appealPacket = null; rerender(r, 'money.denial.' + c.id + '.appeal'); } })),
       list,
       h('div', { class: 'md-sentence' }, h('span', { class: 'small muted', text: 'What the patient reads: ' }), h('span', { text: pk.patientSentence })));
-    if (st.appealSent === c.id) { drawer.append(h('div', { class: 'row' }, chip('clear', 'Sent'), h('span', { text: 'Sent · disclosure recorded (clearinghouse, payment purpose, artifact hashes).' }))); return drawer; }
+    if (st.appealSent === c.id) { drawer.append(sentLine()); return drawer; }
     drawer.append(h('div', { class: 'btnrow' }, btn('Send', { kind: 'irreversible', testid: 'money.appeal.send', ariaLabel: 'Send appeal for claim ' + c.id, onClick: () => {
       if (missing) { st.denialRefusal[c.id] = refusal({ code: 'packet_incomplete', verb: 'Add the required slot before sending', control: 'Show slots', why: 'An appeal that cites prose loses; every slot is a frozen record artifact.', onControl: () => rerender(r, 'money.appeal.send') }); rerender(r, 'refusal.control'); return; }
       const res = Proto.store.sendAppeal(c.id);
       if (!res.ok) { say(res.verb); return; }
-      st.appealSent = c.id; say('Sent · disclosure recorded'); rerender(r, 'money.tab.denials');
+      // The packet is gone; its confirmation stays on the row, the way a sent statement keeps its own.
+      st.appealSent = c.id; st.appealFor = null; st.appealPacket = null;
+      say('Sent the appeal — disclosure recorded'); rerender(r, 'money.tab.denials');
     } }), h('span', { class: 'small muted', text: 'Irreversible: writes a disclosure row with artifact hashes.' })));
     return drawer;
   }
@@ -201,7 +227,7 @@
     const out = section('Claims aging', h('p', { class: 'small muted', text: 'Submitted and pended claims by age with one next action each. Counts are by payer, never by person.' }));
     for (const [, label, f] of groups) {
       const g = rows.filter(f); if (!g.length) continue;
-      out.append(h('h3', { text: label + ' · ' + g.length }), h('div', { class: 'worklist' }, ...g.map((c) => { const act = agingAction(c); return h('div', { class: 'wrow' }, h('span', { class: 'obj', text: pname(S, c.patientId) }), h('span', { class: 'amt', text: money(c.amountCents) }), h('span', { class: 'why', text: c.id + ' · ' + cdtLine(S, c.cdt, c.tooth) + ' · ' + c.payer + ' · ' + c.age + ' days · ' + c.nextAction }), btn(AGING_ACTION[act], { kind: 'reversible', testid: 'money.aging.row.' + c.id + '.' + act, onClick: () => say(AGING_ACTION[act] + ' for ' + c.id + ': ' + c.nextAction) })); })));
+      out.append(h('h3', { text: label + ' · ' + g.length }), h('div', { class: 'worklist' }, ...g.map((c) => { const act = agingAction(c); return h('div', { class: 'wrow' }, h('span', { class: 'obj', text: pname(S, c.patientId) }), h('span', { class: 'amt', text: money(c.amountCents) }), h('span', { class: 'why', text: c.id + ' · ' + cdtLine(S, c.cdt, c.tooth) + ' · ' + c.payer + ' · ' + c.age + ' days · ' + c.nextAction }), btn(AGING_ACTION[act], { kind: 'reversible', testid: 'money.aging.row.' + c.id + '.' + act, onClick: () => say(AGING_ACTION[act] + ' for ' + pname(S, c.patientId)) })); })));
     }
     return out;
   }
@@ -211,17 +237,17 @@
     const rows = statements(S);
     if (!rows.length) return section('Statements due', h('div', { class: 'row' }, chip('clear', 'Nothing due'), h('span', { class: 'muted', text: 'Statements sent today are disclosure rows on the ledger.' })));
     return section('Statements due', h('div', { class: 'worklist' }, ...rows.map((s) => {
-      const row = h('div', { class: 'md-row' + (s.sent ? ' sent' : '') }, h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, s.patientId) }), h('span', { class: 'amt', text: money(s.amountCents) }), chip('info', 'held: window deferral'), h('span', { class: 'muted', text: 'deferred at the window ' + shortDate(s.created) + ' so insurance could settle first' })),
+      const row = h('div', { class: 'md-row' + (s.sent ? ' sent' : '') }, h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, s.patientId) }), h('span', { class: 'amt', text: money(s.amountCents) }), chip('info', 'Deferred'), h('span', { class: 'muted', text: 'deferred at the window ' + shortDate(s.created) + ' so insurance could settle first' })),
         s.sent
-          ? h('div', { class: 'row' }, Proto.ui.chip('clear', 'Statement sent'), h('span', { class: 'small muted', text: 'Sent to ' + pname(S, s.patientId) + ' · disclosure recorded · ' + S.tenant.today }))
-          : h('div', { class: 'btnrow' }, btn('Send', { kind: 'irreversible', testid: 'money.statement.' + s.id + '.send', onClick: () => { const res = Proto.store.sendStatement(s.id); say(res.ok ? 'Statement sent · disclosure recorded' : res.verb); rerender(r, 'money.tab.statements'); } }), btn('Preview', { kind: 'reversible', testid: 'money.statement.' + s.id + '.preview', pressed: pressed(st.previewFor === s.id), onClick: () => { st.previewFor = st.previewFor === s.id ? null : s.id; rerender(r, 'money.statement.' + s.id + '.preview'); } })));
+          ? h('div', { class: 'row' }, chip('clear', 'Statement sent'), h('span', { class: 'small muted', text: 'Sent to ' + pname(S, s.patientId) + ' · disclosure recorded · ' + shortDate(S.tenant.today) }))
+          : h('div', { class: 'btnrow' }, btn('Send statement', { kind: 'irreversible', testid: 'money.statement.' + s.id + '.send', onClick: () => { const res = Proto.store.sendStatement(s.id); say(res.ok ? 'Sent the statement — disclosure recorded' : res.verb); rerender(r, 'money.tab.statements'); } }), btn('Preview', { kind: 'reversible', testid: 'money.statement.' + s.id + '.preview', pressed: pressed(st.previewFor === s.id), onClick: () => { st.previewFor = st.previewFor === s.id ? null : s.id; rerender(r, 'money.statement.' + s.id + '.preview'); } })));
       if (st.previewFor === s.id) { const ex = Proto.store.explain(s.patientId); row.append(h('div', { class: 'explain', 'aria-label': 'Patient-voice preview' }, h('p', { class: 'sentence', text: ex.length ? ex.map((x) => x.patientVoice).join(' ') : 'Your share is ' + money(s.amountCents) + ' after insurance. We held this statement so your plan could settle first; nothing here is an estimate.' }), h('p', { class: 'small muted', text: 'Same rows the biller sees, rendered in the patient voice: no reason codes, no poster names.' }))); }
       return row;
     })));
   }
   function creditsTab(r, S) {
     if (!S.credits.length) return section('Unallocated credits', h('div', { class: 'row' }, chip('clear', 'None'), h('span', { class: 'muted', text: 'Credits appear when a payment lands before its charges.' })));
-    return section('Unallocated credits', h('div', { class: 'worklist' }, ...S.credits.map((cr) => h('div', { class: 'wrow' }, h('span', { class: 'obj', text: pname(S, cr.patientId) }), h('span', { class: 'amt', text: money(-cr.amountCents) + ' credit' }), h('span', { class: 'why', text: cr.reason }), btn('Apply when charges post', { kind: 'reversible', testid: 'money.credit.' + cr.id + '.apply', onClick: () => say('Will apply ' + money(-cr.amountCents) + ' to ' + cr.intents + ' the moment the note is filed and the charges post.') })))));
+    return section('Unallocated credits', h('div', { class: 'worklist' }, ...S.credits.map((cr) => h('div', { class: 'wrow' }, h('span', { class: 'obj', text: pname(S, cr.patientId) }), h('span', { class: 'amt', text: money(-cr.amountCents) + ' credit' }), h('span', { class: 'why', text: cr.reason }), btn('Apply when charges post', { kind: 'reversible', testid: 'money.credit.' + cr.id + '.apply', onClick: () => say('Apply ' + money(-cr.amountCents) + ' when the charges post') })))));
   }
   function variancesTab(r, S) {
     const rows = myVariances(S);
@@ -231,7 +257,9 @@
   function approvalsTab(r, S) {
     const STATUS = { pending: ['review', 'Waiting'], approved: ['clear', 'Approved'], declined: ['required', 'Sent back'], sent_back: ['required', 'Sent back'] };
     if (!S.approvals.length) return section('Approvals', h('div', { class: 'row' }, chip('clear', 'None waiting'), h('span', { class: 'muted', text: 'Held postings appear here with the frozen sentence the approver reads.' })));
-    return section('Approvals', h('div', { class: 'worklist' }, ...S.approvals.map((a) => { const s = STATUS[a.status] || ['info', a.status]; return h('div', { class: 'wrow' }, chip(s[0], s[1]), h('span', { class: 'amt', text: money(a.amountCents) }), h('span', { class: 'why', text: a.frozenSentence + (a.decidedBy ? ' · ' + a.status + ' by ' + a.decidedBy : '') }), h('span', { class: 'small muted', text: a.id })); })));
+    // The sentence is built at read time (privacy hides the name on glass) and the decision keeps the one word
+    // the chip, the phone and the write-off card all use — never the raw status beside it.
+    return section('Approvals', h('div', { class: 'worklist' }, ...S.approvals.map((a) => { const s = STATUS[a.status] || ['info', a.status]; return h('div', { class: 'wrow' }, chip(s[0], s[1]), h('span', { class: 'amt', text: money(a.amountCents) }), h('span', { class: 'why', text: Proto.store.approvalSentence(a) + (a.decidedBy ? ' · ' + s[1] + ' by ' + a.decidedBy : '') })); })));
   }
 
   /* ---- keys: active only while mounted ---- */
@@ -240,9 +268,18 @@
     const el = document.activeElement; if (!el || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || ev.ctrlKey || ev.metaKey || ev.altKey) return;
     if (document.querySelector('#dialogs .overlay')) return;
     const k = ev.key.toUpperCase(); const r = lastRoute || Proto.router.current(); const S = Proto.store.get();
-    if (k === 'P') { if (eraView(S).b.status === 'review') { ev.preventDefault(); tab = 'era'; postMatched(r); } else say('Matched lines are already posted.'); }
-    else if (k === 'W') { ev.preventDefault(); if (tab !== 'era' && tab !== 'aging') tab = 'era'; if (!st.writeoffOpen) openWriteoff(r); else rerender(r, 'money.writeoff.amount'); }
-    else if (k === 'A') { const d = denials(S)[0]; if (d) { ev.preventDefault(); tab = 'denials'; openAppeal(r, d.id); } else say('No open denials to appeal.'); }
+    // An accelerator takes you to the control; the control does the thing. A bare letter used to run Post
+    // matched (irreversible) and to write an appeal packet, with no gate between the keystroke and the write.
+    if (k === 'P') { if (eraView(S).b.status === 'review') { ev.preventDefault(); tab = 'era'; rerender(r, 'money.era.era-1.postmatched'); } else say('Matched lines are already posted'); }
+    else if (k === 'W') {
+      ev.preventDefault();
+      // No rerender once the card has stopped drawing an amount field: the focus target would not exist and
+      // shell.mount() would have already dropped focus to body.
+      if (st.woPosted) { say('Write-off already posted'); return; }
+      if (st.woHeldReq && st.woHeldReq.status === 'approved') { say('Write-off already approved'); return; }
+      if (tab !== 'era' && tab !== 'aging') tab = 'era';
+      if (!st.writeoffOpen) openWriteoff(r); else rerender(r, 'money.writeoff.amount');
+    } else if (k === 'A') { const d = denials(S).find((c) => c.status === 'denied'); if (d) { ev.preventDefault(); tab = 'denials'; rerender(r, 'money.denial.' + d.id + '.appeal'); } else say('No open denials to appeal'); }
   }
   function attachKeys() { if (!keysOn) { document.addEventListener('keydown', onKey); keysOn = true; } }
   function detachKeys() { if (keysOn) { document.removeEventListener('keydown', onKey); keysOn = false; } }

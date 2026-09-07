@@ -6,9 +6,19 @@
   Proto.screens = Proto.screens || {};
 
   const MAX_RECENTS = 3;
-  const recents = []; // module variable: last activated rows, newest first; never shown on operatory glass
+  /* B9: recents are per user, never global — a shared desk is not a person, so what the front desk opened is
+     not what the biller sees. One bucket per user id, newest first; never shown on operatory glass. */
+  const recentsByUser = new Map();
   let closeDialog = null; // the dialog's close() while open
   let st = null;          // per-open state
+
+  function myRecents() {
+    const u = Proto.store.currentUser() || {};
+    const key = u.id || 'no-pass';
+    let list = recentsByUser.get(key);
+    if (!list) { list = []; recentsByUser.set(key, list); }
+    return list;
+  }
 
   function isOpen() { return !!closeDialog; }
   function privacy() { return !!(window.__proto && window.__proto.privacy); }
@@ -21,7 +31,8 @@
     // and printing them here turns the second identifier into a formality (docs/13 feature 28).
     if (row.kind === 'patient') return 'Confirm the date of birth to open the chart';
     if (row.syn) return row.syn;
-    if (row.kind === 'action' && row.irreversible) return 'Opens its gate first; nothing runs from here';
+    // The palette navigates; it does not open another screen's gate. The row says where the gate is.
+    if (row.kind === 'action' && row.irreversible) return 'Opens the screen that holds its gate; nothing runs from here';
     if (row.kind === 'action') return row.route ? 'Screen' : 'Opens from a patient';
     if (row.kind === 'claim') return 'Money Desk';
     return '';
@@ -34,18 +45,22 @@
   }
 
   function remember(row) {
-    const i = recents.findIndex((x) => x.label === row.label && x.kind === row.kind);
-    if (i >= 0) recents.splice(i, 1);
-    recents.unshift(Object.assign({}, row));
-    if (recents.length > MAX_RECENTS) recents.length = MAX_RECENTS;
+    const list = myRecents();
+    const i = list.findIndex((x) => x.label === row.label && x.kind === row.kind);
+    if (i >= 0) list.splice(i, 1);
+    list.unshift(Object.assign({}, row));
+    if (list.length > MAX_RECENTS) list.length = MAX_RECENTS;
   }
 
   /* ---- date of birth: MM/DD/YYYY (leading zeros optional) compared to the seed's ISO dob ---- */
+  const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  function daysInMonth(mo, y) { return mo === 2 && y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0) ? 29 : MONTH_DAYS[mo - 1]; }
   function parseDob(str) {
     const m = String(str || '').trim().match(/^(\d{1,2})\s*[\/\-.]\s*(\d{1,2})\s*[\/\-.]\s*(\d{4})$/);
     if (!m) return null;
     const mo = Number(m[1]), d = Number(m[2]), y = Number(m[3]);
-    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    // The day is range-checked against its own month, so 02/30 and 04/31 are a format error, not an identity mismatch.
+    if (mo < 1 || mo > 12 || d < 1 || d > daysInMonth(mo, y)) return null;
     return y + '-' + String(mo).padStart(2, '0') + '-' + String(d).padStart(2, '0');
   }
 
@@ -88,17 +103,23 @@
         btn('Close', { testid: 'palette.close', kind: 'quiet', class: 'compact', ariaLabel: 'Close search (Escape)', onClick: close })),
       input, st.hint, st.status, st.list,
       h('details', { class: 'pal-more' }, h('summary', { testid: 'palette.how' }, 'How search works'),
-        h('div', { class: 'whytext', text: 'Three letters list patients (name · date of birth · last four of the phone), claims, screens, and actions. Words from Dentrix, Eaglesoft, Open Dental, and Curve are translated to the words this system uses, so you learn the term at the moment you need it. A patient chart opens only after a second identifier. Irreversible actions (Close day, Post matched) open their gate; nothing runs from here. Patient search never widens to phonetic matches.' })),
+        h('div', { class: 'whytext', text: 'Three letters list patients (by name, by the last four of the phone, or by the MRN), claims, screens, and actions. Words from Dentrix, Eaglesoft, Open Dental, and Curve are translated to the words this system uses, so you learn the term at the moment you need it. A patient row prints the name only: the date of birth is what the chart gate asks for, so it is never printed here and it is not something you search by. Irreversible actions (Close day, Post matched) open the screen that holds their gate; nothing runs from here. Patient search never widens to phonetic matches, and the list is capped, so add letters to narrow it.' })),
     );
     refreshList();
+    // B10: an in-dialog step change lands the keyboard on the next control. On the first render the body is not
+    // in the document yet — the dialog itself focuses the input then.
+    if (st.input.isConnected) st.input.focus();
   }
 
   function currentRows() {
     const q = st.q.trim();
     if (q.length >= 3) return { rows: Proto.store.search(q), recents: false };
-    if (showRecents() && recents.length) return { rows: recents.slice(), recents: true };
+    const mine = myRecents();
+    if (showRecents() && mine.length) return { rows: mine.slice(), recents: true };
     return { rows: [], recents: false };
   }
+
+  const COUNT_WORD = ['no', 'one', 'two', 'three'];
 
   function refreshList() {
     const q = st.q.trim();
@@ -109,11 +130,13 @@
     if (isRecents) nodes.push(h('div', { class: 'small muted pal-groups', text: 'Recents' }));
     rows.forEach((row, i) => nodes.push(renderRow(row, i)));
     st.list.replaceChildren(...nodes);
-    if (q.length === 0) st.hint.textContent = isRecents ? 'Your last three. Type three letters to search.' : 'Type three letters of a name, phone, claim, or the word you know from your old system.';
+    // The count names what is on screen: the number of recents rendered, and the number of rows the search
+    // returned — which is a capped list, not the number of rows that matched.
+    if (q.length === 0) st.hint.textContent = isRecents ? 'Your last ' + (COUNT_WORD[rows.length] || rows.length) + '. Type three letters to search.' : 'Type three letters of a name, phone, claim, or the word you know from your old system.';
     else if (q.length < 3) st.hint.textContent = 'Type ' + (3 - q.length) + ' more letter' + (3 - q.length === 1 ? '' : 's') + '.';
     else if (!rows.length) st.hint.textContent = 'Nothing matches "' + q + '". Patient search does not widen to phonetic matches; try the last four digits of the phone or the MRN.';
-    else st.hint.textContent = rows.length + ' result' + (rows.length === 1 ? '' : 's') + '. Arrow keys move, Enter opens.';
-    st.status.textContent = q.length >= 3 ? (rows.length ? rows.length + ' results' : 'No results') : '';
+    else st.hint.textContent = rows.length + ' shown — the list is capped, so add letters to narrow it. Arrow keys move, Enter opens.';
+    st.status.textContent = q.length >= 3 ? (rows.length ? rows.length + ' shown, the list is capped' : 'No results') : '';
     syncSelection();
   }
 
@@ -136,6 +159,16 @@
     if (st.sel >= 0 && rows[st.sel]) rows[st.sel].scrollIntoView({ block: 'nearest' });
   }
 
+  /* Home/End are pressed with a row focused, and Enter on a focused row fires that row's own click: the
+     highlight and the focus move together, or Enter opens a row the person is not looking at. */
+  function focusRow(i) {
+    if (!st.rows.length) return;
+    st.sel = Math.max(0, Math.min(i, st.rows.length - 1));
+    syncSelection();
+    const el = st.list.querySelectorAll('.palette-row')[st.sel];
+    if (el && el.focus) el.focus();
+  }
+
   function move(delta) {
     if (!st.rows.length) return;
     st.sel = st.sel < 0 ? (delta > 0 ? 0 : st.rows.length - 1) : (st.sel + delta + st.rows.length) % st.rows.length;
@@ -156,22 +189,47 @@
         else if (st.q.trim().length < 3) st.hint.textContent = 'Three letters first.';
         return;
       }
-      if (ev.key === 'Home' && ev.target !== st.input) { ev.preventDefault(); st.sel = 0; syncSelection(); return; }
-      if (ev.key === 'End' && ev.target !== st.input) { ev.preventDefault(); st.sel = st.rows.length - 1; syncSelection(); return; }
+      if (ev.key === 'Home' && ev.target !== st.input) { ev.preventDefault(); focusRow(0); return; }
+      if (ev.key === 'End' && ev.target !== st.input) { ev.preventDefault(); focusRow(st.rows.length - 1); return; }
     } else if (st.step === 'confirm') {
       if (ev.key === 'Enter' && ev.target === st.dobInput) { ev.preventDefault(); confirmDob(); }
     }
   }
 
   /* ---- activation ---- */
+  /* The Money Desk remembers its tab across renders, so a row that lands there names the worklist it is
+     sending the person to; otherwise the landing is whatever tab the last person used. */
+  const TAB_WORD = { era: 'ERA', aging: 'Aging', denials: 'Denials', statements: 'Statements' };
+  function moneyTab(row) {
+    if (row.kind === 'claim') {
+      const cid = (String(row.label).match(/c-\d+/) || [])[0];
+      const claim = cid ? (Proto.store.get().claims || []).find((x) => x.id === cid) : null;
+      return claim && (claim.status === 'submitted' || claim.status === 'pended') ? 'aging' : 'denials';
+    }
+    if (/statement/i.test(row.label)) return 'statements';
+    return 'era';
+  }
+  function goMoney(persona, row) {
+    const tab = moneyTab(row);
+    const md = Proto.screens.moneydesk;
+    const name = () => { if (md && typeof md.setTab === 'function') md.setTab(tab); };
+    name();
+    Proto.router.go(persona, 'money');
+    /* The Money Desk builds its module state on its first render of a store and resets its remembered tab with
+       it, so a tab named before that render is lost. When the landing is that first render, name the worklist
+       again once the state exists and repaint. */
+    if (md && typeof md.state === 'function' && !md.state()) { Proto.router.render(); name(); Proto.router.render(); }
+    return tab;
+  }
+
   function activate(row) {
     if (!row || !st) return;
     const r = st.r;
     if (row.kind === 'patient') { st.row = row; st.patient = Proto.store.patient(row.patientId); renderConfirm(); return; }
     if (row.kind === 'claim') {
       remember(row); close();
-      Proto.router.go(r.persona, row.route || 'money');
-      Proto.router.announce('Money Desk. ' + row.label);
+      const tab = goMoney(r.persona, row);
+      Proto.router.announce('Money Desk · ' + TAB_WORD[tab] + '. ' + row.label);
       return;
     }
     // kind: action
@@ -190,9 +248,10 @@
     }
     remember(row); close();
     if (row.route === 'phone') { location.hash = '#/phone/approvals'; return; }
-    Proto.router.go(r.persona, row.route);
-    if (row.irreversible) Proto.router.announce(row.label + ': opens its gate; nothing executed');
-    else Proto.router.announce(row.label);
+    const tab = row.route === 'money' ? goMoney(r.persona, row) : null;
+    if (!tab) Proto.router.go(r.persona, row.route);
+    if (row.irreversible) Proto.router.announce(row.label + ': the gate is on this screen; nothing executed');
+    else Proto.router.announce(row.label + (tab ? '. Money Desk · ' + TAB_WORD[tab] : ''));
   }
 
   /* ---- step 2: second identifier ---- */
@@ -243,8 +302,9 @@
     const iso = parseDob(st.dob);
     const p = st.patient; const r = st.r; const row = st.row;
     if (iso === p.dob) {
-      // Two identifiers matched: the chart may open. This is the moment the PHI access row is written.
-      Proto.events.write('phiAccessLog', p.id);
+      /* Two identifiers matched: the chart may open. The screen logged a write for a `phiAccessLog` table the
+         store does not have, so the event claimed a row nothing could show; a PHI-access row is the store's to
+         write, not a screen's, and no store verb writes one yet. */
       remember(row);
       close();
       if (Proto.screens.rail && typeof Proto.screens.rail.open === 'function') Proto.screens.rail.open(p.id, r);
@@ -256,11 +316,14 @@
     // Mismatch: one verb line, one control; the primary switches to Held.
     st.refused = true;
     st.gate.replaceChildren(refusal({
-      code: 'second_identifier', verb: 'Date of birth does not match', control: 'Try again',
+      code: 'second_identifier', verb: 'Check the date of birth', control: 'Try again',
       onControl: () => { st.refused = false; st.dob = ''; st.dobInput.value = ''; st.dobInput.classList.remove('invalid'); st.gate.replaceChildren(); swapGo(false); st.dobHint.textContent = 'Second identifier. Ask the patient, or read it from the appointment card.'; st.dobInput.focus(); },
-      why: 'Two identifiers before a chart opens; patient search never widens to phonetic matches.',
+      why: 'The date of birth entered does not match this patient. Two identifiers before a chart opens; patient search never widens to phonetic matches.',
     }));
     swapGo(true);
+    // B10: swapGo removes the focused primary, so the keyboard lands on the gate's own control, never on body.
+    const next = st.gate.querySelector('[data-testid="refusal.control"]');
+    if (next && next.focus) next.focus();
   }
 
   function swapGo(held) {
@@ -270,5 +333,5 @@
     st.go.replaceWith(nb); st.go = nb;
   }
 
-  Proto.screens.palette = { open, close, isOpen, recents: () => recents.map((x) => x.label) };
+  Proto.screens.palette = { open, close, isOpen, recents: () => myRecents().map((x) => x.label) };
 })();

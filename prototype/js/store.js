@@ -196,7 +196,10 @@
     if (amountCents >= threshold) return { ok: false, code: 'needs_second', verb: 'Needs a second approver — ' + eligible.slice(0, 2).join(' or '), why: 'Write-offs at or above ' + Proto.ui.money(threshold) + ' need a distinct second approver (control policy v3, set by Dr. Reagan on 8/4, review due 9/1). Approvals here usually take about 4 minutes.', eligible };
     return { ok: true, code: 'below_threshold', eligible };
   }
-  function decideApproval(reqId, approverId, decision, stepup) {
+  /* An approver who sends a request back says why: the biller reads the reason on the write-off card, and
+     without it the card could name who sent it back but not their line. The reason rides on the request and
+     on the log row, so the decision and its reason are one record. */
+  function decideApproval(reqId, approverId, decision, stepup, reason) {
     const r = S.approvals.find((x) => x.id === reqId); if (!r) return notFound('request');
     const off = offline('Wait for the server — approvals are paused'); if (off) return off;
     const approver = user(approverId) || currentUser();
@@ -204,8 +207,12 @@
     // A step-up is a challenge, not a refusal: it carries no gate identity and never reached the shared component.
     if (!stepup) return { ok: false, needsStepup: true, verb: 'Enter your PIN to approve', why: 'Approvals above the high-value band re-verify within two minutes.' };
     if (r.status && r.status !== 'pending') return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'This request was already ' + r.status + ' by ' + (r.decidedBy || 'someone') + '. Deciding it twice would post the write-off twice; a correction is a reversal and a repost.');
-    r.status = decision; r.decidedBy = approver.name; r.decidedAt = S.clock.time; touch('approvals', r.id);
-    write('approvalsLog', { id: id('al'), requestId: reqId, decision, by: approver.name });
+    // The reason rides on the request and on the log row, so the decision and its reason are one record. It is
+    // carried, not yet required: the control that collects it lives on the approver's card, which the phone
+    // screen has still to grow, and a gate on a word the product does not use yet would guard nothing.
+    const why = String(reason || '').trim();
+    r.status = decision; r.decidedBy = approver.name; r.decidedAt = S.clock.time; if (why) r.decisionReason = why; touch('approvals', r.id);
+    write('approvalsLog', { id: id('al'), requestId: reqId, decision, by: approver.name, reason: why || null });
     if (decision === 'approved') {
       const a = appt(r.appointmentId);
       write('ledger', { id: id('le'), kind: 'write_off', patientId: r.patientId, amountCents: -r.amountCents, effective: S.tenant.today, posted: S.tenant.today, actor: r.requestedBy, actorKind: 'user', locationId: a ? a.locationId : 'loc-1', reason: r.reason, approvalRequestId: reqId, secondApprover: approver.name });

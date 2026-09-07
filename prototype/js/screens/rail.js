@@ -237,7 +237,7 @@
       h('div', { class: 'explain' }, rows.length ? rows.map((x) => h('p', { class: 'sentence' }, boldAmounts(x.patientVoice))) : h('p', { class: 'sentence muted', text: 'Nothing left to pay.' })),
       h('div', null, h('h3', { text: 'Waiting on insurance' }), pend.length ? h('ul', { class: 'ledger-list' }, pend.map((c) => h('li', { text: cdtName(c.cdt) + (c.tooth ? ' #' + c.tooth : '') + ' — ' + c.payer + ' is reviewing; no amount for you until they respond' }))) : h('p', { class: 'muted', text: 'Nothing pending' })),
       h('p', { class: 'small muted', text: 'Estimate lines are labelled estimate. Family members are named by first name; adult dependents show amount and date only unless they have authorized more.' }),
-      h('div', { class: 'btnrow' }, btn('Close preview', { kind: 'quiet', testid: 'ledger.statement.preview.close', onClick: () => closeDlg() }))), { label: 'Statement preview', focus: '[data-testid="ledger.statement.preview.close"]' });
+      h('div', { class: 'btnrow' }, btn('Close', { kind: 'quiet', testid: 'ledger.statement.preview.close', ariaLabel: 'Close the statement preview', onClick: () => closeDlg() }))), { label: 'Statement preview', focus: '[data-testid="ledger.statement.preview.close"]' });
   }
 
   function asOfBlock(pid, st, r, allRows) {
@@ -284,7 +284,7 @@
           // A held primary renders the word Held from ui.btn; the label passed in becomes its accessible name.
           btn('Send statement', { kind: st.gate ? 'held' : 'irreversible', testid: 'ledger.statement.send', ariaLabel: st.gate ? 'Send statement is held: ' + st.gate.verb : 'Send the statement by mail; this freezes it with an id', onClick: () => sendStatement(r, pid, st) }),
           btn('Preview', { kind: 'reversible', testid: 'ledger.statement.preview', onClick: () => previewStatement(pid, st) })),
-        h('details', { class: 'ledger-details' }, h('summary', { testid: 'ledger.statement.why' }, 'What a statement contains'), h('p', { class: 'muted', text: 'The patient-voice sentences under three numbers; pending claims listed under Waiting on insurance with no patient dollar figure; family members by first name. Send freezes the statement with an id and writes a disclosure row per channel. A balance still waiting on insurance holds for a stated reason.' }))));
+        h('details', { class: 'ledger-details' }, h('summary', { testid: 'ledger.statement.why' }, 'Why this statement'), h('p', { class: 'muted', text: 'The patient-voice sentences under three numbers; pending claims listed under Waiting on insurance with no patient dollar figure; family members by first name. Send freezes the statement with an id and writes a disclosure row per channel. A balance still waiting on insurance holds for a stated reason.' }))));
     Proto.screens.shell.mount(page);
   }
   function rerender(r, focusTestid) {

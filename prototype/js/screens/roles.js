@@ -76,7 +76,7 @@
       cred ? h('div', { class: 'row' }, credentialChip(cred)) : (u.licence ? h('p', { class: 'hint', text: 'Licence ' + u.licence + ' on the account; no credential row in this seed.' }) : null),
       dec ? h('div', { class: 'stack' },
         h('div', { class: 'row' }, chip('review', dec.text)),
-        dec.rule ? h('details', null, h('summary', { testid: 'roles.row.' + u.id + '.why' }, 'What was accepted, and why'),
+        dec.rule ? h('details', null, h('summary', { testid: 'roles.row.' + u.id + '.why' }, 'Why this was accepted'),
           h('div', { class: 'rl-note' },
             h('p', null, h('b', { text: 'Fraud path: ' }), dec.rule.fraudPath),
             h('p', null, h('b', { text: 'Compensating control: ' }), dec.rule.compensating),
@@ -229,7 +229,7 @@
       i.downgraded ? h('p', { class: 'rl-note', text: 'Issued as Front desk, not ' + roleLabel(i.requestedRole) + ': no verified ' + (wanted.licence || 'clinical') + ' credential on file for ' + dp.name + '. Nothing clinical was granted; clinical entitlements issue only after the credential is verified.' }) : null,
       h('div', { class: 'rl-chips' }, h('span', { class: 'small muted', text: 'Granted:' }), ...dp.entitlements.map((e) => chip('info', entLabel(e)))),
       h('div', { class: 'btnrow' }, btn('Sign in as this temp', { kind: 'reversible', testid: 'roles.daypass.signin', onClick: () => { P().set({ persona: 'temp' }); location.hash = '#/temp/board'; } })),
-      h('details', null, h('summary', { testid: 'roles.daypass.expiry.why' }, 'What happens at expiry'), h('p', { class: 'hint', text: 'At ' + clock12(dp.shiftEnd) + ' + 30 min the grants lapse and the session is revoked. The account remains as a frozen name on everything it posted; issued by ' + dp.createdBy + ' for ' + (S().locations.find((l) => l.id === dp.locationId) || {}).name + '.' })));
+      h('details', null, h('summary', { testid: 'roles.daypass.expiry.why' }, 'Why it expires'), h('p', { class: 'hint', text: 'At ' + clock12(dp.shiftEnd) + ' + 30 min the grants lapse and the session is revoked. The account remains as a frozen name on everything it posted; issued by ' + dp.createdBy + ' for ' + (S().locations.find((l) => l.id === dp.locationId) || {}).name + '.' })));
   }
 
   // ---- Screen -------------------------------------------------------------------------------

@@ -185,9 +185,17 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       const variants = [];
       const cf = legs.eraReadback && legs.eraReadback.confirm;
       if (cf && /write off/.test(cf.label) && /write-off/.test(cf.aria || '')) variants.push({ concept: 'write-off', words: ['write off', 'write-off'], where: ['money.era.line.el-14.confirm label (moneydesk.js:100): ' + cf.label, 'that same button aria-label (moneydesk.js:100): ' + cf.aria] });
-      const heldWords = [legs.heldButton && legs.heldButton.label, legs.eraReadback && legs.eraReadback.hold && legs.eraReadback.hold.label, ...((legs.statementRow && legs.statementRow.chips) || []).map(chipText).filter((t) => /^held/i.test(t))].filter(Boolean);
-      const heldSet = [...new Set(heldWords)];
-      if (heldSet.length > 1) variants.push({ concept: 'hold / held', words: heldSet, where: ['money.writeoff.post label (moneydesk.js:121)', 'money.era.line.el-14.hold label (moneydesk.js:101)', 'statement row chip (moneydesk.js:214)'] });
+      /* The rule is not "one word in this pool": it is that "Held" belongs to the gated primary's identity and
+         to nothing else (CONTRACTS §6; the glossary reserves it, and gives the ERA line control "Set aside" and
+         the claim-state chip "Waiting on note"). The old predicate pooled the primary's identity word with the
+         ERA action label and any held-ish chip and asked for one distinct word, so a product that obeyed both
+         rules — primary "Held", ERA control "Set aside" — measured as two variants and could never pass. */
+      const primaryLabel = legs.heldButton && legs.heldButton.label;
+      const eraHoldLabel = legs.eraReadback && legs.eraReadback.hold && legs.eraReadback.hold.label;
+      const heldChips = ((legs.statementRow && legs.statementRow.chips) || []).map(chipText).filter((t) => /\bheld\b/i.test(t));
+      const primaryWrong = !!primaryLabel && primaryLabel.trim() !== 'Held';
+      const heldElsewhere = [eraHoldLabel, ...heldChips].filter((t) => t && /\bheld\b/i.test(t));
+      if (primaryWrong || heldElsewhere.length) variants.push({ concept: 'the word Held', gatedPrimary: primaryLabel, expectedPrimary: 'Held', heldOnSomethingElse: heldElsewhere, eraLineControl: eraHoldLabel, heldChips, where: ['money.writeoff.post label — the gated primary, which must read exactly Held', 'money.era.line.el-14.hold label — an action, which must not', 'statement row chips — a state, which must not'] });
       const doneWords = [...new Set([...(((legs.appealDone || {}).chips) || []), ...(((legs.statementRow || {}).chips) || [])].map(chipText).filter((t) => /sent/i.test(t)))];
       if (doneWords.length > 1) variants.push({ concept: 'the done-word after an irreversible Send', words: doneWords, where: ['appeal drawer chip (moneydesk.js:187)', 'statement row chip (moneydesk.js:216)'] });
       const dateFormats = [...new Set(((legs.statementRow || {}).dates || []).map((d) => (/^\d{4}-/.test(d) ? 'YYYY-MM-DD' : 'M/D')))];
