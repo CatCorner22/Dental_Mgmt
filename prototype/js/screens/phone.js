@@ -270,7 +270,10 @@
     const t = ev.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
     if (/^[0-9]$/.test(ev.key)) { ev.preventDefault(); pad.add(ev.key); }
     else if (ev.key === 'Backspace') { ev.preventDefault(); pad.back(); }
-    else if (ev.key === 'Enter' && !(t && t.tagName === 'BUTTON' && t.getAttribute('data-testid') !== 'phone.stepup.submit')) { ev.preventDefault(); pad.submit(); }
+    /* Enter finishes the PIN wherever the keyboard happens to be sitting. The pad opens with focus on its
+       landing key, so excluding focused buttons meant Enter typed a fifth digit instead of submitting and
+       only the submit key would finish. Cancel keeps its own Enter, because it is a different verb. */
+    else if (ev.key === 'Enter' && !(t && t.getAttribute && t.getAttribute('data-testid') === 'phone.stepup.cancel')) { ev.preventDefault(); pad.submit(); }
   }
   function attachKeys() { if (!keysOn) { document.addEventListener('keydown', onKey); keysOn = true; } }
   function detachKeys() { if (keysOn) { document.removeEventListener('keydown', onKey); keysOn = false; } }

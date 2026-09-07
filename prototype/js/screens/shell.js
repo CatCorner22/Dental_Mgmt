@@ -95,7 +95,19 @@
       Proto.router.announce('Now charting as ' + who.name);
     }
     const pad = h('div', { class: 'pinpad' }, ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => btn(String(d), { testid: 'pin.key.' + d, onClick: () => { if (digits.length < 6) { digits += d; dots.textContent = '•'.repeat(digits.length); } } })), btn('⌫', { testid: 'pin.backspace', ariaLabel: 'Backspace', onClick: () => { digits = digits.slice(0, -1); dots.textContent = '•'.repeat(digits.length); } }), btn('0', { testid: 'pin.key.0', onClick: () => { if (digits.length < 6) { digits += '0'; dots.textContent = '•'.repeat(digits.length); } } }), btn('Go', { testid: 'pin.submit', kind: 'irreversible', onClick: submit }));
+    /* One PIN pad, one grammar. The phone step-up took typed digits, Backspace and Enter while this pad took
+       clicks only, so the same four keystrokes filled one pad and left the other empty — and Go then refused
+       a PIN nobody had failed to type. The listener lives only while the pad is open. */
+    const onPadKey = (ev) => {
+      const t = ev.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
+      if (/^[0-9]$/.test(ev.key)) { ev.preventDefault(); if (digits.length < 6) { digits += ev.key; dots.textContent = '•'.repeat(digits.length); } }
+      else if (ev.key === 'Backspace') { ev.preventDefault(); digits = digits.slice(0, -1); dots.textContent = '•'.repeat(digits.length); }
+      else if (ev.key === 'Enter' && !(t && t.getAttribute && t.getAttribute('data-testid') === 'pin.cancel')) { ev.preventDefault(); submit(); }
+    };
+    document.addEventListener('keydown', onPadKey, true);
     close = Proto.ui.dialog(h('div', { class: 'stack' }, h('h2', { text: 'Who is charting?' }), status, refusalSlot, dots, pad, policy, btn('Cancel', { testid: 'pin.cancel', onClick: () => close() })), { label: 'Switch author', focus: '[data-testid="pin.key.1"]' });
+    const closeDialog = close;
+    close = () => { document.removeEventListener('keydown', onPadKey, true); closeDialog(); };
   }
 
   function renderRail1(r) {

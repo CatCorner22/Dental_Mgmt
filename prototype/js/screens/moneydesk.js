@@ -115,7 +115,7 @@
   /* ---- Open balances / write-off ---- */
   function writeoffCard(r, S) {
     const bal = Proto.store.balances(WRITEOFF_PID);
-    const row = h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, WRITEOFF_PID) }), h('span', { class: 'amt', text: money(bal.patientDue) + ' open' }), h('span', { class: 'muted', text: 'Crown #19 · MetLife paid; patient portion outstanding since 9/1' }));
+    const row = h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, WRITEOFF_PID) }), h('span', { class: 'amt', text: money(bal.patientDue) + ' open' }), h('span', { class: 'muted', text: 'Crown #19 · MetLife paid; ' + (bal.patientDue > 0 ? 'patient portion outstanding since 9/1' : 'patient portion settled') }));
     if (st.woHeldReq) st.woHeldReq = S.approvals.find((x) => x.id === st.woHeldReq.id) || st.woHeldReq;
     const card = section('Open balances', row);
     if (st.woPosted) { card.append(h('div', { class: 'row' }, chip('clear', 'Write-off posted'), h('span', { class: 'muted', text: 'On the ledger with its reason code.' }))); return card; }
