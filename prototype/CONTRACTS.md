@@ -50,7 +50,7 @@ Every element with a click or key handler carries `data-testid`, lowercase, dot-
 | Screen | Test ids |
 |---|---|
 | Top bar | `topbar.location`, `topbar.search`, `topbar.theme`, `topbar.privacy`, `topbar.author`, `topbar.signout`, `andon.control` |
-| Author PIN pad | `pin.key.<0-9>`, `pin.backspace`, `pin.submit`, `pin.cancel` |
+| Author PIN pad | `pin.key.<0-9>`, `pin.backspace`, `pin.submit`, `pin.cancel`, `pin.why` |
 | Palette | `palette.input`, `palette.row.<n>`, `palette.confirm.dob` |
 | Patient Rail | `rail.tab.<chart|notes|perio|imaging|plan|ledger|claims|docs|profile>`, `rail.alert`, `rail.close` |
 | Sign-in | `signin.persona.<persona>`, `signin.theme.<light|dark>`, `signin.device.<desk|operatory|shared|phone>`, `signin.motion`, `signin.grayscale`, `signin.privacy`, `signin.outage`, `signin.go` |

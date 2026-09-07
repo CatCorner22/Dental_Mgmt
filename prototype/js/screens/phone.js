@@ -1,32 +1,44 @@
-/* Phone: the second approver's card (docs/13 features 24 and 25; signature moment 2 'The $410
-   write-off'). Route 'phone', id 'approvals', reachable from the Andon slot and #/phone/approvals for
-   any persona. Each pending approval renders as one card: requester initials, patient initials and
-   account number (never the full name; a logged tap reveals it), amount, reason, the frozen ledger
-   sentence, requested-at, eligible approvers, and two 44 px controls with an 8 px gap: Approve
-   (irreversible; PIN step-up first) and Send back (reversible; one-line reason, two taps).
-   No 'Approve all'. Refusals render through the shared component; the store's requester ≠ approver
-   check (blocked_same_person) is honored before the PIN pad opens. */
+/* Phone: the second approver's card (docs/13 features 24 and 25; the held $410 write-off). Route 'phone',
+   id 'approvals', reachable from the Andon slot and #/phone/approvals for any persona; any other id is a
+   Nothing-here. Each pending approval renders as one card: requester initials, patient initials and
+   account number (never the full name; a logged tap reveals it), amount, reason, the ledger sentence the
+   store builds, requested-at, eligible approvers, and two 44 px controls with an 8 px gap: Approve
+   (irreversible; PIN step-up first, Held while a gate stands) and Send back (reversible; one-line reason
+   that rides with the request, two taps). No 'Approve all'. Refusals render through the shared component;
+   the store's requester ≠ approver check (blocked_same_person) is honored before the PIN pad opens. */
 (function () {
-  const Proto = window.Proto; const { h, btn, chip, refusal, money, initials, pageHead } = Proto.ui;
+  const Proto = window.Proto; const { h, btn, chip, refusal, money, time, initials, pageHead } = Proto.ui;
   Proto.screens = Proto.screens || {};
 
   const S = () => Proto.store.get();
   const P = () => window.__proto;
-  const SIM_PID = 'p-306'; const SIM_CENTS = 41000; const SIM_REASON = 'courtesy';
+  /* The sim plays the biller's side. The store keeps one open request per held posting, so a second press
+     plays the next scenario instead of re-announcing the first one. */
+  const SIMS = [
+    { pid: 'p-306', cents: 41000, reason: 'courtesy' },
+    { pid: 'p-303', cents: 22500, reason: 'hardship' },
+  ];
   const REASON_LABEL = { courtesy: 'Courtesy', hardship: 'Hardship', contractual_ppo: 'Contractual (PPO)', small_balance: 'Small balance', promo: 'Promotion' };
 
   let lastRoute = null;
   let keysOn = false;
   let pad = null;                 // step-up state while the dialog is open: {reqId, digits, dots, hint, close}
-  const st = { refusal: {}, declineOpen: {}, declineReason: {}, declineHint: {}, done: {}, nameShown: {}, simNote: null };
+  /* Card state is per user, never global: the name one approver disclosed, the gate they answered and the
+     line they read after deciding belong to them, not to whoever opens the card next on a shared phone. */
+  const byUser = {};
+  function st() {
+    const uid = Proto.store.currentUser().id;
+    return (byUser[uid] = byUser[uid] || { refusal: {}, declineOpen: {}, declineReason: {}, declineHint: {}, done: {}, nameShown: {}, simNote: null });
+  }
 
   /* ---- helpers ---- */
   function pat(pid) { return Proto.store.patient(pid) || { name: '—', mrn: '—' }; }
-  function to12h(hhmm) { if (!hhmm) return '—'; const [hs, ms] = hhmm.split(':'); let hr = Number(hs); const ap = hr >= 12 ? 'pm' : 'am'; hr = hr % 12 || 12; return hr + ':' + ms + ' ' + ap; }
-  function requestedAt(a) { const m = /\bat (\d{1,2}:\d{2})\s*$/.exec(a.frozenSentence || ''); return m ? m[1] : S().clock.time; }
-  function redactedSentence(a) {
+  function requestedAt(a) { return a.requestedAt || S().clock.time; }
+  /* The sentence is the store's (it is privacy-aware and built at read time); the card only redacts the
+     patient name it keeps behind Show name. */
+  function cardSentence(a) {
     const p = pat(a.patientId);
-    const s = a.frozenSentence || '';
+    const s = Proto.store.approvalSentence(a) || '';
     return p.name && s.includes(p.name) ? s.split(p.name).join(initials(p.name) + ' · ' + p.mrn) : s;
   }
   function denialLine(a) {
@@ -42,33 +54,43 @@
   function me() { return Proto.store.currentUser(); }
   function iAmEligible() { return (me().entitlements || []).includes('approve_second'); }
   function say(text) { Proto.router.announce(text); }
-  function focusTestid(id) { if (!id) return; const el = document.querySelector('[data-testid="' + id + '"]'); if (el) el.focus(); }
+  function focusOn(sel) {
+    if (!sel) return;
+    const q = /^[[.#]/.test(sel) ? sel : '[data-testid="' + sel + '"]';
+    const el = document.querySelector(q); if (el) el.focus();
+  }
+  function nextSim() {
+    const open = S().approvals.filter((a) => a.status === 'pending');
+    return SIMS.find((x) => !open.some((a) => a.kind === 'write_off' && a.patientId === x.pid && a.amountCents === x.cents)) || SIMS[0];
+  }
+  function simWords(x) { return money(x.cents) + ' ' + (REASON_LABEL[x.reason] || x.reason).toLowerCase() + ' write-off'; }
 
-  function rerender(r, focusId) {
+  function rerender(r, focus) {
     r = r || lastRoute || Proto.router.current();
     render(r);
     Proto.screens.shell.refreshAndon(r);
     if (Proto.screens.shell.refreshRail1) Proto.screens.shell.refreshRail1(r);
-    focusTestid(focusId);
+    focusOn(focus);
   }
 
-  /* ---- step-up: 'Re-verify: enter your PIN' (any 4-6 digits pass in the prototype) ---- */
+  /* ---- step-up: 'Confirm your PIN' (any 4-6 digits pass in the prototype) ---- */
   function openStepup(r, a) {
     const dots = h('div', { class: 'pindots', 'aria-live': 'polite', 'aria-label': 'PIN digits entered', text: '' });
-    const hint = h('p', { class: 'hint ph-hint', text: 'Four to six digits. Approvals above the high-value band re-verify within two minutes.' });
+    const hint = h('p', { class: 'hint ph-hint', text: 'Four to six digits.' });
     const state = { reqId: a.id, digits: '', dots, hint, close: null };
     function paint() { dots.textContent = '•'.repeat(state.digits.length); }
     state.add = (d) => { if (state.digits.length < 6) { state.digits += d; paint(); } };
     state.back = () => { state.digits = state.digits.slice(0, -1); paint(); };
     state.submit = () => {
       if (state.digits.length < 4) { hint.textContent = 'Enter at least four digits, then tap Approve.'; hint.classList.add('ph-hint-warn'); return; }
+      const s = st();
       const res = Proto.store.decideApproval(a.id, me().id, 'approved', true);
       state.close();
-      if (!res.ok) { st.refusal[a.id] = res; rerender(r, 'phone.request.' + a.id + '.approve'); return; }
-      st.refusal[a.id] = null;
-      st.done[a.id] = { kind: 'approved', text: 'Approved · posted with your name as second approver · the biller’s Held button is now Posted' };
+      if (!res.ok) { s.refusal[a.id] = gate(r, a, res); rerender(r, 'refusal.control'); return; }
+      s.refusal[a.id] = null;
+      s.done[a.id] = { kind: 'approved', text: 'Approved · posted with your name as second approver · the biller’s write-off is on the ledger' };
       say('Approved. Posted with your name as second approver.');
-      rerender(r);
+      rerender(r, '.ph-done');
     };
     const keys = h('div', { class: 'pinpad', role: 'group', 'aria-label': 'PIN keypad' },
       ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => btn(String(d), { testid: 'phone.stepup.' + d, onClick: () => state.add(String(d)) })),
@@ -77,50 +99,62 @@
       h('span', { class: 'ph-pad-spacer', 'aria-hidden': 'true' }),
       btn('Approve', { testid: 'phone.stepup.submit', kind: 'irreversible', class: 'ph-submit', ariaLabel: 'Submit PIN and approve ' + money(a.amountCents), onClick: state.submit }));
     const body = h('div', { class: 'stack ph-stepup' },
-      h('h2', { text: 'Re-verify: enter your PIN' }),
+      h('h2', { text: 'Confirm your PIN' }),
       h('p', { class: 'small muted', text: 'Approving ' + money(a.amountCents) + ' ' + (REASON_LABEL[a.reason] || a.reason) + ' write-off for ' + initials(pat(a.patientId).name) + ' · ' + pat(a.patientId).mrn + '. Your name is recorded as second approver.' }),
       hint, dots, keys,
       btn('Cancel', { testid: 'phone.stepup.cancel', kind: 'quiet', onClick: () => state.close() }));
-    state.close = Proto.ui.dialog(body, { label: 'Re-verify PIN', focus: '[data-testid="phone.stepup.1"]', onClose: () => { if (pad === state) pad = null; } });
+    state.close = Proto.ui.dialog(body, { label: 'Confirm your PIN', focus: '[data-testid="phone.stepup.1"]', onClose: () => { if (pad === state) pad = null; } });
     pad = state;
   }
 
   /* ---- decisions ---- */
+  /* A refusal the store raised keeps the store's own verb and control word; the screen only wires the way
+     out (blocked_same_person names Send back, everything else names Switch author). */
+  function gate(r, a, res) {
+    const control = res.control || 'Switch author';
+    const onControl = control === 'Send back'
+      ? () => onDecline(r, a)
+      : () => Proto.screens.shell.openPinPad(r);
+    return Object.assign({}, res, { control, onControl });
+  }
   function onApprove(r, a) {
-    st.refusal[a.id] = null;
+    const s = st();
+    s.refusal[a.id] = null;
     // Pre-check with the store's own rule set first (no mutation until step-up passes): the requester
-    // approving their own request is blocked_same_person, whatever their entitlements.
+    // approving their own request is blocked_same_person, whatever their entitlements. A step-up is a
+    // challenge, not a gate — it carries needsStepup, not a refusal code.
     const pre = Proto.store.decideApproval(a.id, me().id, 'approved', false);
-    if (!pre.ok && pre.code !== 'stepup') {
-      st.refusal[a.id] = Object.assign({}, pre, { control: 'Switch author', onControl: () => Proto.screens.shell.openPinPad(r) });
-      rerender(r, 'phone.request.' + a.id + '.approve'); return;
-    }
+    if (!pre.ok && !pre.needsStepup) { s.refusal[a.id] = gate(r, a, pre); rerender(r, 'refusal.control'); return; }
     if (!iAmEligible()) {
-      st.refusal[a.id] = { code: 'needs_second', verb: 'Needs an eligible approver — ' + (a.eligible || []).slice(0, 2).join(' or '), control: 'Switch author', onControl: () => Proto.screens.shell.openPinPad(r), why: 'Only people with the Second approver entitlement can second a held posting. Switching author signs the other person in under their own name; nothing is shared.' };
-      rerender(r, 'phone.request.' + a.id + '.approve'); return;
+      s.refusal[a.id] = { code: 'needs_second', verb: 'Needs a second approver — ' + (a.eligible || []).slice(0, 2).join(' or '), control: 'Switch author', onControl: () => Proto.screens.shell.openPinPad(r), why: 'Only people with the Second approver entitlement can second a held posting. Switching author signs the other person in under their own name; nothing is shared.' };
+      rerender(r, 'refusal.control'); return;
     }
     openStepup(r, a);
   }
   function onDecline(r, a) {
-    st.refusal[a.id] = null;
-    if (!st.declineOpen[a.id]) { st.declineOpen[a.id] = true; st.declineHint[a.id] = null; rerender(r, 'phone.request.' + a.id + '.reason'); return; }
-    const reason = (st.declineReason[a.id] || '').trim();
-    if (!reason) { st.declineHint[a.id] = 'One line for the biller: what should happen first?'; rerender(r, 'phone.request.' + a.id + '.reason'); return; }
-    const res = Proto.store.decideApproval(a.id, me().id, 'declined', true);
-    if (!res.ok) { st.refusal[a.id] = Object.assign({}, res, { control: res.control || 'Switch author', onControl: () => Proto.screens.shell.openPinPad(r) }); rerender(r, 'phone.request.' + a.id + '.decline'); return; }
-    st.done[a.id] = { kind: 'declined', text: 'Sent back: ' + reason + ' · the biller’s screen now reads “Sent back: ' + reason + '”', reason };
-    st.declineOpen[a.id] = false;
+    const s = st();
+    s.refusal[a.id] = null;
+    if (!s.declineOpen[a.id]) { s.declineOpen[a.id] = true; s.declineHint[a.id] = null; rerender(r, 'phone.request.' + a.id + '.reason'); return; }
+    const reason = (s.declineReason[a.id] || '').trim();
+    if (!reason) { s.declineHint[a.id] = 'One line for the biller: what should happen first?'; rerender(r, 'phone.request.' + a.id + '.reason'); return; }
+    // The line the approver typed rides with the decision: the store carries it onto the request and the
+    // log row, so "Send back with one line" leaves a line behind and not just a name.
+    const res = Proto.store.decideApproval(a.id, me().id, 'declined', true, reason);
+    if (!res.ok) { s.refusal[a.id] = gate(r, a, res); rerender(r, 'refusal.control'); return; }
+    s.done[a.id] = { kind: 'declined', text: 'Sent back to ' + a.requestedBy + ': ' + reason, reason };
+    s.declineOpen[a.id] = false;
     say('Sent back: ' + reason);
-    rerender(r);
+    rerender(r, '.ph-done');
   }
   function simulate(r) {
+    const s = st(); const x = nextSim();
     const p = P(); const prev = p.persona;
     let res;
-    try { p.persona = 'biller'; res = Proto.store.requestWriteoff(SIM_PID, SIM_CENTS, SIM_REASON); }
+    try { p.persona = 'biller'; res = Proto.store.requestWriteoff(x.pid, x.cents, x.reason); }
     finally { p.persona = prev; }
-    if (res && res.held) { st.simNote = 'Sam (biller) tapped Post on the ' + money(SIM_CENTS) + ' courtesy write-off; it is held as request ' + res.requestId + '. Their button reads Held.'; say('Request ' + res.requestId + ' is waiting for you'); }
-    else if (res && res.ok) { st.simNote = 'Below the threshold: the write-off posted without a second approver.'; say(st.simNote); }
-    else { st.simNote = (res && res.verb) || 'Nothing was requested.'; say(st.simNote); }
+    if (res && res.held) { s.simNote = 'Sam (biller) tapped Post on the ' + simWords(x) + '; it is waiting on you as request ' + res.requestId + '.'; say('Request ' + res.requestId + ' is waiting for you'); }
+    else if (res && res.ok) { s.simNote = 'Below the threshold: the write-off posted without a second approver.'; say(s.simNote); }
+    else { s.simNote = (res && res.verb) || 'Nothing was requested.'; say(s.simNote); }
     rerender(r, 'phone.simulate');
   }
 
@@ -128,10 +162,12 @@
   function kv(label, value, extraClass) { return h('div', { class: 'ph-kv' + (extraClass ? ' ' + extraClass : '') }, h('span', { class: 'ph-k', text: label }), h('span', { class: 'ph-v', text: value })); }
 
   function requestCard(r, a) {
+    const s = st();
     const p = pat(a.patientId);
     const who = me();
     const mine = a.requestedById === who.id;
     const at = requestedAt(a);
+    const gated = !!s.refusal[a.id];
     const card = h('article', { class: 'card ph-card', 'aria-label': 'Approval request ' + a.id, dataset: { req: a.id } });
     card.append(h('div', { class: 'ph-head' },
       h('span', { class: 'ph-initials', 'aria-label': 'Requested by ' + a.requestedBy, title: 'Requester', text: initials(a.requestedBy) }),
@@ -140,50 +176,66 @@
         h('div', { class: 'small muted', text: (REASON_LABEL[a.reason] || a.reason) + ' write-off · ' + a.id })),
       chip('review', 'Waiting')));
     const nameRow = h('div', { class: 'ph-kv' }, h('span', { class: 'ph-k', text: 'Patient' }),
-      st.nameShown[a.id]
+      s.nameShown[a.id]
         ? h('span', { class: 'ph-v', text: p.name + ' · ' + p.mrn })
-        : h('span', { class: 'ph-v' }, initials(p.name) + ' · ' + p.mrn + ' ', btn('Show name', { testid: 'phone.request.' + a.id + '.name', kind: 'quiet', class: 'compact', ariaLabel: 'Show the patient’s full name (this tap is logged)', onClick: () => { st.nameShown[a.id] = true; Proto.events.write('disclosures', 'name-' + a.id); rerender(r, 'phone.request.' + a.id + '.approve'); } })));
+        : h('span', { class: 'ph-v' }, initials(p.name) + ' · ' + p.mrn + ' ', btn('Show name', { testid: 'phone.request.' + a.id + '.name', kind: 'quiet', class: 'compact', ariaLabel: 'Show the patient’s full name (this tap is logged)', onClick: () => { st().nameShown[a.id] = true; rerender(r, 'phone.request.' + a.id + '.approve'); } })));
     card.append(h('div', { class: 'ph-grid' },
       nameRow,
       kv('Requested by', a.requestedBy + (mine ? ' (you)' : '')),
-      kv('Requested at', to12h(at)),
+      kv('Requested at', time(at)),
       kv('Eligible', (a.eligible || []).join(' or ') || '—')));
-    card.append(h('p', { class: 'ph-sentence', text: redactedSentence(a) }));
+    card.append(h('p', { class: 'ph-sentence', text: cardSentence(a) }));
     const denial = denialLine(a);
     if (denial) card.append(h('p', { class: 'ph-line' }, chip('required', 'Denial'), ' ', denial));
-    if (heldForHours(a)) card.append(h('p', { class: 'ph-line' }, chip('info', 'After hours'), ' Requested at ' + to12h(at) + ', location closed at ' + to12h(S().tenant.businessHours.close) + '.'));
-    if (st.refusal[a.id]) card.append(refusal(st.refusal[a.id]));
-    if (st.declineOpen[a.id]) {
+    if (heldForHours(a)) card.append(h('p', { class: 'ph-line' }, chip('info', 'After hours'), ' Requested at ' + time(at) + ', location closed at ' + time(S().tenant.businessHours.close) + '.'));
+    if (gated) card.append(refusal(s.refusal[a.id]));
+    if (s.declineOpen[a.id]) {
       // Validation is silent until blur; the hint updates in place so a blur never re-renders the
       // card under a tap that is landing on Approve or Send back.
       const hintId = 'ph-reason-hint-' + a.id;
-      const hintEl = h('p', { class: 'hint' + (st.declineHint[a.id] ? ' ph-hint-warn' : ''), id: hintId, text: st.declineHint[a.id] || 'The biller sees this beside their Appeal control.' });
-      const input = h('input', { class: 'input', type: 'text', maxlength: '80', id: 'ph-reason-' + a.id, testid: 'phone.request.' + a.id + '.reason', placeholder: 'e.g. appeal first', value: st.declineReason[a.id] || '', 'aria-describedby': hintId,
-        onInput: (ev) => { st.declineReason[a.id] = ev.target.value; },
-        onBlur: (ev) => { if (!ev.target.value.trim()) { st.declineHint[a.id] = 'One line for the biller: what should happen first?'; hintEl.textContent = st.declineHint[a.id]; hintEl.classList.add('ph-hint-warn'); } },
+      const hintEl = h('p', { class: 'hint' + (s.declineHint[a.id] ? ' ph-hint-warn' : ''), id: hintId, text: s.declineHint[a.id] || 'One line for the biller; it rides with the request.' });
+      const input = h('input', { class: 'input', type: 'text', maxlength: '80', id: 'ph-reason-' + a.id, testid: 'phone.request.' + a.id + '.reason', placeholder: 'e.g. appeal first', value: s.declineReason[a.id] || '', 'aria-describedby': hintId,
+        onInput: (ev) => { st().declineReason[a.id] = ev.target.value; },
+        onBlur: (ev) => { if (!ev.target.value.trim()) { st().declineHint[a.id] = 'One line for the biller: what should happen first?'; hintEl.textContent = st().declineHint[a.id]; hintEl.classList.add('ph-hint-warn'); } },
         onKeydown: (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); onDecline(r, a); } } });
       card.append(h('div', { class: 'field' }, h('label', { for: 'ph-reason-' + a.id, text: 'Send back with one line' }), input, hintEl));
     }
+    // While a gate stands the primary carries the Held identity (CONTRACTS §6): it never dims, and the
+    // word Held is the button's whole label; what is held stays in its accessible name.
     card.append(h('div', { class: 'ph-actions' },
-      btn('Approve', { testid: 'phone.request.' + a.id + '.approve', kind: 'irreversible', ariaLabel: 'Approve ' + money(a.amountCents) + ' write-off; you will re-verify with your PIN', onClick: () => onApprove(r, a) }),
-      btn(st.declineOpen[a.id] ? 'Send back' : 'Decline', { testid: 'phone.request.' + a.id + '.decline', kind: 'reversible', ariaLabel: st.declineOpen[a.id] ? 'Send back with the reason above' : 'Decline: send back with a one-line reason', onClick: () => onDecline(r, a) })));
+      gated
+        ? btn('Approve ' + money(a.amountCents) + ' write-off', { testid: 'phone.request.' + a.id + '.approve', kind: 'held', onClick: () => focusOn('refusal.control') })
+        : btn('Approve', { testid: 'phone.request.' + a.id + '.approve', kind: 'irreversible', ariaLabel: 'Approve ' + money(a.amountCents) + ' write-off; you will confirm your PIN', onClick: () => onApprove(r, a) }),
+      btn('Send back', { testid: 'phone.request.' + a.id + '.decline', kind: 'reversible', ariaLabel: s.declineOpen[a.id] ? 'Send back with the reason above' : 'Send back with a one-line reason', onClick: () => onDecline(r, a) })));
     card.append(h('details', { class: 'ph-why' }, h('summary', { testid: 'phone.request.' + a.id + '.why', text: 'Why am I seeing this?' }),
       h('p', { class: 'small muted', text: 'Write-offs at or above ' + money(S().tenant.dualReleaseThresholdCents) + ', and any refund, adjustment, or write-off outside business hours, are held for a distinct second approver. The card carries the frozen evaluation so you never open the ledger. Requester and approver are two attributed identities; the requester’s session is never elevated.' })));
     return card;
   }
 
   function decidedCard(a) {
-    const done = st.done[a.id];
+    const done = st().done[a.id];
     const s = a.status === 'approved' ? ['clear', 'Approved'] : ['required', 'Sent back'];
     return h('article', { class: 'card flat ph-decided', 'aria-label': 'Decided request ' + a.id },
       h('div', { class: 'ph-head' }, chip(s[0], s[1]), h('span', { class: 'ph-amount small', text: money(a.amountCents) }), h('span', { class: 'small muted grow', text: a.id })),
-      done ? h('p', { class: 'ph-done', role: 'status', text: done.text }) : null,
-      h('p', { class: 'small muted', text: redactedSentence(a) + (a.decidedBy ? ' · ' + (a.status === 'approved' ? 'approved' : 'sent back') + ' by ' + a.decidedBy + ' at ' + to12h(a.decidedAt) : '') }));
+      done ? h('p', { class: 'ph-done', role: 'status', tabindex: '-1', text: done.text }) : null,
+      h('p', { class: 'small muted', text: cardSentence(a) + (a.decidedBy ? ' · ' + s[1] + ' · ' + a.decidedBy + ' at ' + time(a.decidedAt) : '') }));
+  }
+
+  function renderNotFound(r) {
+    detachKeys();
+    const nf = Proto.store.notFound('request');
+    Proto.screens.shell.mount(h('div', { class: 'stack' },
+      h('h1', { text: 'Nothing here' }),
+      h('p', { class: 'muted', text: nf.why }),
+      btn('Back to home', { kind: 'quiet', testid: 'notfound.home', onClick: () => Proto.router.go(r.persona, Proto.router.HOME[r.persona]) })));
   }
 
   function render(r) {
     lastRoute = r;
-    const s = S(); const who = me();
+    // The address names one surface here. An id this screen does not know is a Nothing-here, as it is on
+    // checkout, encounter and ledger, not the Approvals screen wearing someone else's id.
+    if (r && r.id && r.id !== 'approvals') { renderNotFound(r); return; }
+    const s = S(); const who = me(); const cards = st();
     const pending = s.approvals.filter((a) => a.status === 'pending');
     const decided = s.approvals.filter((a) => a.status !== 'pending');
     const root = h('div', { class: 'phone ph-page' });
@@ -192,18 +244,21 @@
       root.append(h('p', { class: 'small muted', text: pending.length + ' waiting. One decision per card; there is no Approve all.' }));
       pending.forEach((a) => root.append(requestCard(r, a)));
     } else {
+      // The count is read from the decided rows, not printed as a figure a person would have to trust.
+      const done = decided.length;
       root.append(h('section', { class: 'card ph-empty', 'aria-label': 'Nothing waiting' },
         h('div', { class: 'ph-head' }, chip('clear', 'Clear'), h('h2', { class: 'grow', text: 'Nothing waiting for you' })),
-        h('p', { class: 'practice-line muted', text: 'Approvals this week: 6, median 4 minutes (practice)' })));
+        h('p', { class: 'practice-line muted', text: 'Decided here today: ' + done + '. A held posting appears the moment someone asks.' })));
     }
     if (decided.length) {
-      root.append(h('section', { class: 'stack', 'aria-label': 'Decided' }, h('h2', { class: 'ph-h2', text: 'Decided' }), ...decided.slice().reverse().map(decidedCard)));
+      root.append(h('section', { class: 'stack', 'aria-label': 'Decided' }, h('h2', { class: 'ph-h2', text: 'Decided' }), ...decided.slice().reverse().map((a) => decidedCard(a))));
     }
+    const sim = nextSim();
     root.append(h('section', { class: 'card flat stack ph-sim', 'aria-label': 'Simulate a request' },
       h('h2', { class: 'ph-h2', text: 'Test the flow alone' }),
-      h('p', { class: 'small muted', text: 'Plays the biller’s side of signature moment 2 so you can approve from here.' }),
-      btn('Simulate: the biller requests the $410 courtesy write-off', { testid: 'phone.simulate', kind: 'reversible', class: 'ph-wrap', onClick: () => simulate(r) }),
-      st.simNote ? h('p', { class: 'small', role: 'status', text: st.simNote }) : null));
+      h('p', { class: 'small muted', text: 'Plays the biller’s side of the request so you can approve from here.' }),
+      btn('Simulate: the biller requests the ' + simWords(sim), { testid: 'phone.simulate', kind: 'reversible', class: 'ph-wrap', onClick: () => simulate(r) }),
+      cards.simNote ? h('p', { class: 'small', role: 'status', text: cards.simNote }) : null));
     Proto.screens.shell.mount(root);
     attachKeys();
   }
@@ -221,6 +276,6 @@
   function detachKeys() { if (keysOn) { document.removeEventListener('keydown', onKey); keysOn = false; } }
   window.addEventListener('hashchange', () => { if (Proto.router.current().route !== 'phone') { detachKeys(); if (pad) pad.close(); } });
 
-  Proto.screens.phone = { render, simulate, approve: onApprove, decline: onDecline, state: () => st };
+  Proto.screens.phone = { render, simulate, approve: onApprove, decline: onDecline, state: () => st() };
   Proto.router.on('phone', (r) => Proto.screens.phone.render(r));
 })();

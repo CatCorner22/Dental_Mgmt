@@ -18,11 +18,15 @@
 
   function canvas() { return document.getElementById('canvas'); }
   function mount(node) { const c = canvas(); c.replaceChildren(node); return c; }
+  // A toggle that rebuilds the bar it lives in removes the element that had focus, so the keyboard fell to
+  // body after every press. Each such handler puts the keyboard back on the control's replacement.
+  function refocus(testid) { const el = document.querySelector('[data-testid="' + testid + '"]'); if (el) el.focus(); }
 
   function renderTopbar(r) {
     const top = document.getElementById('topbar');
     const P = window.__proto; const S = Proto.store.get();
-    if (!r.persona) { top.replaceChildren(h('span', { class: 'brand' }, h('span', { class: 'mark', 'aria-hidden': 'true' }), 'Riverbend Dental'), h('span', { class: 'spacer' }), btn(P.theme === 'dark' ? 'Light theme' : 'Dark theme', { testid: 'topbar.theme', onClick: () => { P.set({ theme: P.theme === 'dark' ? 'light' : 'dark' }); renderTopbar(r); } })); return; }
+    // One word per concept: the theme control reads "Dark" / "Light" here, in the signed-in bar and on sign-in.
+    if (!r.persona) { top.replaceChildren(h('span', { class: 'brand' }, h('span', { class: 'mark', 'aria-hidden': 'true' }), 'Riverbend Dental'), h('span', { class: 'spacer' }), btn(P.theme === 'dark' ? 'Light' : 'Dark', { testid: 'topbar.theme', ariaLabel: 'Switch to ' + (P.theme === 'dark' ? 'light' : 'dark'), onClick: () => { P.set({ theme: P.theme === 'dark' ? 'light' : 'dark' }); renderTopbar(r); refocus('topbar.theme'); } })); return; }
     const u = Proto.store.currentUser();
     const loc = S.locations[0];
     const nav = h('nav', { 'aria-label': 'Primary' }, ...(NAV[r.persona] || NAV.frontdesk).map(([route, label]) => btn(label, { testid: 'nav.' + route, onClick: () => Proto.router.go(r.persona, route), class: r.route === route ? 'current' : '' })));
@@ -30,13 +34,15 @@
     const authorChip = h('button', { type: 'button', class: 'authorchip', testid: 'topbar.author', 'aria-label': 'Who is charting: ' + u.name + (u.licence ? ', ' + u.licence : '') + '. Switch author', onClick: () => openPinPad(r) }, h('span', { text: (P.device === 'shared' || P.device === 'operatory') ? (Proto.ui.initials(u.name) + (u.licence ? ' · ' + u.licence : '')) : (u.short || u.name) }));
     top.replaceChildren(
       h('span', { class: 'brand' }, h('span', { class: 'mark', 'aria-hidden': 'true' }), 'Riverbend'),
-      btn(loc.short, { testid: 'topbar.location', ariaLabel: 'Location: ' + loc.name + '. Switch location', onClick: () => Proto.router.announce('Location switching is out of scope for the prototype') }),
+      btn(loc.short, { testid: 'topbar.location', ariaLabel: 'Location: ' + loc.name + '. Switch location', onClick: () => Proto.router.announce('Switch location: not in this prototype') }),
       btn('Search  ⌘K', { testid: 'topbar.search', ariaLabel: 'Search patients, claims, and actions (Ctrl or Cmd K)', onClick: () => Proto.screens.palette.open(r) }),
       nav,
       h('span', { class: 'spacer' }),
       authorChip,
-      btn(P.privacy ? 'Privacy on' : 'Privacy', { testid: 'topbar.privacy', pressed: P.privacy, ariaLabel: 'Privacy mode: hide patient names on operatory glass', onClick: () => { P.set({ privacy: !P.privacy }); Proto.screens.shell.render(r); Proto.router.render(); } }),
-      btn(P.theme === 'dark' ? 'Light' : 'Dark', { testid: 'topbar.theme', ariaLabel: 'Switch to ' + (P.theme === 'dark' ? 'light' : 'dark') + ' theme', onClick: () => { P.set({ theme: P.theme === 'dark' ? 'light' : 'dark' }); renderTopbar(r); } }),
+      // "Privacy mode" is the one word for this control here, on sign-in and in the accessible name; the
+      // pressed state is the ✓ mark and aria-pressed, never a second label.
+      btn('Privacy mode', { testid: 'topbar.privacy', pressed: P.privacy, ariaLabel: 'Privacy mode: hide patient names on operatory glass', onClick: () => { P.set({ privacy: !P.privacy }); Proto.screens.shell.render(r); Proto.router.render(); refocus('topbar.privacy'); } }),
+      btn(P.theme === 'dark' ? 'Light' : 'Dark', { testid: 'topbar.theme', ariaLabel: 'Switch to ' + (P.theme === 'dark' ? 'light' : 'dark'), onClick: () => { P.set({ theme: P.theme === 'dark' ? 'light' : 'dark' }); renderTopbar(r); refocus('topbar.theme'); } }),
       btn('Sign out', { testid: 'topbar.signout', onClick: () => { location.hash = '#/signin'; } }),
     );
   }
@@ -45,7 +51,7 @@
     const a = document.getElementById('andon'); const P = window.__proto;
     if (!r.persona) { a.replaceChildren(); return; }
     if (P.outage) {
-      a.replaceChildren(chip('required', 'Server unreachable', {}), h('span', { class: 'grow', text: 'Showing the Board from 7:58 am · reads only, no postings · incident INC-2093' }), btn('Support line', { testid: 'andon.control', kind: 'reversible', onClick: () => Proto.router.announce('Support: 615-555-0100, answered 7 am to 6 pm Central') }));
+      a.replaceChildren(chip('required', 'Server unreachable', {}), h('span', { class: 'grow', text: 'Showing the Board from 7:58 am · reads only, no postings · incident INC-2093' }), btn('Support line', { testid: 'andon.control', kind: 'reversible', onClick: () => Proto.router.announce('Call support: 615-555-0100, 7 am to 6 pm') }));
       return;
     }
     const S = Proto.store.get();
@@ -58,7 +64,11 @@
     const P = window.__proto; const S = Proto.store.get();
     let digits = '';
     const dots = h('div', { class: 'pindots', 'aria-live': 'polite', text: '' });
-    const status = h('p', { class: 'hint', text: P.device === 'desk' ? 'This desk is not shared: switching author signs you out and in as the other person.' : 'Enter the other person\'s PIN. Their session opens on this page; yours is revoked and local drafts are wiped after autosave.' });
+    // The finish path carries the instruction alone. What switching costs is an explanation, so it sits
+    // behind a disclosure instead of standing in front of the first digit.
+    const status = h('p', { class: 'hint', text: 'Enter the other person\'s PIN' });
+    const policy = h('details', null, h('summary', { class: 'small', testid: 'pin.why' }, 'Why this signs you out'),
+      h('p', { class: 'small muted', text: P.device === 'desk' ? 'This desk is not shared, so switching signs you out and in as the other person.' : 'Their session opens on this page; yours is revoked and local drafts are wiped after autosave.' }));
     let close;
     const refusalSlot = h('div', { class: 'pin-refusal' });
     function showRefusal(v) { refusalSlot.replaceChildren(Proto.ui.refusal(v)); }
@@ -66,23 +76,26 @@
       const who = S.users.find((u) => u.pin === digits);
       digits = ''; dots.textContent = '';
       if (!who) {
-        showRefusal({ code: 'pin_no_match', verb: 'PIN did not match — try again', control: 'Clear and retype', onControl: () => { const k = pad.querySelector('[data-testid="pin.key.1"]'); if (k) k.focus(); }, why: 'Six digits at most. Three misses lock this device for five minutes and raise a finding for the practice, never for the person.', severity: 'required' });
+        showRefusal({ code: 'pin_no_match', verb: 'Retype the PIN — no match', control: 'Clear and retype', onControl: () => { const k = pad.querySelector('[data-testid="pin.key.1"]'); if (k) k.focus(); }, why: 'Six digits at most. Three misses lock this device for five minutes and raise a finding for the practice, never for the person.', severity: 'required' });
         return;
       }
       const persona = Object.entries(S.personaUser).find(([, uid]) => uid === who.id);
       if (!persona) {
         // No chart persona for this account in the prototype: refuse rather than write a session that changes nothing.
-        showRefusal({ code: 'no_chart_session', verb: who.short + ' has no charting session here', control: 'Keep current author', onControl: () => close(), why: 'This account can approve and post but does not chart, so there is nothing for it to open on this screen. The author stays as it was and nothing was written.', severity: 'info' });
+        showRefusal({ code: 'no_chart_session', verb: 'Keep the current author — no charting session', control: 'Keep current author', onControl: () => close(), why: who.short + ' can approve and post but does not chart, so there is nothing for that account to open on this screen. The author stays as it was and nothing was written.', severity: 'info' });
         return;
       }
-      Proto.events.write('sessions', 'sess-' + who.id);
+      // The switch opens that person's session through the store, which writes the row and logs it. The shell
+      // used to emit a write event for a table the store did not hold, so the log named a row nothing wrote.
+      const opened = Proto.store.openSession(who.id);
+      if (!opened.ok) { showRefusal({ code: opened.code, verb: opened.verb, control: opened.control, why: opened.why, onControl: () => close(), severity: 'stop' }); return; }
       close();
       const p = persona[0]; P.set({ persona: p });
       location.hash = '#/' + p + '/' + (r.route === 'signin' ? Proto.router.HOME[p] : r.route) + (r.id ? '/' + r.id : '');
       Proto.router.announce('Now charting as ' + who.name);
     }
     const pad = h('div', { class: 'pinpad' }, ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => btn(String(d), { testid: 'pin.key.' + d, onClick: () => { if (digits.length < 6) { digits += d; dots.textContent = '•'.repeat(digits.length); } } })), btn('⌫', { testid: 'pin.backspace', ariaLabel: 'Backspace', onClick: () => { digits = digits.slice(0, -1); dots.textContent = '•'.repeat(digits.length); } }), btn('0', { testid: 'pin.key.0', onClick: () => { if (digits.length < 6) { digits += '0'; dots.textContent = '•'.repeat(digits.length); } } }), btn('Go', { testid: 'pin.submit', kind: 'irreversible', onClick: submit }));
-    close = Proto.ui.dialog(h('div', { class: 'stack' }, h('h2', { text: 'Who is charting?' }), status, refusalSlot, dots, pad, btn('Cancel', { testid: 'pin.cancel', onClick: () => close() })), { label: 'Switch author', focus: '[data-testid="pin.key.1"]' });
+    close = Proto.ui.dialog(h('div', { class: 'stack' }, h('h2', { text: 'Who is charting?' }), status, refusalSlot, dots, pad, policy, btn('Cancel', { testid: 'pin.cancel', onClick: () => close() })), { label: 'Switch author', focus: '[data-testid="pin.key.1"]' });
   }
 
   function renderRail1(r) {
@@ -91,10 +104,12 @@
     if (r.persona !== 'temp') { if (bar) bar.remove(); return; }
     const S = Proto.store.get(); const steps = Proto.store.railSteps();
     if (!bar) { bar = h('div', { class: 'rail1', id: 'rail1', 'aria-label': 'Your first shift' }); document.getElementById('andon').after(bar); }
-    if (S.rail1Collapsed) { bar.replaceChildren(btn('Show first-shift steps', { testid: 'rail1.toggle', onClick: () => { S.rail1Collapsed = false; renderRail1(r); } })); return; }
-    bar.replaceChildren(h('span', { class: 'small muted', text: 'Your first shift:' }), ...steps.map(([code, label], i) => { const retired = !!Proto.store.railStateFor()[code]; return btn(retired ? label + ' ✓' : label, { testid: 'rail1.chip.' + i, dataset: { retired: retired ? '1' : '0' }, ariaLabel: label + (retired ? ', done' : ', show me'), onClick: () => pulseFor(code, r) }); }), btn('Hide', { testid: 'rail1.toggle', onClick: () => { S.rail1Collapsed = true; renderRail1(r); } }));
+    if (S.rail1Collapsed) { bar.replaceChildren(btn('Show first-shift steps', { testid: 'rail1.toggle', onClick: () => { S.rail1Collapsed = false; renderRail1(r); refocus('rail1.toggle'); } })); return; }
+    bar.replaceChildren(h('span', { class: 'small muted', text: 'Your first shift:' }), ...steps.map(([code, label], i) => { const retired = !!Proto.store.railStateFor()[code]; return btn(retired ? label + ' ✓' : label, { testid: 'rail1.chip.' + i, dataset: { retired: retired ? '1' : '0' }, ariaLabel: label + (retired ? ', done' : ', show me'), onClick: () => pulseFor(code, r) }); }), btn('Hide', { testid: 'rail1.toggle', onClick: () => { S.rail1Collapsed = true; renderRail1(r); refocus('rail1.toggle'); } }));
   }
-  let pointTimer = null;
+  // One timer per ring. A single shared timer let the next press cancel the previous element's clear, so the
+  // ring from an earlier "show me" stayed on its control for the rest of the shift.
+  const pointTimers = new Map();
   function pulseFor(code, r) {
     const map = { arrive: '[data-testid$=".arrive"]', seat: '[data-testid$=".seat"]', checkout: '[data-testid$=".checkout"]', payment: '[data-testid="checkout.post"]', find: '[data-testid="topbar.search"]', perio: '[data-testid$=".perio"]', save: '[data-testid="perio.save"]', tag: '[data-testid="perio.tag.add"]', ready: '[data-testid$=".ready"]' };
     const el = document.querySelector(map[code]);
@@ -103,7 +118,7 @@
       el.classList.remove('pulse', 'pointed'); void el.offsetWidth;
       el.classList.add('pulse', 'pointed');                       // 'pointed' is a static ring: it survives reduced motion
       el.scrollIntoView({ block: 'center' });
-      clearTimeout(pointTimer); pointTimer = setTimeout(() => el.classList.remove('pointed'), 6000);
+      clearTimeout(pointTimers.get(el)); pointTimers.set(el, setTimeout(() => { el.classList.remove('pointed'); pointTimers.delete(el); }, 6000));
       Proto.router.announce(verb);
     }
     else Proto.router.announce(code === 'checkout' || code === 'payment' ? 'Nothing to check out yet' : 'Nothing to do for this step yet');
