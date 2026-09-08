@@ -288,8 +288,19 @@
     // private heading that reads the raw id back to whoever typed it (A6).
     if (!a) { Proto.router.go(r.persona, 'notfound'); return; }
     const pt = Proto.store.patient(a.patientId); const enc = Proto.store.encounter(a.encounterId);
-    const est = S.estimates[aid] || { patientCents: a.balanceCents || 0, insuranceCents: 0, writeoffCents: 0, note: 'No plan estimate on file; the patient portion shown is the appointment balance.' };
+    const seedEst = S.estimates[aid] || { patientCents: a.balanceCents || 0, insuranceCents: 0, writeoffCents: 0, note: 'No plan estimate on file; the patient portion shown is the appointment balance.' };
+    /* What the window collects is what the ledger still says is open, never a stored estimate on its own.
+       A $410 write-off approved from the phone landed on the ledger and took Patient due to zero while this
+       screen went on footing "$410.00 est.", prefilling Collect 410.00 and offering a live Post, so the same
+       visit read two ways on two screens (C5, A7). The plan estimate stays a separate number and still never
+       joins the balance (docs/13 feature 23); it is only capped by what is actually still owed. */
+    const openNow = Proto.store.balances(a.patientId).patientDue;
+    const notYetCharged = S.procedures.filter((p) => p.encounterId === a.encounterId && !Proto.store.charged(p)).reduce((t, p) => t + p.feeCents, 0);
+    const collectible = openNow + notYetCharged;
+    const est = Object.assign({}, seedEst, { patientCents: Math.min(seedEst.patientCents, collectible) });
     const st = state[aid] || (state[aid] = fresh(est.patientCents));
+    // A stale prefill outlives the state it was built from: re-read it when the ledger has moved under it.
+    if (st.decision === 'collect' && est.patientCents <= 0 && !st.posted) { st.decision = 'zero_due'; st.amountStr = dollars(0); st.tender = null; }
     if (st.heldReq) st.heldReq = S.approvals.find((x) => x.id === st.heldReq.id) || st.heldReq;
     const procs = S.procedures.filter((p) => p.encounterId === a.encounterId);
     const bal = Proto.store.balances(a.patientId);

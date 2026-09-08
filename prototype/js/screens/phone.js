@@ -60,7 +60,7 @@
     const el = document.querySelector(q); if (el) el.focus();
   }
   function nextSim() {
-    const open = S().approvals.filter((a) => a.status === 'pending');
+    const open = Proto.store.pendingApprovalsFor();         // the requests this approver may decide
     return SIMS.find((x) => !open.some((a) => a.kind === 'write_off' && a.patientId === x.pid && a.amountCents === x.cents)) || SIMS[0];
   }
   function simWords(x) { return money(x.cents) + ' ' + (REASON_LABEL[x.reason] || x.reason).toLowerCase() + ' write-off'; }
@@ -236,7 +236,7 @@
     // checkout, encounter and ledger, not the Approvals screen wearing someone else's id.
     if (r && r.id && r.id !== 'approvals') { renderNotFound(r); return; }
     const s = S(); const who = me(); const cards = st();
-    const pending = s.approvals.filter((a) => a.status === 'pending');
+    const pending = Proto.store.pendingApprovalsFor();
     const decided = s.approvals.filter((a) => a.status !== 'pending');
     const root = h('div', { class: 'phone ph-page' });
     root.append(pageHead('Approvals', 'Signed in as ' + who.name + (iAmEligible() ? ' · eligible second approver' : ' · not an approver')));
@@ -270,7 +270,10 @@
     const t = ev.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
     if (/^[0-9]$/.test(ev.key)) { ev.preventDefault(); pad.add(ev.key); }
     else if (ev.key === 'Backspace') { ev.preventDefault(); pad.back(); }
-    else if (ev.key === 'Enter' && !(t && t.tagName === 'BUTTON' && t.getAttribute('data-testid') !== 'phone.stepup.submit')) { ev.preventDefault(); pad.submit(); }
+    /* Enter finishes the PIN wherever the keyboard happens to be sitting. The pad opens with focus on its
+       landing key, so excluding focused buttons meant Enter typed a fifth digit instead of submitting and
+       only the submit key would finish. Cancel keeps its own Enter, because it is a different verb. */
+    else if (ev.key === 'Enter' && !(t && t.getAttribute && t.getAttribute('data-testid') === 'phone.stepup.cancel')) { ev.preventDefault(); pad.submit(); }
   }
   function attachKeys() { if (!keysOn) { document.addEventListener('keydown', onKey); keysOn = true; } }
   function detachKeys() { if (keysOn) { document.removeEventListener('keydown', onKey); keysOn = false; } }
