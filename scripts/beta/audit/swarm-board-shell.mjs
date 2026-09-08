@@ -1,4 +1,7 @@
 // Swarm hunt, lens board-shell: router.js, app.js, events.js, screens/shell.js, signin.js, board.js, chairs.js.
+// Verified (swarm/verified-board-shell): all five checks reproduced independently against 2a5ea39 and each flipped to
+// "no" under a local negative-control patch (onClose hook in openPinPad; status gates in postCheckout, arrive, seat;
+// clock comparison in pingChair; enum/boolean validation in P.set). Line references are to 2a5ea39.
 // Default position is NOT reproduced: every check measures the breach it claims and carries the values.
 // Each check closes its browser context in `finally` so one failure cannot hang the run.
 export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => {
@@ -16,6 +19,8 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
     // the dialog's OWN close, which the wrapper never sees. After Escape the pad is gone and onPadKey stays on document:
     // Enter on any focused button is preventDefault-ed (the button never fires) and submit() logs an invisible pin_no_match
     // refusal; digits typed anywhere accumulate, and a seed PIN + Enter opens a session and switches the author with no dialog.
+    // Cancel and a matched PIN do go through the wrapper, so this is specific to the three dialog-owned exits. ui.js:115
+    // already calls opts.onClose from the dialog's close(); openPinPad simply does not pass one.
     // Negative control: once Escape/backdrop/hashchange route through the wrapper (or the dialog takes an onClose), Enter on
     // board.card.a-1042.arrive arrives Marisol (status → arrived, no pin_no_match), typing 2468 + Enter writes no sessions row
     // and the persona stays frontdesk; then enterSwallowed, ghostRefusal and authorSwitched are all false and the check reports false.
@@ -46,12 +51,12 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const ghostRefusal = ghost.includes('pin_no_match') && visibleRefusals === 0;
         const authorSwitched = afterPin.persona !== personaBefore && ev2.some((e) => e.kind === 'write' && e.table === 'sessions') && afterPin.overlays === 0;
         const reproduced = padOpen && padClosed && (enterSwallowed || ghostRefusal || authorSwitched);
-        rec('S-board-shell-1', 'Closing the Switch-author pad with Escape leaves its capture-phase keydown handler on document: Enter on any button is swallowed and logs a hidden pin_no_match refusal, and a PIN typed on the Board with no dialog open switches the author', 'A1/A4/B10 — shell.js:107-110 removes onPadKey only through its wrapper; ui.js:115-118 Escape/backdrop/hashchange close bypass it',
+        rec('S-board-shell-1', 'Closing the Switch-author pad with Escape leaves its capture-phase keydown handler on document: Enter on any button is swallowed and logs a hidden pin_no_match refusal, and a PIN typed on the Board with no dialog open switches the author', 'A2/B10 — shell.js:107-110 removes onPadKey only through its wrapper; ui.js:115-118 Escape/backdrop/hashchange close bypass it (ui.js:115 offers opts.onClose, unused)',
           reproduced, { padOpen, padClosed, a1042Before: before, a1042AfterEnter: afterEnter, enterSwallowed, eventsAfterEnter: brief(ev1), seqRangeEnter: range(ev1, seq0), ghostRefusalCodes: ghost, visibleRefusalsOnPage: visibleRefusals, ghostRefusal, personaBefore, afterPin, eventsAfterPin: brief(ev2), seqRangePin: range(ev2, seq1), authorSwitched });
       } finally { await c.close(); }
     },
 
-    // board.js:12 offers Checkout only for CHECKOUTABLE statuses (in_chart, note_filed), but router.js accepts
+    // board.js:19 offers Checkout only for CHECKOUTABLE statuses (in_chart, note_filed), but router.js accepts
     // #/<persona>/checkout/<apptId> for any appointment and neither checkout.js (Post at :236) nor store.js:126 postCheckout
     // checks the appointment status. Opening a-1042 (confirmed, 9:00, not arrived) by URL and pressing Post writes a collection
     // decision and a credit and moves the status to checked_out_unfiled; back on the Board the card reads "Filed later" with
@@ -77,7 +82,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const statusJumped = !!before && before.status === 'confirmed' && before.arrivedAt === null && !!afterPost && /checked_out/.test(afterPost.status) && afterPost.arrivedAt === null;
         const stuck = !card.controls.some((t) => /\.(arrive|seat|checkout)$/.test(t));
         const reproduced = postLive && posted && statusJumped;
-        rec('S-board-shell-2', 'Checkout before arrival: #/frontdesk/checkout/a-1042 (confirmed, never arrived) shows a live Post that writes a collection decision and moves the appointment to checked_out_unfiled; the Board card then reads Filed later with no Arrive/Seat/Checkout control', 'A2/A4/C5 — board.js:12 CHECKOUTABLE is the only status gate; store.js:126 postCheckout and checkout.js:236 Post never check appointment status',
+        rec('S-board-shell-2', 'Checkout before arrival: #/frontdesk/checkout/a-1042 (confirmed, never arrived) shows a live Post that writes a collection decision and moves the appointment to checked_out_unfiled; the Board card then reads Filed later with no Arrive/Seat/Checkout control', 'A2/C5 — board.js:19 CHECKOUTABLE is the only status gate; store.js:126 postCheckout and checkout.js:236 Post never check appointment status',
           reproduced, { clock, postLive, a1042Before: before, a1042AfterPost: afterPost, money, events: brief(ev), seqRange: range(ev, seq0), boardCardChips: card.chips, boardCardControls: card.controls, noWorkableControlLeft: stuck });
       } finally { await c.close(); }
     },
@@ -144,17 +149,18 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
     },
 
     // CONTRACTS §3 types theme as 'light'|'dark', device as 'desk'|'operatory'|'shared'|'phone' and privacy as boolean, and §3
-    // says query parameters "set the same options". app.js:9-10 set() copies any truthy string into __proto.theme/device and
-    // onto data-theme/data-device, and app.js:28 forwards every query value unfiltered, so ?theme=purple&device=tv&privacy=maybe
-    // leaves the page reporting theme 'purple', device 'tv' and privacy true, and the values persist on later routes.
-    // Negative control: a set() that validates against the §3 enums leaves theme 'light', device 'desk' (and data-theme/
-    // data-device the same) or falls back to the defaults; then outOfContract is empty and the check reports false. The
+    // says query parameters "set the same options" (its example is privacy=1&outage=1). app.js:9-10 set() copies any truthy
+    // string into __proto.theme/device and onto data-theme/data-device, :12-13 coerce privacy/outage with a truthiness test
+    // that only special-cases '0', and app.js:28 forwards every query value unfiltered, so ?theme=purple&device=tv&privacy=false
+    // leaves the page reporting theme 'purple', device 'tv' and privacy TRUE, and the values persist on later routes.
+    // Negative control: a set() that validates against the §3 enums and reads booleans only from '1'/'true' leaves theme
+    // 'light', device 'desk', privacy false (and data-theme/data-device the same); then outOfContract is empty and the check reports false. The
     // well-formed ?theme=dark&device=phone contrast is read in the same context so a set() that ignores queries entirely is
     // also reported false rather than mistaken for validation.
     async 'S-board-shell-5'(b) {
       const { c, p } = await ctx(b);
       try {
-        await go(p, '#/frontdesk/board?theme=purple&device=tv&privacy=maybe');
+        await go(p, '#/frontdesk/board?theme=purple&device=tv&privacy=false');
         const read = () => p.evaluate(() => ({ hash: location.hash, theme: window.__proto.theme, device: window.__proto.device, privacy: window.__proto.privacy, dataTheme: document.documentElement.getAttribute('data-theme'), dataDevice: document.documentElement.getAttribute('data-device'), h1: ((document.querySelector('#canvas h1') || {}).textContent || '').trim() }));
         const bad = await read();
         await hop(p, '#/frontdesk/chairs'); await p.waitForTimeout(120);
@@ -166,12 +172,13 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const outOfContract = [];
         if (!THEMES.includes(bad.theme)) outOfContract.push('query theme=' + bad.theme);
         if (!DEVICES.includes(bad.device)) outOfContract.push('query device=' + bad.device);
+        if (bad.privacy === true) outOfContract.push('query privacy=false read as true');
         if (!THEMES.includes(persisted.theme) || !DEVICES.includes(persisted.device)) outOfContract.push('persists to next route: theme=' + persisted.theme + ' device=' + persisted.device);
         if (!THEMES.includes(viaSet.theme)) outOfContract.push('set() theme=' + viaSet.theme);
         if (!DEVICES.includes(viaSet.device)) outOfContract.push('set() device=' + viaSet.device);
         const queriesWork = good.theme === 'dark' && good.device === 'phone' && good.dataTheme === 'dark';
         const reproduced = queriesWork && outOfContract.length > 0 && !!bad.h1;
-        rec('S-board-shell-5', '?theme=purple&device=tv&privacy=maybe and set({theme:"neon", device:"toaster"}) are accepted verbatim: __proto.theme/device and data-theme/data-device carry values outside the CONTRACTS §3 enums and persist across routes', 'CONTRACTS §3 — app.js:9-10 set() and :28 applyQuery copy option strings without validating them',
+        rec('S-board-shell-5', '?theme=purple&device=tv&privacy=false and set({theme:"neon", device:"toaster"}) are accepted verbatim: __proto.theme/device and data-theme/data-device carry values outside the CONTRACTS §3 enums, privacy=false turns privacy ON, and the values persist across routes', 'CONTRACTS §3 — app.js:9-13 set() and :28 applyQuery copy option strings without validating them; booleans are truthy-coerced',
           reproduced, { afterBadQuery: bad, afterHopToChairs: persisted, afterSetWithBadValues: viaSet, wellFormedContrast: good, outOfContract });
       } finally { await c.close(); }
     },
