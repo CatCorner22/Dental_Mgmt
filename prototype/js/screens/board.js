@@ -102,7 +102,7 @@
   function doReverify(id, r) {
     const a = Proto.store.appt(id); if (!a) return;
     const res = Proto.store.reverify(id);
-    if (!res.ok) { gates[id] = gateFor(res); render(r); return; }
+    if (!res.ok) { gates[id] = gateFor(res); render(r); focusGate(); return; }
     after(r, 'Eligibility re-run: active, deductible met.', 'board.card.' + id + '.expand');
   }
   /* The read-only Board offers no live action: Checkout is held here rather than routing to a screen that
