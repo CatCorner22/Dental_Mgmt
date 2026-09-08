@@ -179,23 +179,28 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       } finally { await c.close(); }
     },
 
-    // S-8 · A7/C5 · seed.js:208 eraBatches.era-1.eftCents = 481233 is a literal: the 41 seeded lines pay 2,138,500 cents, so the ERA heading
-    // prints "EFT $4,812.33" beside lines whose paid column totals $21,385.00, and no state change can reconcile the two.
+    // S-8 · C5/docs/13 §13 · seed.js:208 eraBatches.era-1.eftCents = 481233 is a literal unrelated to the generated lines: docs/13 §13 says the
+    // $4,812.33 EFT's "41 patient lines are already explained", but posting the batch (Post matched + the three read-back confirms) writes
+    // insurance_payment rows that sum to $21,385.00 under a heading that still reads "EFT $4,812.33". The sum of the lines is on no screen,
+    // so the disagreement is heading vs ledger, not two on-screen numbers.
     // Negative control: eftCents equals the sum of paidCents over the batch's lines (or is derived at read time) and the check reports false.
     async 'S-moneydesk-close-8'(b) {
       const { c, p, errs } = await ctx(b);
       try {
         await go(p, '#/biller/money');
+        const head = await p.evaluate(() => { const text = document.getElementById('canvas').textContent.replace(/\s+/g, ' '); return (text.match(/EFT\s*\$[\d,]+\.\d\d/) || [null])[0]; });
+        await click(p, 'money.era.era-1.postmatched'); await p.waitForTimeout(150);
         const r = await p.evaluate(() => {
-          const S = window.__proto.state(); const batch = S.eraBatches.find((x) => x.id === 'era-1'); const lines = S.eraLines.filter((l) => l.batchId === 'era-1');
+          const S = () => window.__proto.state(); const batch = S().eraBatches.find((x) => x.id === 'era-1'); const lines = S().eraLines.filter((l) => l.batchId === 'era-1');
+          const confirms = lines.filter((l) => l.status === 'delta').map((l) => l.id + ':' + (Proto.store.eraConfirm(l.id).ok ? 'ok' : 'refused'));
+          const ids = new Set(lines.map((l) => l.id));
+          const ledgerPaid = S().ledger.filter((e) => e.kind === 'insurance_payment' && ids.has(e.eraLineId)).reduce((s, e) => s - e.amountCents, 0);
           const sumPaid = lines.reduce((s, l) => s + l.paidCents, 0);
-          const text = document.getElementById('canvas').textContent.replace(/\s+/g, ' ');
-          const eft = (text.match(/EFT\s*\$[\d,]+\.\d\d/) || [null])[0];
-          return { eftCents: batch.eftCents, lines: batch.lines, linesInState: lines.length, sumPaidCents: sumPaid, eftOnScreen: eft, moneyOfEft: Proto.ui.money(batch.eftCents), moneyOfSum: Proto.ui.money(sumPaid) };
+          return { eftCents: batch.eftCents, lines: batch.lines, linesInState: lines.length, confirms, sumPaidCents: sumPaid, ledgerInsurancePaidCents: ledgerPaid, moneyOfEft: Proto.ui.money(batch.eftCents), moneyOfLedger: Proto.ui.money(ledgerPaid), headingNow: (document.getElementById('canvas').textContent.replace(/\s+/g, ' ').match(/EFT\s*\$[\d,]+\.\d\d/) || [null])[0] };
         });
-        const reproduced = r.eftOnScreen !== null && r.eftOnScreen.replace(/\s+/g, '') === ('EFT' + r.moneyOfEft).replace(/\s+/g, '') && r.eftCents !== r.sumPaidCents;
-        rec('S-moneydesk-close-8', 'The ERA heading prints "EFT $4,812.33" from the literal eftCents 481233 while the 41 lines of era-1 sum to $21,385.00 paid — two numbers for one remittance', 'A7,C5 · seed.js:208 · moneydesk.js eraTab heading',
-          reproduced, r);
+        const reproduced = head !== null && head.replace(/\s+/g, '') === ('EFT' + r.moneyOfEft).replace(/\s+/g, '') && r.ledgerInsurancePaidCents > 0 && r.ledgerInsurancePaidCents !== r.eftCents;
+        rec('S-moneydesk-close-8', 'The ERA heading prints "EFT $4,812.33" from the literal eftCents 481233, while posting the batch writes insurance_payment rows for its lines that sum to $21,385.00 — one remittance, two totals', 'C5 · docs/13 §13 · seed.js:208 · moneydesk.js eraTab heading',
+          reproduced, Object.assign({ eftOnScreenBeforePosting: head, pageErrors: errs }, r));
       } finally { await c.close(); }
     },
 
@@ -213,7 +218,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const seq0 = await lastSeq(p);
         const r = await p.evaluate(() => {
           const S = () => window.__proto.state(); const me = Proto.store.currentUser();
-          const out = { approver: { id: me.id, name: me.name, role: me.role, entitlements: me.entitlements }, pendingForMe: Proto.store.pendingApprovalsFor().length };
+          const out = { approver: { id: me.id, name: me.name, role: me.role, entitlements: me.entitlements }, onEligibleList: (S().approvals[0].eligible || []).includes(me.short) || (S().approvals[0].eligible || []).includes(me.name) };
           out.res = Proto.store.decideApproval('ar-1', me.id, 'approved', true);
           const a = S().approvals.find((x) => x.id === 'ar-1'); out.request = { status: a.status, decidedBy: a.decidedBy || null };
           out.writeoffs = S().ledger.filter((e) => e.approvalRequestId === 'ar-1').map((e) => ({ id: e.id, kind: e.kind, amountCents: e.amountCents, secondApprover: e.secondApprover || null }));
@@ -226,7 +231,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const noEnt = !(r.approver.entitlements || []).includes('approve_second');
         const reproduced = !!req && req.status === 'pending' && noEnt && !!r.res.ok && r.request.status === 'approved' && r.writeoffs.some((w) => w.kind === 'write_off' && w.amountCents === -req.amountCents);
         rec('S-moneydesk-close-9', 'The front desk seat (entitlements post_payment, schedule; not on ar-1.eligible) approves the held $410 courtesy write-off via decideApproval: ar-1 becomes approved, decidedBy Priya Raman, and write_off −41000 posts with her as secondApprover', 'B2 · CONTRACTS §6 · store.js:202-218 · phone.js:55',
-          reproduced, { request: req, approver: r.approver, pendingApprovalsForApprover: r.pendingForMe, result: r.res, requestAfter: r.request, writeoffsPosted: r.writeoffs, patientDue306After: r.patientDue306, tempSeat: temp, pageErrors: errs, events: brief(ev), seqRange: range(ev) });
+          reproduced, { request: req, approver: r.approver, approverOnEligibleList: r.onEligibleList, result: r.res, requestAfter: r.request, writeoffsPosted: r.writeoffs, patientDue306After: r.patientDue306, tempSeat: temp, pageErrors: errs, events: brief(ev), seqRange: range(ev) });
       } finally { await c.close(); }
     },
 
@@ -301,7 +306,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       } finally { await c.close(); }
     },
 
-    // S-13 · B10/A3 · moneydesk.js:131 the amount input's blur handler swaps the hint text on an invalid amount, and the Post button beneath moves
+    // S-13 · A2/B2 · moneydesk.js:131 the amount input's blur handler swaps the hint text on an invalid amount, and the Post button beneath moves
     // during the press: mousedown blurs the field, the layout shifts, mouseup lands on nothing. The click is logged without a testid, postWriteoff
     // never runs, no refusal renders and nothing is announced — the press is lost.
     // Negative control: Post keeps its box across the blur, the click carries testid money.writeoff.post and an amount_required refusal renders; the check reports false.
@@ -328,7 +333,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const hint = await p.evaluate(() => (document.querySelector('.hint') || {}).textContent || null);
         const moved = !!boxBefore && !!boxAfterBlur && boxBefore.y !== boxAfterBlur.y;
         const reproduced = moved && clickEv.length > 0 && clickEv.every((t) => t !== 'money.writeoff.post') && refs.length === 0 && ev.every((e) => e.kind !== 'refusal');
-        rec('S-moneydesk-close-13', 'With "1e3" in the write-off amount, pressing Post moves the button under the pointer (hint text swap on blur): the click is logged with no testid, no amount_required refusal renders and the live region stays empty', 'B10,A3 · moneydesk.js:131',
+        rec('S-moneydesk-close-13', 'With "1e3" in the write-off amount, pressing Post moves the button under the pointer (hint text swap on blur): the click is logged with no testid, no amount_required refusal renders and the live region stays empty', 'A2,B2 · moneydesk.js:131',
           reproduced, { postBoxBeforeBlur: boxBefore, postBoxAfterBlur: boxAfterBlur, hintAfterBlur: hint, clickTestids: clickEv, refusalsRendered: refs, announced, pageErrors: errs, events: brief(ev), seqRange: range(ev) });
       } finally { await c.close(); }
     },
@@ -345,7 +350,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
           const S = () => window.__proto.state();
           const seq0 = window.__events.length ? window.__events[window.__events.length - 1].seq : 0;
           const a = Proto.store.closeDay('loc-2'); const b2 = Proto.store.closeDay('loc-3');
-          const today = S().dayCloses.filter((d) => d.date === S().tenant.today).map((d) => ({ id: d.id, locationId: d.locationId, chainHeadHash: d.chainHeadHash, closedAt: d.closedAt }));
+          const today = S().dayCloses.filter((d) => d.date === S().tenant.today).map((d) => ({ id: d.id, locationId: d.locationId, date: d.date, chainHeadHash: d.chainHeadHash, closedAt: d.closedAt }));
           return { first: a.ok ? a.dayClose.id : a, second: b2.ok ? b2.dayClose.id : b2, todayCloses: today, ev: window.__events.filter((e) => e.seq > seq0) };
         });
         const hashes = r.todayCloses.map((d) => d.chainHeadHash);
