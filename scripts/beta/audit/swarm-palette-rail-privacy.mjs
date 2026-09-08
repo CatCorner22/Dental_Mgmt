@@ -136,15 +136,17 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const legA = raisesSeen === 4 && secondIdentifierEvents.length === 1 && liveMutations === 0;
         const legB = !!standing && ledgerGate.gates.includes(standing.code + '@canvas') && sameGateAfterExplain === 1 && gatesAfterEscape.includes(standing.code + '@canvas') && sameGateEvents.length === 2 && liveAfter === standing.verb;
         rec('S-palette-rail-privacy-3', 'ui.refusal dedups by a single last-gate key: four wrong date-of-birth raises (retry, another patient, reopened palette) log one second_identifier event and the last three never touch the live region, while the ledger\'s standing gate is logged and announced a second time once the palette gate has passed through the slot', 'A3 — a gate writes one refusal event; C8 — announcements; ui.js:52-64 (lastGate), palette.js:298-328 confirmDob, app.js:38 resetGates only on route change',
-          legA && legB, { legA: { raise1, afterTryAgain: cleared, raise2, raise3, raise4, raisesSeen, liveMutationsDuringRaises2to4: liveMutations, secondIdentifierEvents, refusalEvents: refusalEvents(evA), seqRange: range(evA, seq0) }, legB: { ledgerGate, standingGateEventsAfterExplainWithGateUp: sameGateAfterExplain, gatesAfterPaletteEscape: gatesAfterEscape, standingGateEvents: sameGateEvents, liveAfterSecondExplain: liveAfter, refusalEvents: refusalEvents(evB), seqRange: range(evB, seqB) } });
+          legA || legB, { legA, legB, legAEvidence: { raise1, afterTryAgain: cleared, raise2, raise3, raise4, raisesSeen, liveMutationsDuringRaises2to4: liveMutations, secondIdentifierEvents, refusalEvents: refusalEvents(evA), seqRange: range(evA, seq0) }, legBEvidence: { ledgerGate, standingGateEventsAfterExplainWithGateUp: sameGateAfterExplain, gatesAfterPaletteEscape: gatesAfterEscape, standingGateEvents: sameGateEvents, liveAfterSecondExplain: liveAfter, refusalEvents: refusalEvents(evB), seqRange: range(evB, seqB) } });
       } finally { await c.close(); }
     },
 
     // B10 · ui.js:118,127 · every dialog registers its own capture-phase keydown listener on document; Escape calls
     // ev.stopPropagation(), which does not stop the other listeners on the same node, so one Escape with the palette open
     // over the Statement preview closes both dialogs.
-    // Negative control: Escape closes only the top dialog (dialogsAfterEscape === 1, Statement preview still open, focus back
-    // on its close control) and the check reports false.
+    // Negative control: Escape closes only one dialog (dialogsAfterEscape === 1) and the check reports false. Verified with
+    // stopImmediatePropagation in place of stopPropagation: one dialog survives — note that with that patch alone it is the
+    // *preview* that closes (document listeners run in registration order), so the real fix must also test that the
+    // dialog is the topmost overlay in #dialogs.
     async 'S-palette-rail-privacy-4'(b) {
       const { c, p } = await ctx(b);
       try {
@@ -209,6 +211,40 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const reproduced = before.d1 === 'review_due' && pressed && wrote && afterFirst.d1 === 'tighten' && pageErrors.some((e) => /T is not defined/.test(e)) && ev1.some((e) => e.kind === 'error') && afterFirst.cardStill && afterFirst.buttonsStill.includes('close.decision.d-1.tighten') && afterFirst.resultLine === null && afterFirst.live === '' && pressedAgain && afterSecond.controlDecisions.length === afterFirst.controlDecisions.length + 1;
         rec('S-palette-rail-privacy-6', 'Tighten on decision d-1 throws "T is not defined" after the store has written decisions/d-1 and a controlDecisions row: the card and its buttons stay, nothing is announced, and a second press writes a second controlDecisions row for the same decision', 'A1 — no page error; A4 — repeating the control does not double-write; dailyclose.js:207-208 (undefined T), store.js reviewDecision (no already-decided guard)',
           reproduced, { before, afterFirstPress: afterFirst, pageErrors, eventsFirstPress: kinds(ev1), afterSecondPress: afterSecond, eventsBothPresses: kinds(ev2), seqRange: range(ev2, seq0) });
+      } finally { await c.close(); }
+    },
+
+    // A4 / A3 · store.js:449 reviewDecision · verifier-added, adjacent to -6. The verb has no already-decided guard and no
+    // action whitelist: called again on the same decision (any string, even undefined) it sets decisions/d-1.status to that
+    // string, writes another controlDecisions row superseding d-1, and flips the tenant threshold back and forth. The UI
+    // path reaches the repeat only through the -6 crash; this measures the verb directly so the double-write stays guarded
+    // once T is fixed.
+    // Negative control: reviewDecision refuses when d.status !== 'review_due' or the action is not keep/tighten/retire
+    // (ok:false on the 2nd-4th calls, one controlDecisions row, status stays 'tighten') and the check reports false.
+    async 'S-palette-rail-privacy-v1'(b) {
+      const { c, p, errs } = await ctx(b);
+      try {
+        await go(p, '#/owner/close');
+        const seq0 = await lastSeq(p);
+        const r = await p.evaluate(() => {
+          const S = () => window.__proto.state();
+          const d1 = () => S().decisions.find((d) => d.id === 'd-1');
+          const snap = () => ({ d1: d1() && d1().status, controlDecisions: S().controlDecisions.map((x) => x.id + ':' + x.action + ':' + x.supersedes), threshold: S().tenant.dualReleaseThresholdCents });
+          const before = snap();
+          const first = Proto.store.reviewDecision('d-1', 'tighten');
+          const afterFirst = snap();
+          const second = Proto.store.reviewDecision('d-1', 'retire');
+          const third = Proto.store.reviewDecision('d-1', 'bogus');
+          const fourth = Proto.store.reviewDecision('d-1', undefined);
+          return { before, first, afterFirst, second, third, fourth, after: snap() };
+        });
+        const ev = await after(p, seq0);
+        const cdWrites = writes(ev).filter((w) => w.table === 'controlDecisions');
+        const reproduced = r.before.d1 === 'review_due' && r.before.controlDecisions.length === 0 && r.first.ok === true && r.afterFirst.d1 === 'tighten' && r.afterFirst.threshold === 10000
+          && r.second.ok === true && r.third.ok === true && r.fourth.ok === true
+          && r.after.controlDecisions.length === 4 && r.after.controlDecisions.every((x) => x.endsWith(':d-1')) && r.after.d1 === undefined && r.after.threshold === 15000 && cdWrites.length === 4 && errs.length === 0;
+        rec('S-palette-rail-privacy-v1', 'Proto.store.reviewDecision has no already-decided guard and no action whitelist: after Tighten, retire/bogus/undefined on the same d-1 each return ok, write a further controlDecisions row superseding d-1 (four rows), set decisions/d-1.status to "bogus" then undefined and flip the threshold 10000 → 15000', 'A4 — repeating a control does not double-write; A3 — one refusal per gate; store.js:449 reviewDecision',
+          reproduced, { ...r, controlDecisionWrites: cdWrites, events: kinds(ev), seqRange: range(ev, seq0), pageErrors: errs });
       } finally { await c.close(); }
     },
   };
