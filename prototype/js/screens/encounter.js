@@ -460,7 +460,7 @@
     // The filing gate is the live one, so no earlier gate is left holding the contract selectors (§6).
     x.checked = true; x.sendGate = null; x.gateNode = null; x.undoGate = null;
     const res = Proto.store.fileNote(enc.id, x.note, confirmed);
-    if (res.ok) { x.filed = res.filed; x.readback = false; rerender(r); focusFirst('enc.back'); Proto.router.announce('Filed · charges released · claim queued'); return; }
+    if (res.ok) { x.filed = res.filed; x.readback = false; rerender(r); focusFirst('enc.back'); Proto.router.announce(res.claim ? 'Filed · charges released · claim queued' : 'Filed · nothing performed, no charge, no claim'); return; }
     if (res.killers) { x.killers = res.killers; x.readback = false; }
     else if (res.code === 'readback') { x.killers = []; x.readback = true; }
     else { x.gateNode = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: () => rerender(r) }); }
@@ -469,13 +469,14 @@
     else if (res.killers) focusFirst('enc.killer.0.fix', 'enc.file');
   }
   function renderFiledCard(enc, filed, x) {
-    const s = S(); const released = filed ? s.ledger.filter((e) => e.releasedByNoteId === filed.id) : []; const claim = s.claims.slice().reverse().find((c) => c.patientId === enc.patientId && c.status === 'scrubbed');
+    const s = S(); const released = filed ? s.ledger.filter((e) => e.releasedByNoteId === filed.id) : []; const claim = s.claims.slice().reverse().find((c) => c.encounterId === enc.id) || (released.length ? s.claims.slice().reverse().find((c) => c.patientId === enc.patientId && c.status === 'scrubbed') : null);
     return h('div', { class: 'card stack enc-filed', 'aria-label': 'Filed note' },
       h('div', { class: 'row' }, chip('clear', 'Filed', { big: true }), chip('clear', 'Audit passed')),
       filed ? h('p', { class: 'small muted', text: 'By ' + filed.author + ' at ' + dateTime((filed.filedOn || '') + ' ' + (filed.filedTime || '')) + ' · text and version frozen; corrections are addenda, never edits.' }) : null,
       h('ul', { class: 'enc-rows' },
         h('li', null, h('b', { text: 'Charges released: ' + released.length }), released.length ? ' · ' + released.map((e) => money(e.amountCents) + (e.tooth ? ' #' + e.tooth : '')).join(', ') : ' (nothing pending)'),
-        h('li', null, h('b', { text: 'Claim queued' }), claim ? ' · ' + claim.id + ' to ' + claim.payer + ' · ' + claim.nextAction : ''),
+        // A claim follows released charges; a visit that performed nothing sends none, and the card says so.
+        claim || released.length ? h('li', null, h('b', { text: 'Claim queued' }), claim ? ' · ' + claim.id + ' to ' + claim.payer + ' · ' + claim.nextAction : '') : h('li', null, h('b', { text: 'No claim' }), ' · nothing performed this visit, nothing to bill'),
         h('li', null, 'Board chip flipped to Note filed; checkout releases any held payment.')),
       filed && filed.markdown ? h('div', { class: 'enc-readonly small', text: filed.markdown }) : null);
   }
