@@ -3,6 +3,8 @@
 // performed, painting into a sealed exam, malformed store arguments, DOB in the read-back under privacy).
 // Default position is NOT reproduced: every check measures the breach it claims and carries the values.
 // Each check closes its browser context in `finally` so one failure cannot hang the run.
+// Verified (swarm/verified-encounter): each of the eleven was reproduced by an independent probe from the repro
+// steps, and each flipped to "no" with only its own fix patched into prototype/ (isolated negative controls).
 
 export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => {
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
@@ -92,9 +94,11 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const reversedProc = preFile.procedures.find((x) => x.reversed);
         const reversedCharged = reversedProc ? afterL.charges.filter((l) => l.procedureId === reversedProc.id) : [];
         const newClaim = afterL.claims.slice(before.claims.length);
-        const reproduced = afterE.noteFiled && preFile.live.length === 1 && !!reversedProc && reversedCharged.length > 0 && afterL.balance.patientDue - before.balance.patientDue > 118000;
+        const releasedReversed = reversedCharged.length > 0 && afterL.balance.patientDue - before.balance.patientDue > 118000;
+        const claimNamesReversed = !!reversedProc && newClaim.some((cl) => cl.cdt === reversedProc.cdt && !preFile.live.includes(reversedProc.cdt + '#' + reversedProc.tooth));
+        const reproduced = afterE.noteFiled && preFile.live.length === 1 && !!reversedProc && (releasedReversed || claimNamesReversed);
         rec('S-encounter-2', 'Undo Composite #30, paint Crown #30, File: filing releases the reversed composite as a $260 ledger charge beside the $1,180 crown (Patient due +$1,440, not +$1,180) and queues the claim under the undone code d2392', 'A7, C5 — one live paint releases one charge; a reversed procedure never reaches the ledger; store.js:384 release filter ignores p.reversed, store.js:391 claim cdt from S.procedures.find',
-          reproduced, { livePaintsAtFile: preFile.live, proceduresAtFile: preFile.procedures, reversedProcedure: reversedProc || null, chargesForReversedProcedure: reversedCharged, chargesAfter: afterL.charges.filter((l) => l.releasedByNoteId), patientDueBefore: before.balance.patientDue, patientDueAfter: afterL.balance.patientDue, expectedDelta: 118000, newClaims: newClaim, filedCardText: filedCard, writes: writes(ev), seqRange: range(ev, seq0) });
+          reproduced, { livePaintsAtFile: preFile.live, proceduresAtFile: preFile.procedures, reversedProcedure: reversedProc || null, chargesForReversedProcedure: reversedCharged, releasedReversed, claimNamesReversed, chargesAfter: afterL.charges.filter((l) => l.releasedByNoteId), patientDueBefore: before.balance.patientDue, patientDueAfter: afterL.balance.patientDue, expectedDelta: 118000, newClaims: newClaim, filedCardText: filedCard, writes: writes(ev), seqRange: range(ev, seq0) });
       } finally { await c.close(); }
     },
 
@@ -203,7 +207,8 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
     // header (encounter.js:166) and read-back line (encounter.js:398) drop the DOB under privacy. Under ?privacy=1 the
     // gate shows "for TB, born 11/2/1990" on operatory glass.
     // Negative control: a Why built with the same `priv` guard (initials only, no DOB) leaves `dobInGateWhy` false and
-    // the check reports false; the check requires __proto.privacy === true when it reads the gate.
+    // the check reports false; the check requires __proto.privacy === true when it reads the gate. Whether the rest of
+    // the canvas also shows the DOB is recorded as evidence only: a second leak must not hide this one.
     async 'S-encounter-7'(b) {
       const { c, p } = await ctx(b);
       try {
@@ -221,7 +226,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
           return { privacy: window.__proto.privacy, device: window.__proto.device, dob: pat.dob, dobLong, fullName: pat.name, gateCode: gate ? gate.dataset.code : null, gateText, dobInGateWhy: !!gateText && gateText.includes(dobLong), fullNameInGate: !!gateText && gateText.includes(pat.name), dobElsewhereOnCanvas: canvasSansGate.includes(dobLong), headerText: ((document.querySelector('.enc-page h1, .enc-page h2, header h1') || {}).textContent || '').trim() };
         });
         const ev = await after(p, seq0);
-        const reproduced = read.privacy === true && read.gateCode === 'readback' && read.dobInGateWhy && !read.dobElsewhereOnCanvas;
+        const reproduced = read.privacy === true && read.gateCode === 'readback' && read.dobInGateWhy;
         rec('S-encounter-7', 'Under privacy=1 on an operatory device the read-back gate\'s Why prints the patient\'s full date of birth ("for TB, born 11/2/1990") while the encounter header and the screen\'s own read-back line hide the DOB', 'B8, docs/04 §privacy: "covers … any gate copy"; docs/15: "privacy mode leaks nothing"; store.js:377 fileNote appends longDate(who.dob) without the privacy guard used at encounter.js:166/398',
           reproduced, { privacy: read.privacy, device: read.device, gateCode: read.gateCode, gateText: read.gateText, dobLong: read.dobLong, dobInGateWhy: read.dobInGateWhy, fullNameInGate: read.fullNameInGate, dobElsewhereOnCanvas: read.dobElsewhereOnCanvas, refusalEvents: ev.filter((e) => e.kind === 'refusal').map((e) => e.code), seqRange: range(ev, seq0) });
       } finally { await c.close(); }
@@ -310,9 +315,11 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
 
     // store.js:270-291 chartPaint validates the CDT code and nothing else. A string `surfaces` throws TypeError at :291
     // (surfaces.join) after chartEvents, procedures and planItems were already written — the "one gesture, one
-    // transaction" promise breaks half-way; tooth 99 / -1 / NaN and temporality 'yesterday' are accepted and written.
+    // transaction" promise breaks half-way; tooth 99 / -1 and temporality 'yesterday' are accepted and written. Every
+    // bad-argument leg uses a code on the fee schedule (d2392/d2740) so a licence_scope refusal cannot be misread as
+    // argument validation.
     // Negative control: a validating chartPaint returns {ok:false} for each and writes nothing: `threw` false, the three
-    // counts unchanged, `tooth99.ok`/`badTemporality.ok` false, and the check reports false.
+    // counts unchanged, `tooth99.ok`/`toothNeg.ok`/`badTemporality.ok` false, and the check reports false.
     async 'S-encounter-11'(b) {
       const { c, p, errs } = await ctx(b);
       try {
@@ -327,14 +334,14 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
           out.rowsWritten = { chartEvent: s.chartEvents.filter((x) => x.encounterId === 'enc-9002' && x.tooth === 3).map((x) => ({ id: x.id, surfaces: x.surfaces })), procedure: s.procedures.filter((x) => x.encounterId === 'enc-9002' && x.tooth === 3).map((x) => ({ id: x.id, surfaces: x.surfaces, status: x.status, feeCents: x.feeCents })), noteLines: (s.notes['enc-9002'] || {}).procedures || [] };
           const slim = (x) => ({ ok: !!x.ok, code: x.code || null, tooth: x.chartEvent ? x.chartEvent.tooth : undefined, procedure: x.procedure ? x.procedure.id : null, temporality: x.chartEvent ? x.chartEvent.temporality : undefined });
           out.tooth99 = slim(Proto.store.chartPaint('enc-9002', 99, ['o'], 'd2740', 'today'));
-          out.toothNeg = slim(Proto.store.chartPaint('enc-9002', -1, ['o'], 'd2391', 'today'));
+          out.toothNeg = slim(Proto.store.chartPaint('enc-9002', -1, ['o'], 'd2740', 'today'));
           out.badTemporality = slim(Proto.store.chartPaint('enc-9002', 19, ['o'], 'd2392', 'yesterday'));
           out.after = cnt();
           return out;
         });
         const ev = await after(p, seq0);
         const partial = r.threw && (r.afterString.chartEvents > r.before.chartEvents || r.afterString.procedures > r.before.procedures);
-        const reproduced = !!partial || r.tooth99.ok === true || r.badTemporality.ok === true;
+        const reproduced = !!partial || r.tooth99.ok === true || r.toothNeg.ok === true || r.badTemporality.ok === true;
         rec('S-encounter-11', 'chartPaint with surfaces "mod" throws TypeError (surfaces.join) after writing the chart event, the $260 procedure and the plan item — a half-committed transaction with no note line — and accepts tooth 99, tooth -1 and temporality "yesterday" as written rows', 'A7, C5 — one gesture is one transaction or nothing; a verb refuses input it cannot chart; store.js:270-291 chartPaint validates only the CDT code',
           reproduced, { threw: r.threw, countsBefore: r.before, countsAfterStringSurfaces: r.afterString, rowsWrittenBeforeThrow: r.rowsWritten, tooth99: r.tooth99, toothNegative: r.toothNeg, badTemporality: r.badTemporality, countsAfterAll: r.after, pageErrors: errs, writes: writes(ev), seqRange: range(ev, seq0) });
       } finally { await c.close(); }
