@@ -3,18 +3,23 @@
 // states; these checks measure the canvas, the rail-open state and the focus that a keyboard user is left with.
 // Default position is NOT reproduced: every check measures the breach it claims and carries the values.
 // Each check closes its browser context in `finally` so one failure cannot hang the run.
+// Verified (swarm/verified-a11y-devices): both checks reproduced independently and each flipped to "no" under a local
+// patch of the named root cause (components.css minmax(0, …) columns; board.js doReverify + focusGate()).
 export default ({ ctx, go, click, events, rec }) => {
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
   const after = async (p, seq) => (await events(p)).filter((e) => e.seq > seq);
   const active = (p) => p.evaluate(() => { const a = document.activeElement; return a === document.body ? 'BODY' : (a.getAttribute('data-testid') || a.tagName); });
 
-  // Canvas geometry plus every visible control whose right edge lies past the canvas's own right edge
-  // (part or all of the 44 px target is only reachable by panning the canvas sideways).
+  // Canvas geometry plus every visible control whose right edge lies past the canvas's own right edge and that no
+  // scrolling container of its own (e.g. a working `.enc-odont-wrap`) can bring back: part or all of the 44 px target is
+  // only reachable by panning the canvas sideways. A control inside a wrapper that really scrolls is not counted, so the
+  // helper cannot report the designed odontogram scroll as a breach.
   const canvasOverflow = (p) => p.evaluate(() => {
     const c = document.getElementById('canvas'); const cr = c.getBoundingClientRect();
     const wrap = document.querySelector('.enc-odont-wrap'); const rail = document.getElementById('rail');
+    const scrollsInOwnBox = (e) => { let a = e.parentElement; while (a && a !== c) { const cs = getComputedStyle(a); if ((cs.overflowX === 'auto' || cs.overflowX === 'scroll') && a.scrollWidth > a.clientWidth + 1) return true; a = a.parentElement; } return false; };
     const off = [...c.querySelectorAll('button, textarea, input, select')]
-      .filter((e) => e.offsetParent !== null)
+      .filter((e) => e.offsetParent !== null && !scrollsInOwnBox(e))
       .map((e) => { const b = e.getBoundingClientRect(); return { id: e.getAttribute('data-testid') || e.tagName, left: Math.round(b.left), right: Math.round(b.right), visiblePx: Math.max(0, Math.round(Math.min(b.right, cr.right) - Math.max(b.left, cr.left))) }; })
       .filter((x) => x.right > cr.right + 1);
     return {
@@ -33,9 +38,11 @@ export default ({ ctx, go, click, events, rec }) => {
     // at ≤ 640) instead of letting `.enc-odont-wrap { overflow-x: auto }` scroll, and at 1280 with the rail open the 856 + 16 + 320 px
     // minimum exceeds the 928 px canvas. The canvas (overflow: auto) absorbs the excess, so document.scrollWidth stays equal to the
     // viewport and R14 / proto-check see nothing while teeth, the tag chip, the Note textareas and File sit past the canvas edge.
-    // Negative control: once the column is minmax(0, 1fr) (or the odontogram wrapper is allowed to scroll) canvasScrollWidth equals
-    // canvasClientWidth at 420, 820, 1024 + rail and 1280 + rail, odontWrap.scrolls is true where the odontogram is wider than the
-    // canvas, offscreenControls is 0 in every state, and the check reports false.
+    // Negative control (run by the verifier): with `.enc-layout { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) }`,
+    // `minmax(0, 1fr)` below 1280 and `.enc-layout > * { min-width: 0 }`, canvasScrollWidth equals canvasClientWidth in all four
+    // states (420/420, 820/820, 704/704, 960/960), .enc-odont-wrap scrolls (408 > 362, 824 > 762, 824 > 646, 824 > 481),
+    // offscreenControls is 0 and the check reports false. Any single state where the canvas still pans with a control past its
+    // edge keeps the check at YES, so a partial fix cannot silence it.
     async 'S-a11y-devices-1'(b) {
       const states = [
         { w: 420, route: '#/dentist/encounter/enc-9002?device=phone', open: null },
@@ -58,7 +65,7 @@ export default ({ ctx, go, click, events, rec }) => {
       // Breach: the canvas pans sideways (scrollWidth > clientWidth) while the document does not, and a real control is past the edge.
       const breached = out.filter((o) => o.canvasScrollWidth > o.canvasClientWidth + 1 && o.documentScrollWidth <= o.viewport && o.offscreenControls > 0);
       const wrapNeverScrolls = out.every((o) => !o.odontWrap || !o.odontWrap.scrolls);
-      const reproduced = breached.length >= 3 && wrapNeverScrolls;
+      const reproduced = breached.length > 0;
       rec('S-a11y-devices-1', 'The Encounter canvas pans sideways at 420 (450 > 420), 820 (866 > 820), 1024 + rail (866 > 704) and 1280 + rail (1208 > 960) because .enc-layout\'s 1fr/856px columns grow to the odontogram\'s width: teeth 16/17 keep 11 px of their 44 px, File and the Note textareas overhang the edge and at 1024 + rail six teeth are fully off-screen, while document.scrollWidth stays equal to the viewport so R14 and proto-check report nothing',
         'B11, docs/04 (wide content scrolls inside its own container; the visible target is the touch target); components.css:249-250',
         reproduced, { statesBreached: breached.map((o) => o.width + (o.railOpen ? '+rail' : '')), odontWrapScrollsAnywhere: !wrapNeverScrolls, states: out });
@@ -69,8 +76,11 @@ export default ({ ctx, go, click, events, rec }) => {
     // re-focuses its own button (doArrive/doSeat do) nor calls focusGate() (goCheckout/doPing/holdStrip do). render(r) replaces the
     // card, the focused Re-verify button is detached, and document.activeElement falls to body; the next Tab lands on the chair
     // strip at the top of the page.
-    // Negative control: after the fix Enter on Re-verify under outage leaves focus on refusal.control (or the Re-verify button):
-    // activeAfter !== 'BODY' on desk, operatory and phone, and the check reports false.
+    // Negative control (run by the verifier): with `focusGate()` added to the refusal branch, Enter on Re-verify under outage
+    // leaves focus on refusal.control and the next Tab reaches refusal.why on desk, operatory and phone; the check reports false.
+    // A verifier sweep of every Board button under outage (focus + Enter, 1280) found only board.card.<id>.reverify dropping
+    // focus to body (a-1042 and a-1065); Arrive/Seat/Checkout/Ping refusals and the readiness strip keep it.
+    // Reproduced: any device where the outage gate renders and document.activeElement is body afterwards.
     async 'S-a11y-devices-2'(b) {
       const devices = [{ w: 1280, q: '?outage=1' }, { w: 1024, q: '?outage=1&device=operatory' }, { w: 420, q: '?outage=1&device=phone' }];
       const out = [];
@@ -96,7 +106,7 @@ export default ({ ctx, go, click, events, rec }) => {
         } finally { await c.close(); }
       }
       const dropped = out.filter((o) => o.reverifyPresent && o.outage === true && o.gateCode === 'outage' && o.gateControlPresent && o.activeBefore === 'board.card.a-1042.reverify' && o.activeAfter === 'BODY' && o.events.some((e) => e.kind === 'refusal' && e.code === 'outage'));
-      const reproduced = dropped.length === out.filter((o) => o.reverifyPresent).length && dropped.length > 0;
+      const reproduced = dropped.length > 0;
       rec('S-a11y-devices-2', 'Enter on Re-verify (a-1042) during an outage renders the Stop gate "Wait for the server — eligibility cannot re-run" with its Support line control, then leaves document.activeElement on body on desk, operatory and phone; the next Tab starts over at the chair strip (board.chair.1), while Arrive/Seat/Checkout/Ping refusals keep focus',
         'B10 (focus never on body after a mutation or refusal); board.js:105-109 doReverify refusal branch',
         reproduced, { devicesDropped: dropped.map((o) => o.width + o.query), devices: out });
