@@ -2,6 +2,8 @@
 // decideApproval, reviewDecision, eraConfirm, closeDay). Sequences and edges the existing 294 checks did not drive.
 // Default position is NOT reproduced: every check measures the breach it claims and carries the values.
 // Each check closes its browser context in `finally` so one failure cannot hang the run.
+// Verified (swarm/verified-ledger): S-ledger-1..8 reproduced by an independent probe and each flips to "no" under a
+// one-line local fix of its own root cause (negative control); S-ledger-v1 added for the adjacent Daily Close defect.
 export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => {
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
   const after = async (p, seq) => (await events(p)).filter((e) => e.seq > seq);
@@ -291,6 +293,42 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const reproduced = r.before.patientDue > 0 && !!r.over.ok && r.afterOver.patientDue === 0 && r.afterOver.credit === 0 && r.ledgerSumAfterOver < 0 && !!r.half.ok && !!r.tiny.ok && fractional.length === 2;
         rec('S-ledger-8', 'requestWriteoff posts any positive number: on p-316 (Patient due $84.00) a $134.00 write-off posts and the ledger nets to −$50.00 while the three numbers read $0.00/$0.00/$0.00, and 0.5 and 1e-9 cents post as ledger rows', 'A1, A7 — store.js:226 "posts the number you type against the balance"; store.js:222-231 no cap at the open balance and no integer-cents check',
           reproduced, { balanceBefore: r.before, ledgerSumBefore: r.ledgerSumBefore, overBalanceResult: r.over, balanceAfterOver: r.afterOver, ledgerSumAfterOver: r.ledgerSumAfterOver, halfCentResult: r.half, tinyResult: r.tiny, rowsWritten: r.rows, fractionalRows: fractional, balanceAfterAll: r.after, explainAfter: r.explain, writes: writes(ev), seqRange: range(ev, seq0) });
+      } finally { await c.close(); }
+    },
+
+    // S-ledger-v1 (verifier, adjacent to S-ledger-5) · B1/C3 (a control that fires once; a screen computed from state) ·
+    // dailyclose.js:207-208 reads `T.dualReleaseThresholdCents` inside the decision button handler and no `T` is in scope,
+    // so the first press of Retire (or Tighten) runs reviewDecision (store: d-1.status = retire, controlDecisions dec-2) and
+    // then throws ReferenceError before the result line, the aria-live announcement and rerender(). The card keeps its three
+    // buttons, so a second press (Tighten) reviews the same decision again: status retire → tighten, threshold 15000 → 10000,
+    // a second controlDecisions row, and store.js:449 reviewDecision has no already_decided gate to stop it. Existing checks
+    // (A-seed-2, A-screens-dailyclose-1-4) read the result line / health text but never the pageerror or the second review.
+    // Negative control: with `T` defined (const T = S.tenant) the press writes the result line, rerender() drops the reviewed card
+    // (status !== review_due), no ReferenceError fires and the second press has no button to hit; then the check reports false.
+    async 'S-ledger-v1'(b) {
+      const { c, p, errs } = await ctx(b);
+      try {
+        await go(p, '#/owner/close');
+        const snap = () => p.evaluate(() => {
+          const S = Proto.store.get(); const d = S.decisions.find((x) => x.id === 'd-1');
+          return { status: d.status, reviewBy: d.reviewBy || null, threshold: S.tenant.dualReleaseThresholdCents,
+            controlDecisions: S.controlDecisions.map((x) => x.id + ':' + x.action),
+            buttons: ['keep', 'tighten', 'retire'].filter((a) => !!document.querySelector('[data-testid="close.decision.d-1.' + a + '"]')),
+            reviewedLine: (document.body.innerText.match(/[^\n]*(Retired|Tightened|Kept)[^\n]*threshold[^\n]*|[^\n]*Reviewed today[^\n]*/) || [null])[0] };
+        });
+        const before = await snap();
+        const seq0 = await lastSeq(p);
+        const retired = await click(p, 'close.decision.d-1.retire'); await p.waitForTimeout(200);
+        const afterRetire = await snap(); const errsAfterRetire = errs.slice();
+        const tightened = await click(p, 'close.decision.d-1.tighten'); await p.waitForTimeout(200);
+        const afterTighten = await snap();
+        const ev = await after(p, seq0);
+        const refErr = (list) => list.filter((m) => /T is not defined|ReferenceError/.test(m));
+        const reproduced = retired && before.status === 'review_due' && afterRetire.status === 'retire' && refErr(errsAfterRetire).length >= 1
+          && afterRetire.buttons.length === 3 && afterRetire.reviewedLine === null
+          && tightened && afterTighten.status === 'tighten' && afterTighten.threshold === 10000 && afterTighten.controlDecisions.length === before.controlDecisions.length + 2;
+        rec('S-ledger-v1', 'Pressing Retire on decision d-1 throws ReferenceError "T is not defined" (dailyclose.js:208) after the store has already recorded the retire: no result line, no announcement, no rerender, the three buttons stay, and a second press (Tighten) reviews the same decision again — status retire → tighten, threshold $150 → $100, two controlDecisions rows for one card', 'B1, C3, A7 — one decision per review; the screen is a projection of state; dailyclose.js:207-208 `T` undefined; store.js:449 reviewDecision has no already_decided gate',
+          reproduced, { before, retirePressed: retired, afterRetire, pageErrorsAfterRetire: errsAfterRetire, tightenPressed: tightened, afterTighten, pageErrors: errs.slice(), writes: writes(ev), seqRange: range(ev, seq0) });
       } finally { await c.close(); }
     },
   };
