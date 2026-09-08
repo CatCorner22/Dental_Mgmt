@@ -85,7 +85,8 @@
     return 'Undo: removed ' + (removed ? (removed.skipped ? 'not probed' : removed.depth) : 'nothing') + ', stepped back';
   }
   function toggle(st, field) {
-    const key = st.last; if (!key || !st.sites[key]) return 'Record a depth first';
+    // A mark belongs to a probed site: a not-probed site carries no depth, so it can carry no bleeding either.
+    const key = st.last; if (!key || !st.sites[key] || st.sites[key].depth == null) return 'Record a depth first';
     const v = st.sites[key]; v[field] = !v[field];
     return (field === 'bleed' ? 'Bleeding ' : 'Suppuration ') + (v[field] ? 'on' : 'off') + ' at ' + siteLabel(key);
   }
@@ -100,7 +101,7 @@
   }
   function depthGate(st, depth) {
     // Verb-first and eight words at most: the measured depth stays in the Why, where it cannot push the line over.
-    st.gate = { code: 'depth_gt_15', node: refusal({ code: 'depth_gt_15', verb: 'Type a depth of 15 mm or less', control: 'Re-enter the depth', why: 'Probing depths above 15 mm are not recordable; ' + depth + ' mm was refused, the site keeps its previous value and the cursor stays here. Type 0 then a digit for 10 to 15.', onControl: () => { st.gate = null; const c = Proto.router.current(); rerender(c); focusCell(st); } }) };
+    st.gate = { code: 'depth_gt_15', res: { code: 'depth_gt_15', verb: 'Type a depth of 15 mm or less', control: 'Re-enter the depth', why: 'Probing depths above 15 mm are not recordable; ' + depth + ' mm was refused, the site keeps its previous value and the cursor stays here. Type 0 then a digit for 10 to 15.' }, onControl: () => { st.gate = null; const c = Proto.router.current(); rerender(c); focusCell(st); } };
   }
   /* One sealed-exam gate for every way of reaching it: a grammar key, the Amend control, a lane segment. */
   function openAmendGate(st, r) {
@@ -110,7 +111,14 @@
   }
   function apply(st, k, r) {
     if (st.saved) return openAmendGate(st, r);
-    if (st.mode === 'screening') { const out = applyScreening(st, k); setTimeout(() => focusSextant(st), 0); return out; }
+    // The refused depth is answered by the next grammar key: the gate stands only until the operator re-enters.
+    const held = st.gate && st.gate.code === 'depth_gt_15' ? st.gate : null;
+    const out = applyKey(st, k, r);
+    if (held && out && st.gate === held) st.gate = null;
+    return out;
+  }
+  function applyKey(st, k, r) {
+    if (st.mode === 'screening') { st.pendingZero = false; const out = applyScreening(st, k); setTimeout(() => focusSextant(st), 0); return out; }
     if (/^[0-9]$/.test(k)) {
       const d = Number(k);
       if (st.pendingZero) { st.pendingZero = false; const depth = 10 + d; if (depth > 15) { depthGate(st, depth); return 'Depth ' + depth + ' mm refused (above 15)'; } return record(st, depth); }
@@ -128,8 +136,9 @@
     return null;
   }
   function focusSextant(st) { const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); }
+  const uncoded = (st) => st.sextants.filter((c) => c === '').length;
   function applyScreening(st, k) {
-    if (/^[0-4]$/.test(k) || k === '*') { if (st.scur > 5) return 'All six sextants coded. Save exam.'; st.sextants[st.scur] = k; st.scur++; return 'Sextant ' + SEXTANTS[st.scur - 1][0] + ' = ' + k; }
+    if (/^[0-4]$/.test(k) || k === '*') { if (st.scur > 5) return uncoded(st) ? 'Past the last sextant; go back to code the ' + uncoded(st) + ' empty' : 'All six sextants coded. Save exam.'; st.sextants[st.scur] = k; st.scur++; return 'Sextant ' + SEXTANTS[st.scur - 1][0] + ' = ' + k; }
     if (k === 'Backspace') { if (st.scur === 0) return 'Nothing to undo'; st.scur--; st.sextants[st.scur] = ''; return 'Undo: cleared sextant ' + SEXTANTS[st.scur][0]; }
     if (k === 'ArrowRight' || k === 'ArrowDown' || k === 'PageDown') { if (st.scur < 5) st.scur++; return 'Next sextant'; }
     if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp') { if (st.scur > 0) st.scur--; return 'Previous sextant'; }
@@ -147,7 +156,11 @@
     const st = stateFor(enc); const k = ev.key;
     // Escape dismisses the inline sub-forms as it dismisses a dialog, from inside their fields too, and hands
     // focus back to the control that opened them.
-    if (k === 'Escape' && (st.licenceOpen || st.tagOpen)) { ev.preventDefault(); closeInline(st, r); return; }
+    if (k === 'Escape' && (st.licenceOpen || st.tagOpen)) {
+      const inTag = t && t.closest && t.closest('.pe-tag'); const inReason = t && t.closest && t.closest('.pe-licence');
+      if (inTag && !st.tagOpen) return; if (inReason && !st.licenceOpen) return;
+      ev.preventDefault(); closeInline(st, r, inTag ? 'tag' : inReason ? 'reason' : undefined); return;
+    }
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
     const onCell = t && t.classList && t.classList.contains('psite');
     const onControl = t && !onCell && ['BUTTON', 'SUMMARY', 'A'].includes(t.tagName);
@@ -155,6 +168,8 @@
     // in this screen Space is the bleeding key, and letting it activate whatever holds focus
     // fires an irreversible Save and silently drops the bleeding mark (bp-25, round 2).
     if (k === 'Enter' || k === 'Tab' || k === 'Escape') return;
+    // Once the exam is saved there is no bleeding key left to protect: a control that holds focus keeps its own keys.
+    if (onControl && st.saved) return;
     if (onControl && k === ' ') {
       ev.preventDefault();
       const meaningSpace = apply(st, ' ', r);
@@ -166,9 +181,11 @@
     ev.preventDefault();
     st.keystrokes++; st.lastKey = { key: k === ' ' ? 'Space' : k, meaning };
     if (st.padOpen) st.padOpen = false; // the pad hides when a key or pedal event arrives
-    rerender(r);
+    rerender(r); afterKey(st);
   }
-  function viaPad(st, r, k) { const meaning = apply(st, k, r); if (!meaning) return; st.keystrokes++; st.lastKey = { key: 'Pad ' + (k === ' ' ? 'Bleed' : k), meaning }; rerender(r); }
+  function viaPad(st, r, k) { const meaning = apply(st, k, r); if (!meaning) return; st.keystrokes++; st.lastKey = { key: 'Pad ' + (k === ' ' ? 'Bleed' : k), meaning }; rerender(r); afterKey(st); }
+  // A refusal the key raised is the next thing to read, so the keyboard lands on its control (B10).
+  function afterKey(st) { if (st.gate && st.gate.code === 'depth_gt_15') focusGateControl(); }
 
   // ---- Save ----------------------------------------------------------------------------------
   function buildSites(st) {
@@ -177,7 +194,20 @@
     for (const key of st.path) { const v = st.sites[key]; out[key] = v && v.depth != null ? { depth: v.depth, bleed: !!v.bleed, sup: !!v.sup, skipped: false } : { depth: null, bleed: false, sup: false, skipped: true }; }
     return out;
   }
-  function mkGate(st, res, onControl) { st.gate = { code: res.code, node: refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, severity: res.code === 'outage' ? 'stop' : 'required', onControl: onControl || (() => {}) }) }; }
+  function mkGate(st, res, onControl) { st.gate = { code: res.code, res, onControl }; }
+  /* The gate on the page answers the chart as it stands: it is derived again on every render from the same
+     preconditions Save would meet, so it clears when its condition does and its numbers match the chooser's. */
+  function currentGate(st, r) {
+    if (!mayChart(Proto.store.currentUser())) return { code: 'licence_scope', res: { code: 'licence_scope', verb: 'Switch to a licensed author before Save', control: 'Switch author', why: 'The exam is attributed to the author who is signed in, and only a clinical licence or a day pass that grants perio can carry one. Switching author opens the PIN pad; nothing is written until then.' }, onControl: () => Proto.screens.shell.openPinPad(r) };
+    if (st.mode === 'screening' && uncoded(st)) { const n = uncoded(st); return { code: 'screening_incomplete', res: { code: 'screening_incomplete', verb: 'Code ' + n + ' more sextant' + (n > 1 ? 's' : '') + ' before Save', control: 'Go to the first empty sextant', why: 'Screening saves six codes (0 to 4, or * for furcation, mobility, or recession). An empty box would read as 0.' }, onControl: () => { st.gate = null; st.scur = st.sextants.indexOf(''); rerender(r); const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); } }; }
+    const res = Proto.store.perioGate(st.encId, buildSites(st), { mode: st.mode, amending: !!st.amending });
+    if (!res) return null;
+    if (res.code === 'omission_licence') return { code: res.code, res, onControl: () => { st.licenceOpen = true; rerender(r); const b = document.querySelector('[data-testid="perio.licence.' + LICENCES[0][0] + '"]'); if (b) b.focus(); } };
+    if (res.code === 'outage') return { code: res.code, res, onControl: () => { rerender(r); Proto.router.announce(st.gate ? 'Call support: 615-555-0100, 7 am to 6 pm' : 'Server is back; Save exam is open'); } };
+    if (res.code === 'exam_sealed') return { code: res.code, res, onControl: () => Proto.router.go(r.persona, 'encounter', st.encId) };
+    return { code: res.code, res, onControl: () => doSave(st, r, null) };
+  }
+  function gateNode(g) { return refusal({ code: g.res.code, verb: g.res.verb, control: g.res.control, why: g.res.why, severity: g.res.code === 'outage' ? 'stop' : 'required', onControl: g.onControl }); }
   // A gate names the next thing to do, so the keyboard lands on it rather than on the Held primary behind it.
   function focusGateControl() { const c = document.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); }
   /* Who may author an exam: a clinical licence on the account, or a day pass that grants perio. The old test read
@@ -187,13 +217,12 @@
     const u = Proto.store.currentUser();
     // The remedy here is "hand the chart to someone licensed", not "type your own PIN", so the code is the licence
     // one and the control carries the one label this action has everywhere (Encounter, Phone, the pad's own dialog).
-    if (!mayChart(u)) { mkGate(st, { code: 'licence_scope', verb: 'Switch to a licensed author before Save', control: 'Switch author', why: 'The exam is attributed to the author who is signed in, and only a clinical licence or a day pass that grants perio can carry one. Switching author opens the PIN pad; nothing is written until then.' }, () => Proto.screens.shell.openPinPad(r)); rerender(r); focusGateControl(); return; }
-    if (st.mode === 'screening' && st.sextants.some((c) => c === '')) { const n = st.sextants.filter((c) => c === '').length; mkGate(st, { code: 'screening_incomplete', verb: 'Code ' + n + ' more sextant' + (n > 1 ? 's' : '') + ' before Save', control: 'Go to the first empty sextant', why: 'Screening saves six codes (0 to 4, or * for furcation, mobility, or recession). An empty box would read as 0.' }, () => { st.gate = null; st.scur = st.sextants.indexOf(''); rerender(r); const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); }); rerender(r); focusGateControl(); return; }
-    const res = Proto.store.savePerio(st.encId, buildSites(st), { mode: st.mode, licence: licence || undefined, amending: !!st.amending });
+    const pre = mayChart(u) ? null : currentGate(st, r);
+    const res = pre ? pre.res : Proto.store.savePerio(st.encId, buildSites(st), { mode: st.mode, licence: licence || undefined, amending: !!st.amending });
     if (!res.ok) {
+      st.gate = currentGate(st, r) || { code: res.code, res, onControl: () => doSave(st, r, null) };
       // The reasons open with the gate: the chart is finished, so the remaining decision is one tap, not three.
-      if (res.code === 'omission_licence') { st.licenceOpen = true; mkGate(st, res, () => { const b = document.querySelector('[data-testid="perio.licence.' + LICENCES[0][0] + '"]'); if (b) b.focus(); }); }
-      else mkGate(st, res);
+      if (st.gate.code === 'omission_licence') st.licenceOpen = true;
       rerender(r); focusGateControl(); return;
     }
     st.gate = null; st.licenceOpen = false; st.amending = false; st.saved = res.exam; st.savedAt = S().clock.time; st.padOpen = false;
@@ -217,7 +246,7 @@
     st.tagToothTouched = true; st.tagTextTouched = true;
     if (bad) { rerender(r); const el = document.querySelector('[data-testid="' + (!st.tagText.trim() && st.tagTooth ? 'perio.tag.text' : 'perio.tag.tooth') + '"]'); if (el) el.focus(); return; }
     const res = Proto.store.addTag(st.encId, tooth, [], st.tagText.trim());
-    if (!res.ok) { mkGate(st, res); rerender(r); return; }
+    if (!res.ok) { mkGate(st, res, () => saveTag(st, r)); rerender(r); focusGateControl(); return; }
     st.tagged.push(res.tag); st.tagOpen = false; st.tagText = ''; st.tagToothTouched = false; st.tagTextTouched = false; Proto.store.retireChip('tag');
     Proto.screens.shell.refreshAndon(r); if (Proto.screens.shell.refreshRail1) Proto.screens.shell.refreshRail1(r);
     rerender(r); Proto.router.announce('Tagged tooth ' + tooth + ' for the dentist. A finding, not a diagnosis.');
@@ -400,10 +429,9 @@
       return;
     }
     const st = stateFor(enc); const pt = Proto.store.patient(enc.patientId); const a = S().appointments.find((x) => x.encounterId === enc.id);
-    // A gate answers a condition, and clears when the condition does: switching to a licensed author used to
-    // leave Save reading Held with a refusal nothing could clear, and coding the last sextant left it too.
-    if (st.gate && st.gate.code === 'licence_scope' && mayChart(Proto.store.currentUser())) st.gate = null;
-    if (st.gate && st.gate.code === 'screening_incomplete' && !st.sextants.some((c) => c === '')) st.gate = null;
+    // A gate answers a condition and clears when the condition does; only the depth gate answers a keystroke.
+    if (st.gate && !st.saved && st.gate.code !== 'depth_gt_15') st.gate = currentGate(st, r);
+    if (st.licenceOpen && !(st.gate && st.gate.code === 'omission_licence')) st.licenceOpen = false;
     const name = displayName(pt.name, P().privacy); const key = curKey(st);
     // The lane the operator is in is the lane the instructions describe.
     const keyHints = st.mode === 'screening'
@@ -412,14 +440,14 @@
     const sub = (a ? 'Chair ' + a.op + ' · ' : '') + (st.priorDate ? 'Prior exam ' + longDate(st.priorDate) + ' ghosted' : 'No prior exam on file') + ' · ' + (32 - st.missing.length) + ' teeth' + (st.missing.length ? ' (x = missing: ' + st.missing.join(', ') + ')' : '') + keyHints;
 
     // Selection carries its ✓ press mark, not fill alone: opts.pressed is the only way to get both.
-    const segFull = btn('Full chart', { kind: 'quiet', testid: 'perio.full', pressed: st.mode === 'full', onClick: () => { if (st.saved) { openAmendGate(st, r); return; } st.mode = 'full'; st.gate = null; rerender(r); } });
-    const segScr = btn('Screening', { kind: 'quiet', testid: 'perio.screening', pressed: st.mode === 'screening', ariaLabel: 'Screening lane: six sextant codes in at most 12 keystrokes', onClick: () => { if (st.saved) { openAmendGate(st, r); return; } st.mode = 'screening'; st.gate = null; st.padOpen = false; rerender(r); const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); } });
+    const segFull = btn('Full chart', { kind: 'quiet', testid: 'perio.full', pressed: st.mode === 'full', onClick: () => { if (st.saved) { openAmendGate(st, r); return; } st.mode = 'full'; st.gate = null; st.pendingZero = false; rerender(r); } });
+    const segScr = btn('Screening', { kind: 'quiet', testid: 'perio.screening', pressed: st.mode === 'screening', ariaLabel: 'Screening lane: six sextant codes in at most 12 keystrokes', onClick: () => { if (st.saved) { openAmendGate(st, r); return; } st.mode = 'screening'; st.gate = null; st.pendingZero = false; st.padOpen = false; rerender(r); const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); } });
     // The pad carries the full-chart grammar, so it is offered in the lane that has one.
     const padT = st.mode === 'full' ? btn(st.padOpen ? 'Hide glove pad' : 'Glove pad', { kind: 'quiet', testid: 'perio.pad.toggle', pressed: st.padOpen, ariaLabel: 'Glove pad: 44 px keys for gloved fingers', onClick: () => { st.padOpen = !st.padOpen; rerender(r); } }) : null;
     const setT = btn('Settings', { kind: 'quiet', testid: 'perio.settings', pressed: st.settingsOpen, ariaLabel: 'Perio settings: last key pressed and probing path', onClick: () => { st.settingsOpen = !st.settingsOpen; rerender(r); if (st.settingsOpen) { const sec = document.getElementById('perio-settings'); if (sec) { sec.scrollIntoView({ block: 'nearest', behavior: 'auto' }); sec.focus(); } } } }); setT.setAttribute('aria-expanded', String(st.settingsOpen)); setT.setAttribute('aria-controls', 'perio-settings');
     let save;
     if (st.saved) save = btn('Amend this exam', { kind: 'reversible', testid: 'perio.amend', ariaLabel: 'Amend the saved exam: adds a dated addendum, never overwrites', onClick: () => openAmendGate(st, r) });
-    else if (st.gate) save = btn('Held', { kind: 'held', testid: 'perio.save', ariaLabel: 'Save exam is held: ' + (st.gate.node.querySelector('.verb') || {}).textContent, onClick: () => { const c = document.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); } });
+    else if (st.gate) save = btn('Held', { kind: 'held', testid: 'perio.save', ariaLabel: 'Save exam is held: ' + st.gate.res.verb, onClick: () => doSave(st, r, null) });
     else save = btn('Save exam', { kind: 'irreversible', testid: 'perio.save', ariaLabel: 'Save exam: one transaction, derives the note and the recall', onClick: () => doSave(st, r, null) });
 
     const page = h('div', { class: 'stack periopage' },
@@ -429,17 +457,22 @@
       page.append(h('div', { class: 'activesite', 'aria-live': 'polite' }, h('span', { text: st.saved ? 'Exam saved · grid is read-only' : key ? 'Tooth ' + toothOf(key) + ' · site ' + siteOf(key) + ' · prior ' + (priorV != null ? priorV : '—') + (st.pendingZero ? ' · 10+…' : '') : 'All ' + total(st) + ' sites entered · Save exam' }),
         h('span', { class: 'pe-count small', text: 'Sites recorded: ' + probedCount(st) + '/' + total(st) + (skippedCount(st) ? ' · ' + skippedCount(st) + ' not probed' : '') })));
     } else {
-      page.append(h('div', { class: 'activesite', 'aria-live': 'polite' }, h('span', { text: st.saved ? 'Screening saved' : st.scur <= 5 ? 'Sextant ' + SEXTANTS[st.scur][0] + ' (teeth ' + SEXTANTS[st.scur][1] + ') · keys 0–4 or *' : 'All six sextants coded · Save exam' }),
+      // The headline counts codes, not the cursor: arrowing past an empty box never reads as coded.
+      const firstEmpty = st.sextants.indexOf('');
+      page.append(h('div', { class: 'activesite', 'aria-live': 'polite' }, h('span', { text: st.saved ? 'Screening saved' : st.scur <= 5 ? 'Sextant ' + SEXTANTS[st.scur][0] + ' (teeth ' + SEXTANTS[st.scur][1] + ') · keys 0–4 or *' : firstEmpty >= 0 ? uncoded(st) + ' sextant' + (uncoded(st) > 1 ? 's' : '') + ' still empty · ⌫ or ← back to ' + SEXTANTS[firstEmpty][0] : 'All six sextants coded · Save exam' }),
         h('span', { class: 'pe-count small', text: 'Codes: ' + st.sextants.filter(Boolean).length + '/6' + (st.sextants.some((c) => c === '3' || c === '4') ? ' · Full chart due' : '') })));
     }
     page.append(h('p', { class: 'pe-flash', 'aria-live': 'polite', 'aria-atomic': 'true', role: 'status', text: st.flash || '' }));
-    if (st.gate) page.append(st.gate.node);
+    /* The pad sits above the grid instead of sticking to the bottom of the scroller: docked there it covered
+       64 lower-arch cells, and once the cursor reached them it covered the active cell itself. A gate the pad
+       raised stands beside the pad, where the gloved hand is looking, not above it. */
+    const padNode = st.padOpen && !st.saved && st.mode === 'full' ? pad(st, r) : null;
+    if (padNode && st.gate && st.gate.code === 'depth_gt_15') page.append(padNode);
+    if (st.gate) page.append(gateNode(st.gate));
     if (st.amendGate) page.append(st.amendGate);
     // The reasons stand with the gate that asked for them, above the chart, where the actor is already reading.
     if (st.licenceOpen && !st.saved) page.append(licenceChooser(st, r));
-    /* The pad sits above the grid instead of sticking to the bottom of the scroller: docked there it covered
-       64 lower-arch cells, and once the cursor reached them it covered the active cell itself. */
-    if (st.padOpen && !st.saved && st.mode === 'full') page.append(pad(st, r));
+    if (padNode && !(st.gate && st.gate.code === 'depth_gt_15')) page.append(padNode);
     page.append(st.mode === 'full' ? grid(st, r) : sextants(st, r));
     page.append(h('div', { class: 'row pe-legend small muted' }, h('span', { text: st.mode === 'full'
       ? 'Cell: depth (or —) · small grey = prior exam · ● bleeding · ◆ suppuration · shaded = 5 mm or deeper · x = missing tooth'
