@@ -108,41 +108,37 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       } finally { await c.close(); }
     },
 
-    // RC-42 · B2 · phone.js:168 renders Approve as kind 'irreversible' on every render; when st.refusal[a.id] is set (:95, :99) the card shows the
-    // refusal (:155) but the primary keeps class 'btn irreversible' and the word Approve instead of switching to Held (outlined, lock glyph, Held).
+    // RC-42 · B2 · phone.js requestCard renders the Approve primary; when s.refusal[a.id] is set the card shows the refusal but the primary
+    // may keep class 'btn irreversible' and the word Approve instead of switching to Held (outlined, lock glyph, Held).
+    // The card is only rendered for a viewer pendingApprovalsFor() admits (approve_second), so the gate is driven from the owner (Dr. Reagan,
+    // u-dr-1): Approve under an outage is refused by the store's pre-check (code outage) and the refusal lands on the card. The biller's Money
+    // Desk Post in its held state is read as the contrast case for the same identity rule.
     // Negative control: while a refusal stands on the card, a compliant primary has class 'held' (or the word Held) and the check reports false; it
-    // also reports false when no refusal reached the DOM, because then there is no gate for the identity to answer. The Money Desk Post button in
-    // its held state is read as the contrast case for the same store situation.
+    // also reports false when no refusal reached the DOM or the viewer was shown no card, because then there is no gate for the identity to answer.
     async 'A-screens-phone-1-3'(b) {
       const cases = [];
-      // Case 1: frontdesk (Priya, not an approver) → needs_second from phone.js:99.
+      // Contrast: the biller's Post that just went Held on the Money Desk.
+      let contrast = null;
+      { const { c, p } = await ctx(b);
+        try { await go(p, '#/biller/money'); await heldWriteoff(p); contrast = await identity(p, 'money.writeoff.post'); }
+        finally { await c.close(); } }
+      // Owner (eligible approver) sees ar-1; Approve during an outage → the store's outage refusal on the card.
       { const { c, p } = await ctx(b);
         try {
-          await go(p, '#/frontdesk/board'); await hop(p, '#/phone/approvals'); await p.waitForTimeout(150);
+          await go(p, '#/owner/close'); await hop(p, '#/phone/approvals'); await p.waitForTimeout(150);
           const viewer = await whoAmI(p);
           await click(p, 'phone.simulate'); await p.waitForTimeout(150);
+          const cardShown = await p.evaluate(() => ({ cards: document.querySelectorAll('.ph-card').length, pendingForViewer: Proto.store.pendingApprovalsFor().map((a) => a.id) }));
           const before = await identity(p, 'phone.request.ar-1.approve');
+          await p.evaluate(() => window.__proto.set({ outage: true })); await p.waitForTimeout(150);
           const seq0 = await lastSeq(p);
-          await click(p, 'phone.request.ar-1.approve'); await p.waitForTimeout(200);
+          const pressed = await click(p, 'phone.request.ar-1.approve'); await p.waitForTimeout(200);
           const ev = await after(p, seq0);
-          cases.push({ case: 'frontdesk needs_second', viewer, approveBefore: before, refusalEvents: refusalEvents(ev), refusalDom: await refusalsDom(p), approveAfter: await identity(p, 'phone.request.ar-1.approve'), heldButtonsOnCard: await p.evaluate(() => document.querySelectorAll('.ph-card .btn.held').length), contrast: null, seqRange: range(ev, seq0) });
+          cases.push({ case: 'owner outage', viewer, cardShown, pressed, approveBefore: before, refusalEvents: refusalEvents(ev), refusalDom: await refusalsDom(p), approveAfter: await identity(p, 'phone.request.ar-1.approve'), heldButtonsOnCard: await p.evaluate(() => document.querySelectorAll('.ph-card .btn.held').length), contrast: { moneyDeskPostWhenHeld: contrast }, seqRange: range(ev, seq0) });
         } finally { await c.close(); } }
-      // Case 2: biller (Sam, the requester) → blocked_same_person from store.js:140 via phone.js:95; contrast is the Money Desk Post that just went Held.
-      { const { c, p } = await ctx(b);
-        try {
-          await go(p, '#/biller/money'); await heldWriteoff(p);
-          const contrast = await identity(p, 'money.writeoff.post');
-          await hop(p, '#/phone/approvals'); await p.waitForTimeout(150);
-          const viewer = await whoAmI(p);
-          const before = await identity(p, 'phone.request.ar-1.approve');
-          const seq0 = await lastSeq(p);
-          await click(p, 'phone.request.ar-1.approve'); await p.waitForTimeout(200);
-          const ev = await after(p, seq0);
-          cases.push({ case: 'biller blocked_same_person', viewer, approveBefore: before, refusalEvents: refusalEvents(ev), refusalDom: await refusalsDom(p), approveAfter: await identity(p, 'phone.request.ar-1.approve'), heldButtonsOnCard: await p.evaluate(() => document.querySelectorAll('.ph-card .btn.held').length), contrast: { moneyDeskPostWhenHeld: contrast }, seqRange: range(ev, seq0) });
-        } finally { await c.close(); } }
-      const scored = cases.map((k) => { const gate = k.refusalDom.length > 0 && k.refusalEvents.some((e) => k.refusalDom.some((d) => d.code === e.code)); const a = k.approveAfter; return { case: k.case, gateOnScreen: gate, codes: k.refusalDom.map((d) => d.code), approveClass: a && a.className, approveLabel: a && a.label, keepsIrreversible: !!a && a.irreversible && !a.held && !/held/i.test(a.label) }; });
-      const reproduced = scored.length === 2 && scored.every((s) => s.gateOnScreen && s.keepsIrreversible);
-      rec('A-screens-phone-1-3', 'After a refusal on the phone card (needs_second for frontdesk, blocked_same_person for the requesting biller) the Approve button keeps class "btn irreversible" and the word Approve; it never switches to the Held identity the Money Desk Post uses for the same situation', 'B2 / CONTRACTS §6 — the primary button never dims; it switches to the Held identity while the gate stands; phone.js:168',
+      const scored = cases.map((k) => { const gate = k.cardShown.cards > 0 && !!k.approveBefore && k.refusalDom.length > 0 && k.refusalEvents.some((e) => k.refusalDom.some((d) => d.code === e.code)); const a = k.approveAfter; return { case: k.case, gateOnScreen: gate, codes: k.refusalDom.map((d) => d.code), approveClass: a && a.className, approveLabel: a && a.label, keepsIrreversible: !!a && a.irreversible && !a.held && !/held/i.test(a.label) }; });
+      const reproduced = scored.length === 1 && scored.every((s) => s.gateOnScreen && s.keepsIrreversible);
+      rec('A-screens-phone-1-3', 'After a refusal on the phone card (the owner\'s Approve refused under an outage) the Approve button keeps class "btn irreversible" and the word Approve; it never switches to the Held identity the Money Desk Post uses for the same situation', 'B2 / CONTRACTS §6 — the primary button never dims; it switches to the Held identity while the gate stands; phone.js requestCard',
         reproduced, { cases, scored });
     },
 
