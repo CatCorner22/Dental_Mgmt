@@ -1,6 +1,11 @@
 // Swarm hunt, lens "controls": dual release, SoD/day passes, shared-desk PIN and author, entitlement gates, outage.
 // Default position is NOT reproduced: every check measures the breach it claims and carries the values.
 // Each check closes its browser context in `finally` so one failure cannot hang the run.
+// Verified (swarm/verified-controls): S-controls-1..9 reproduced independently and each flipped to "no" under a temporary
+// patch of the described fix (PIN lookup + openSession; noPass guard on arrive/eraPostMatched/requestWriteoff; write_off
+// entitlement; approver = currentUser + approve_second; user-keyed Checkout draft; offline() in buildAppeal; entitlement +
+// already_decided in reviewDecision; deferred requestApproval on Money Desk; balance check in decideApproval).
+// S-controls-v1 is the verifier's adjacent finding: Tighten/Retire throw `T is not defined` in dailyclose.js:207-208.
 
 export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => {
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
@@ -219,9 +224,10 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       } finally { await c.close(); }
     },
 
-    // RC-swarm-controls-7 · B3/A4 · store.js:458 reviewDecision has no entitlement gate and no already-decided gate, and
+    // RC-swarm-controls-7 · B3/A4 · store.js:449 reviewDecision has no entitlement gate and no already-decided gate, and
     // dailyclose.js:194 renders Keep/Tighten/Retire for every persona: Priya Raman changes tenant.dualReleaseThresholdCents
     // 15000 → 10000 from #/frontdesk/close, and a decision reviewed three times writes three controlDecisions rows.
+    // resultLine is evidence only: on main it is null because the Tighten handler throws after the store mutation (S-controls-v1).
     // Negative control: a gated verb refuses the frontdesk seat (entitlement) and refuses a second review (already_decided),
     // so the threshold stays 15000, controlDecisions gains at most one row, and the check reports false.
     async 'S-controls-7'(b) {
@@ -245,7 +251,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const effect = await p.evaluate(() => Proto.store.evaluateRelease('write_off', 12000, Proto.store.currentUser()).code);
         const reproduced = pressed && me.id === 'u-fd-1' && buttons.length >= 3 && t0 === 15000 && t1 === 10000 && gate.length === 0
           && again.r1.ok === true && again.r2.ok === true && again.controlDecisions.length - cd0 === 3 && again.controlDecisions.slice(cd0).every((x) => x.endsWith(':' + me.name));
-        rec('S-controls-7', 'The front-desk seat reviews the owner\'s dual-release decision: Tighten on #/frontdesk/close moves the write-off threshold from $150 to $100 under Priya Raman\'s name, and Keep then Retire on the same decision each write another controlDecisions row', 'B3, A4 — store.js:458 reviewDecision (no entitlement, no already-decided gate); dailyclose.js:194 renders the decision controls for every persona; docs/04 owner home decisions-due card; docs/05 "control policy changed"',
+        rec('S-controls-7', 'The front-desk seat reviews the owner\'s dual-release decision: Tighten on #/frontdesk/close moves the write-off threshold from $150 to $100 under Priya Raman\'s name, and Keep then Retire on the same decision each write another controlDecisions row', 'B3, A4 — store.js:449 reviewDecision (no entitlement, no already-decided gate); dailyclose.js:194 renders the decision controls for every persona; docs/04 owner home decisions-due card; docs/05 "control policy changed"',
           reproduced, { currentUser: me, decisionButtons: buttons, thresholdBefore: t0, thresholdAfterTighten: t1, resultLine: line, refusalsDom: gate, secondAndThirdReview: again, controlDecisionsBefore: cd0, writes: writes(ev), refusalEvents: refusalEv(ev), seqRanges: { tighten: [seq0 + 1, seq1], repeats: [seq1 + 1, range(ev, seq0)[1]] }, releaseCodeFor120: effect, pageErrors: errs });
       } finally { await c.close(); }
     },
@@ -322,6 +328,51 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
           && approvedRows.length === 2 && overWrittenCents === 30000 && bal1.patientDue === 0 && bal1.credit === 0 && explain.length === 1 && /paid in full/.test(explain[0]) && !/300/.test(explain[0]);
         rec('S-controls-9', 'Two second-approved courtesy write-offs on Lena Fischer\'s single $410 balance — $410 requested from Money Desk and $300 from Checkout — both post, leaving −$710 of write-off rows against a $410 charge while balances(), Explain and the ledger tiles read $0.00 / paid in full and never show the extra $300', 'A7, C5 — store.js:216 decideApproval posts without reading the open balance; store.js:78 balances clamps; the approver\'s frozen sentence (phone.js) carries no remaining-balance figure; docs/05 dual release is a control on the amount, which here exceeds the debt',
           reproduced, { balancesBefore: bal0, requests, approverCards: cards, approvals, writeOffRows: wo, writtenOffCents, overWrittenCents, balancesAfter: bal1, explain, ledgerTiles: three, writes: writes(ev), seqRange: range(ev, seq0), pageErrors: errs });
+      } finally { await c.close(); }
+    },
+
+    // RC-swarm-controls-v1 · A4/A2 · dailyclose.js:207-208 build the Tighten/Retire result line from `T.dualReleaseThresholdCents`,
+    // but no `T` is in scope (the tenant is `S.tenant`): the click handler throws ReferenceError AFTER store.reviewDecision has
+    // mutated decisions/d-1, tenant and controlDecisions, so no result line and no announcement render and the card is not
+    // re-rendered — Keep/Tighten/Retire stay on screen and a second press of the same control writes controlDecisions/dec-3 (A4).
+    // Keep, which reads no `T`, renders "Kept 90 more days…" and removes the controls. Owner persona: this is the main flow.
+    // Negative control: with `S.tenant.dualReleaseThresholdCents` (or a gated reviewDecision) the press throws nothing, the line
+    // renders, the controls leave the card and the second press writes no row; then the check reports false.
+    async 'S-controls-v1'(b) {
+      const { c, p, errs } = await ctx(b);
+      try {
+        // each leg on its own document: a second go() to the same file URL is a same-document navigation and keeps the store
+        const fresh = async () => { await p.goto('about:blank'); await go(p, '#/owner/close'); };
+        const legs = {};
+        for (const action of ['tighten', 'retire']) {
+          await fresh();
+          const seq0 = await lastSeq(p);
+          const cd0 = await p.evaluate(() => window.__proto.state().controlDecisions.length);
+          const errsBefore = errs.length;
+          const pressed = await click(p, 'close.decision.d-1.' + action); await p.waitForTimeout(200);
+          const view1 = await p.evaluate(() => ({
+            buttons: [...document.querySelectorAll('[data-testid^="close.decision.d-1."]')].map((b) => b.getAttribute('data-testid')),
+            resultLine: (document.body.textContent.match(/(Tightened|Retired|Kept)[^.]*\./) || [])[0] || null,
+            live: ((document.getElementById('live') || {}).textContent || '').trim(),
+            status: window.__proto.state().decisions.find((d) => d.id === 'd-1').status,
+            controlDecisions: window.__proto.state().controlDecisions.map((x) => x.id + ':' + x.action),
+          }));
+          const pressedAgain = await click(p, 'close.decision.d-1.' + action); await p.waitForTimeout(200);
+          const cd2 = await p.evaluate(() => window.__proto.state().controlDecisions.map((x) => x.id + ':' + x.action));
+          const ev = await after(p, seq0);
+          legs[action] = { pressed, pressedAgain, pageErrorsFromPress: errs.slice(errsBefore), afterFirstPress: view1, controlDecisionsAfterSecondPress: cd2, rowsWritten: cd2.length - cd0, writes: writes(ev), refusalEvents: refusalEv(ev), seqRange: range(ev, seq0) };
+        }
+        // Keep is the comparator: same card, same verb, no `T` in its string, so it renders and retires the controls.
+        await fresh();
+        const keepErrs = errs.length;
+        await click(p, 'close.decision.d-1.keep'); await p.waitForTimeout(200);
+        const keep = await p.evaluate(() => ({ buttons: [...document.querySelectorAll('[data-testid^="close.decision.d-1."]')].length, resultLine: (document.body.textContent.match(/Kept[^.]*\./) || [])[0] || null }));
+        const keepPageErrors = errs.slice(keepErrs);
+        const broken = (l) => l.pressed && l.pressedAgain && l.pageErrorsFromPress.some((e) => /T is not defined/.test(e)) && l.afterFirstPress.resultLine === null
+          && l.afterFirstPress.status !== 'review_due' && l.afterFirstPress.buttons.length >= 3 && l.rowsWritten === 2 && l.controlDecisionsAfterSecondPress.filter((x) => x.endsWith(':' + l.afterFirstPress.status)).length === 2;
+        const reproduced = broken(legs.tighten) && broken(legs.retire) && keep.buttons === 0 && !!keep.resultLine && keepPageErrors.length === 0;
+        rec('S-controls-v1', 'On the owner\'s Daily Close, Tighten and Retire on decision d-1 throw "T is not defined" after the store has already changed d-1, the threshold and controlDecisions: no result line or announcement renders, the Keep/Tighten/Retire controls stay on the card, and pressing the same control again writes a second controlDecisions row', 'A4, A2 — dailyclose.js:207-208 read T.dualReleaseThresholdCents with no T in scope (the tenant is S.tenant); store.js:449 reviewDecision has already written decisions/d-1 and controlDecisions before the handler throws; Keep on the same card renders and retires its controls',
+          reproduced, { legs, keepComparator: { buttonsLeft: keep.buttons, resultLine: keep.resultLine, pageErrors: keepPageErrors }, pageErrors: errs });
       } finally { await c.close(); }
     },
   };
