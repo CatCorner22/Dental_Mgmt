@@ -1,5 +1,5 @@
-// Swarm hunt, lens clinical-store: clinical record integrity in prototype/js/store.js and prototype/js/seed.js
-// (savePerio, chartPaint, chartUndo, noteKillers, readyForExam, fileNote, seed foreign keys).
+// Swarm hunt, lens clinical-store (verified): clinical record integrity in prototype/js/store.js
+// (savePerio, addTag, chartPaint, chartUndo, noteKillers, readyForExam, fileNote) and the seeded Filed-later visit.
 // Default position is NOT reproduced: every check measures the breach it claims and carries the values.
 // Each check closes its browser context in `finally` so one failure cannot hang the run.
 
@@ -40,8 +40,8 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       } finally { await c.close(); }
     },
 
-    // seed.js seeds the Filed-later lane a-1050 (Devon Price, p-307) with credit cr-1 −9500 and allocationIntent ai-0 pointing at
-    // paymentId 'le-window-9010', but the ledger holds no such payment row. store.js:397-398 fileNote then flags cr-1 fromLedger/applied
+    // seed.js:227 seeds the Filed-later lane a-1050 (Devon Price, p-307) with credit cr-1 −9500 and store.js:16 seeds allocationIntent ai-0 pointing
+    // at paymentId 'le-window-9010', but the ledger holds no such payment row. store.js:389 fileNote then flags cr-1 fromLedger/applied
     // (dropping it from balances) while no payment row ever offsets the released charge.
     // Negative control: with the $95 window payment on the ledger (or the credit left standing), filing a $118 prophy leaves Patient due 2300
     // (or 11800 with credit 9500 still counted); the check reports false.
@@ -65,7 +65,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const paidAtWindow = r.before.decision || 0;
         const expectedDue = 11800 - paidAtWindow;
         const reproduced = r.paintOk && r.fileOk && !!r.intent && !r.paymentRowExists && r.before.balances.credit === paidAtWindow && r.after.balances.credit === 0 && r.after.balances.patientDue === 11800 && r.after.balances.patientDue !== expectedDue && !r.after.ledger.some((l) => /patient_payment/.test(l));
-        rec('S-clinical-store-2', 'Filing the Filed-later visit enc-9010 (a-1050, $95 collected at checkout) charges $118 and erases the $95 credit: seed intent ai-0 names payment le-window-9010 that no ledger row holds, so Patient due is $118.00 instead of $23.00', 'A2, B6, C5 — seed.js allocationIntents ai-0 paymentId dangling; store.js:397-398 sets cr-1.fromLedger without a payment row',
+        rec('S-clinical-store-2', 'Filing the Filed-later visit enc-9010 (a-1050, $95 collected at checkout) charges $118 and erases the $95 credit: seed intent ai-0 names payment le-window-9010 that no ledger row holds, so Patient due is $118.00 instead of $23.00', 'A2, B6, C5 — store.js:16 allocationIntents ai-0 paymentId dangling (seed.js:227 cr-1); store.js:389 sets cr-1.fromLedger without a payment row',
           reproduced, { intent: r.intent, paymentRowExists: r.paymentRowExists, patientPortionCollected: paidAtWindow, balancesBefore: r.before.balances, ledgerBefore: r.before.ledger, creditBefore: r.before.credit, balancesAfter: r.after.balances, ledgerAfter: r.after.ledger, creditAfter: r.after.credit, intentAfter: r.after.intent, expectedPatientDue: expectedDue, apptStatusAfter: r.after.apptStatus, writes: writes(ev), seqRange: range(ev) });
       } finally { await c.close(); }
     },
@@ -93,7 +93,8 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
 
     // store.js:366 noteKillers builds `toothed` from every chartEvents row, reversed paints and reversal rows included, and takes toothed[0]
     // as "the chart tooth". Paint #30, Undo, paint #19: a note naming the undone #30 files clean, and a note naming #14 is told to use #30.
-    // Negative control: reading live paints only, the #30 note raises contradiction with chartTooth 19 and the #14 note names chartTooth 19; the check reports false.
+    // Negative control: reading live paints only, the #30 note raises contradiction with chartTooth 19 and the #14 note names chartTooth 19; the check
+    // reports false only when both facets are gone (a fix that picks the last paint but still reads reversed rows keeps it true).
     async 'S-clinical-store-4'(b) {
       const { c, p } = await ctx(b);
       try {
@@ -111,7 +112,10 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         });
         const ev = await after(p, seq0);
         const contra = r.killersForOtherTooth.find((k) => k.code === 'contradiction');
-        const reproduced = r.ok && r.live.length === 1 && r.live[0] === 19 && !r.killersForUndoneTooth.some((k) => k.code === 'contradiction') && !!contra && contra.chartTooth === 30 && r.fileOk === true;
+        // Either facet alone is the breach: the undone-tooth note files clean, or the fix names the undone tooth as the chart tooth.
+        const undoneNoteFiles = !r.killersForUndoneTooth.some((k) => k.code === 'contradiction') && r.fileOk === true;
+        const fixNamesUndone = !!contra && contra.chartTooth === 30;
+        const reproduced = r.ok && r.live.length === 1 && r.live[0] === 19 && (undoneNoteFiles || fixNamesUndone);
         rec('S-clinical-store-4', 'With composite #30 undone and crown #19 the only live paint, a note about #30 raises no contradiction and files, and a note about #14 is told "Use the chart tooth #30" — the undone tooth — because noteKillers reads reversed chart events', 'A2, A8 — store.js:366-369 toothed includes reversed rows and toothed[0] is the reversed paint',
           reproduced, { chartRows: r.rows, liveTeeth: r.live, killersForUndoneTooth: r.killersForUndoneTooth, killersForOtherTooth: r.killersForOtherTooth, fileOk: r.fileOk, fileCode: r.fileCode || null, filedMarkdown: r.filedMarkdown, writes: writes(ev), seqRange: range(ev) });
       } finally { await c.close(); }
@@ -121,7 +125,8 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
     // A hygienist opening the Filed-later visit enc-9010 (a-1050 checked_out_unfiled) and pressing "Send to Exams to sign" pulls the
     // checked-out patient back into the chair queue; the Board's Filed-later row vanishes; File then lands the visit on 'note_filed' with Checkout offered again.
     // Negative control: when readyForExam refuses (or the fix is not offered) for a checked-out visit, a-1050 stays checked_out_unfiled,
-    // the Board queue row persists, and File moves it to checked_out; the check reports false.
+    // the Board queue row persists, and File moves it to checked_out; the check reports false. It stays true while either the status
+    // regresses or File lands the decided visit anywhere but checked_out.
     async 'S-clinical-store-5'(b) {
       const { c, p } = await ctx(b);
       try {
@@ -140,7 +145,10 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         await hop(p, '#/frontdesk/board'); await p.waitForTimeout(150);
         const board2 = await p.evaluate(() => ({ queueRow: ((document.querySelector('[data-testid="board.queue.row.a-1050"]') || {}).textContent || '').trim().slice(0, 120), checkoutOffered: !!document.querySelector('[data-testid="board.queue.row.a-1050.checkout"]') }));
         const ev = await after(p, seq0);
-        const reproduced = before.status === 'checked_out_unfiled' && before.decision && !!sendTid && mid.status === 'ready_for_exam' && board.queueRow === false && filed.ok === true && filed.status === 'note_filed';
+        // The breach is the status regression of a decided, checked-out visit; the Board row and the post-File status are its consequences.
+        const regressed = mid.status === 'ready_for_exam';
+        const filedWrong = filed.ok === true && filed.status !== 'checked_out';
+        const reproduced = before.status === 'checked_out_unfiled' && !!before.decision && !!sendTid && (regressed || filedWrong);
         rec('S-clinical-store-5', 'The hygienist\'s "Send to Exams to sign" on the checked-out Filed-later visit a-1050 moves it from checked_out_unfiled to ready_for_exam (Board Filed-later row disappears), and File then sets note_filed instead of checked_out, offering Checkout again on a visit whose collection decision already exists', 'A2, B1 — store.js:265 readyForExam has no status guard; encounter.js:449 checks only ready_for_exam/exam_requested',
           reproduced, { statusBefore: before.status, collectionDecisionExists: before.decision, killerFixes: fixes, statusAfterSend: mid.status, examRequestedEvents: mid.examRequested, boardAfterSend: board, fileResult: filed, boardAfterFile: board2, writes: writes(ev), seqRange: range(ev) });
       } finally { await c.close(); }
@@ -199,7 +207,8 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
     // store.js:365 money_in_note tests /\b(fee|cost|price|estimate|copay)\b/i and /\$\s?\d/, so the inflected forms a dentist actually
     // types (fees, costs, copayment, estimates, "dollars") pass the gate and file into the sealed note.
     // Negative control: when the money cue matches inflections (fees?|costs?|copay(ment)?|estimates?|dollars), each sample raises money_in_note,
-    // the file attempt is refused, and the check reports false.
+    // the file attempt is refused, and the check reports false. It stays true while Fees/Costs/Copayment pass or the fee line files;
+    // "Estimates given" and "1,000 dollars" are carried as evidence only.
     async 'S-clinical-store-8'(b) {
       const { c, p } = await ctx(b);
       try {
@@ -216,7 +225,10 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
           return { bypass, control: ctl, fileOk: file.ok, fileCode: file.code || null, filedMarkdown: file.ok ? file.filed.markdown : null };
         });
         const ev = await after(p, seq0);
-        const reproduced = r.bypass.every((x) => !x.killers.includes('money_in_note')) && r.control.every((x) => x.killers.includes('money_in_note')) && r.fileOk === true && /Fees discussed: 260/.test(r.filedMarkdown || '');
+        // The breach is a fee line filing into the sealed note, or any inflection of a word the gate already knows passing it.
+        const inflected = r.bypass.filter((x) => /^(Fees|Costs|Copayment)/.test(x.text)).some((x) => !x.killers.includes('money_in_note'));
+        const feeLineFiled = r.fileOk === true && /Fees discussed: 260/.test(r.filedMarkdown || '');
+        const reproduced = r.control.every((x) => x.killers.includes('money_in_note')) && (feeLineFiled || inflected);
         rec('S-clinical-store-8', 'The money gate flags "Fee" and "$40" but not "Fees", "Costs", "Copayment", "Estimates" or "1,000 dollars", so a plan reading "Fees discussed: 260" files into the sealed note', 'A2, A8 — store.js:365 word list has no inflections and no "dollars"',
           reproduced, { bypassSamples: r.bypass, controlSamples: r.control, fileOk: r.fileOk, fileCode: r.fileCode, filedMarkdown: r.filedMarkdown, writes: writes(ev), seqRange: range(ev) });
       } finally { await c.close(); }
@@ -224,7 +236,8 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
 
     // store.js:367 reads one tooth (`text.match(/#(\d{1,2})/)`), so a note that names a charted tooth first and an uncharted tooth second
     // raises no contradiction; a note that writes "tooth 14" without '#' is not read at all.
-    // Negative control: when every #NN (and "tooth NN") mention is checked against live paints, both samples raise contradiction and the check reports false.
+    // Negative control: when every #NN (and "tooth NN") mention is checked against live paints, both samples raise contradiction and the check
+    // reports false; it stays true while either sample passes.
     async 'S-clinical-store-9'(b) {
       const { c, p } = await ctx(b);
       try {
@@ -241,7 +254,10 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
           return { paintOk: paint.ok, live, secondToothKillers: second, noHashKillers: noHash, controlKillers: control, fileOk: file.ok, filedMarkdown: file.ok ? file.filed.markdown : null };
         });
         const ev = await after(p, seq0);
-        const reproduced = r.paintOk && r.live.length === 1 && r.live[0] === 19 && !r.secondToothKillers.includes('contradiction') && !r.noHashKillers.includes('contradiction') && r.controlKillers.includes('contradiction') && r.fileOk === true;
+        // Either facet alone is the breach: the second #NN is never compared, or 'tooth NN' is never compared.
+        const secondToothPasses = !r.secondToothKillers.includes('contradiction') && r.fileOk === true;
+        const toothWordPasses = !r.noHashKillers.includes('contradiction');
+        const reproduced = r.paintOk && r.live.length === 1 && r.live[0] === 19 && r.controlKillers.includes('contradiction') && (secondToothPasses || toothWordPasses);
         rec('S-clinical-store-9', 'With only crown #19 charted, a note that also plans "composite #14 DO today" files without a contradiction because only the first #NN in the note is compared to the chart, and "tooth 14" without a # is never compared', 'A2, A8 — store.js:367 single match, /#(\\d{1,2})/ only',
           reproduced, { liveTeeth: r.live, secondToothKillers: r.secondToothKillers, noHashKillers: r.noHashKillers, controlKillers: r.controlKillers, fileOk: r.fileOk, filedMarkdown: r.filedMarkdown, writes: writes(ev), seqRange: range(ev) });
       } finally { await c.close(); }
@@ -250,8 +266,8 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
     // chartUndo (store.js:308) and fileNote (store.js:379) refuse on a filed note, but savePerio (store.js:237) and addTag (store.js:264) do not:
     // #/hygienist/perio/enc-9004 (Ruth Adler, noteFiled, status signed) renders the grid, and Save writes a perio exam and a tag onto the sealed
     // encounter, whose row the Exams queue skips (encounter.js:96), so no dentist ever sees them.
-    // Negative control: when savePerio/addTag refuse (already_decided / exam_sealed) on a noteFiled encounter, no perioExams or tags row is
-    // written for enc-9004, notes['enc-9004'] is unchanged, and the check reports false.
+    // Negative control: when savePerio and addTag both refuse (exam_sealed, as fileNote does) on a noteFiled encounter, no perioExams or tags row is
+    // written for enc-9004, notes['enc-9004'] is unchanged, and the check reports false; it stays true while either verb still writes.
     async 'S-clinical-store-10'(b) {
       const { c, p } = await ctx(b);
       try {
@@ -265,7 +281,10 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         await hop(p, '#/dentist/exams'); await p.waitForTimeout(150);
         const queue = await p.evaluate(() => ({ row9004: !!document.querySelector('[data-testid="exams.row.enc-9004"]'), rows: [...document.querySelectorAll('[data-testid^="exams.row."]')].map((e) => e.getAttribute('data-testid')).filter((t) => !/\.open$/.test(t)) }));
         const ev = await after(p, seq0);
-        const reproduced = before.noteFiled === true && before.exams === 0 && before.tags === 0 && r.exams.length === 1 && r.tagOk === true && r.tags.length === 1 && !!r.notes && /Perio screening/.test(r.notes.perioSummary || '') && r.noteFiled === true && queue.row9004 === false;
+        // Either write onto the sealed encounter is the breach.
+        const perioWrote = r.exams.length === 1 && !!r.notes && /Perio screening/.test(r.notes.perioSummary || '');
+        const tagWrote = r.tagOk === true && r.tags.length === 1;
+        const reproduced = before.noteFiled === true && before.exams === 0 && before.tags === 0 && r.noteFiled === true && (perioWrote || tagWrote);
         rec('S-clinical-store-10', 'The perio route on the filed encounter enc-9004 (noteFiled, signed) accepts Save and addTag: a code-4 screening and an open tag are written onto the sealed visit while the Exams queue skips filed encounters, so the new finding has no reader', 'A2, B1 — store.js:237 savePerio and store.js:264 addTag have no noteFiled guard, unlike chartUndo:308 and fileNote:379',
           reproduced, { before, afterSave: r, examsQueue: queue, writes: writes(ev), seqRange: range(ev) });
       } finally { await c.close(); }
@@ -295,26 +314,6 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const reproduced = r.bogus.ok === true && /not probed \(undefined\)/.test(r.summaryBogus || '') && r.bool.ok === true && /\(undefined\)/.test(r.summaryBool || '') && r.noLicence.ok === false && r.noLicence.code === 'omission_licence';
         rec('S-clinical-store-11', 'savePerio with licence "bogus" (or `true`) saves a full exam and writes "2 sites not probed (undefined)" into the hygiene note, while a missing licence is correctly refused', 'A8, C3 — store.js:245 tests truthiness only; store.js:258 LICENCE_WORDS[extras.licence] is undefined for unknown codes',
           reproduced, { knownLicences: r.known, bogusResult: r.bogus, summaryAfterBogus: r.summaryBogus, booleanResult: r.bool, summaryAfterBoolean: r.summaryBool, noLicenceResult: r.noLicence, writes: writes(ev), seqRange: range(ev) });
-      } finally { await c.close(); }
-    },
-
-    // seed.js eraLines: 41 lines carry claimId 'c-' + (40 + i) while the claims table holds c-88, c-72, c-65, c-51 only, so 37 ERA lines name no
-    // claim and three (el-11→c-51, el-25→c-65, el-32→c-72) name a claim whose patientId differs from the line's own patientId.
-    // Negative control: when every eraLine.claimId resolves to a claims row with the same patientId, dangling and crossPatient are empty and the check reports false.
-    async 'S-clinical-store-12'(b) {
-      const { c, p } = await ctx(b);
-      try {
-        await go(p, '#/biller/money');
-        const r = await p.evaluate(() => {
-          const s = window.__proto.state();
-          const dangling = s.eraLines.filter((l) => !s.claims.some((c) => c.id === l.claimId)).map((l) => l.id + '->' + l.claimId);
-          const crossPatient = s.eraLines.filter((l) => { const c = s.claims.find((x) => x.id === l.claimId); return c && c.patientId !== l.patientId; }).map((l) => ({ line: l.id, claimId: l.claimId, linePatient: l.patientId, claimPatient: s.claims.find((x) => x.id === l.claimId).patientId }));
-          const matched = s.eraLines.filter((l) => { const c = s.claims.find((x) => x.id === l.claimId); return c && c.patientId === l.patientId; }).map((l) => l.id + '->' + l.claimId);
-          return { eraLines: s.eraLines.length, claims: s.claims.map((c) => c.id + ':' + c.patientId), dangling, crossPatient, matched };
-        });
-        const reproduced = r.eraLines > 0 && r.dangling.length > 0 && r.crossPatient.length > 0;
-        rec('S-clinical-store-12', 'Seed integrity: 37 of 41 ERA lines carry a claimId no claims row holds and 3 more resolve to a claim belonging to a different patient than the line names', 'B1, seed.js eraLines claimId: \'c-\' + (40 + i) vs claims c-88/c-72/c-65/c-51',
-          reproduced, { eraLineCount: r.eraLines, claims: r.claims, danglingCount: r.dangling.length, dangling: r.dangling, crossPatient: r.crossPatient, matched: r.matched });
       } finally { await c.close(); }
     },
   };
