@@ -207,7 +207,8 @@
     Object.assign(eraLines[21], { cdt: 'd4341', expectedCents: 28500, paidCents: 21400, carc: '45', status: 'delta', note: 'Paid below contract: expected $285, ERA says $214' });
     Object.assign(eraLines[30], { cdt: 'd2392', tooth: 14, expectedCents: 26000, paidCents: 20800, carc: '131', status: 'delta', note: 'Downcoded to D2391: expected $260, ERA says $208' });
     Object.assign(eraLines[39], { id: 'el-40', patientId: 'p-321', claimId: 'c-88', cdt: 'd4341', expectedCents: 28500, paidCents: 0, carc: '16', rarc: 'N4', status: 'denied', note: 'Claim lacks information: missing perio chart' });
-    const eraBatches = [{ id: 'era-1', payer: 'Delta Dental', received: TODAY + 'T06:10', lines: 41, postedLines: 37, eftCents: 481233, trn: 'TRN 20260903-90112', status: 'review' }];
+    // The EFT is the remittance's own total: the sum of what its lines paid, so the heading and the ledger agree.
+    const eraBatches = [{ id: 'era-1', payer: 'Delta Dental', received: TODAY + 'T06:10', lines: 41, postedLines: 37, eftCents: eraLines.reduce((s, l) => s + l.paidCents, 0), trn: 'TRN 20260903-90112', status: 'review' }];
 
     const claims = [
       { id: 'c-88', patientId: 'p-321', status: 'denied', cdt: 'd4341', tooth: null, amountCents: 28500, payer: 'Delta Dental', carc: '16', rarc: 'N4', plain: 'Delta says the claim is missing information: the perio chart was not attached.', nextAction: 'Appeal with the perio chart and the SRP narrative from the note', appealBy: '2026-11-02', submitted: '2026-08-20', hasPerioChart: true, hasNarrative: true },
