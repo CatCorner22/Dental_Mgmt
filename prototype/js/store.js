@@ -164,10 +164,20 @@
   const DECISIONS = ['collect', 'send_statement', 'payment_plan', 'zero_due'];
   const TENDERS = ['card', 'cash', 'check', 'hsa'];
   const cents = (v) => Number.isInteger(v) && v >= 0;
+  // The patient portion of a visit is one number for the screen and the posting: the plan estimate, capped by
+  // what the ledger still says is open plus the visit's charges not yet posted. A write-off that landed on the
+  // ledger lowers it everywhere at once.
+  function patientPortion(aid) {
+    const a = appt(aid); if (!a) return null;
+    const seed = S.estimates[aid] || { patientCents: a.balanceCents || 0, insuranceCents: 0, writeoffCents: 0, note: 'No plan estimate on file; the patient portion shown is the appointment balance.' };
+    const notYetCharged = S.procedures.filter((p) => p.encounterId === a.encounterId && !charged(p)).reduce((t, p) => t + p.feeCents, 0);
+    const collectible = balances(a.patientId).patientDue + notYetCharged;
+    return Object.assign({}, seed, { patientCents: Math.max(0, Math.min(seed.patientCents, collectible)) });
+  }
   function postCheckout(aid, form) {
     const a = appt(aid); if (!a) return notFound('appointment');
     form = form || {};
-    const est = S.estimates[aid] || { patientCents: a.balanceCents || 0 };
+    const est = patientPortion(aid);
     let u = currentUser();
     const off = offline('Wait for the server — postings are paused'); if (off) return off;
     const who = actorGate(u, 'post_payment', 'Posting at the window'); if (who) return who;
@@ -218,7 +228,7 @@
       if (noteFiled) { let rem = amt; for (const r of rows) { if (rem <= 0) break; const alloc = Math.min(rem, r.amountCents); write('allocations', { id: id('al'), paymentId: pay.id, chargeId: r.id, amountCents: alloc }); rem -= alloc; } }
       else write('allocationIntents', { id: id('ai'), paymentId: pay.id, encounterId: encId, amountCents: amt });
     }
-    if (form.decision === 'send_statement') write('statementsDue', { id: id('sd'), patientId: a.patientId, amountCents: est.patientCents, reason: 'window_deferred', createdBy: u.name, created: S.tenant.today });
+    if (form.decision === 'send_statement') write('statementsDue', { id: id('sd'), patientId: a.patientId, encounterId: encId, amountCents: est.patientCents, reason: 'window_deferred', createdBy: u.name, created: S.tenant.today });
     if (form.decision === 'payment_plan') write('paymentPlans', { id: id('pp'), patientId: a.patientId, amountCents: est.patientCents, cadence: form.cadence || 'monthly', eligibleBucket: 'patient_ar', createdBy: u.name });
     for (const pid of form.selfPay || []) { const p = S.procedures.find((x) => x.id === pid); if (p) { p.selfPayRestricted = true; p.restrictedAt = S.tenant.today; write('domainEvents', { id: id('de'), type: 'procedure.self_pay_restricted', procedureId: pid }); } }
     if (form.writeoffCents > 0) {
@@ -597,7 +607,20 @@
   // One packet per claim: pressing Appeal four times wrote four packets and renamed the drawer each time.
   function buildAppeal(claimId) { const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim'); const existing = S.appealPackets.find((p) => p.claimId === claimId); if (existing) return { ok: true, packet: existing, already: true }; const off = offline('Wait for the server — the packet cannot build'); if (off) return off; const pk = write('appealPackets', { id: id('ap'), claimId, slots: { perioChart: c.hasPerioChart, narrative: c.hasNarrative, radiograph: true, letter: true }, patientSentence: 'Delta asked for your gum chart; we are sending it. You owe nothing while they review.' }); return { ok: true, packet: pk }; }
   function sendAppeal(claimId) { const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim'); const off = offline('Wait for the server — the appeal cannot send'); if (off) return off; if (c.status === 'appealed') return refuse('already_decided', 'Wait for the payer to answer', 'Open the claim', 'This appeal was already sent. Sending it twice does not speed it up and starts a second review.'); c.status = 'appealed'; touch('claims', c.id); write('claimEvents', { id: id('cev'), claimId, kind: 'claim.appealed', actor: currentUser().name }); write('disclosures', { id: id('dis'), patientId: c.patientId, channel: 'clearinghouse', purpose: 'payment', recordIds: ['pe-1', 'nf-old'], actor: currentUser().name }); return { ok: true }; }
-  function sendStatement(sdId) { const s = S.statementsDue.find((x) => x.id === sdId); if (!s) return notFound('patient'); const off = offline('Wait for the server — statements cannot send'); if (off) return off; if (s.sent) return refuse('already_decided', 'Wait for this statement to land', 'Open the ledger', 'This statement was sent at ' + (s.sentAt || S.clock.time) + '. A second copy of the same balance confuses the patient and the phone call that follows.'); s.sent = true; s.sentAt = S.clock.time; touch('statementsDue', s.id); write('disclosures', { id: id('dis'), patientId: s.patientId, channel: 'mail', purpose: 'payment', recordIds: [sdId], actor: currentUser().name }); return { ok: true }; }
+  // Showing a redacted name on glass is a disclosure like any other: it writes the row the control's label promises.
+  function discloseName(patientId, recordId) {
+    const p = patient(patientId); if (!p) return notFound('patient');
+    const row = write('disclosures', { id: id('dis'), patientId, channel: 'screen', purpose: 'operations', recordIds: recordId ? [recordId] : [], actor: currentUser().name });
+    return { ok: true, disclosureId: row.id };
+  }
+  // A statement bills what the account owes now, not the figure it was raised with: a write-off that landed since
+  // lowers it, and a visit still waiting for its charges keeps them in. Once sent, the row keeps what it billed.
+  function statementDue(s) {
+    if (s.sent) return s.amountCents;
+    const pending = s.encounterId ? S.procedures.filter((p) => p.encounterId === s.encounterId && !charged(p)).reduce((t, p) => t + p.feeCents, 0) : 0;
+    return Math.max(0, balances(s.patientId).patientDue + pending);
+  }
+  function sendStatement(sdId) { const s = S.statementsDue.find((x) => x.id === sdId); if (!s) return notFound('patient'); const off = offline('Wait for the server — statements cannot send'); if (off) return off; if (s.sent) return refuse('already_decided', 'Wait for this statement to land', 'Open the ledger', 'This statement was sent at ' + (s.sentAt || S.clock.time) + '. A second copy of the same balance confuses the patient and the phone call that follows.'); const due = statementDue(s); if (due <= 0) return refuse('zero_collect_refused', 'Nothing due — no statement to send', 'Open the ledger', 'The ledger says this account owes nothing now, so a statement would bill $0.00 and log a disclosure for no purpose. The row stays until the balance moves.'); s.amountCents = due; s.sent = true; s.sentAt = S.clock.time; touch('statementsDue', s.id); write('disclosures', { id: id('dis'), patientId: s.patientId, channel: 'mail', purpose: 'payment', recordIds: [sdId], actor: currentUser().name }); return { ok: true }; }
 
   // Daily Close
   /* Matching a variance settles it against the bank line, so the tender row and the location grade agree.
@@ -717,6 +740,7 @@
   function railStateFor() { const uid = currentUser().id; return (S.railState && S.railState[uid]) || {}; }
 
   // Palette search
+  const SEARCH_CAP = 8;
   function search(q) {
     q = (q || '').trim().toLowerCase(); if (q.length < 3) return [];
     retireChip('find');
@@ -725,7 +749,10 @@
     for (const a of S.actions) if (a.label.toLowerCase().includes(q)) out.push({ kind: 'action', label: a.label, route: a.route, irreversible: !!a.irreversible });
     for (const p of S.patients) if (p.name.toLowerCase().includes(q) || p.phone.endsWith(q) || p.mrn.toLowerCase().includes(q)) out.push({ kind: 'patient', label: p.name, syn: 'DOB ' + Proto.ui.longDate(p.dob) + ' · …' + p.phone.slice(-4), patientId: p.id });
     for (const c of S.claims) if (c.id.includes(q) || (c.payer || '').toLowerCase().includes(q)) out.push({ kind: 'claim', label: 'Claim ' + c.id + ' · ' + c.payer, route: 'money' });
-    return out.slice(0, 8);
+    // The list carries whether the cap cut it, so the palette says "capped" only when a row was left out.
+    const rows = out.slice(0, SEARCH_CAP);
+    Object.defineProperty(rows, 'capped', { value: out.length > SEARCH_CAP });
+    return rows;
   }
 
   // Ensure tables referenced by write() exist
@@ -734,5 +761,5 @@
   reset = function (seedNum) { const s = _reset(seedNum); for (const t of TABLES) if (!s[t]) s[t] = []; return s; };
 
   const LICENCE_WORDS = { implant: 'implant', crown_margin: 'crown margin', not_tolerated: 'patient could not tolerate probing', third_molar_absent: 'third molar absent' };
-  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, perioGate, savePerio, addTag, readyForExam, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, sendStatement, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
+  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, patientPortion, explain, allocate, charged, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, perioGate, savePerio, addTag, readyForExam, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, sendStatement, statementDue, discloseName, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
 })();
