@@ -316,7 +316,7 @@
     }
     if (st.decision === 'collect' && est.patientCents <= 0 && !st.posted) { st.decision = 'zero_due'; st.amountStr = dollars(0); st.tender = null; }
     if (st.heldReq) st.heldReq = S.approvals.find((x) => x.id === st.heldReq.id) || st.heldReq;
-    const procs = S.procedures.filter((p) => p.encounterId === a.encounterId);
+    const procs = Proto.store.liveProcedures(a.encounterId);
     const bal = Proto.store.balances(a.patientId);
     const covers = (fee) => st.decision === 'collect' && cents(st.amountStr) >= fee;
     const name = displayName(pt.name, P.privacy);

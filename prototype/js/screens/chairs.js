@@ -60,7 +60,10 @@
     return prior.length ? prior[prior.length - 1] : null;
   }
   const hasNote = (a) => { const n = S().notes[a.encounterId]; return !!(n && Object.keys(n).length) || S().filedNotes.some((f) => f.encounterId === a.encounterId); };
-  const canReady = (a) => READY_FROM.includes(a.status) || (!DONE.includes(a.status) && (!!perioToday(a) || hasNote(a)));
+  // Ready for exam is offered from the statuses the store's readyForExam accepts, and from no other: a card
+  // never offers an irreversible verb the press would refuse.
+  const canReady = (a) => READY_FROM.includes(a.status);
+  const hasExamContent = (a) => !!perioToday(a) || hasNote(a);
   function queuePosition(a) {
     if (a.status !== 'ready_for_exam') return 0;
     const order = S().appointmentEvents.filter((e) => e.kind === 'encounter.exam_requested').map((e) => e.appointmentId);
@@ -100,9 +103,11 @@
     if (focusTestid) { const el = document.querySelector('[data-testid="' + focusTestid + '"]'); if (el) el.focus(); }
     if (announce) Proto.router.announce(announce);
   }
-  function gateFor(res) {
+  // The gate's one control does what its label says: the outage names the support line, every other gate
+  // opens the visit it refused. The slot is the card, so two cards holding the same gate each log their own.
+  function gateFor(res, id, r) {
     const g = { code: res.code, verb: res.verb, control: res.control, why: res.why };
-    g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, severity: g.code === 'outage' ? 'stop' : 'required', onControl: () => { if (g.code === 'outage') Proto.router.announce(SUPPORT); } });
+    g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, severity: g.code === 'outage' ? 'stop' : 'required', slot: 'chairs.card.' + id, onControl: () => { if (g.code === 'outage') Proto.router.announce(SUPPORT); else goNote(id, r); } });
     return g;
   }
 
@@ -115,7 +120,7 @@
     const a = Proto.store.appt(id); if (!a || !canReady(a)) return;
     const focusId = 'chairs.card.' + id + '.ready';
     const res = Proto.store.readyForExam(id);
-    if (!res.ok) { gates[id] = gateFor(res); render(r); const b = document.querySelector('[data-testid="' + focusId + '"]'); if (b) b.focus(); return; }
+    if (!res.ok) { gates[id] = gateFor(res, id, r); render(r); const b = document.querySelector('[data-testid="' + focusId + '"]'); if (b) b.focus(); return; }
     delete gates[id];
     Proto.store.retireChip('ready');
     const name = displayName(Proto.store.patient(a.patientId).name, P().privacy);
@@ -170,10 +175,12 @@
     actions.append(btn('Write note', { kind: 'quiet', testid: 'chairs.card.' + a.id + '.note', ariaLabel: 'Write the note for ' + name, onClick: () => goNote(a.id, r) }));
     if (Proto.screens.rail) actions.append(Proto.screens.rail.button(a.patientId, r, 'chairs.card.' + a.id + '.rail'));
     if (ready) {
-      if (gates[a.id]) actions.append(btn('Ready for exam', { kind: 'held', testid: 'chairs.card.' + a.id + '.ready', onClick: () => { const c = el.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); } }));
+      // A Held press asks the store again: the gate it re-earns is the current one, not the one that stood.
+      if (gates[a.id]) actions.append(btn('Ready for exam', { kind: 'held', testid: 'chairs.card.' + a.id + '.ready', onClick: () => doReady(a.id, r) }));
       else actions.append(btn('Ready for exam', { kind: 'irreversible', testid: 'chairs.card.' + a.id + '.ready', ariaLabel: 'Ready for exam: ' + name + ' joins the dentist\'s queue', onClick: () => doReady(a.id, r) }));
     }
     el.append(actions);
+    if (!ready && !DONE.includes(a.status) && hasExamContent(a)) el.append(h('p', { class: 'small muted', text: 'Ready for exam opens once the front desk seats the patient; this visit is ' + a.status.replace(/_/g, ' ') + '.' }));
     if (gates[a.id]) el.append(h('div', { class: 'gate' }, gates[a.id].node));
     if (s.outage) el.append(h('div', { class: 'stamp', text: 'Read-only during the outage · nothing writes' }));
     return el;
@@ -204,8 +211,12 @@
   function render(r) {
     syncStore();
     const s = S(); const u = Proto.store.currentUser(); const list = mine(); const hyg = isHygienist(u);
-    // The gate the outage raised belongs to the outage: once the server answers again the card offers the verb.
-    for (const id of Object.keys(gates)) if (gates[id].code === 'outage' && !s.outage) delete gates[id];
+    // A gate belongs to the state that raised it: the outage gate leaves when the server answers, and a
+    // wrong-status gate leaves once the visit reaches a status the verb accepts, so the card offers the verb again.
+    for (const id of Object.keys(gates)) {
+      const a = Proto.store.appt(id);
+      if ((gates[id].code === 'outage' && !s.outage) || (gates[id].code === 'wrong_status' && a && canReady(a))) delete gates[id];
+    }
     const sub = fmtTime(s.clock.time) + ' · ' + list.length + ' chair' + (list.length === 1 ? '' : 's') + (hyg ? ' · yours' : ' · all hygiene chairs at ' + s.locations[0].name + ' and yours') + (P().outage ? ' · read-only during the outage' : '') + ' · keys: P perio, N note, R focus Ready for exam';
     // The heading names the set below it: for a hygienist that is her own chairs, for anyone else
     // every hygiene chair at this location plus their own.

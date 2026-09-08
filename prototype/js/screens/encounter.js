@@ -456,7 +456,11 @@
         rerender(r); focusFirst('refusal.control'); return;
       }
       const res = Proto.store.readyForExam(enc.appointmentId);
-      if (res.ok) { rerender(r); focusFirst('enc.killer.0.fix', 'enc.file'); Proto.router.announce('Sent to Exams to sign'); }
+      if (res.ok) { rerender(r); focusFirst('enc.killer.0.fix', 'enc.file'); Proto.router.announce('Sent to Exams to sign'); return; }
+      // The store's refusal is the screen's: a press that wrote nothing shows the gate that stopped it.
+      const outage = res.code === 'outage';
+      x.sendGate = { code: res.code, verb: res.verb, control: outage ? res.control : 'Back to Chairs', severity: outage ? 'stop' : 'required', why: res.why, onControl: () => { if (outage) Proto.router.announce('Support: 615-555-0100, answered 7 am to 6 pm Central'); else Proto.router.go(r.persona, 'chairs'); } };
+      rerender(r); focusFirst('refusal.control');
       return;
     }
   }

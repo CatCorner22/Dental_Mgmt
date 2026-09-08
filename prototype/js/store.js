@@ -180,7 +180,7 @@
   function patientPortion(aid) {
     const a = appt(aid); if (!a) return null;
     const seed = S.estimates[aid] || { patientCents: a.balanceCents || 0, insuranceCents: 0, writeoffCents: 0, note: 'No plan estimate on file; the patient portion shown is the appointment balance.' };
-    const notYetCharged = S.procedures.filter((p) => p.encounterId === a.encounterId && !charged(p)).reduce((t, p) => t + p.feeCents, 0);
+    const notYetCharged = liveProcedures(a.encounterId).filter((p) => !charged(p)).reduce((t, p) => t + p.feeCents, 0);
     const collectible = balances(a.patientId).patientDue + notYetCharged;
     return Object.assign({}, seed, { patientCents: Math.max(0, Math.min(seed.patientCents, collectible)) });
   }
@@ -381,7 +381,7 @@
       }
     }
     const licence = extras && extras.licence;
-    if (licence != null && !LICENCE_WORDS[licence]) return refuse('omission_licence', 'Choose a reason from the list', 'Choose a reason', 'The reason a site was not probed is one of: implant, crown margin, patient could not tolerate, third molar absent. "' + licence + '" is not on that list, so nothing was written.');
+    if (licence != null && !Object.hasOwn(LICENCE_WORDS, licence)) return refuse('omission_licence', 'Choose a reason from the list', 'Choose a reason', 'The reason a site was not probed is one of: implant, crown margin, patient could not tolerate, third molar absent. "' + licence + '" is not on that list, so nothing was written.');
     const skipped = entries.filter(([, v]) => v && v.skipped).length;
     if (skipped > 0 && !licence) return refuse('omission_licence', 'Name why ' + skipped + (skipped === 1 ? ' site was' : ' sites were') + ' not probed', 'Choose a reason', 'A blank is never forced into a fabrication: pick implant, crown margin, patient could not tolerate, or third molar absent.');
     return null;
@@ -569,7 +569,7 @@
     // Release every charge this note holds, not only the ones painted this session: a seeded procedure sat
     // "completed" and uncharged forever, so filing wrote no ledger row and the patient's credit never applied.
     // Only a procedure that still stands is released: a reversed one never reaches the ledger or the claim.
-    const release = S.procedures.filter((p) => p.encounterId === encId && !p.reversed && !charged(p));
+    const release = liveProcedures(encId).filter((p) => !charged(p));
     const relTotal = release.reduce((s, p) => s + p.feeCents, 0);
     const relEst = S.estimates[enc.appointmentId] || { insuranceCents: 0 };
     for (const p of release) { p.status = 'completed'; p.charged = true; touch('procedures', p.id); write('ledger', stampClose({ id: id('le'), kind: 'charge', patientId: enc.patientId, amountCents: p.feeCents, effective: enc.dos, posted: S.tenant.today, actor: currentUser().name, actorKind: 'file_event', locationId: enc.locationId, procedureId: p.id, cdt: p.cdt, tooth: p.tooth, releasedByNoteId: filed.id, insuranceExpectedCents: relTotal ? Math.round((relEst.insuranceCents || 0) * p.feeCents / relTotal) : 0 }));
@@ -632,7 +632,7 @@
   // lowers it, and a visit still waiting for its charges keeps them in. Once sent, the row keeps what it billed.
   function statementDue(s) {
     if (s.sent) return s.amountCents;
-    const pending = s.encounterId ? S.procedures.filter((p) => p.encounterId === s.encounterId && !charged(p)).reduce((t, p) => t + p.feeCents, 0) : 0;
+    const pending = s.encounterId ? liveProcedures(s.encounterId).filter((p) => !charged(p)).reduce((t, p) => t + p.feeCents, 0) : 0;
     return Math.max(0, balances(s.patientId).patientDue + pending);
   }
   function sendStatement(sdId) { const s = S.statementsDue.find((x) => x.id === sdId); if (!s) return notFound('patient'); const off = offline('Wait for the server — statements cannot send'); if (off) return off; if (s.sent) return refuse('already_decided', 'Wait for this statement to land', 'Open the ledger', 'This statement was sent at ' + (s.sentAt || S.clock.time) + '. A second copy of the same balance confuses the patient and the phone call that follows.'); const due = statementDue(s); if (due <= 0) return refuse('zero_collect_refused', 'Nothing due — no statement to send', 'Open the ledger', 'The ledger says this account owes nothing now, so a statement would bill $0.00 and log a disclosure for no purpose. The row stays until the balance moves.'); s.amountCents = due; s.sent = true; s.sentAt = S.clock.time; touch('statementsDue', s.id); write('disclosures', { id: id('dis'), patientId: s.patientId, channel: 'mail', purpose: 'payment', recordIds: [sdId], actor: currentUser().name }); return { ok: true }; }
