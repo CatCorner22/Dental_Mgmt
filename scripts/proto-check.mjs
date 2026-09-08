@@ -102,7 +102,10 @@ async function checkFlows(browser) {
     errors.length = 0;
     const r = await runFlow(page, flow);
     if (r.problems.length) fail('flows', `${flow.id}: ${r.problems.join('; ')}`);
+    // The budget holds for the taps the page recorded under CONTRACTS §5, not for the number of scripted steps.
     if (r.taps > flow.budgetTaps) fail('flows', `${flow.id}: ${r.taps} taps > budget ${flow.budgetTaps}`);
+    if (r.evTaps > flow.budgetTaps) fail('flows', `${flow.id}: ${r.evTaps} page-recorded taps > budget ${flow.budgetTaps} (${r.taps} scripted)`);
+    if (r.evTaps < r.taps) fail('flows', `${flow.id}: page recorded ${r.evTaps} taps for ${r.taps} scripted presses`);
     if (flow.budgetKeystrokes && r.keys > flow.budgetKeystrokes) fail('flows', `${flow.id}: ${r.keys} keystrokes > budget ${flow.budgetKeystrokes}`);
     for (const e of errors) fail('flows', `${flow.id}: ${e}`);
     results.flows.detail = results.flows.detail || {}; results.flows.detail[flow.id] = r;
