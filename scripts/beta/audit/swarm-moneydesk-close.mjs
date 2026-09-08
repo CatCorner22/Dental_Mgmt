@@ -9,7 +9,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
   const fill = async (p, tid, value) => { const s = `[data-testid="${tid}"]`; if (!(await p.$(s))) return false; await p.fill(s, value); await p.waitForTimeout(60); return true; };
   const live = (p) => p.evaluate(() => ((document.getElementById('live') || {}).textContent || '').trim());
   const refusals = (p) => p.evaluate(() => [...document.querySelectorAll('.refusal')].map((r) => r.dataset.code || null));
-  const heldWriteoff = async (p) => { await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await click(p, 'money.writeoff.post'); await p.waitForTimeout(150); };
+  const heldWriteoff = async (p) => { await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await click(p, 'money.writeoff.post'); await p.waitForTimeout(150); await click(p, 'refusal.control'); await p.waitForTimeout(150); };
   const decisionCard = (p) => p.evaluate(() => { const b = document.querySelector('[data-testid^="close.decision.d-1."]'); const card = b ? b.closest('section, .card, article') || b.parentElement : null; return { buttons: [...document.querySelectorAll('[data-testid^="close.decision.d-1."]')].map((e) => e.getAttribute('data-testid')), text: card ? card.textContent.replace(/\s+/g, ' ').trim().slice(0, 400) : null }; });
 
   return {

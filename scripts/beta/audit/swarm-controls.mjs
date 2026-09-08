@@ -140,7 +140,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       const { c, p, errs } = await ctx(b);
       try {
         await go(p, '#/biller/money');
-        await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await click(p, 'money.writeoff.post'); await p.waitForTimeout(150);
+        await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await click(p, 'money.writeoff.post'); await p.waitForTimeout(150); await click(p, 'refusal.control'); await p.waitForTimeout(150);
         const req = await p.evaluate(() => { const a = window.__proto.state().approvals[0]; return a ? { id: a.id, amountCents: a.amountCents, requestedBy: a.requestedBy, requestedById: a.requestedById, status: a.status } : null; });
         // Leg A: the hygienist, from her own persona route, decides through the store with her own id.
         await hop(p, '#/hygienist/phone');
@@ -152,7 +152,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         // Leg B: fresh store; the requesting biller passes another user's id as the approver.
         await p.evaluate(() => window.__proto.reset());
         await hop(p, '#/biller/money');
-        await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await click(p, 'money.writeoff.post'); await p.waitForTimeout(150);
+        await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await click(p, 'money.writeoff.post'); await p.waitForTimeout(150); await click(p, 'refusal.control'); await p.waitForTimeout(150);
         const sam = await who(p);
         const seqB = await lastSeq(p);
         const legB = await p.evaluate(() => { const S0 = window.__proto.state(); const id = S0.approvals[0].id; const r = Proto.store.decideApproval(id, 'u-dr-1', 'approved', true); const S = window.__proto.state(); const a = S.approvals.find((x) => x.id === id); return { id, result: r, requestedById: a.requestedById, status: a.status, decidedBy: a.decidedBy, log: S.approvalsLog.map((l) => l.id + ':' + l.decision + ':' + l.by) }; });
