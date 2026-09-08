@@ -17,7 +17,7 @@
   let tab = 'era'; // remembered across renders
   let lastRoute = null; let lastStore = null; let keysOn = false;
   let st = null; // module state; rebuilt on store reset
-  const fresh = () => ({ writeoffOpen: false, writeoffStr: '', writeoffReason: null, woRefusal: null, woHeldReq: null, woRequested: false, woPosted: false, appealFor: null, appealPacket: null, appealSent: null, denialRefusal: {}, previewFor: null, announced: '' });
+  const fresh = () => ({ writeoffOpen: false, writeoffStr: '', writeoffReason: null, woRefusal: null, woHeldReq: null, woGate: null, woRequested: false, woPosted: false, appealFor: null, appealPacket: null, appealSent: null, denialRefusal: {}, previewFor: null, announced: '' });
 
   const priv = () => !!(window.__proto && window.__proto.privacy);
   const pname = (S, pid) => { const p = S.patients.find((x) => x.id === pid); return displayName(p ? p.name : pid, priv()); };
@@ -129,15 +129,18 @@
     const amt = h('input', { class: 'input md-amount', type: 'text', inputmode: 'decimal', testid: 'money.writeoff.amount', value: st.writeoffStr, 'aria-label': 'Write-off amount in dollars', onInput: (ev) => { st.writeoffStr = ev.target.value; } });
     const hint = h('p', { class: 'hint', text: 'At or above ' + money(S.tenant.dualReleaseThresholdCents) + ' a second approver is needed; the posting is held, never silently allowed.' });
     amt.addEventListener('blur', () => { const bad = st.writeoffStr.trim() !== '' && !(cents(st.writeoffStr) > 0); amt.classList.toggle('invalid', bad); if (bad) hint.textContent = 'Enter a dollar amount above zero.'; });
-    const reasons = h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Reason code' }, ...REASONS.map(([code, label]) => btn(label, { testid: 'money.writeoff.reason.' + code, pressed: pressed(st.writeoffReason === code), onClick: () => { st.writeoffReason = code; st.woRefusal = null; rerender(r, 'money.writeoff.reason.' + code); } })));
-    const held = st.woHeldReq && st.woHeldReq.status === 'pending';
+    const reasons = h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Reason code' }, ...REASONS.map(([code, label]) => btn(label, { testid: 'money.writeoff.reason.' + code, pressed: pressed(st.writeoffReason === code), onClick: () => { st.writeoffReason = code; st.woRefusal = null; st.woGate = null; rerender(r, 'money.writeoff.reason.' + code); } })));
+    const requested = st.woHeldReq && st.woHeldReq.status === 'pending';
+    // The gated primary reads Held from the refusal on: before the request is written the gate holds it,
+    // after the request is written the approver does.
+    const held = requested || !!st.woGate;
     // The eligible approvers are one list, the one the request was written with; the biller is not told a
     // different set of names from the one the phone card and the verb line read.
-    const approvers = held ? (st.woHeldReq.eligible || []).join(' or ') : '';
+    const approvers = held ? ((requested ? st.woHeldReq.eligible : st.woGate.eligible) || []).join(' or ') : '';
     const post = held
-      ? btn('Held', { kind: 'held', testid: 'money.writeoff.post', ariaLabel: 'Held: waiting on a second approver', onClick: () => say('Waiting on ' + approvers) })
+      ? btn('Held', { kind: 'held', testid: 'money.writeoff.post', ariaLabel: 'Held: waiting on a second approver', onClick: () => say(requested ? 'Waiting on ' + approvers : 'Press Request approval to send this to ' + approvers) })
       : btn('Post', { kind: 'irreversible', testid: 'money.writeoff.post', onClick: () => postWriteoff(r) });
-    const postRow = h('div', { class: 'btnrow' }, post, held ? h('span', { class: 'row' }, chip('review', 'Approval requested'), h('span', { class: 'small muted', text: approvers + ' will see it on their phone; this flips to Posted when they approve.' })) : null);
+    const postRow = h('div', { class: 'btnrow' }, post, requested ? h('span', { class: 'row' }, chip('review', 'Approval requested'), h('span', { class: 'small muted', text: approvers + ' will see it on their phone; this flips to Posted when they approve.' })) : null);
     // The gate stays on screen while the request is open: the refusal is the only thing that says what is
     // holding the posting and where to go next, and nulling it here left the Held button with no verb line.
     if (held) setTimeout(() => { const el = document.querySelector('[data-testid="money.writeoff.post"]'); if (el) { const b = el.getBoundingClientRect(); if (b.bottom > window.innerHeight || b.top < 0) el.scrollIntoView({ block: 'center' }); } }, 0);
@@ -160,11 +163,11 @@
     if (res.ok) { st.woPosted = true; st.woRefusal = null; say('Posted the ' + money(amountCents) + ' write-off'); rerender(r, 'money.tab.' + tab); return; }
     if (res.held) {
       // The request row is written when this control is pressed, so the label and the write agree.
-      st.woHeldReq = null;
+      st.woHeldReq = null; st.woGate = { eligible: res.pendingRequest.eligible || [] };
       st.woRefusal = refusal({ code: res.code, verb: res.verb, control: res.control || 'Request approval', why: res.why, onControl: () => {
         const out = Proto.store.requestApproval(res.pendingRequest);
-        if (!out.ok) { st.woRefusal = refusal({ code: out.code, verb: out.verb, control: out.control || 'Back', why: out.why, onControl: () => { st.woRefusal = null; rerender(r, 'money.writeoff.post'); } }); rerender(r, 'refusal.control'); return; }
-        st.woHeldReq = Proto.store.get().approvals.find((x) => x.id === out.requestId) || null; st.woRequested = true;
+        if (!out.ok) { st.woGate = null; st.woRefusal = refusal({ code: out.code, verb: out.verb, control: out.control || 'Back', why: out.why, onControl: () => { st.woRefusal = null; rerender(r, 'money.writeoff.post'); } }); rerender(r, 'refusal.control'); return; }
+        st.woGate = null; st.woHeldReq = Proto.store.get().approvals.find((x) => x.id === out.requestId) || null; st.woRequested = true;
         say('Requested approval from ' + ((st.woHeldReq && st.woHeldReq.eligible) || []).join(' or '));
         rerender(r, 'money.writeoff.post');
       } });

@@ -16,7 +16,7 @@
      plays the next scenario instead of re-announcing the first one. */
   const SIMS = [
     { pid: 'p-306', cents: 41000, reason: 'courtesy' },
-    { pid: 'p-303', cents: 22500, reason: 'hardship' },
+    { pid: 'p-313', cents: 22500, reason: 'hardship' },
   ];
   const REASON_LABEL = { courtesy: 'Courtesy', hardship: 'Hardship', contractual_ppo: 'Contractual (PPO)', small_balance: 'Small balance', promo: 'Promotion' };
 
