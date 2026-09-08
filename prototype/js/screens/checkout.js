@@ -57,6 +57,7 @@
     if (res.code === 'zero_collect_refused') { v.control = res.control || 'Nothing due today'; v.onControl = () => { st.decision = 'zero_due'; st.refusalNode = null; rerender(r, 'checkout.collect.seg.zero-due'); }; }
     else if (res.code === 'pin_required' || res.code === 'pin_no_match') { v.control = 'Enter PIN'; v.onControl = () => { st.refusalNode = null; rerender(r, 'checkout.pin'); }; }
     else if (res.code === 'tender_required') { v.control = 'Choose card'; v.onControl = () => { st.tender = 'card'; st.refusalNode = null; rerender(r, 'checkout.card.number'); }; }
+    else if (res.code === 'amount_required') { v.control = res.control || 'Go to amount'; v.onControl = () => { st.refusalNode = null; rerender(r, /write-off/i.test(res.verb + ' ' + (res.why || '')) ? 'checkout.writeoff.amount' : 'checkout.amount'); }; }
     // The control that says "Open the ledger" opens the ledger. Every unnamed code used to fall through to the
     // Board, so the one gate whose label named a destination landed somewhere else.
     else if (res.code === 'already_decided') { v.control = res.control || 'Open the ledger'; v.onControl = () => Proto.router.go(r.persona, 'ledger', a.patientId); }
@@ -210,7 +211,11 @@
 
   function writeoffBlock(r, st, policy) {
     const S = Proto.store.get();
-    if (st.heldReq && st.heldReq.status === 'approved') return h('div', { class: 'row' }, chip('clear', 'Write-off ' + money(st.heldReq.amountCents) + ' approved by ' + st.heldReq.decidedBy), h('span', { class: 'small muted', text: 'Already on the ledger; Post writes the rest.' }));
+    if (st.heldReq && st.heldReq.status === 'approved') {
+      // The chip reads the amount the approver posted: a request capped at the open balance shows the cap.
+      const capped = st.heldReq.postedCents != null && st.heldReq.postedCents !== st.heldReq.amountCents;
+      return h('div', { class: 'row' }, chip('clear', 'Write-off ' + money(capped ? st.heldReq.postedCents : st.heldReq.amountCents) + ' approved by ' + st.heldReq.decidedBy), h('span', { class: 'small muted', text: (capped ? 'Capped from ' + money(st.heldReq.amountCents) + ' requested to the open balance. ' : '') + 'Already on the ledger; Post writes the rest.' }));
+    }
     if (!st.writeoffOpen) return h('div', null, btn('Add write-off or adjustment', { kind: 'reversible', testid: 'checkout.writeoff.add', onClick: () => { st.writeoffOpen = true; st.refusalNode = null; rerender(r, 'checkout.writeoff.amount'); } }));
     policy.push('At or above ' + money(S.tenant.dualReleaseThresholdCents) + ' a second approver is needed; the posting is held, never silently allowed.');
     const amt = h('input', { class: 'input co-amount', type: 'text', inputmode: 'decimal', testid: 'checkout.writeoff.amount', value: st.writeoffStr, onInput: (ev) => { st.writeoffStr = ev.target.value; if (st.refusalNode) { st.refusalNode = null; rerender(r, 'checkout.writeoff.amount'); } } });

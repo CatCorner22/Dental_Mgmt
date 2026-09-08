@@ -227,7 +227,7 @@
     const done = st().done[a.id];
     const s = a.status === 'approved' ? ['clear', 'Approved'] : ['required', 'Sent back'];
     return h('article', { class: 'card flat ph-decided', 'aria-label': 'Decided request ' + a.id },
-      h('div', { class: 'ph-head' }, chip(s[0], s[1]), h('span', { class: 'ph-amount small', text: money(a.amountCents) }), h('span', { class: 'small muted grow', text: a.id })),
+      h('div', { class: 'ph-head' }, chip(s[0], s[1]), h('span', { class: 'ph-amount small', text: money(a.postedCents != null ? a.postedCents : a.amountCents) + (a.postedCents != null && a.postedCents !== a.amountCents ? ' of ' + money(a.amountCents) + ' asked' : '') }), h('span', { class: 'small muted grow', text: a.id })),
       done ? h('p', { class: 'ph-done', role: 'status', tabindex: '-1', text: done.text }) : null,
       h('p', { class: 'small muted', text: cardSentence(a) + (a.decidedBy ? ' · ' + s[1] + ' · ' + a.decidedBy + ' at ' + time(a.decidedAt) : '') }));
   }

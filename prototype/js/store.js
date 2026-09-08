@@ -111,6 +111,16 @@
   function balances(pid) { const a = allocate(pid); return { patientDue: a.patientDue, insurancePending: a.insurancePending, credit: a.credit }; }
   /* A procedure is charged when the ledger says so, whatever its flag claims. */
   const charged = (p) => !!p.charged || S.ledger.some((e) => e.kind === 'charge' && e.procedureId === p.id);
+  /* The procedures a visit still stands on. A reversed row stays in the chart's history and never reaches the
+     ledger, the claim, the estimate or the checkout table: one list for every path that bills the visit. */
+  const liveProcedures = (encId) => S.procedures.filter((p) => p.encounterId === encId && !p.reversed);
+  /* What a write-off may forgive: the ledger's open patient balance plus the charges this visit is about to
+     post (a filed note releases them at checkout). One ceiling for the desk, the checkout and the approver. */
+  function openCeiling(pid, encId) {
+    const enc = encId ? encounter(encId) : null;
+    const pending = enc && enc.noteFiled ? liveProcedures(encId).filter((p) => !charged(p)).reduce((t, p) => t + p.feeCents, 0) : 0;
+    return balances(pid).patientDue + pending;
+  }
   function explain(pid) {
     const out = [];
     for (const c of allocate(pid).charges) {
@@ -184,7 +194,7 @@
     // The form is data from a screen; the verb keeps its own contract, so a malformed field refuses instead
     // of landing on the ledger.
     if (!DECISIONS.includes(form.decision)) return refuse('invalid_input', 'Choose a decision before posting', 'Nothing due today', 'The visit closes with one of four typed decisions: collect, send statement, payment plan, or nothing due today. "' + String(form.decision) + '" is none of them, so nothing was written.');
-    if (form.decision === 'collect' && form.amountCents != null && !cents(form.amountCents)) return refuse('amount_required', 'Type the amount in whole cents', 'Go to amount', 'A payment is a whole number of cents at or above zero. "' + String(form.amountCents) + '" is not, so nothing was written.');
+    if (form.decision === 'collect' && form.amountCents != null && !(cents(form.amountCents) && form.amountCents > 0)) return refuse('amount_required', 'Type an amount above zero', 'Go to amount', 'A payment is a whole number of cents above zero. "' + String(form.amountCents) + '" is not, so nothing was written. To take nothing at the window, choose Nothing due today.');
     if (form.decision === 'collect' && form.tender && !TENDERS.includes(form.tender)) return refuse('tender_required', 'Choose a tender the bank knows', 'Choose card', 'The day sheet reconciles card, cash, check and HSA against the bank. "' + String(form.tender) + '" is not one of them, so nothing was written.');
     if (form.writeoffCents != null && form.writeoffCents !== 0 && !(Number.isInteger(form.writeoffCents) && form.writeoffCents > 0)) return refuse('amount_required', 'Type the write-off in whole cents', 'Go to amount', 'A write-off is a whole number of cents above zero. "' + String(form.writeoffCents) + '" is not, so nothing was written.');
     if (S.collectionDecisions.some((d) => d.encounterId === a.encounterId)) return refuse('already_decided', 'Correct this visit from the ledger', 'Open the ledger', 'One typed decision per visit. To change what was collected, post a correction from the ledger: a reversal and a repost, both linked to the original.');
@@ -192,18 +202,18 @@
     if (form.decision === 'collect' && est.patientCents === 0) return refuse('zero_collect_refused', 'Choose Nothing due today', 'Nothing due today', 'Collect with $0 writes nothing; the typed decision keeps the window honest.');
     if (form.decision === 'collect' && !form.tender) return refuse('tender_required', 'Choose a tender', 'Choose card', 'The tender is what the day sheet reconciles against the bank, so a payment cannot post without one.');
     const encId = a.encounterId; const enc = encounter(encId);
-    const procs = S.procedures.filter((p) => p.encounterId === encId);
+    const procs = liveProcedures(encId);
     const foreign = (form.selfPay || []).filter((pid) => !procs.some((p) => p.id === pid));
     if (foreign.length) return refuse('invalid_input', 'Choose a procedure from this visit', 'Open the chart', 'Self-pay restriction marks a procedure of this visit. ' + foreign.join(', ') + ' belongs to another chart, so nothing was written.');
-    // Shared desk: the PIN names the poster. It must match a seat, and the match mints that seat's own
-    // session so the posting carries the name of the person who typed it.
+    // Shared desk: the PIN names the poster. It must match a seat that can post; the seat's own session is
+    // minted only once every gate below has passed, so a refused or held Post leaves no sessions row behind.
+    let pinSeat = null;
     if (window.__proto.device === 'shared') {
       const pin = String(form.pin == null ? '' : form.pin).trim();
       if (!pin) return refuse('pin_required', 'Enter your PIN to post', 'Enter PIN', 'Shared desk: the PIN mints your own session, so the posting carries your name and not the last person\'s.');
       const match = S.users.find((x) => x.pin === pin);
       if (!match) return refuse('pin_no_match', 'Try your PIN again — no match', 'Enter PIN', 'The PIN did not match any seat in this practice, so there is no name to freeze onto the posting. Nothing was written.');
-      const session = openSession(match.id); if (!session.ok) return session;
-      u = match;
+      u = pinSeat = match;
       const seat2 = actorGate(u, 'post_payment', 'Posting at the window'); if (seat2) return seat2;
     }
     // Write-off gate (dual release inside the posting transaction). The request row is written when the
@@ -211,9 +221,12 @@
     // and left the control itself a no-op.
     if (form.writeoffCents && form.writeoffCents > 0) {
       const seat = actorGate(u, 'write_off', 'A write-off'); if (seat) return seat;
+      const ceiling = openCeiling(a.patientId, encId);
+      if (form.writeoffCents > ceiling) return refuse('amount_required', 'Type a write-off within the balance', 'Go to amount', 'This account has ' + Proto.ui.money(ceiling) + ' open once this visit posts. A write-off above that would push the ledger negative, so nothing was written.');
       const gate = evaluateRelease('write_off', form.writeoffCents, u, a.patientId);
       if (!gate.ok) return Object.assign(refuse(gate.code, gate.verb, 'Request approval', gate.why), { held: true, pendingRequest: { kind: 'write_off', amountCents: form.writeoffCents, reason: form.writeoffReason || 'courtesy', patientId: a.patientId, eligible: gate.eligible, appointmentId: aid, form } });
     }
+    if (pinSeat) { const session = openSession(pinSeat.id); if (!session.ok) return session; }
     // Post: charges (if note filed), payment, allocations, decision, self-pay flags in one transaction
     const noteFiled = enc && enc.noteFiled;
     const rows = [];
@@ -222,9 +235,10 @@
     const toCharge = noteFiled ? procs.filter((p) => !charged(p)) : [];
     const feeTotal = toCharge.reduce((s, p) => s + p.feeCents, 0);
     for (const p of toCharge) { p.charged = true; touch('procedures', p.id); rows.push(write('ledger', stampClose({ id: id('le'), kind: 'charge', patientId: a.patientId, amountCents: p.feeCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: a.locationId, procedureId: p.id, cdt: p.cdt, tooth: p.tooth, insuranceExpectedCents: feeTotal ? Math.round((est.insuranceCents || 0) * p.feeCents / feeTotal) : 0 }))); }
+    let pay = null;
     if (form.decision === 'collect') {
-      const amt = form.amountCents || est.patientCents;
-      const pay = write('ledger', stampClose({ id: id('le'), kind: 'patient_payment', patientId: a.patientId, amountCents: -amt, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: a.locationId, tender: form.tender, gl: noteFiled ? 'patient_ar' : 'unapplied_credit' }));
+      const amt = form.amountCents != null ? form.amountCents : est.patientCents;
+      pay = write('ledger', stampClose({ id: id('le'), kind: 'patient_payment', patientId: a.patientId, amountCents: -amt, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: a.locationId, tender: form.tender, gl: noteFiled ? 'patient_ar' : 'unapplied_credit' }));
       if (noteFiled) { let rem = amt; for (const r of rows) { if (rem <= 0) break; const alloc = Math.min(rem, r.amountCents); write('allocations', { id: id('al'), paymentId: pay.id, chargeId: r.id, amountCents: alloc }); rem -= alloc; } }
       else write('allocationIntents', { id: id('ai'), paymentId: pay.id, encounterId: encId, amountCents: amt });
     }
@@ -237,7 +251,8 @@
     }
     write('collectionDecisions', { id: 'cd-' + nextId.cd++, encounterId: encId, decision: form.decision, patientPortionCents: est.patientCents, decidedBy: u.name, decidedAt: S.tenant.today + ' ' + S.clock.time, statementDueId: null, paymentPlanId: null });
     a.status = noteFiled ? 'checked_out' : 'checked_out_unfiled'; touch('appointments', aid);
-    if (!noteFiled && !S.credits.find((c) => c.patientId === a.patientId && c.reason.includes(aid))) write('credits', { id: id('cr'), patientId: a.patientId, amountCents: -(form.amountCents || est.patientCents || 0), reason: 'Checked out unfiled: payment waiting for charges (' + aid + ')', intents: 'pending charges on ' + encId, fromLedger: true });
+    // A payment taken before the note is filed waits as credit; a decision that collected nothing has no credit to wait.
+    if (!noteFiled && pay && !S.credits.find((c) => c.patientId === a.patientId && c.reason.includes(aid))) write('credits', { id: id('cr'), patientId: a.patientId, amountCents: pay.amountCents, reason: 'Checked out unfiled: payment waiting for charges (' + aid + ')', intents: 'pending charges on ' + encId, fromLedger: true });
     retireChip('checkout'); if (form.decision === 'collect') retireChip('payment');
     return { ok: true, taps: 0 };
   }
@@ -257,7 +272,7 @@
     if (!req) return '';
     const who = patient(req.patientId);
     const name = who ? Proto.ui.displayName(who.name, !!(window.__proto && window.__proto.privacy)) : 'this account';
-    const open = req.patientId ? balances(req.patientId).patientDue : null;
+    const open = req.patientId ? openCeiling(req.patientId, (appt(req.appointmentId) || {}).encounterId) : null;
     return 'Write-off ' + Proto.ui.money(req.amountCents) + ' on ' + name + ' (' + (req.reason || 'courtesy') + ') requested by ' + req.requestedBy + ' at ' + Proto.ui.time(req.requestedAt || S.clock.time) + (open == null ? '' : ' · ' + Proto.ui.money(open) + ' still open');
   }
 
@@ -309,7 +324,7 @@
     let amount = r.amountCents;
     if (decision === 'approved' && r.kind === 'write_off') {
       if (S.ledger.some((e) => e.kind === 'write_off' && e.approvalRequestId === reqId)) return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'The write-off for this request is already on the ledger. Posting it again would double it; a correction is a reversal and a repost.');
-      const open = balances(r.patientId).patientDue;
+      const open = openCeiling(r.patientId, (appt(r.appointmentId) || {}).encounterId);
       if (open <= 0) return refuse('amount_required', 'Nothing left to write off', 'Open the ledger', 'This account\'s open balance is ' + Proto.ui.money(0) + ': the write-off was already posted or the balance was paid. Approving would write off money nobody owes.');
       amount = Math.min(r.amountCents, open);
     }
@@ -328,7 +343,7 @@
     const who = actorGate(u, 'write_off', 'A write-off'); if (who) return who;
     if (!Number.isInteger(amountCents) || amountCents <= 0) return refuse('amount_required', 'Type an amount above zero', 'Go to amount', 'A write-off posts the number you type against the balance in whole cents, so it cannot be blank, negative, zero, or a fraction of a cent.');
     // A write-off can only forgive what is owed; the open balance is the ceiling.
-    const open = balances(accountPid).patientDue;
+    const open = openCeiling(accountPid, null);
     if (amountCents > open) return refuse('amount_required', 'Type an amount within the balance', 'Go to amount', 'This account has ' + Proto.ui.money(open) + ' open. A write-off above that would push the ledger negative, so nothing was written.');
     const gate = evaluateRelease('write_off', amountCents, u, accountPid);
     // The request row is written when the biller presses Request approval, not here.
@@ -625,11 +640,19 @@
   // Daily Close
   /* Matching a variance settles it against the bank line, so the tender row and the location grade agree.
      Before, the grade flipped to "Tied · independent" while the Card row still showed a $312.40 gap. */
+  /* Settling a variance, by match or by reason, is a money control: the seat needs an identity, the entitlement
+     that reconciles the bank or closes the day, and independence from the hands that posted or closed that day. */
+  function reconcileGate(rr, u) {
+    const who = actorGate(u, ['bank_reconcile', 'close_day'], 'Settling a variance'); if (who) return who;
+    if (rr && (rr.closer === u.name || rr.posters === u.name || (u.role === 'biller' && rr.locationId === 'loc-3'))) return refuse('clear_not_independent', 'Ask an independent seat to clear', 'Send to Dana or the CPA', 'You posted or prepared the deposit for that day, so settling your own variance would leave nobody checking the money. ' + (rr.closer === u.name ? 'Dr. Reagan' : 'Dana') + ' or the CPA seat can settle it.');
+    return null;
+  }
   function matchVariance(vid) {
     const v = S.variances.find((x) => x.id === vid); if (!v) return notFound('request');
     const off = offline('Wait for the server — reconciliation is read-only'); if (off) return off;
-    if (v.status !== 'open') return refuse('already_decided', 'Open the day to see the match', 'Open the day', 'This variance was already ' + v.status + '. The settlement row that closed it is on the day.');
     const rr = S.reconciliation.find((r) => r.id === v.reconciliationId);
+    const seat = reconcileGate(rr, currentUser()); if (seat) return seat;
+    if (v.status !== 'open') return refuse('already_decided', 'Open the day to see the match', 'Open the day', 'This variance was already ' + v.status + '. The settlement row that closed it is on the day.');
     v.status = 'matched'; touch('variances', v.id);
     if (rr) { rr.bank = Object.assign({}, rr.bank); rr.bank[v.tender] = (rr.bank[v.tender] || 0) + v.amountCents; rr.settled = (rr.settled || []).concat([{ tender: v.tender, amountCents: v.amountCents, basis: 'timing_card_settlement' }]); rr.state = 'tied'; touch('reconciliation', rr.id); }
     write('reconciliationMatches', { id: id('rm'), varianceId: vid, basis: 'timing_card_settlement', tender: v.tender, amountCents: v.amountCents, actor: currentUser().name });
@@ -645,7 +668,7 @@
     /* Independence is not enough on its own: clearing a variance is a money control, so the seat also needs
        the entitlement for it. The screen applies this test to decide who is offered the control; the rule is
        enforced here too, because a control that never renders is not a control that cannot be reached. */
-    if (!u.entitlements.includes('bank_reconcile') && !u.entitlements.includes('close_day')) return refuse('entitlement', 'Ask a seat that reconciles the bank', 'Send to Dana or the CPA', 'Clearing a variance signs off on the day\'s money. The seats that carry bank reconciliation or day close can do it; yours does not.');
+    if (u.noPass || (!u.entitlements.includes('bank_reconcile') && !u.entitlements.includes('close_day'))) return refuse('entitlement', 'Ask a seat that reconciles the bank', 'Send to Dana or the CPA', 'Clearing a variance signs off on the day\'s money. The seats that carry bank reconciliation or day close can do it; yours does not.');
     if (v.status !== 'open') return refuse('already_decided', 'Open the day to see the match', 'Open the day', 'This variance was already ' + v.status + '.');
     // Tied is derived, never declared: every tender's bank line must equal what was expected once the
     // explained variances are settled against it. A gap no variance explains keeps the day open.
@@ -761,5 +784,5 @@
   reset = function (seedNum) { const s = _reset(seedNum); for (const t of TABLES) if (!s[t]) s[t] = []; return s; };
 
   const LICENCE_WORDS = { implant: 'implant', crown_margin: 'crown margin', not_tolerated: 'patient could not tolerate probing', third_molar_absent: 'third molar absent' };
-  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, patientPortion, explain, allocate, charged, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, perioGate, savePerio, addTag, readyForExam, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, sendStatement, statementDue, discloseName, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
+  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, patientPortion, openCeiling, explain, allocate, charged, liveProcedures, reconcileGate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, perioGate, savePerio, addTag, readyForExam, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, sendStatement, statementDue, discloseName, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
 })();

@@ -148,11 +148,11 @@
     return detail;
   }
   function varianceCard(r, S, rr, v) {
-    const me = Proto.store.currentUser(); const ents = me.entitlements || [];
+    const me = Proto.store.currentUser();
     const isCloser = rr.closer === me.name || rr.posters === me.name;
-    // Clear is offered to an independent seat that carries the money it would be clearing, and to nobody
-    // else: it used to be offered to (and accepted from) any seat that had not closed the day.
-    const mayClear = !isCloser && CLEAR_ENTS.some((e) => ents.includes(e));
+    // Match and Clear are offered to an independent seat that carries the money it would be settling, and to
+    // nobody else: the store's gate decides, so the control on screen is the control the store accepts.
+    const mayClear = !Proto.store.reconcileGate(rr, me);
     const clearers = table(S, 'users').filter((u) => u.name !== me.name && u.name !== rr.closer && CLEAR_ENTS.some((e) => (u.entitlements || []).includes(e))).map((u) => u.short);
     const pm = v.proposedMatch || {};
     const card = h('div', { class: 'card flat stack', 'aria-label': 'Variance ' + v.id },
@@ -160,7 +160,7 @@
       h('p', { class: 'explain sentence', text: v.sentence }),
       h('p', null, h('b', { text: 'Proposed match: ' }), pm.bankLine + ' ↔ ' + plural(pm.ledgerEntries || 0, 'ledger entry').replace('entrys', 'entries')));
     const controls = h('div', { class: 'btnrow' },
-      btn('Match these', { kind: 'irreversible', testid: 'close.variance.' + v.id + '.match', onClick: () => { const res = Proto.store.matchVariance(v.id); if (res.ok) say('Matched ' + money(v.amountCents) + ' at ' + locOf(S, v.locationId).name); rerender(r, 'close.tied.tile'); } }),
+      mayClear ? btn('Match these', { kind: 'irreversible', testid: 'close.variance.' + v.id + '.match', onClick: () => { const res = Proto.store.matchVariance(v.id); if (res.ok) say('Matched ' + money(v.amountCents) + ' at ' + locOf(S, v.locationId).name); rerender(r, 'close.tied.tile'); } }) : null,
       btn(st.invOpen[v.id] ? 'Hide rows' : 'Investigate', { kind: 'reversible', testid: 'close.variance.' + v.id + '.investigate', pressed: !!st.invOpen[v.id], onClick: () => { st.invOpen[v.id] = !st.invOpen[v.id]; rerender(r, 'close.variance.' + v.id + '.investigate'); } }));
     if (mayClear) controls.append(btn('Clear with reason', { kind: st.varRefusal[v.id] ? 'held' : 'quiet', testid: 'close.variance.' + v.id + '.clear', onClick: () => {
       const res = Proto.store.clearVariance(v.id);
@@ -169,7 +169,7 @@
       rerender(r, 'close.variance.' + v.id + '.clear');
     } }));
     card.append(controls);
-    if (!mayClear) card.append(h('p', { class: 'small muted', text: (isCloser ? 'Same hands closed ' + locOf(S, rr.locationId).name + ' on ' + shortDate(rr.date) + '. ' : 'Clearing belongs to a seat that reconciles the bank or closes the books. ') + (clearers.length ? orList(clearers) + ' can clear. ' : '') + 'Match these and Investigate stay open to you.' }));
+    if (!mayClear) card.append(h('p', { class: 'small muted', text: (isCloser ? 'Same hands closed ' + locOf(S, rr.locationId).name + ' on ' + shortDate(rr.date) + '. ' : 'Clearing belongs to a seat that reconciles the bank or closes the books. ') + (clearers.length ? orList(clearers) + ' can clear. ' : '') + 'Investigate stays open to you.' }));
     if (st.varRefusal[v.id]) card.append(st.varRefusal[v.id]);
     if (st.invOpen[v.id]) {
       const rows = S.ledger.filter((e) => e.locationId === v.locationId && e.kind === 'patient_payment' && e.tender === v.tender && e.posted === rr.date).slice(-(pm.ledgerEntries || 2));
