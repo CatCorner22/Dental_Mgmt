@@ -23,7 +23,7 @@
   const WROTE = { ledger: 'appended a ledger row', approvals: 'created an approval request', approvalsLog: 'decided an approval request', dayCloses: 'closed a business day', deposits: 'prepared a deposit slip', reconciliationMatches: 'matched or cleared a variance', controlDecisions: 'reviewed a control decision', appointmentEvents: 'moved an appointment', eligibilityChecks: 're-ran eligibility', messages: 'pinged a chair', perioExams: 'saved a perio exam', tags: 'tagged a tooth for the dentist', chartEvents: 'painted the chart', planItems: 'added a plan item', filedNotes: 'filed a note', claims: 'changed a claim', claimEvents: 'recorded a claim event', appealPackets: 'built an appeal packet', disclosures: 'disclosed records (logged)', statementsDue: 'queued a statement', collectionDecisions: 'recorded a collection decision', allocations: 'allocated a payment', dayPasses: 'issued a day pass', userEntitlements: 'changed entitlements', firstRunState: 'retired a first-shift chip', sessions: 'switched author with a PIN' };
 
   let st = null, lastStore = null, lastRoute = null, keysOn = false;
-  const fresh = () => ({ tileOpen: false, locOpen: null, invOpen: {}, changedOpen: false, lateOpen: false, varRefusal: {}, closeStep: 'idle', closeRefusal: null, dayClose: null, decisionResult: {}, riskDone: {}, logOpen: false });
+  const fresh = () => ({ tileOpen: false, locOpen: null, invOpen: {}, changedOpen: false, lateOpen: false, varRefusal: {}, closeStep: 'idle', closeRefusal: null, dayClose: null, decisionResult: {}, decisionRefusal: {}, riskDone: {}, logOpen: false });
   const priv = () => !!(window.__proto && window.__proto.privacy);
   const bool = (b) => (b ? 'true' : 'false');
   const say = (t) => Proto.router.announce(t);
@@ -195,6 +195,9 @@
     const due = S.decisions.filter((d) => d.status === 'review_due');
     const results = Object.keys(st.decisionResult);
     if (!due.length && !results.length) return null;
+    // The review controls render for the seats the store lets review: owner and the office manager.
+    const me = Proto.store.currentUser();
+    const mayReview = me.role === 'owner' || (me.entitlements || []).includes('grant_roles');
     const rows = due.map((d) => {
       const late = days(d.reviewBy, S.tenant.today);
       const act = (action, label, kind) => btn(label, { kind, testid: 'close.decision.' + d.id + '.' + action, onClick: () => {
@@ -204,17 +207,19 @@
           // computation of it here is how the sentence and the row underneath it come to disagree.
           const next = shortDate(res.reviewBy);
           st.decisionResult[d.id] = action === 'keep' ? 'Kept 90 more days; review on ' + next + '.'
-            : action === 'tighten' ? 'Tightened: write-off threshold back to ' + money(T.dualReleaseThresholdCents) + '; review on ' + next + '.'
-              : 'Retired: write-off threshold back to ' + money(T.dualReleaseThresholdCents) + '. Nothing auto-renews.';
+            : action === 'tighten' ? 'Tightened: write-off threshold back to ' + money(res.thresholdCents) + '; review on ' + next + '.'
+              : 'Retired: write-off threshold back to ' + money(res.thresholdCents) + '. Nothing auto-renews.';
           say(action === 'keep' ? 'Kept 90 more days' : action === 'tighten' ? 'Tightened the write-off threshold' : 'Retired the raised threshold');
-        }
+        } else st.decisionRefusal[d.id] = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: null });
         rerender(r, 'close.closeday');
       } });
       return h('div', { class: 'card flat stack', 'aria-label': 'Decision ' + d.id },
         h('div', { class: 'row' }, chip('review', 'Review ' + (late > 0 ? 'was due ' + shortDate(d.reviewBy) + ' (' + plural(late, 'day') + ' ago)' : 'due ' + shortDate(d.reviewBy))), h('span', { class: 'small muted', text: 'Decided ' + shortDate(d.decidedAt) + ' by ' + shortName(S, d.decidedBy) })),
         h('p', null, h('b', { text: d.text })),
         h('p', { class: 'row' }, h('span', { text: 'Since this raise: ' + d.measuredEffect + '.' }), chip('info', 'Directional')),
-        h('div', { class: 'btnrow' }, act('keep', 'Keep 90 more days', 'reversible'), act('tighten', 'Tighten', 'reversible'), act('retire', 'Retire', 'irreversible')),
+        mayReview ? h('div', { class: 'btnrow' }, act('keep', 'Keep 90 more days', 'reversible'), act('tighten', 'Tighten', 'reversible'), act('retire', 'Retire', 'irreversible'))
+          : h('p', { class: 'small muted', text: 'Reviewing this decision belongs to Dr. Reagan or Dana; it is shown here so the practice can see what is due.' }),
+        st.decisionRefusal[d.id] || null,
         h('details', null, h('summary', { class: 'small', testid: 'close.decision.' + d.id + '.why' }, 'Why directional'), h('p', { class: 'small muted', text: 'Under the digest minimum sample the effect sentence is computed from domain events since the decision and labelled directional. An unreviewed decision stops applying at midnight of its review date and becomes a finding; neglect tightens, never loosens.' })));
     });
     return section('Decisions due for review' + (due.length ? ': ' + due.length : ''), ...rows, ...results.map((id) => {

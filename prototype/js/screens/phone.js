@@ -150,7 +150,7 @@
     const s = st(); const x = nextSim();
     const p = P(); const prev = p.persona;
     let res;
-    try { p.persona = 'biller'; res = Proto.store.requestWriteoff(x.pid, x.cents, x.reason); }
+    try { p.persona = 'biller'; res = Proto.store.requestWriteoff(x.pid, x.cents, x.reason); if (res && res.held) { const out = Proto.store.requestApproval(res.pendingRequest); res = out.ok ? Object.assign(res, { requestId: out.requestId }) : out; } }
     finally { p.persona = prev; }
     if (res && res.held) { s.simNote = 'Sam (biller) tapped Post on the ' + simWords(x) + '; it is waiting on you as request ' + res.requestId + '.'; say('Request ' + res.requestId + ' is waiting for you'); }
     else if (res && res.ok) { s.simNote = 'Below the threshold: the write-off posted without a second approver.'; say(s.simNote); }

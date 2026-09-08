@@ -159,8 +159,15 @@
     const res = Proto.store.requestWriteoff(WRITEOFF_PID, amountCents, st.writeoffReason);
     if (res.ok) { st.woPosted = true; st.woRefusal = null; say('Posted the ' + money(amountCents) + ' write-off'); rerender(r, 'money.tab.' + tab); return; }
     if (res.held) {
-      const S = Proto.store.get(); st.woHeldReq = S.approvals.find((x) => x.id === res.requestId) || null;
-      st.woRefusal = refusal({ code: res.code, verb: res.verb, control: res.control || 'Request approval', why: res.why, onControl: () => { st.woRequested = true; say('Requested approval from ' + ((st.woHeldReq && st.woHeldReq.eligible) || []).join(' or ')); rerender(r, 'money.writeoff.post'); } });
+      // The request row is written when this control is pressed, so the label and the write agree.
+      st.woHeldReq = null;
+      st.woRefusal = refusal({ code: res.code, verb: res.verb, control: res.control || 'Request approval', why: res.why, onControl: () => {
+        const out = Proto.store.requestApproval(res.pendingRequest);
+        if (!out.ok) { st.woRefusal = refusal({ code: out.code, verb: out.verb, control: out.control || 'Back', why: out.why, onControl: () => { st.woRefusal = null; rerender(r, 'money.writeoff.post'); } }); rerender(r, 'refusal.control'); return; }
+        st.woHeldReq = Proto.store.get().approvals.find((x) => x.id === out.requestId) || null; st.woRequested = true;
+        say('Requested approval from ' + ((st.woHeldReq && st.woHeldReq.eligible) || []).join(' or '));
+        rerender(r, 'money.writeoff.post');
+      } });
       rerender(r, 'refusal.control'); return;
     }
     st.woRefusal = refusal({ code: res.code, verb: res.verb, control: res.control || 'Back to ERA', why: res.why, onControl: () => { tab = 'era'; st.woRefusal = null; rerender(r, 'money.tab.era'); } });
