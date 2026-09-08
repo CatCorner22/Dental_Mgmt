@@ -246,9 +246,11 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 /* ---- end module: perio ---- */
 
 /* ---- module: encounter (js/screens/encounter.js) — appended, never edits rules above ---- */
-.enc-layout { display: grid; grid-template-columns: minmax(856px, 1.25fr) minmax(320px, 1fr); gap: var(--space-4); align-items: start; }
-@media (max-width: 1279px) { .enc-layout { grid-template-columns: 1fr; } }
-.enc-odont-wrap { overflow-x: auto; padding-bottom: var(--space-1); display: flex; flex-direction: column; gap: var(--gap); }
+/* The odontogram scrolls inside its own wrapper; the columns never grow to it, so the canvas never pans sideways. */
+.enc-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.enc-layout > * { min-width: 0; }
+@media (max-width: 1279px) { .enc-layout { grid-template-columns: minmax(0, 1fr); } }
+.enc-odont-wrap { overflow-x: auto; max-width: 100%; padding-bottom: var(--space-1); display: flex; flex-direction: column; gap: var(--gap); }
 .tooth.enc-tagged { border-style: dashed; border-color: var(--required-rail); }
 .tooth.enc-tagged[aria-pressed="true"] { border-style: solid; }
 .surfaces .btn[aria-pressed="mixed"] { border-style: dashed; border-color: var(--focus); background: var(--surface-2); color: var(--ink); }

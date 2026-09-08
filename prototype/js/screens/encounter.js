@@ -336,7 +336,8 @@
   }
 
   // ---- note ---------------------------------------------------------------------------------
-  function starterTooth(enc, x) { const ces = eventsOf(enc.id); if (x.tooth) return x.tooth; if (ces.length) return ces[ces.length - 1].tooth; const t = openTags(enc.id)[0]; return t ? t.tooth : '[tooth]'; }
+  // A whole-patient paint has no tooth; the starter names the last paint that does, or the open tag, never "#null".
+  function starterTooth(enc, x) { const ces = eventsOf(enc.id).filter((c) => c.tooth != null); if (x.tooth) return x.tooth; if (ces.length) return ces[ces.length - 1].tooth; const t = openTags(enc.id)[0]; return t ? t.tooth : '[tooth]'; }
   function starterSurfaces(enc, x) { if (x.surfaces.length) return x.surfaces.map((o) => o.s).join(''); const ces = eventsOf(enc.id); if (ces.length && ces[ces.length - 1].surfaces.length) return ces[ces.length - 1].surfaces.join(''); const t = openTags(enc.id)[0]; return t && t.surfaces ? t.surfaces.join('') : 'DO'; }
   function starters() { return isSurgeon() ? ['sedation', 'caries', 'recurrent', 'fractured'] : ['caries', 'recurrent', 'fractured']; }
   function renderNote(r, enc, x) {
@@ -437,7 +438,10 @@
       // verb was rewritten, and the fix silently did nothing.
       const m = String(k.verb || '').match(/#(\d{1,2})/);
       const chartTooth = k.chartTooth != null ? String(k.chartTooth) : m ? m[1] : null; if (!chartTooth) return;
-      const fix = (txt) => (txt || '').replace(/#(\d{1,2})\b/g, (all, n) => (n === chartTooth ? all : '#' + chartTooth));
+      // Only the reference the killer named changes; a tooth the chart agrees with stays as written.
+      const w = String(k.why || '').match(/note says #(\d{1,2})/);
+      const noteTooth = k.noteTooth != null ? Number(k.noteTooth) : w ? Number(w[1]) : null; if (noteTooth == null) return;
+      const fix = (txt) => (txt || '').replace(/(#|\btooth\s+#?)(\d{1,2})\b/gi, (all, pre, n) => (Number(n) === noteTooth ? pre + chartTooth : all));
       x.note.assessment = fix(x.note.assessment); x.note.plan = fix(x.note.plan);
       x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3); rerender(r);
       focusFirst('enc.killer.0.fix', 'enc.file'); Proto.router.announce('Note now says #' + chartTooth + ', matching the chart'); return;
