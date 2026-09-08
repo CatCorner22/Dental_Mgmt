@@ -1,9 +1,12 @@
 /* Hash router: #/signin | #/<persona>/<route>[/<id>][?k=v&...] */
 (function () {
   const Proto = (window.Proto = window.Proto || {});
-  const PERSONAS = ['frontdesk', 'biller', 'hygienist', 'dentist', 'surgeon', 'owner', 'compliance', 'temp'];
-  const HOME = { frontdesk: 'board', biller: 'money', hygienist: 'chairs', dentist: 'exams', surgeon: 'exams', owner: 'close', compliance: 'risk', temp: 'board' };
-  const LABEL = { frontdesk: 'Front-desk coordinator', biller: 'Office manager / biller', hygienist: 'Hygienist', dentist: 'Dentist', surgeon: 'Oral surgeon', owner: 'Owner', compliance: 'Compliance lead', temp: 'Temp (day pass)' };
+  // Every persona the seed maps to a user (seed.personaUser) must be routable: the PIN pad switches the author
+  // by setting `#/<persona>/...`, and a persona the router does not know falls through to sign-in after the
+  // session row has already been written.
+  const PERSONAS = ['frontdesk', 'biller', 'hygienist', 'assistant', 'dentist', 'surgeon', 'owner', 'compliance', 'temp'];
+  const HOME = { frontdesk: 'board', biller: 'money', hygienist: 'chairs', assistant: 'board', dentist: 'exams', surgeon: 'exams', owner: 'close', compliance: 'risk', temp: 'board' };
+  const LABEL = { frontdesk: 'Front-desk coordinator', biller: 'Office manager / biller', hygienist: 'Hygienist', assistant: 'Dental assistant', dentist: 'Dentist', surgeon: 'Oral surgeon', owner: 'Owner', compliance: 'Compliance lead', temp: 'Temp (day pass)' };
 
   function parse(hash) {
     const h = (hash || location.hash || '#/signin').replace(/^#/, '');

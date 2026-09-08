@@ -35,7 +35,6 @@
   const cap = (s) => String(s == null ? '' : s).charAt(0).toUpperCase() + String(s == null ? '' : s).slice(1);
   const orList = (a) => (a.length <= 1 ? a[0] || '' : a.slice(0, -1).join(', ') + ' or ' + a[a.length - 1]);
   // Date arithmetic on the stored parts, never through a UTC round trip that can slide a day.
-  const addDays = (iso, n) => { const p = String(iso == null ? '' : iso).split('-'); if (p.length !== 3) return null; const d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]) + n); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
   // A monthly task falls on the same day each month: after that day the next one is next month's.
   const monthlyDue = (today, dom) => { const p = String(today == null ? '' : today).split('-'); if (p.length !== 3) return null; let y = Number(p[0]), m = Number(p[1]); if (Number(p[2]) > dom) { m += 1; if (m > 12) { m = 1; y += 1; } } return y + '-' + String(m).padStart(2, '0') + '-' + String(dom).padStart(2, '0'); };
 
@@ -206,6 +205,8 @@
           // The store sets the next review date when a decision is kept or tightened; printing a second
           // computation of it here is how the sentence and the row underneath it come to disagree.
           const next = shortDate(res.reviewBy);
+          // Read the threshold after the store has moved it: the sentence names the value now in force.
+          const threshold = money(Proto.store.get().tenant.dualReleaseThresholdCents);
           st.decisionResult[d.id] = action === 'keep' ? 'Kept 90 more days; review on ' + next + '.'
             : action === 'tighten' ? 'Tightened: write-off threshold back to ' + money(res.thresholdCents) + '; review on ' + next + '.'
               : 'Retired: write-off threshold back to ' + money(res.thresholdCents) + '. Nothing auto-renews.';
