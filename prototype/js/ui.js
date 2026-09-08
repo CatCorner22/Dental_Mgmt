@@ -50,30 +50,44 @@
   /* Refusal: one verb line, one control, a Why disclosure, an aria-live announcement of the verb alone. */
   let refusalSeq = 0;
   const standing = new Map();                           // gate key -> the nodes built for it
-  function resetGates() { standing.clear(); }
+  const shadowed = [];                                  // newest last: the gate that took the selectors, and the nodes it took them from
+  function resetGates() { standing.clear(); shadowed.length = 0; }
+  const LIVE_SELECTORS = '[data-testid^="refusal."]:not([data-testid^="refusal.prior."])';
+  /* The newest gate on the page owns the contract selectors. When it leaves (a dialog closes, a slot is
+     cleared) the gate it shadowed gets them back, so a standing gate is never left renamed for good. */
+  function restoreGates() {
+    while (shadowed.length && !shadowed[shadowed.length - 1].shadow.isConnected) {
+      for (const p of shadowed.pop().priors) if (p.node.isConnected) p.node.setAttribute('data-testid', p.testid);
+    }
+    if (!shadowed.length) watcher.disconnect();
+  }
+  const watcher = new MutationObserver(restoreGates);   // runs while a gate is shadowed, so the hand-back needs no call from the screen
   function refusal(v) {
-    // v: {code, verb, control, onControl, why, severity}
+    // v: {code, verb, control, onControl, why, severity, slot}
     const id = 'ref-' + (++refusalSeq);
     const sev = v.severity || 'required';
     // A screen that re-renders rebuilds the gate it is already showing. A gate is logged and announced once
-    // per raise: while a node for the same gate still stands on the page the new node is a rerender of it;
+    // per raise: while a node for the same gate still stands in the same slot the new node is a rerender of it;
     // once every earlier node has left the page (cleared, unmounted, dialog closed) the next one is a new raise.
-    // Gates with different keys never share the slot, so two gates on one page do not re-log each other.
-    const key = v.code + '|' + v.verb + '|' + (v.control || '');
+    // The slot is the card, row or dialog the gate stands in, so the same gate on two cards logs twice.
+    const key = v.code + '|' + v.verb + '|' + (v.control || '') + '|' + (v.slot || '');
     const nodes = (standing.get(key) || []).filter((n) => n.isConnected);
     if (!nodes.length) {
       Proto.events.refusal(v.code, v.verb, v.control);
       Proto.router.announce(v.verb);                    // one verb line: the control label is not read as a second sentence
     }
     // Two gates can stand on one page (a dialog over a screen). The contract selectors name the live one,
-    // so any gate already on the page gives them up rather than shadowing it.
-    for (const prior of document.querySelectorAll('[data-testid^="refusal."]')) prior.setAttribute('data-testid', prior.getAttribute('data-testid').replace('refusal.', 'refusal.prior.'));
+    // so any gate already on the page lends them to it and takes them back when it leaves.
+    restoreGates();
+    const priors = [...document.querySelectorAll(LIVE_SELECTORS)].map((node) => ({ node, testid: node.getAttribute('data-testid') }));
+    for (const p of priors) p.node.setAttribute('data-testid', p.testid.replace('refusal.', 'refusal.prior.'));
     const el = h('div', { class: 'refusal ' + sev, role: 'group', 'aria-labelledby': id, dataset: { code: v.code, severity: sev } },
       h('span', { class: 'glyph', 'aria-hidden': 'true', text: GLYPH[sev] || '▲' }),   // severity three ways: glyph, word, fill
       h('span', { class: 'sevword sr-only', text: sev === 'stop' ? 'Stop' : sev === 'required' ? 'Required' : sev === 'review' ? 'Review' : sev === 'clear' ? 'Clear' : 'Note' }),
       h('span', { class: 'verb', id, testid: 'refusal.verb', text: v.verb }),
       v.control ? btn(v.control, { kind: v.controlKind || 'reversible', testid: 'refusal.control', onClick: v.onControl, describedby: id }) : null,
       v.why ? h('details', null, h('summary', { testid: 'refusal.why' }, 'Why'), h('div', { class: 'whytext', text: v.why })) : null);
+    if (priors.length) { shadowed.push({ shadow: el, priors }); watcher.observe(document.body, { childList: true, subtree: true }); }
     nodes.push(el); standing.set(key, nodes);
     return el;
   }

@@ -76,9 +76,10 @@
   }
   /* Wrap a store refusal so its DOM node is built (and logged) once and reused across re-renders. The
      component logs and announces the gate; this screen never announces one itself. */
-  function gateFor(res, onControl) {
+  // `slot` names the card, queue row or strip the gate stands in, so the same gate raised on two cards logs twice.
+  function gateFor(res, slot, onControl) {
     const g = { code: res.code, verb: res.verb, control: res.control, why: res.why };
-    g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, severity: g.code === 'outage' ? 'stop' : 'required', onControl: () => { if (g.code === 'outage') Proto.router.announce(SUPPORT); if (onControl) onControl(g); } });
+    g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, severity: g.code === 'outage' ? 'stop' : 'required', slot, onControl: () => { if (g.code === 'outage') Proto.router.announce(SUPPORT); if (onControl) onControl(g); } });
     return g;
   }
   const focusGate = () => { const c = document.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); };
@@ -87,14 +88,14 @@
   function doArrive(id, r) {
     const a = Proto.store.appt(id); if (!a || !ARRIVABLE.includes(a.status)) return;
     const res = Proto.store.arrive(id);
-    if (!res.ok) { gates[id] = gateFor(res); render(r); const b = document.querySelector('[data-testid="board.card.' + id + '.arrive"]'); if (b) b.focus(); return; }
+    if (!res.ok) { gates[id] = gateFor(res, 'board.card.' + id); render(r); const b = document.querySelector('[data-testid="board.card.' + id + '.arrive"]'); if (b) b.focus(); return; }
     delete gates[id];
     after(r, displayName(Proto.store.patient(a.patientId).name, P().privacy) + ' arrived. Seat is the next step on the same card.', 'board.card.' + id + '.seat');
   }
   function doSeat(id, r) {
     const a = Proto.store.appt(id); if (!a || a.status !== 'arrived') return;
     const res = Proto.store.seat(id);
-    if (!res.ok) { gates[id] = gateFor(res); render(r); const b = document.querySelector('[data-testid="board.card.' + id + '.seat"]'); if (b) b.focus(); return; }
+    if (!res.ok) { gates[id] = gateFor(res, 'board.card.' + id); render(r); const b = document.querySelector('[data-testid="board.card.' + id + '.seat"]'); if (b) b.focus(); return; }
     delete gates[id];
     // Focus stays on the card that was worked, not on the chair strip at the top of the page.
     after(r, 'Seated in chair ' + a.op + '. The chair strip now shows ' + provInitials(Proto.store.user(a.providerId)) + '.', 'board.card.' + id + '.expand');
@@ -102,14 +103,14 @@
   function doReverify(id, r) {
     const a = Proto.store.appt(id); if (!a) return;
     const res = Proto.store.reverify(id);
-    if (!res.ok) { gates[id] = gateFor(res); render(r); focusGate(); return; }
+    if (!res.ok) { gates[id] = gateFor(res, 'board.card.' + id); render(r); focusGate(); return; }
     after(r, 'Eligibility re-run: active, deductible met.', 'board.card.' + id + '.expand');
   }
   /* The read-only Board offers no live action: Checkout is held here rather than routing to a screen that
      would refuse on arrival. */
   function goCheckout(id, r, where) {
     if (P().outage) {
-      const g = gateFor(outageRefusal('checkout is read-only'));
+      const g = gateFor(outageRefusal('checkout is read-only'), (where === 'queue' ? 'board.queue.' : 'board.card.') + id);
       if (where === 'queue') rowGates[id] = g; else gates[id] = g;
       render(r); focusGate(); return;
     }
@@ -120,13 +121,13 @@
     const res = Proto.store.pingChair(id);
     if (!res.ok) {
       // The gate's one control opens the chart it names.
-      pings[id] = { code: res.code, node: refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why || 'One ping per encounter per 15 minutes. The chair device saw the first one; a second would only add noise.', severity: res.code === 'outage' ? 'stop' : 'required', onControl: () => { if (res.code === 'outage') Proto.router.announce(SUPPORT); else Proto.router.go(r.persona, 'encounter', a.encounterId); } }) };
+      pings[id] = { code: res.code, node: refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why || 'One ping per encounter per 15 minutes. The chair device saw the first one; a second would only add noise.', severity: res.code === 'outage' ? 'stop' : 'required', slot: 'board.ping.' + id, onControl: () => { if (res.code === 'outage') Proto.router.announce(SUPPORT); else Proto.router.go(r.persona, 'encounter', a.encounterId); } }) };
       render(r); focusGate(); return;
     }
     pings[id] = { text: 'Pinged chair ' + a.op + ' · ' + clock12(S().clock.time) + ' · one-to-one, not broadcast' };
     after(r, 'Pinged chair ' + a.op, 'board.queue.row.' + id + '.ping');
   }
-  function holdStrip(r) { stripGate = stripGate || gateFor(outageRefusal('readiness is read-only')); render(r); focusGate(); }
+  function holdStrip(r) { stripGate = stripGate || gateFor(outageRefusal('readiness is read-only'), 'board.readiness'); render(r); focusGate(); }
 
   // ---- Readiness strip ---------------------------------------------------------------------
   /* Every row's id segment is the seed id of the thing the row is about (CONTRACTS §4). */
