@@ -7,7 +7,7 @@
    that rides with the request, two taps). No 'Approve all'. Refusals render through the shared component;
    the store's requester ≠ approver check (blocked_same_person) is honored before the PIN pad opens. */
 (function () {
-  const Proto = window.Proto; const { h, btn, chip, refusal, money, time, initials, pageHead } = Proto.ui;
+  const Proto = window.Proto; const { h, btn, chip, refusal, money, time, initials, displayName, pageHead } = Proto.ui;
   Proto.screens = Proto.screens || {};
 
   const S = () => Proto.store.get();
@@ -28,7 +28,11 @@
   const byUser = {};
   function st() {
     const uid = Proto.store.currentUser().id;
-    return (byUser[uid] = byUser[uid] || { refusal: {}, declineOpen: {}, declineReason: {}, declineHint: {}, done: {}, nameShown: {}, simNote: null });
+    const s = (byUser[uid] = byUser[uid] || { refusal: {}, declineOpen: {}, declineReason: {}, declineHint: {}, done: {}, nameShown: {}, privacy: null, simNote: null });
+    // A reveal belongs to the glass it was made on: when privacy flips, every shown name goes back behind the tap (B8).
+    const privacy = !!window.__proto.privacy;
+    if (s.privacy !== privacy) { s.nameShown = {}; s.privacy = privacy; }
+    return s;
   }
 
   /* ---- helpers ---- */
@@ -175,10 +179,17 @@
         h('div', { class: 'ph-amount', text: money(a.amountCents) }),
         h('div', { class: 'small muted', text: (REASON_LABEL[a.reason] || a.reason) + ' write-off · ' + a.id })),
       chip('review', 'Waiting')));
+    // Privacy glass never prints a full name, so it offers no tap to print one; the reveal is a logged disclosure.
+    const privacy = !!window.__proto.privacy;
     const nameRow = h('div', { class: 'ph-kv' }, h('span', { class: 'ph-k', text: 'Patient' }),
-      s.nameShown[a.id]
-        ? h('span', { class: 'ph-v', text: p.name + ' · ' + p.mrn })
-        : h('span', { class: 'ph-v' }, initials(p.name) + ' · ' + p.mrn + ' ', btn('Show name', { testid: 'phone.request.' + a.id + '.name', kind: 'quiet', class: 'compact', ariaLabel: 'Show the patient’s full name (this tap is logged)', onClick: () => { st().nameShown[a.id] = true; rerender(r, 'phone.request.' + a.id + '.approve'); } })));
+      privacy ? h('span', { class: 'ph-v', text: displayName(p.name, true) + ' · ' + p.mrn })
+        : s.nameShown[a.id]
+          ? h('span', { class: 'ph-v', text: displayName(p.name, false) + ' · ' + p.mrn })
+          : h('span', { class: 'ph-v' }, initials(p.name) + ' · ' + p.mrn + ' ', btn('Show name', { testid: 'phone.request.' + a.id + '.name', kind: 'quiet', class: 'compact', ariaLabel: 'Show the patient’s full name (this tap is logged)', onClick: () => {
+            const out = Proto.store.discloseName(a.patientId, a.id);
+            if (!out.ok) { st().refusal[a.id] = gate(r, a, out); rerender(r, 'refusal.control'); return; }
+            st().nameShown[a.id] = true; rerender(r, 'phone.request.' + a.id + '.approve');
+          } })));
     card.append(h('div', { class: 'ph-grid' },
       nameRow,
       kv('Requested by', a.requestedBy + (mine ? ' (you)' : '')),
