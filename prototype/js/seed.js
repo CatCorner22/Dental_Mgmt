@@ -170,6 +170,8 @@
     L({ kind: 'charge', patientId: 'p-303', amountCents: 21700, effective: '2026-07-14', posted: '2026-07-14', actor: 'Sam Dawson', actorKind: 'user', locationId: 'loc-1', cdt: 'd4341', tooth: null });
     L({ kind: 'insurance_payment', patientId: 'p-303', amountCents: -15600, effective: '2026-08-02', posted: '2026-08-02', actor: 'pg-boss worker', actorKind: 'worker', locationId: 'loc-1', payer: 'Delta Dental', gl: 'ins_ar_primary' });
     L({ kind: 'insurance_payment', patientId: 'p-303', amountCents: -6100, effective: '2026-08-20', posted: '2026-08-20', actor: 'pg-boss worker', actorKind: 'worker', locationId: 'loc-1', payer: 'MetLife', gl: 'ins_ar_secondary' });
+    // The Filed-later visit (a-1050): the $95 taken at the window is a ledger row; the credit and the allocation intent both name it.
+    ledger.push({ id: 'le-window-9010', kind: 'patient_payment', patientId: 'p-307', amountCents: -9500, effective: TODAY, posted: TODAY, actor: 'Priya Raman', actorKind: 'user', locationId: 'loc-1', tender: 'card', gl: 'unapplied_credit' });
 
     // Day closes, deposits, bank, reconciliation for yesterday
     const dayCloses = [
@@ -224,7 +226,7 @@
       return { id: sid, patientId: pid, amountCents: owed, reason: 'window_deferred', createdBy: 'Priya Raman', created: YESTERDAY };
     };
     const statementsDue = [statementFor('sd-1', 'p-316', 8400), statementFor('sd-2', 'p-319', 21200)];
-    const credits = [{ id: 'cr-1', patientId: 'p-307', amountCents: -9500, reason: 'Checked out unfiled: payment waiting for charges (a-1050)', intents: 'pending charges on enc-9010' }];
+    const credits = [{ id: 'cr-1', patientId: 'p-307', amountCents: -9500, reason: 'Checked out unfiled: payment waiting for charges (a-1050)', intents: 'pending charges on enc-9010', fromLedger: true, paymentId: 'le-window-9010' }];
 
     // Roles and SoD rules
     const roleTemplates = [
