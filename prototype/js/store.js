@@ -4,7 +4,7 @@
   const Proto = (window.Proto = window.Proto || {});
   let S = null;
   // Every prefix write() uses starts here; seeded tables (credits cr-1, ERA lines el-1..41) start past their seed ids.
-  const ID_START = { le: 5000, cd: 1, ar: 1, pe: 2, ce: 1, pr: 500, tag: 2, nf: 1, dc: 1, cl: 100, ap: 1, ue: 1, dp: 1, dec: 2, msg: 1, ai: 1, ae: 1, el: 100, al: 1, sd: 3, pp: 1, de: 1, cr: 2, cev: 1, pl: 1, dis: 1, rm: 1, dep: 1, ses: 1 };
+  const ID_START = { le: 5000, cd: 1, ar: 1, pe: 2, ce: 1, pr: 500, tag: 2, nf: 1, dc: 1, cl: 100, ap: 1, ue: 1, dp: 1, dec: 2, msg: 1, ai: 1, ae: 1, el: 100, al: 1, alog: 1, sd: 3, pp: 1, de: 1, cr: 2, cev: 1, pl: 1, dis: 1, rm: 1, dep: 1, ses: 1 };
   let nextId = Object.assign({}, ID_START);
   const id = (p) => { if (!Number.isFinite(nextId[p])) nextId[p] = 1; return p + '-' + (nextId[p]++); };
 
@@ -212,7 +212,7 @@
     // screen has still to grow, and a gate on a word the product does not use yet would guard nothing.
     const why = String(reason || '').trim();
     r.status = decision; r.decidedBy = approver.name; r.decidedAt = S.clock.time; if (why) r.decisionReason = why; touch('approvals', r.id);
-    write('approvalsLog', { id: id('al'), requestId: reqId, decision, by: approver.name, reason: why || null });
+    write('approvalsLog', { id: id('alog'), requestId: reqId, decision, by: approver.name, reason: why || null });
     if (decision === 'approved') {
       const a = appt(r.appointmentId);
       write('ledger', { id: id('le'), kind: 'write_off', patientId: r.patientId, amountCents: -r.amountCents, effective: S.tenant.today, posted: S.tenant.today, actor: r.requestedBy, actorKind: 'user', locationId: a ? a.locationId : 'loc-1', reason: r.reason, approvalRequestId: reqId, secondApprover: approver.name });
