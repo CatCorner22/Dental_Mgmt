@@ -71,7 +71,8 @@
       h('p', { class: 'small muted', text: P.device === 'desk' ? 'This desk is not shared, so switching signs you out and in as the other person.' : 'Their session opens on this page; yours is revoked and local drafts are wiped after autosave.' }));
     let close;
     const refusalSlot = h('div', { class: 'pin-refusal' });
-    function showRefusal(v) { refusalSlot.replaceChildren(Proto.ui.refusal(v)); }
+    // The slot is emptied before the next gate is built, so each wrong PIN is a fresh raise: one refusal event, one announcement.
+    function showRefusal(v) { refusalSlot.replaceChildren(); refusalSlot.append(Proto.ui.refusal(v)); }
     function submit() {
       const who = S.users.find((u) => u.pin === digits);
       digits = ''; dots.textContent = '';
@@ -102,7 +103,13 @@
       const t = ev.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
       if (/^[0-9]$/.test(ev.key)) { ev.preventDefault(); if (digits.length < 6) { digits += ev.key; dots.textContent = '•'.repeat(digits.length); } }
       else if (ev.key === 'Backspace') { ev.preventDefault(); digits = digits.slice(0, -1); dots.textContent = '•'.repeat(digits.length); }
-      else if (ev.key === 'Enter' && !(t && t.getAttribute && t.getAttribute('data-testid') === 'pin.cancel')) { ev.preventDefault(); submit(); }
+      else if (ev.key === 'Enter') {
+        // Enter submits from a digit key or from nowhere in particular; on any other control in the pad
+        // (Go, Backspace, Cancel, a gate's control, a Why disclosure) it stays the control's own activation.
+        const tid = (t && t.getAttribute && t.getAttribute('data-testid')) || '';
+        const interactive = t && /^(BUTTON|SUMMARY|A)$/.test(t.tagName || '');
+        if (/^pin\.key\./.test(tid) || !interactive) { ev.preventDefault(); submit(); }
+      }
     };
     document.addEventListener('keydown', onPadKey, true);
     // The dialog owns the cleanup: Escape, the backdrop and a route change close it as surely as Cancel or Go.
@@ -145,4 +152,7 @@
   document.addEventListener('keydown', (ev) => {
     if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'k' || ev.key === 'K')) { const r = Proto.router.current(); if (r.persona) { ev.preventDefault(); Proto.screens.palette.open(r); } }
   });
+  // The skip link moves the keyboard, not the route: the hash is the router's, so the link never writes it.
+  const skip = document.querySelector('[data-testid="skip.canvas"]');
+  if (skip) skip.addEventListener('click', (ev) => { ev.preventDefault(); const c = canvas(); if (c) { c.focus(); c.scrollIntoView({ block: 'start' }); } });
 })();
