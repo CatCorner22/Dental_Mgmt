@@ -105,9 +105,8 @@
       else if (ev.key === 'Enter' && !(t && t.getAttribute && t.getAttribute('data-testid') === 'pin.cancel')) { ev.preventDefault(); submit(); }
     };
     document.addEventListener('keydown', onPadKey, true);
-    close = Proto.ui.dialog(h('div', { class: 'stack' }, h('h2', { text: 'Who is charting?' }), status, refusalSlot, dots, pad, policy, btn('Cancel', { testid: 'pin.cancel', onClick: () => close() })), { label: 'Switch author', focus: '[data-testid="pin.key.1"]' });
-    const closeDialog = close;
-    close = () => { document.removeEventListener('keydown', onPadKey, true); closeDialog(); };
+    // The dialog owns the cleanup: Escape, the backdrop and a route change close it as surely as Cancel or Go.
+    close = Proto.ui.dialog(h('div', { class: 'stack' }, h('h2', { text: 'Who is charting?' }), status, refusalSlot, dots, pad, policy, btn('Cancel', { testid: 'pin.cancel', onClick: () => close() })), { label: 'Switch author', focus: '[data-testid="pin.key.1"]', onClose: () => document.removeEventListener('keydown', onPadKey, true) });
   }
 
   function renderRail1(r) {

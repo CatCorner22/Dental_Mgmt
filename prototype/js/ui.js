@@ -49,18 +49,19 @@
 
   /* Refusal: one verb line, one control, a Why disclosure, an aria-live announcement of the verb alone. */
   let refusalSeq = 0;
-  let lastGate = null;                                  // the gate this screen has already logged and announced
-  function resetGates() { lastGate = null; }
+  const standing = new Map();                           // gate key -> the nodes built for it
+  function resetGates() { standing.clear(); }
   function refusal(v) {
     // v: {code, verb, control, onControl, why, severity}
     const id = 'ref-' + (++refusalSeq);
     const sev = v.severity || 'required';
-    // A screen that re-renders rebuilds the gate it is already showing. Logging and announcing on every
-    // construction turned one visible gate into six refusal events and read the verb aloud again each time,
-    // so the event log counted gates that were never raised. The same gate is logged once until it changes.
+    // A screen that re-renders rebuilds the gate it is already showing. A gate is logged and announced once
+    // per raise: while a node for the same gate still stands on the page the new node is a rerender of it;
+    // once every earlier node has left the page (cleared, unmounted, dialog closed) the next one is a new raise.
+    // Gates with different keys never share the slot, so two gates on one page do not re-log each other.
     const key = v.code + '|' + v.verb + '|' + (v.control || '');
-    if (lastGate !== key) {
-      lastGate = key;
+    const nodes = (standing.get(key) || []).filter((n) => n.isConnected);
+    if (!nodes.length) {
       Proto.events.refusal(v.code, v.verb, v.control);
       Proto.router.announce(v.verb);                    // one verb line: the control label is not read as a second sentence
     }
@@ -73,6 +74,7 @@
       h('span', { class: 'verb', id, testid: 'refusal.verb', text: v.verb }),
       v.control ? btn(v.control, { kind: v.controlKind || 'reversible', testid: 'refusal.control', onClick: v.onControl, describedby: id }) : null,
       v.why ? h('details', null, h('summary', { testid: 'refusal.why' }, 'Why'), h('div', { class: 'whytext', text: v.why })) : null);
+    nodes.push(el); standing.set(key, nodes);
     return el;
   }
 
@@ -104,7 +106,9 @@
   function initials(name) { const parts = String(name == null ? '' : name).split(/\s+/).filter((p) => p && !HONORIFIC.test(p)); return parts.map((p) => p[0]).join('').slice(0, 2).toUpperCase() || '—'; }
   function displayName(name, privacy) { return privacy ? initials(name) : (name == null ? '—' : name); }
 
-  /* Dialog: focus trapped, Escape closes, returns close() */
+  /* Dialog: focus trapped, Escape closes, returns close(). Dialogs stack: only the topmost one owns the keyboard,
+     so one Escape closes one dialog. opts.onClose runs on every close path (Escape, backdrop, hashchange, close()). */
+  const dialogStack = [];
   function dialog(content, opts) {
     opts = opts || {};
     const root = document.getElementById('dialogs');
@@ -112,9 +116,10 @@
     const overlay = h('div', { class: 'overlay' }, box);
     const prev = document.activeElement;
     let closed = false;
-    function close() { if (closed) return; closed = true; overlay.remove(); if (prev && prev.focus) prev.focus(); document.removeEventListener('keydown', onKey, true); window.removeEventListener('hashchange', close); if (opts.onClose) opts.onClose(); }
+    function close() { if (closed) return; closed = true; overlay.remove(); const i = dialogStack.indexOf(overlay); if (i >= 0) dialogStack.splice(i, 1); if (prev && prev.focus) prev.focus(); document.removeEventListener('keydown', onKey, true); window.removeEventListener('hashchange', close); if (opts.onClose) opts.onClose(); }
     window.addEventListener('hashchange', close); // a dialog never outlives the route it opened on
     function onKey(ev) {
+      if (dialogStack[dialogStack.length - 1] !== overlay) return;
       if (ev.key === 'Escape') { ev.stopPropagation(); close(); }
       if (ev.key === 'Tab') {
         const f = [...box.querySelectorAll('button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"]), summary')];
@@ -128,7 +133,7 @@
     // The backdrop closes the dialog, so it is a control and carries an id like every other control.
     overlay.setAttribute('data-testid', 'dialog.backdrop');
     overlay.addEventListener('click', (ev) => { if (ev.target === overlay && !opts.modal) close(); });
-    root.append(overlay);
+    root.append(overlay); dialogStack.push(overlay);
     const f = box.querySelector(opts.focus || 'input, button, [tabindex]');
     if (f) f.focus();
     return close;
