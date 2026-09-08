@@ -157,6 +157,20 @@ Everything the pre-registered section above says it cannot: real usability, lear
 - **The regression suite is only as good as its probes.** Six of them were found measuring nothing. The guard added here catches two of those six shapes mechanically; the other four were caught by human-style judgement and could recur.
 - **A fix verified by the check written for it is not independently verified.** The probe and the fix were written against the same understanding of the defect. Where that understanding was wrong, both are wrong together, and the check will report clean.
 
+### A static read after the harnesses were green (2026-09-08)
+
+The paragraph above is not hypothetical. With all 294 checks reporting clean, a read of `prototype/js` against the contract and the seed found five defects, each confirmed live in the browser before it was fixed, and none of which any check had been asked to look for:
+
+| Defect | Where | How it hid |
+|---|---|---|
+| Tighten and Retire on a decision due for review wrote the `controlDecisions` row and moved the threshold, then threw `T is not defined` | `dailyclose.js decisions()` | An earlier fix removed the `const T` with the date helper it served; Keep never read `T`, and Keep was the only action a check pressed |
+| A valid PIN for the assistant (Jo Ramirez) wrote the session row and then landed on sign-in with no author chip | `router.js PERSONAS`, `shell.js openPinPad()` | `seed.personaUser` knew the persona; the router did not; no check typed 3333 |
+| The owner's Andon strip printed "1 approval waiting" beside an empty sentence | `shell.js renderAndon()` | It read `frozenSentence`, a field no approvals row carries since the sentence moved to `approvalSentence`; the Andon checks compared counts, not sentences |
+| After Post wrote the write-off request, the held gate still offered "Request approval": pressing it wrote nothing | `moneydesk.js postWriteoff()` | The checks measured that the request was written and that the gate rendered; none pressed the control and looked for a write |
+| `approvalsLog` minted ids from the `al` counter that `allocations` use, so the log row was `al-1` and the first allocation `al-2` | `store.js decideApproval()` | No check read an id's prefix as the name of its table |
+
+Each has a check in `scripts/beta/audit/misc-2.mjs`, written first and shown to report YES on the tree before the fix and no after it. The harness now carries 299 checks. The three harnesses also gained a `package.json`, because they had been looking for Playwright at the paths of the machine they were written on and writing their reports to a scratch directory that exists nowhere else: on any other checkout, `reproduce.mjs` ran all 294 checks and then threw on the final write.
+
 ### Coverage
 
 | Measure | Count |

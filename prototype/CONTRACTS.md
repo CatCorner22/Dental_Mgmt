@@ -10,13 +10,14 @@ These contracts bind the prototype, the stability checks (`scripts/proto-check.m
 
 ## 2. Routes
 
-`#/signin` and `#/<persona>/<route>[/<id>]`. Personas: `frontdesk`, `biller`, `hygienist`, `dentist`, `surgeon`, `owner`, `compliance`, `temp`. Persona homes (where sign-in lands):
+`#/signin` and `#/<persona>/<route>[/<id>]`. Personas: `frontdesk`, `biller`, `hygienist`, `assistant`, `dentist`, `surgeon`, `owner`, `compliance`, `temp`. Persona homes (where sign-in lands):
 
 | Persona | Home route | Screen |
 |---|---|---|
 | frontdesk | `board` | Board |
 | biller | `money` | Money Desk |
 | hygienist | `chairs` | Chairs (mine) |
+| assistant | `board` | Board (charts as an assistant; the dentist files) |
 | dentist, surgeon | `exams` | Exams to sign |
 | owner | `close` | Daily Close and Controls |
 | compliance | `risk` | Practice risk |

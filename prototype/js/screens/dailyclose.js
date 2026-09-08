@@ -202,9 +202,11 @@
           // The store sets the next review date when a decision is kept or tightened; printing a second
           // computation of it here is how the sentence and the row underneath it come to disagree.
           const next = shortDate(res.reviewBy);
+          // Read the threshold after the store has moved it: the sentence names the value now in force.
+          const threshold = money(Proto.store.get().tenant.dualReleaseThresholdCents);
           st.decisionResult[d.id] = action === 'keep' ? 'Kept 90 more days; review on ' + next + '.'
-            : action === 'tighten' ? 'Tightened: write-off threshold back to ' + money(T.dualReleaseThresholdCents) + '; review on ' + next + '.'
-              : 'Retired: write-off threshold back to ' + money(T.dualReleaseThresholdCents) + '. Nothing auto-renews.';
+            : action === 'tighten' ? 'Tightened: write-off threshold back to ' + threshold + '; review on ' + next + '.'
+              : 'Retired: write-off threshold back to ' + threshold + '. Nothing auto-renews.';
           say(action === 'keep' ? 'Kept 90 more days' : action === 'tighten' ? 'Tightened the write-off threshold' : 'Retired the raised threshold');
         }
         rerender(r, 'close.closeday');

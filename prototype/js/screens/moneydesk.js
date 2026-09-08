@@ -17,7 +17,7 @@
   let tab = 'era'; // remembered across renders
   let lastRoute = null; let lastStore = null; let keysOn = false;
   let st = null; // module state; rebuilt on store reset
-  const fresh = () => ({ writeoffOpen: false, writeoffStr: '', writeoffReason: null, woRefusal: null, woHeldReq: null, woRequested: false, woPosted: false, appealFor: null, appealPacket: null, appealSent: null, denialRefusal: {}, previewFor: null, announced: '' });
+  const fresh = () => ({ writeoffOpen: false, writeoffStr: '', writeoffReason: null, woRefusal: null, woHeldReq: null, woPosted: false, appealFor: null, appealPacket: null, appealSent: null, denialRefusal: {}, previewFor: null, announced: '' });
 
   const priv = () => !!(window.__proto && window.__proto.privacy);
   const pname = (S, pid) => { const p = S.patients.find((x) => x.id === pid); return displayName(p ? p.name : pid, priv()); };
@@ -160,7 +160,10 @@
     if (res.ok) { st.woPosted = true; st.woRefusal = null; say('Posted the ' + money(amountCents) + ' write-off'); rerender(r, 'money.tab.' + tab); return; }
     if (res.held) {
       const S = Proto.store.get(); st.woHeldReq = S.approvals.find((x) => x.id === res.requestId) || null;
-      st.woRefusal = refusal({ code: res.code, verb: res.verb, control: res.control || 'Request approval', why: res.why, onControl: () => { st.woRequested = true; say('Requested approval from ' + ((st.woHeldReq && st.woHeldReq.eligible) || []).join(' or ')); rerender(r, 'money.writeoff.post'); } });
+      // The store wrote the request at Post (the Held button and its chip say so), so a control reading
+      // "Request approval" would promise a write that had already happened and then do nothing. The next
+      // step for the biller is to see the request where it waits: the Approvals tab.
+      st.woRefusal = refusal({ code: res.code, verb: res.verb, control: 'Open approvals', why: res.why, onControl: () => { tab = 'approvals'; rerender(r, 'money.tab.approvals'); } });
       rerender(r, 'refusal.control'); return;
     }
     st.woRefusal = refusal({ code: res.code, verb: res.verb, control: res.control || 'Back to ERA', why: res.why, onControl: () => { tab = 'era'; st.woRefusal = null; rerender(r, 'money.tab.era'); } });
