@@ -1,6 +1,8 @@
 // Swarm hunt, lens "perio": prototype/js/screens/perio.js and store.savePerio (store.js:237-263).
 // Default position is NOT reproduced: every check drives the grammar, measures the breach and carries the values.
 // Each check closes its browser context in `finally` so one failure cannot hang the run.
+// Verified (swarm/verified-perio): all 14 reproduced by an independent probe, and each flipped to "no" under a local
+// patch of the named defect (negative control), with the patch reverted before commit.
 
 export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => {
   const ENC = 'enc-9001'; const ROUTE = '#/hygienist/perio/enc-9001';
@@ -274,6 +276,8 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
     // refused pad entry lands the refusal above the top of the viewport while focus stays on the tapped pad key.
     // Negative control: when the gate is scrolled into view (or placed by the cursor), the refusal's verb has top >= 0 and
     // bottom <= innerHeight after the refused pad tap, and the check reports false.
+    // Verified: the breach is viewport-height bound. At 1024x900 and 1280x900 the same sequence leaves the verb at
+    // top ≈ 70 px (visible); at 768 px tall the cursor-bottom scroll pushes it to bottom −40 px.
     async 'S-perio-11'(b) {
       const { c, p } = await ctx(b, 1024, 768);
       try {
@@ -289,7 +293,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         });
         const st = await ST(p); const ev = await after(p, seq0);
         const reproduced = o.gateCode === 'depth_gt_15' && !!o.verb && o.verb.bottom <= 0 && !!o.control && o.control.bottom <= 0 && /perio\.pad\.key\./.test(o.focus) && st.gate === 'depth_gt_15';
-        rec('S-perio-11', 'On a 1024x768 operatory, 100 pad taps then pad 10+ and 7 refuse 17 mm with a depth_gt_15 gate whose verb and control both sit above the top of the viewport (bottom < 0) while focus stays on the pad key: the gloved operator sees no refusal', 'docs/13 feature 5; CONTRACTS §6 (the gate the actor must read is on screen); perio.js:375 scrollCursorIntoView runs last and :436 mounts the gate above the pad',
+        rec('S-perio-11', 'On a 1024x768 operatory (not at 900 px tall), 100 pad taps then pad 10+ and 7 refuse 17 mm with a depth_gt_15 gate whose verb and control both sit above the top of the viewport (bottom < 0) while focus stays on the pad key: the gloved operator sees no refusal', 'docs/13 feature 5; CONTRACTS §6 (the gate the actor must read is on screen); perio.js:375 scrollCursorIntoView runs last and :436 mounts the gate above the pad',
           reproduced, { geometry: o, stateGate: st.gate, lastKey: st.lastKey, events: ev, seqRange: range(ev, seq0) });
       } finally { await c.close(); }
     },
@@ -298,7 +302,9 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
     // are stored and summarised, an unknown licence prints "(undefined)" into the note, an empty sites object saves
     // a full-chart exam of 0 sites with no omission licence, and mode "bogus" is written as is.
     // Negative control: when savePerio refuses out-of-range depths, unknown licence codes, unknown modes and an empty
-    // chart (ok:false with a §6 code), none of the four rows is written and the check reports false.
+    // chart (ok:false with a §6 code), none of the four rows is written and the check reports false. The four breaches
+    // are OR-ed, so a partial fix (say, the depth range alone) keeps the check live for the ones still open; the
+    // `openBreaches` list in the detail names them.
     async 'S-perio-12'(b) {
       const { c, p } = await ctx(b);
       try {
@@ -317,12 +323,16 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
           return { depth99: slim(r1), noteAfterDepth99: note1, unknownLicence: slim(r2), noteAfterUnknownLicence: note2, emptySites: slim(r3), bogusMode: slim(r4), rowsWritten: rows };
         }, ENC);
         const ev = await after(p, seq0);
-        const reproduced = !!o.depth99 && o.depth99.ok === true && o.depth99.deepest === 99 && /deepest 99 mm/.test((o.noteAfterDepth99 || {}).perioSummary || '')
-          && !!o.unknownLicence && o.unknownLicence.ok === true && o.unknownLicence.licence === 'bogus' && /\(undefined\)/.test((o.noteAfterUnknownLicence || {}).perioSummary || '')
-          && !!o.emptySites && o.emptySites.ok === true && o.emptySites.probed === 0 && o.emptySites.kind === 'exam'
-          && !!o.bogusMode && o.bogusMode.ok === true && o.bogusMode.mode === 'bogus' && o.rowsWritten === 4;
-        rec('S-perio-12', 'savePerio writes whatever it is handed: depths 99, -4, NaN and "7" save with "deepest 99 mm" in the note, licence "bogus" saves and the note reads "1 site not probed (undefined)", an empty sites object saves a full-chart exam of 0 sites without the omission licence, and mode "bogus" is stored', 'A2, B2 (CHECKLIST); store.js:240-250 derive and write without validating depth range, licence code, mode or a non-empty chart (the only depth check is perio.js:116 at the screen)',
-          reproduced, { results: o, events: ev, seqRange: range(ev, seq0) });
+        const breaches = {
+          depthOutOfRange: !!o.depth99 && o.depth99.ok === true && o.depth99.deepest === 99 && /deepest 99 mm/.test((o.noteAfterDepth99 || {}).perioSummary || ''),
+          unknownLicence: !!o.unknownLicence && o.unknownLicence.ok === true && o.unknownLicence.licence === 'bogus' && /\(undefined\)/.test((o.noteAfterUnknownLicence || {}).perioSummary || ''),
+          emptyChart: !!o.emptySites && o.emptySites.ok === true && o.emptySites.probed === 0 && o.emptySites.kind === 'exam',
+          unknownMode: !!o.bogusMode && o.bogusMode.ok === true && o.bogusMode.mode === 'bogus',
+        };
+        const openBreaches = Object.keys(breaches).filter((k) => breaches[k]);
+        const reproduced = openBreaches.length > 0 && o.rowsWritten === openBreaches.length && ev.filter((e) => e.kind === 'write' && e.table === 'perioExams').length === openBreaches.length;
+        rec('S-perio-12', 'savePerio writes whatever it is handed: depths 99, -4, NaN and "7" save with "deepest 99 mm" in the note, licence "bogus" saves and the note reads "1 site not probed (undefined)", an empty sites object saves a full-chart exam of 0 sites without the omission licence, and mode "bogus" is stored', 'A2, A8, B2 (CHECKLIST); store.js:240-250 derive and write without validating depth range, licence code, mode or a non-empty chart (the only depth check is perio.js:116 at the screen; docs/13:155 places it "at the control", so the depth leg is a boundary gap, not a documented breach)',
+          reproduced, { openBreaches, results: o, events: ev, seqRange: range(ev, seq0) });
       } finally { await c.close(); }
     },
 
