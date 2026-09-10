@@ -52,7 +52,7 @@
   function allocate(pid) {
     const rows = S.ledger.filter((e) => e.patientId === pid).slice().sort((a, b) => String(a.effective).localeCompare(String(b.effective)) || String(a.id).localeCompare(String(b.id)));
     const charges = rows.filter((e) => e.kind === 'charge').map((ch) => ({ row: ch, open: ch.amountCents, applied: [], pending: 0, due: 0 }));
-    const claimFor = (ch) => S.claims.find((c) => c.patientId === pid && c.cdt === ch.cdt && ['submitted', 'pended'].includes(c.status));
+    const claimFor = (ch) => S.claims.find((c) => c.patientId === pid && c.cdt === ch.cdt && ['scrubbed', 'submitted', 'pended'].includes(c.status));
     const expected = (ch) => (Number.isFinite(ch.insuranceExpectedCents) ? ch.insuranceExpectedCents : null);
     // A credit that finds no open charge is still money on the account: it lands on the latest charge as an
     // over-payment, or, with no charge at all, in the unapplied pool. Dropping it read a $44 window payment
@@ -288,8 +288,13 @@
     const mode = (extras && extras.mode) || 'full';
     const codes = entries.filter(([, v]) => v && v.code != null).map(([, v]) => v.code);
     const prior = S.perioExams.filter((e) => e.encounterId === encId).pop();
-    const amends = (extras && extras.amending && prior) ? prior.id : null;
-    const exam = write('perioExams', { id: 'pe-' + nextId.pe++, patientId: enc.patientId, encounterId: encId, date: S.tenant.today, sites, probed, skipped, bleeding, deepest, sextantCodes: codes, licence: extras && extras.licence, mode, author: currentUser().name, amendsExamId: amends, kind: amends ? 'addendum' : 'exam' });
+    // Save is once only: a second Save on a saved chart is an addendum or nothing. The screen swapped the button
+    // for Amend, but two dispatches of one Save wrote two exams.
+    if (prior && !(extras && extras.amending)) return refuse('exam_sealed', 'Amend the saved exam with an addendum', 'Start an addendum', 'This visit already carries a saved exam. A saved exam is the record; a change is a dated addendum that links to it, never a second exam.');
+    const amends = prior ? prior.id : null;
+    // A licence explains skipped sites; with none skipped there is nothing for it to explain.
+    const licence = skipped > 0 ? extras.licence : null;
+    const exam = write('perioExams', { id: 'pe-' + nextId.pe++, patientId: enc.patientId, encounterId: encId, date: S.tenant.today, sites, probed, skipped, bleeding, deepest, sextantCodes: codes, licence, mode, author: currentUser().name, amendsExamId: amends, kind: amends ? 'addendum' : 'exam' });
     S.notes[encId] = S.notes[encId] || {};
     if (mode === 'screening') {
       const worst = codes.length ? Math.max(...codes.map((x) => Number(x) || 0)) : null;
@@ -297,9 +302,11 @@
       S.notes[encId].perioSummary = 'Perio screening: ' + codes.length + ' sextants scored (' + codes.join(', ') + ')' + (worst != null ? ', highest ' + worst + ' — ' + (MEAN[worst] || 'see chart') : '') + '.';
       if (worst != null && worst >= 3) S.notes[encId].srpEvidence = 'Screening code ' + worst + ' indicates a full six-point chart before periodontal therapy.';
     } else {
-      S.notes[encId].perioSummary = (amends ? 'Perio addendum to exam ' + amends + ' (' + currentUser().name + ', ' + S.tenant.today + '): ' : 'Perio: ') + probed + ' sites probed, deepest ' + deepest + ' mm, bleeding at ' + bleeding + (bleeding === 1 ? ' site' : ' sites') + (skipped ? ', ' + skipped + (skipped === 1 ? ' site' : ' sites') + ' not probed (' + LICENCE_WORDS[extras.licence] + ')' : '') + '.';
+      // The prior exam is named by its date and author, never by its row id: the note is a clinical record.
+      S.notes[encId].perioSummary = (amends ? 'Perio addendum to the ' + Proto.ui.longDate(prior.date) + ' exam (' + currentUser().name + ', ' + Proto.ui.longDate(S.tenant.today) + '): ' : 'Perio: ') + probed + ' sites probed, deepest ' + deepest + ' mm, bleeding at ' + bleeding + (bleeding === 1 ? ' site' : ' sites') + (skipped ? ', ' + skipped + (skipped === 1 ? ' site' : ' sites') + ' not probed (' + LICENCE_WORDS[licence] + ')' : '') + '.';
     }
-    if (deepest >= 5) S.notes[encId].srpEvidence = 'SRP evidence: ' + entries.filter(([, v]) => v && v.depth >= 5).length + ' sites at or above 5 mm.';
+    if (deepest >= 5) { const deep = entries.filter(([, v]) => v && v.depth >= 5).length; S.notes[encId].srpEvidence = 'SRP evidence: ' + deep + (deep === 1 ? ' site' : ' sites') + ' at or above 5 mm.'; }
+    touch('notes', encId);
     retireChip('perio'); retireChip('save');
     return { ok: true, exam };
   }
@@ -309,31 +316,45 @@
   // Encounter (flow 3)
   // Services that belong to the visit, not to a tooth.
   const WHOLE_PATIENT = ['d0120', 'd0140', 'd0274', 'd1110', 'd9230', 'd9243'];
+  const wholePatient = (cdtCode) => WHOLE_PATIENT.includes(cdtCode);
+  const liveEvents = (encId) => S.chartEvents.filter((c) => c.encounterId === encId && !c.reversed && c.kind !== 'reversal');
+  const sameSurfaces = (a, b) => (a || []).slice().sort().join('') === (b || []).slice().sort().join('');
   function chartPaint(encId, tooth, surfaces, cdtCode, temporality) {
     const enc = encounter(encId); if (!enc) return notFound('encounter');
     const off = offline('Wait for the server — charting is paused'); if (off) return off;
     if (!S.cdt[cdtCode]) return refuse('licence_scope', 'Choose a procedure from the list', 'Open the procedure list', 'Only codes on the practice fee schedule can be charted; an unknown code would write a procedure with no fee and no claim line.');
     const fee = (S.cdt[cdtCode] || [null, 0])[1];
-    if (WHOLE_PATIENT.includes(cdtCode)) { tooth = null; surfaces = []; }
-    const already = S.chartEvents.find((c) => c.encounterId === encId && c.cdt === cdtCode && c.tooth === tooth);
-    // The verb names no procedure: interpolating it ran the line to ten words on a two-surface composite.
-    if (already) return refuse('duplicate_paint', 'Undo the first one to change it', 'Undo the first one', 'Already charted this visit: ' + (S.cdt[cdtCode] || [cdtCode])[0] + (tooth ? ' #' + tooth : '') + '. One gesture writes one chart event, one procedure, one plan line and one pending charge. Charting it twice would bill it twice.');
-    const ce = write('chartEvents', { id: 'ce-' + nextId.ce++, encounterId: encId, tooth, surfaces, cdt: cdtCode, temporality: temporality || 'today', author: currentUser().name });
-    let proc = null;
-    if ((temporality || 'today') === 'today') proc = write('procedures', { id: 'pr-' + nextId.pr++, encounterId: encId, patientId: enc.patientId, cdt: cdtCode, tooth, surfaces, feeCents: fee, status: 'completed_pending_charge', selfPayRestricted: false, chartEventId: ce.id });
-    const pat = patient(enc.patientId);
-    const carrier = pat && pat.primary ? carrierName(pat.primary) : null;
-    const share = carrier ? 0.5 : 1;
-    const est = Math.round(fee * share);
-    const trace = carrier
-      ? carrier + ' PPO: 50% after deductible (met) → patient est. ' + Proto.ui.money(est)
-      : 'Self-pay, no coverage on file → patient est. ' + Proto.ui.money(est);
-    const plan = write('planItems', { id: id('pl'), encounterId: encId, tooth, surfaces, cdt: cdtCode, estimateCents: est, ruleTrace: trace, temporality: temporality || 'today' });
+    if (wholePatient(cdtCode)) { tooth = null; surfaces = []; }
+    temporality = temporality || 'today';
+    // A duplicate is the same code, tooth and surfaces already standing on this visit: a live paint (the reversed
+    // ones no longer count) or a procedure the visit carried before the chart was opened. The verb names no
+    // procedure: interpolating it ran the line to ten words on a two-surface composite.
+    const same = (o) => o.cdt === cdtCode && (o.tooth == null ? tooth == null : o.tooth === tooth) && sameSurfaces(o.surfaces, surfaces);
+    const what = (S.cdt[cdtCode] || [cdtCode])[0] + (tooth ? ' #' + tooth : '');
+    const painted = liveEvents(encId).find(same);
+    if (painted) return Object.assign(refuse('duplicate_paint', 'Undo the first one to change it', 'Undo the first one', 'Already charted this visit: ' + what + '. One gesture writes one chart event, one procedure, one plan line and one pending charge. Charting it twice would bill it twice.'), { undoable: true, chartEventId: painted.id });
+    const onVisit = S.procedures.find((p) => p.encounterId === encId && !p.reversed && !p.chartEventId && same(p));
+    if (onVisit) return refuse('duplicate_paint', 'Choose another code — already on this visit', 'Go to the procedures', 'Already on this visit: ' + what + ', recorded before the chart was opened. Charting it again would bill it twice; it releases at File as it stands.');
+    const ce = write('chartEvents', { id: 'ce-' + nextId.ce++, encounterId: encId, tooth, surfaces, cdt: cdtCode, temporality, author: currentUser().name });
+    let proc = null, plan = null;
+    if (temporality === 'today') proc = write('procedures', { id: 'pr-' + nextId.pr++, encounterId: encId, patientId: enc.patientId, cdt: cdtCode, tooth, surfaces, feeCents: fee, status: 'completed_pending_charge', selfPayRestricted: false, chartEventId: ce.id });
+    // Existing is history: no plan item, no charge, no module, and it dispositions no finding.
+    if (temporality !== 'existing') {
+      const pat = patient(enc.patientId);
+      const carrier = pat && pat.primary ? carrierName(pat.primary) : null;
+      const share = carrier ? 0.5 : 1;
+      const est = Math.round(fee * share);
+      const trace = carrier
+        ? carrier + ' PPO: 50% after deductible (met) → patient est. ' + Proto.ui.money(est)
+        : 'Self-pay, no coverage on file → patient est. ' + Proto.ui.money(est);
+      plan = write('planItems', { id: id('pl'), encounterId: encId, tooth, surfaces, cdt: cdtCode, estimateCents: est, ruleTrace: trace, temporality });
+      for (const t of S.tags) if (t.encounterId === encId && t.tooth === tooth && !t.disposition) { t.disposition = 'charted'; touch('tags', t.id); }
+    }
     S.notes[encId] = S.notes[encId] || {};
-    const line = (S.cdt[cdtCode] || [cdtCode])[0] + (tooth ? ' #' + tooth : '') + (surfaces && surfaces.length ? ' ' + surfaces.join('') : '') + (temporality === 'existing' ? ' (existing, placed elsewhere)' : temporality === 'planned' ? ' (planned)' : '');
+    const line = what + (surfaces && surfaces.length ? ' ' + surfaces.join('') : '') + (temporality === 'existing' ? ' (existing, placed elsewhere)' : temporality === 'planned' ? ' (planned)' : '');
     S.notes[encId].procedures = (S.notes[encId].procedures || []).concat([line]);
     S.notes[encId].procedure = S.notes[encId].procedures.join('; ');
-    for (const t of S.tags) if (t.encounterId === encId && t.tooth === tooth && !t.disposition) { t.disposition = 'charted'; touch('tags', t.id); }
+    touch('notes', encId);
     return { ok: true, chartEvent: ce, procedure: proc, plan };
   }
   /* Undo reverses the last paint; it never deletes. The screen used to splice the chart event, its procedure
@@ -344,7 +365,7 @@
   function chartUndo(encId) {
     const enc = encounter(encId); if (!enc) return notFound('encounter');
     const off = offline('Wait for the server — charting is paused'); if (off) return off;
-    const live = S.chartEvents.filter((c) => c.encounterId === encId && !c.reversed && c.kind !== 'reversal');
+    const live = liveEvents(encId);
     if (!live.length) return refuse('already_decided', 'Chart something before undoing it', 'Chart a tooth', 'Nothing has been painted on this visit yet, so there is nothing to reverse.');
     const ce = live[live.length - 1];
     if (enc.noteFiled) return refuse('already_decided', 'Amend the filed note instead', 'Open the note', 'The note is filed, so the paint is sealed. A correction after filing is an addendum that supersedes it, not an undo.');
@@ -355,7 +376,7 @@
     const plan = S.planItems.filter((pl) => pl.encounterId === encId && pl.cdt === ce.cdt && pl.tooth === ce.tooth && !pl.reversed).pop();
     if (plan) { plan.reversed = true; touch('planItems', plan.id); }
     const n = S.notes[encId];
-    if (n && n.procedures && n.procedures.length) { n.procedures = n.procedures.slice(0, -1); n.procedure = n.procedures.join('; '); }
+    if (n && n.procedures && n.procedures.length) { n.procedures = n.procedures.slice(0, -1); n.procedure = n.procedures.join('; '); touch('notes', encId); }
     for (const t of S.tags) if (t.encounterId === encId && t.tooth === ce.tooth && t.disposition === 'charted') { t.disposition = null; touch('tags', t.id); }
     return { ok: true, reversal: rev, supersedes: ce.id, procedure: proc || null, plan: plan || null };
   }
@@ -363,7 +384,9 @@
      required: the screen used to set the disposition on the seed row itself. */
   function dismissTag(tagId, reason) {
     const t = S.tags.find((x) => x.id === tagId); if (!t) return notFound('request');
-    const off = offline('Wait for the server — the tag cannot be dismissed'); if (off) return off;
+    const off = offline('Wait for the server — dismissals are paused'); if (off) return off;
+    // The disposition carries the dentist's attribution: the hygienist who raised the finding cannot close it.
+    if (!dentistLike(currentUser())) return refuse('licence_scope', 'Ask the dentist to disposition this', 'Send to Exams to sign', 'A hygienist finding is dispositioned by the dentist who examines it, under their licence: charted, or seen with a reason. Sending the chair to Exams to sign puts it in the dentist\'s queue.');
     if (t.disposition) return refuse('already_decided', 'Open the tag to see its disposition', 'Open the tag', 'This finding already carries a disposition (' + t.disposition + '). Changing it is a new note, not a second dismissal.');
     const text = String(reason || '').trim();
     if (!text) return refuse('reason_required', 'Give a one-line reason', 'Type the reason', 'A dismissed hygienist finding stays in the record with why it was dismissed; the hygienist sees the reason on her card.');
@@ -397,6 +420,7 @@
     if (!u || !u.entitlements || !u.entitlements.includes('approve_second')) return [];
     return S.approvals.filter((a) => a.status === 'pending' && a.requestedById !== u.id);
   }
+  const dentistLike = (u) => ['dentist', 'owner', 'surgeon'].includes(u.role);
   function noteKillers(encId, note) {
     const enc = encounter(encId); const killers = [];
     const u = currentUser();
@@ -405,14 +429,15 @@
     for (const t of S.tags) if (t.encounterId === encId && !t.disposition) killers.push({ code: 'tag_undispositioned', verb: 'Chart or dismiss tag #' + t.tooth, control: 'Chart it or dismiss', fix: 'tag' });
     const text = ((note && note.assessment) || '') + ' ' + ((note && note.plan) || '');
     if (/\$\s?\d/.test(text) || /\b(fee|cost|price|estimate|copay)\b/i.test(text)) killers.push({ code: 'money_in_note', verb: 'Move the fee to the plan card', control: 'Move to plan card', fix: 'money' });
-    const toothed = S.chartEvents.filter((c) => c.encounterId === encId && c.tooth != null);
+    // Standing paints only: a reversed paint is not a tooth the chart names.
+    const toothed = liveEvents(encId).filter((c) => c.tooth != null);
     const m = text.match(/#(\d{1,2})/);
     if (m && toothed.length && !toothed.some((c) => c.tooth === Number(m[1]))) {
       const c = toothed[0];
       killers.push({ code: 'contradiction', verb: 'Use the chart tooth #' + c.tooth, control: 'Use chart tooth', fix: 'contradiction', why: 'The note says #' + m[1] + ' and the chart says #' + c.tooth + '. A wrong-tooth claim is denied or paid wrongly, so the two must agree before filing.', noteTooth: Number(m[1]), chartTooth: c.tooth });
     }
     if (!(note && note.assessment && note.assessment.trim().length)) killers.push({ code: 'assessment_required', verb: 'Add an assessment', control: 'Add assessment', fix: 'assessment' });
-    if (u.role !== 'dentist' && u.role !== 'owner' && u.role !== 'surgeon') killers.push({ code: 'licence_scope', verb: 'Send to a dentist to file', control: 'Send to Exams to sign', fix: 'licence' });
+    if (!dentistLike(u)) killers.push({ code: 'licence_scope', verb: 'Send to a dentist to file', control: 'Send to Exams to sign', fix: 'licence' });
     return killers;
   }
   function fileNote(encId, note, readbackConfirmed) {
@@ -425,22 +450,31 @@
     if (!readbackConfirmed) {
       const pr = window.__proto && window.__proto.privacy; const who = patient(enc.patientId);
       const whoName = who ? Proto.ui.displayName(who.name, pr) : 'this patient';
-      return Object.assign(refuse('readback', 'Confirm the author and the patient', 'Confirm and file', 'Filing as ' + currentUser().name + ' for ' + whoName + (who && who.dob ? ', born ' + Proto.ui.longDate(who.dob) : '') + '. The read-back repeats both so a stale author on a shared device is caught at the last gate.'), { readback: { author: currentUser().name, patient: whoName } });
+      // Privacy mode covers the gate copy too: the date of birth stays off the Why when the header hides it.
+      return Object.assign(refuse('readback', 'Confirm the author and the patient', 'Confirm and file', 'Filing as ' + currentUser().name + ' for ' + whoName + (who && who.dob && !pr ? ', born ' + Proto.ui.longDate(who.dob) : '') + '. The read-back repeats both so a stale author on a shared device is caught at the last gate.'), { readback: { author: currentUser().name, patient: whoName } });
     }
     enc.noteFiled = true; enc.status = 'signed'; touch('encounters', enc.id);
     const a = appt(enc.appointmentId); if (a) { a.status = a.status === 'checked_out_unfiled' ? 'checked_out' : 'note_filed'; touch('appointments', a.id); }
     const filed = write('filedNotes', { id: 'nf-' + nextId.nf++, encounterId: encId, author: currentUser().name, filedOn: S.tenant.today, filedTime: S.clock.time, rulesetVersion: '2.25.2', byteauditOk: true, markdown: [note.assessment, note.plan, S.notes[encId] && S.notes[encId].procedure, S.notes[encId] && S.notes[encId].perioSummary].filter(Boolean).join('\n') });
     // Release every charge this note holds, not only the ones painted this session: a seeded procedure sat
     // "completed" and uncharged forever, so filing wrote no ledger row and the patient's credit never applied.
-    const release = S.procedures.filter((p) => p.encounterId === encId && !charged(p));
+    // A reversed paint is not work done, so it never releases.
+    const release = S.procedures.filter((p) => p.encounterId === encId && !p.reversed && !charged(p));
     const relTotal = release.reduce((s, p) => s + p.feeCents, 0);
     const relEst = S.estimates[enc.appointmentId] || { insuranceCents: 0 };
-    for (const p of release) { p.status = 'completed'; p.charged = true; touch('procedures', p.id); write('ledger', { id: id('le'), kind: 'charge', patientId: enc.patientId, amountCents: p.feeCents, effective: enc.dos, posted: S.tenant.today, actor: currentUser().name, actorKind: 'file_event', locationId: enc.locationId, procedureId: p.id, cdt: p.cdt, tooth: p.tooth, releasedByNoteId: filed.id, insuranceExpectedCents: relTotal ? Math.round((relEst.insuranceCents || 0) * p.feeCents / relTotal) : 0 });
+    // What the plan is expected to cover comes from the paint's own plan card; the visit estimate is the fallback
+    // for procedures the seed carried in. A charge released with 0 read "Patient due $260.00" beside a plan card
+    // that said the plan pays $130.00.
+    const expectedFor = (p) => { const pl = S.planItems.find((x) => x.encounterId === encId && x.cdt === p.cdt && x.tooth === p.tooth && x.temporality === 'today' && !x.reversed); return pl ? Math.max(0, p.feeCents - pl.estimateCents) : relTotal ? Math.round((relEst.insuranceCents || 0) * p.feeCents / relTotal) : 0; };
+    for (const p of release) { p.status = 'completed'; p.charged = true; touch('procedures', p.id); write('ledger', { id: id('le'), kind: 'charge', patientId: enc.patientId, amountCents: p.feeCents, effective: enc.dos, posted: S.tenant.today, actor: currentUser().name, actorKind: 'file_event', locationId: enc.locationId, procedureId: p.id, cdt: p.cdt, tooth: p.tooth, releasedByNoteId: filed.id, insuranceExpectedCents: expectedFor(p) });
       // A payment taken before the note was filed is waiting as an intent; filing is what lets it land.
       for (const intent of S.allocationIntents.filter((x) => x.encounterId === encId && !x.appliedTo)) { intent.appliedTo = p.id; touch('allocationIntents', intent.id); const cr = S.credits.find((c) => c.patientId === enc.patientId && c.intents && c.intents.includes(encId)); if (cr) { cr.fromLedger = true; cr.applied = true; touch('credits', cr.id); } }
     }
-    write('claims', { id: 'c-' + nextId.cl++, patientId: enc.patientId, status: 'scrubbed', cdt: (S.procedures.find((p) => p.encounterId === encId) || {}).cdt, amountCents: 0, payer: carrierName((patient(enc.patientId) || {}).primary), submitted: S.tenant.today, age: 0, nextAction: 'Queued to clearinghouse' });
-    return { ok: true, filed };
+    // A claim names the charges it bills: with nothing released, or no plan on file, there is no claim to queue.
+    const payer = (patient(enc.patientId) || {}).primary;
+    let claim = null;
+    if (release.length && payer) claim = write('claims', { id: 'c-' + nextId.cl++, patientId: enc.patientId, encounterId: encId, status: 'scrubbed', cdt: release[0].cdt, lines: release.map((p) => p.cdt), amountCents: relTotal, payer: carrierName(payer), submitted: S.tenant.today, age: 0, nextAction: 'Queued to clearinghouse' });
+    return { ok: true, filed, released: release.length, claim };
   }
 
   // Money Desk (flow 5)
@@ -478,6 +512,12 @@
   // One packet per claim: pressing Appeal four times wrote four packets and renamed the drawer each time.
   function buildAppeal(claimId) { const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim'); const existing = S.appealPackets.find((p) => p.claimId === claimId); if (existing) return { ok: true, packet: existing, already: true }; const pk = write('appealPackets', { id: id('ap'), claimId, slots: { perioChart: c.hasPerioChart, narrative: c.hasNarrative, radiograph: true, letter: true }, patientSentence: 'Delta asked for your gum chart; we are sending it. You owe nothing while they review.' }); return { ok: true, packet: pk }; }
   function sendAppeal(claimId) { const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim'); const off = offline('Wait for the server — the appeal cannot send'); if (off) return off; if (c.status === 'appealed') return refuse('already_decided', 'Wait for the payer to answer', 'Open the claim', 'This appeal was already sent. Sending it twice does not speed it up and starts a second review.'); c.status = 'appealed'; touch('claims', c.id); write('claimEvents', { id: id('cev'), claimId, kind: 'claim.appealed', actor: currentUser().name }); write('disclosures', { id: id('dis'), patientId: c.patientId, channel: 'clearinghouse', purpose: 'payment', recordIds: ['pe-1', 'nf-old'], actor: currentUser().name }); return { ok: true }; }
+  /* A name shown after a "logged read" is logged here: the phone card and Daily Close call this when they reveal
+     a patient, so the disclosures table is the record the label promises. */
+  function disclose({ patientId, purpose, recordIds } = {}) {
+    const row = write('disclosures', { id: id('dis'), patientId: patientId || null, channel: 'screen', purpose: purpose || 'treatment', recordIds: recordIds || [], actor: currentUser().name });
+    return { ok: true, id: row.id };
+  }
   function sendStatement(sdId) {
     const s = S.statementsDue.find((x) => x.id === sdId); if (!s) return notFound('patient'); const off = offline('Wait for the server — statements cannot send'); if (off) return off;
     if (s.sent) return refuse('already_decided', 'Wait for this statement to land', 'Open the ledger', 'This statement was sent at ' + (s.sentAt || S.clock.time) + '. A second copy of the same balance confuses the patient and the phone call that follows.');
@@ -613,5 +653,5 @@
   reset = function (seedNum) { const s = _reset(seedNum); for (const t of TABLES) if (!s[t]) s[t] = []; return s; };
 
   const LICENCE_WORDS = { implant: 'implant', crown_margin: 'crown margin', not_tolerated: 'patient could not tolerate probing', third_molar_absent: 'third molar absent' };
-  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, windowEstimate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, addTag, readyForExam, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, sendStatement, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
+  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, windowEstimate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, addTag, readyForExam, wholePatient, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, disclose, sendStatement, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
 })();

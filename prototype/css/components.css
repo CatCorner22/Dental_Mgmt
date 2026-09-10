@@ -250,8 +250,16 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 /* ---- end module: perio ---- */
 
 /* ---- module: encounter (js/screens/encounter.js) — appended, never edits rules above ---- */
-.enc-layout { display: grid; grid-template-columns: minmax(856px, 1.25fr) minmax(320px, 1fr); gap: var(--space-4); align-items: start; }
-@media (max-width: 1279px) { .enc-layout { grid-template-columns: 1fr; } }
+.enc-layout { display: grid; grid-template-columns: minmax(856px, 1.25fr) minmax(320px, 1fr); grid-template-rows: auto 1fr; grid-template-areas: "chart note" "chart gate"; gap: var(--space-4); align-items: start; }
+.enc-col-chart { grid-area: chart; min-width: 0; }
+.enc-col-note { grid-area: note; min-width: 0; }
+.enc-gate-col { grid-area: gate; min-width: 0; }
+/* One column below 1280 px: the gate pins to the bottom of the viewport so File is in view at every stage,
+   instead of 1,300 px under tags, odontogram and cards. */
+@media (max-width: 1279px) {
+  .enc-layout { grid-template-columns: 1fr; grid-template-rows: auto; grid-template-areas: "chart" "note" "gate"; }
+  .enc-gate-col { position: sticky; bottom: 0; z-index: 3; background: var(--bg); border-top: 1px solid var(--line); padding-top: var(--space-2); max-height: 70vh; overflow: auto; }
+}
 .enc-odont-wrap { overflow-x: auto; padding-bottom: var(--space-1); display: flex; flex-direction: column; gap: var(--gap); }
 .tooth.enc-tagged { border-style: dashed; border-color: var(--required-rail); }
 .tooth.enc-tagged[aria-pressed="true"] { border-style: solid; }
@@ -316,6 +324,12 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 .dc-sentences li { line-height: 1.5; }
 .dc-health { display: flex; align-items: center; gap: var(--gap); flex-wrap: wrap; color: var(--ink-2); padding: var(--space-2) 0; }
 .dc-lock { font-size: var(--fs-3); }
+/* Narrow glass: the source line takes its own row under the name and chip instead of a 51 px column six lines
+   tall, and the tender columns size to their text so the Gap chip ends inside the table. */
+@media (max-width: 599px) {
+  .dc-loc > .grow { flex-basis: 100%; }
+  .tender { grid-template-columns: minmax(0, 1fr) repeat(3, auto); }
+}
 
 /* ---- module: roles (js/screens/roles.js) — appended, never edits rules above ---- */
 .rl-page { max-width: 1100px; }

@@ -157,7 +157,7 @@
       detachKeys();
       const nf = Proto.store.notFound('encounter');
       mount(h('div', { class: 'stack' }, h('h1', { text: 'Nothing here' }), h('p', { class: 'muted', text: nf.why }),
-        btn('Back to Exams', { testid: 'enc.back', kind: 'reversible', onClick: () => Proto.router.go(r.persona, 'exams') })), 'encounter:notfound');
+        btn('Back to home', { testid: 'notfound.home', kind: 'quiet', onClick: () => Proto.router.go(r.persona, Proto.router.HOME[r.persona]) })), 'encounter:notfound');
       return;
     }
     const a = apptOf(enc); const p = Proto.store.patient(enc.patientId); const x = state(enc.id);
@@ -169,9 +169,21 @@
     const filed = filedOf(enc.id);
     if (enc.noteFiled || filed) { detachKeys(); mount(h('div', { class: 'stack enc-page' }, head, renderFiledCard(enc, filed, x)), 'encounter:' + enc.id); return; }
     attachKeys();
-    const left = h('div', { class: 'stack' }, renderTags(r, enc, x), renderOdontogram(r, enc, x), renderTransactions(r, enc, x));
-    const right = h('div', { class: 'stack' }, renderNote(r, enc, x), renderGate(r, enc, x));
-    mount(h('div', { class: 'stack enc-page' }, head, a && a.referral ? h('div', { class: 'card flat' }, chip('info', 'Referral'), ' ', referralLine(a)) : null, h('div', { class: 'enc-layout' }, left, right)), 'encounter:' + enc.id);
+    // The filing gate is its own grid child so the stylesheet can pin it in view below 1280 px, where the
+    // chart, the note and the gate stack in one column and File sat 1,300 px under the fold.
+    const chart = h('div', { class: 'stack enc-col-chart' }, renderTags(r, enc, x), renderOdontogram(r, enc, x), renderTransactions(r, enc, x));
+    const note = h('div', { class: 'stack enc-col-note' }, renderNote(r, enc, x));
+    mount(h('div', { class: 'stack enc-page' }, head, a && a.referral ? h('div', { class: 'card flat' }, chip('info', 'Referral'), ' ', referralLine(a)) : null, h('div', { class: 'enc-layout' }, chart, note, renderGate(r, enc, x))), 'encounter:' + enc.id);
+  }
+  /* A gate this screen renders from a store refusal: one verb line, one control, and the control does what its
+     label says (the support line, the undo, the procedure strip, the dentist's queue), never only a re-render. */
+  function gateNode(r, enc, x, res, fallback) {
+    const act = res.code === 'outage' ? () => (Proto.ui.support ? Proto.ui.support() : Proto.router.announce('Call support: 615-555-0100, 7 am to 6 pm'))
+      : res.code === 'duplicate_paint' ? (res.undoable ? () => { x.gateNode = null; undo(r, enc, x); } : () => focusFirst('enc.proc.' + PROCS[0][0]))
+      : res.code === 'licence_scope' ? () => { x.gateNode = null; fixKiller(r, enc, x, { fix: 'licence' }); }
+      : res.code === 'entitlement' ? () => Proto.router.go(r.persona, 'roles')
+      : fallback || (() => focusFirst('enc.tooth.' + (openTags(enc.id)[0] || { tooth: 30 }).tooth, 'enc.tooth.30', 'enc.back'));
+    return refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, severity: res.code === 'outage' ? 'stop' : undefined, onControl: act });
   }
 
   // ---- tags ---------------------------------------------------------------------------------
@@ -186,9 +198,10 @@
     if (t.disposition === 'dismissed') { row.append(h('div', { class: 'small muted', text: 'Reason: ' + (t.reason || '—') + (t.dispositionBy ? ' · ' + shortName(t.dispositionBy) : '') })); return row; }
     if (t.disposition) return row;
     const dismissing = x.dismissing[t.id] != null;
+    // Dismissing is the dentist's disposition (store.js dismissTag refuses anyone else), so only they are offered it.
     const controls = h('div', { class: 'btnrow' },
       btn('Chart it', { kind: 'reversible', testid: 'enc.tag.' + t.id + '.chart', onClick: () => chartTag(r, enc, x, t) }),
-      btn(dismissing ? 'Dismiss with reason' : 'Dismiss', { kind: 'quiet', testid: 'enc.tag.' + t.id + '.dismiss', onClick: () => dismissTag(r, enc, x, t) }));
+      dentistLike() ? btn(dismissing ? 'Dismiss with reason' : 'Dismiss', { kind: 'quiet', testid: 'enc.tag.' + t.id + '.dismiss', onClick: () => dismissTag(r, enc, x, t) }) : h('span', { class: 'small muted', text: 'Dismissed only by the dentist' }));
     row.append(controls);
     if (dismissing) {
       const input = h('input', { class: 'input', type: 'text', id: 'reason-' + t.id, testid: 'enc.tag.' + t.id + '.reason', 'aria-label': 'One-line reason for dismissing the tag', placeholder: 'One line: what you saw instead', value: x.dismissing[t.id], onInput: (ev) => { x.dismissing[t.id] = ev.target.value; }, maxlength: '120' });
@@ -211,7 +224,7 @@
     if (!reason) { x.dismissTried = true; rerender(r); return; }
     // The store writes the disposition and logs the tags change; a screen never edits a row itself (A3, A5).
     const res = Proto.store.dismissTag(t.id, reason);
-    if (!res.ok) { x.gateNode = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: () => focusFirst('enc.tag.' + t.id + '.reason') }); rerender(r); return; }
+    if (!res.ok) { x.gateNode = gateNode(r, enc, x, res, () => focusFirst('enc.tag.' + t.id + '.reason')); rerender(r); focusFirst('refusal.control'); return; }
     delete x.dismissing[t.id];
     if (x.checked) x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3);
     rerender(r);
@@ -262,20 +275,13 @@
     x.gateNode = null; rerender(r);
   }
   function paint(r, enc, x, code) {
-    x.undoGate = null;                                  // one live gate per screen: a new attempt supersedes the last
-    // One code, one verb: the tooth gate reads the same wherever it is raised (B4).
-    if (!x.tooth) { x.gateNode = refusal({ code: 'tooth_required', verb: 'Pick a tooth first', control: 'Go to teeth', onControl: () => focusFirst('enc.tooth.' + (openTags(enc.id)[0] || { tooth: 30 }).tooth, 'enc.tooth.30'), why: 'The procedure strip never auto-selects and never guesses a tooth; the chart event, plan item, and pending charge all point at the tooth you pick.' }); rerender(r); return; }
+    x.undoGate = null; x.fileGate = null;               // one live gate per screen: a new attempt supersedes the last
+    // One code, one verb: the tooth gate reads the same wherever it is raised (B4). A service that belongs to
+    // the visit (exam, prophy, sedation) carries no tooth, so it is charted with none picked.
+    if (!x.tooth && !Proto.store.wholePatient(code)) { x.gateNode = refusal({ code: 'tooth_required', verb: 'Pick a tooth first', control: 'Go to teeth', onControl: () => focusFirst('enc.tooth.' + (openTags(enc.id)[0] || { tooth: 30 }).tooth, 'enc.tooth.30'), why: 'The procedure strip never auto-selects and never guesses a tooth; the chart event, plan item, and pending charge all point at the tooth you pick.' }); rerender(r); focusFirst('refusal.control'); return; }
     const surfaces = x.surfaces.map((o) => o.s);
     const res = Proto.store.chartPaint(enc.id, x.tooth, surfaces, code, x.temporality);
-    if (!res.ok) {
-      // The control has to do what its words say. For a duplicate paint that means raising the same
-      // gate the Undo control raises: the first paint is a record, and a record is corrected, not erased.
-      const act = res.code === 'duplicate_paint'
-        ? () => { x.gateNode = null; undo(r, enc, x); }
-        : () => { x.gateNode = null; rerender(r); };
-      x.gateNode = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: act });
-      rerender(r); return;
-    }
+    if (!res.ok) { x.gateNode = gateNode(r, enc, x, res); rerender(r); focusFirst('refusal.control'); return; }
     x.gateNode = null; x.undoGate = null; x.lastPaint = res; x.surfaces = x.surfaces.map((o) => ({ s: o.s, mixed: false }));
     if (x.checked) x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3);
     rerender(r);
@@ -284,10 +290,20 @@
 
   // ---- transaction cards ---------------------------------------------------------------------
   function renderTransactions(r, enc, x) {
-    const s = S(); const ces = eventsOf(enc.id).slice().reverse(); if (!ces.length) return null;
+    const s = S(); const ces = eventsOf(enc.id).slice().reverse();
+    // Procedures the visit carried before the chart was opened release at File like any paint. Hiding them let
+    // the same exam be charted again and billed twice.
+    const carried = s.procedures.filter((p) => p.encounterId === enc.id && !p.chartEventId && !p.reversed);
+    if (!ces.length && !carried.length) return null;
+    const carriedCards = carried.map((p) => {
+      const name = (s.cdt[p.cdt] || [p.cdt])[0] + (p.tooth ? ' #' + p.tooth : ''); const done = Proto.store.charged(p);
+      return h('div', { class: 'card enc-tx stack', 'aria-label': 'On the visit · ' + name },
+        h('div', { class: 'row between' }, h('b', { text: 'On the visit before the chart opened' }), chip(done ? 'clear' : 'style', done ? 'Charged' : 'Today')),
+        h('ul', { class: 'enc-rows' }, h('li', null, h('b', { text: 'Procedure ' }), p.cdt.toUpperCase() + ' ' + name + ' · ' + money(p.feeCents) + (done ? ' charged' : ' pending charge, released at File'))));
+    });
     const cards = ces.map((ce, i) => {
       const proc = s.procedures.find((p) => p.chartEventId === ce.id);
-      const plan = s.planItems.slice().reverse().find((pl) => pl.encounterId === enc.id && pl.tooth === ce.tooth && pl.cdt === ce.cdt && pl.temporality === ce.temporality);
+      const plan = s.planItems.slice().reverse().find((pl) => pl.encounterId === enc.id && !pl.reversed && pl.tooth === ce.tooth && pl.cdt === ce.cdt && pl.temporality === ce.temporality);
       const fee = (s.cdt[ce.cdt] || [null, 0])[1];
       // Storage ids stay off the glass: a chart event, a procedure, a plan item and a note are named by
       // what they say, not by ce-1 / pr-500 / pl-1 (C3).
@@ -301,7 +317,7 @@
         i === 0 ? renderUndo(r, enc, x) : null);
       return card;
     });
-    return h('div', { class: 'stack' }, ...cards);
+    return h('div', { class: 'stack' }, ...cards, ...carriedCards);
   }
   function renderPlanCard(plan, fee, x) {
     const owe = plan.estimateCents; const pays = Math.max(0, fee - owe);
@@ -324,9 +340,10 @@
       btn('Undo last paint', { kind: 'held', testid: 'enc.undo', ariaLabel: 'Held: ' + x.undoGate.verb, onClick: () => focusFirst('refusal.control', 'enc.note.field.assessment') }));
   }
   function undo(r, enc, x) {
-    x.gateNode = null;                                  // one live gate per screen
+    x.gateNode = null; x.fileGate = null;               // one live gate per screen
     const res = Proto.store.chartUndo(enc.id);
-    if (!res.ok) { x.undoGate = res; rerender(r); focusFirst('enc.undo'); return; }
+    // With no standing paint there is no card to carry the gate, so it stands in the Chart section instead.
+    if (!res.ok) { if (eventsOf(enc.id).length) x.undoGate = res; else x.gateNode = gateNode(r, enc, x, res); rerender(r); focusFirst('enc.undo', 'refusal.control'); return; }
     x.undoGate = null;
     x.tooth = null; x.surfaces = [];
     if (x.checked) x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3);
@@ -380,9 +397,17 @@
   function renderGate(r, enc, x) {
     // One gate, one 44 px control: the read-back used to carry three (Confirm and file, Switch author and
     // the held File). The gate card holds the gate; the author line and the primary stand beside it (§6).
-    const area = h('div', { class: 'stack', id: 'enc-gate-area' });
+    const area = h('div', { class: 'stack enc-gate-col', id: 'enc-gate-area' });
     const wrap = h('div', { class: 'card stack', id: 'enc-gate', 'aria-label': 'Filing gate' });
     area.append(wrap);
+    // A File the store refused outright (outage, sealed note) stands here, beside the primary it held (§6),
+    // and clears with the condition that raised it so the primary comes back when the server does.
+    if (x.fileGate && x.fileGate.code === 'outage' && !S().outage) x.fileGate = null;
+    if (x.fileGate) {
+      wrap.append(gateNode(r, enc, x, x.fileGate, () => focusFirst('enc.back')));
+      area.append(btn('File', { kind: 'held', testid: 'enc.file', ariaLabel: 'Held: ' + x.fileGate.verb, onClick: () => focusFirst('refusal.control') }));
+      return area;
+    }
     const total = x.checked ? Proto.store.noteKillers(enc.id, x.note).length : 0;
     if (x.sendGate) wrap.append(refusal(x.sendGate));
     if (x.checked && x.killers.length) {
@@ -458,24 +483,28 @@
   }
   function doFile(r, enc, x, confirmed) {
     // The filing gate is the live one, so no earlier gate is left holding the contract selectors (§6).
-    x.checked = true; x.sendGate = null; x.gateNode = null; x.undoGate = null;
+    x.checked = true; x.sendGate = null; x.gateNode = null; x.undoGate = null; x.fileGate = null;
     const res = Proto.store.fileNote(enc.id, x.note, confirmed);
-    if (res.ok) { x.filed = res.filed; x.readback = false; rerender(r); focusFirst('enc.back'); Proto.router.announce('Filed · charges released · claim queued'); return; }
+    if (res.ok) { x.filed = res.filed; x.readback = false; rerender(r); focusFirst('enc.back'); Proto.router.announce('Filed · ' + (res.released ? 'charges released' : 'nothing to release') + (res.claim ? ' · claim queued' : '')); return; }
     if (res.killers) { x.killers = res.killers; x.readback = false; }
     else if (res.code === 'readback') { x.killers = []; x.readback = true; }
-    else { x.gateNode = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: () => rerender(r) }); }
+    else { x.fileGate = res; x.readback = false; }
     rerender(r);
-    if (res.code === 'readback') { const c = document.querySelector('#enc-gate [data-testid="refusal.control"]'); if (c) c.focus({ preventScroll: true }); }
+    if (res.code === 'readback' || x.fileGate) { const c = document.querySelector('#enc-gate [data-testid="refusal.control"]'); if (c) c.focus({ preventScroll: true }); }
     else if (res.killers) focusFirst('enc.killer.0.fix', 'enc.file');
   }
   function renderFiledCard(enc, filed, x) {
-    const s = S(); const released = filed ? s.ledger.filter((e) => e.releasedByNoteId === filed.id) : []; const claim = s.claims.slice().reverse().find((c) => c.patientId === enc.patientId && c.status === 'scrubbed');
+    // The claim and the charges are the encounter's own: a claim looked up by patient said "queued" on a visit
+    // that queued none, and a seeded filed visit counted no charge.
+    const s = S(); const procs = s.procedures.filter((p) => p.encounterId === enc.id).map((p) => p.id);
+    const released = filed ? s.ledger.filter((e) => e.releasedByNoteId === filed.id) : s.ledger.filter((e) => e.kind === 'charge' && procs.includes(e.procedureId));
+    const claim = s.claims.find((c) => c.encounterId === enc.id) || null;
     return h('div', { class: 'card stack enc-filed', 'aria-label': 'Filed note' },
       h('div', { class: 'row' }, chip('clear', 'Filed', { big: true }), chip('clear', 'Audit passed')),
       filed ? h('p', { class: 'small muted', text: 'By ' + filed.author + ' at ' + dateTime((filed.filedOn || '') + ' ' + (filed.filedTime || '')) + ' · text and version frozen; corrections are addenda, never edits.' }) : null,
       h('ul', { class: 'enc-rows' },
         h('li', null, h('b', { text: 'Charges released: ' + released.length }), released.length ? ' · ' + released.map((e) => money(e.amountCents) + (e.tooth ? ' #' + e.tooth : '')).join(', ') : ' (nothing pending)'),
-        h('li', null, h('b', { text: 'Claim queued' }), claim ? ' · ' + claim.id + ' to ' + claim.payer + ' · ' + claim.nextAction : ''),
+        claim ? h('li', null, h('b', { text: 'Claim queued' }), ' · to ' + claim.payer + ' · ' + claim.nextAction) : h('li', null, h('b', { text: 'No claim queued' }), ' · ' + (released.length ? 'no plan on file to bill' : 'nothing released to bill')),
         h('li', null, 'Board chip flipped to Note filed; checkout releases any held payment.')),
       filed && filed.markdown ? h('div', { class: 'enc-readonly small', text: filed.markdown }) : null);
   }
