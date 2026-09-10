@@ -269,7 +269,7 @@
       const gate = evaluateRelease('write_off', form.writeoffCents, u);
       if (gate.code === 'after_hours') return refuse(gate.code, gate.verb, 'Remove the write-off', gate.why);
       // The request names the PIN's owner, not the persona at the desk: Dr. Reagan's PIN used to raise a request in Priya's name and then approve it as his own.
-      if (!gate.ok) return Object.assign(refuse(gate.code, gate.verb, 'Request approval', gate.why), { held: true, pendingRequest: { kind: 'write_off', amountCents: form.writeoffCents, reason: form.writeoffReason || 'courtesy', patientId: a.patientId, eligible: gate.eligible, appointmentId: aid, posterId: u.id, form } });
+      if (!gate.ok) return Object.assign(refuse(gate.code, gate.verb, 'Request approval', gate.why), { held: true, pendingRequest: { kind: 'write_off', amountCents: form.writeoffCents, reason: form.writeoffReason || 'courtesy', patientId: a.patientId, eligible: gate.eligible, appointmentId: aid, posterId: u.id } });
     }
     // A statement, a plan and the decision carry what is left after the write-off posted beside them: a $410 statement used to queue on a $310 balance.
     const portion = est.patientCents - (form.writeoffCents || 0);
