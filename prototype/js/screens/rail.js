@@ -9,15 +9,14 @@
 
   const TABS = [['chart', 'Chart'], ['notes', 'Notes'], ['perio', 'Perio'], ['imaging', 'Imaging'], ['plan', 'Plan'], ['ledger', 'Ledger'], ['claims', 'Claims'], ['docs', 'Docs'], ['profile', 'Profile']];
   const KIND_WORD = { charge: 'Charge', patient_payment: 'Payment', insurance_payment: 'Insurance payment', write_off: 'Write-off', adjustment: 'Adjustment', refund: 'Refund', reversal: 'Reversal' };
-  const ELIG = { green: ['clear', 'Active'], amber: ['review', 'Re-verify'], red: ['required', 'Inactive'], none: ['info', 'Self-pay'] };
+  const ELIG = Proto.ui.ELIG;                           // one eligibility word per value, shared with the Board and Chairs
   /* Words for what the record holds: a status code, a general-ledger bucket or a reason code is a product-internal
      noun a first-day temp would have to decode, so the screen prints the words and leaves the codes in the record. */
   const CLAIM_WORD = { scrubbed: 'queued', submitted: 'submitted', pended: 'in review', denied: 'denied', appealed: 'appealed' };
   // The same word the Board and the Chairs card print for the same status: never a humanized status code.
   const STATUS_WORD = { scheduled: 'Scheduled', confirmed: 'Confirmed', arrived: 'Arrived', seated: 'Seated', in_chart: 'In chart', ready_for_exam: 'Exam requested', note_filed: 'Note filed', checked_out: 'Done', checked_out_unfiled: 'Filed later' };
   const GL_WORD = { ins_ar_primary: 'primary insurance', ins_ar_secondary: 'secondary insurance', patient_ar: 'patient balance', unapplied_credit: 'unapplied credit' };
-  const REASON_WORD = { contractual_ppo: 'PPO fee schedule', posted_to_wrong_account: 'posted to wrong account', window_deferred: 'deferred at the window', courtesy: 'courtesy' };
-  const MAX_HOLD_DAYS = 45;
+  const REASON_WORD = { contractual_ppo: 'PPO fee schedule', posted_to_wrong_account: 'posted to wrong account', window_deferred: 'deferred at the window', balance_due: 'raised on the balance', courtesy: 'courtesy' };
 
   const rail = { pid: null, r: null, open: { balance: true }, explain: false, msg: null };
   const led = {}; // per user id and patient id: ledger view state (explain, patientVoice, asof, asofOpen, sent, gate, hi)
@@ -37,7 +36,13 @@
      'scrubbed'): leaving that status out made the rail say "none open" for the claim the filing had just created. */
   const openClaims = (pid) => S().claims.filter((c) => c.patientId === pid && Object.keys(CLAIM_WORD).includes(c.status));
   /* View state is per user, never global: the As-of date one biller chose was what the next persona landed on. */
-  const ledState = (pid) => { const k = Proto.store.currentUser().id + '|' + pid; return (led[k] = led[k] || { explain: false, patientVoice: false, asof: null, asofOpen: false, sent: null, gate: null, hi: null }); };
+  let ledStore = null;
+  const ledState = (pid) => {
+    const now = S(); if (ledStore && ledStore !== now) for (const k of Object.keys(led)) delete led[k];   // store reset: every view is stale
+    ledStore = now;
+    const k = Proto.store.currentUser().id + '|' + pid; return (led[k] = led[k] || { explain: false, patientVoice: false, asof: null, asofOpen: false, sent: null, gate: null, hi: null, pin: '' });
+  };
+  const shared = () => P().device === 'shared';
   const humanize = (s) => String(s || '').replace(/_/g, ' ');
   const pressed = (b) => (b ? 'true' : 'false'); // h() writes boolean true as an empty attribute; aria-pressed needs the word
 
@@ -49,8 +54,6 @@
     const L = labels || ['Patient due', 'Waiting on insurance', 'Credit'];
     return h('div', { class: 'threenum' }, [[L[0], b.patientDue], [L[1], b.insurancePending], [L[2], b.credit]].map(([l, v]) => h('div', { class: 'n' }, h('div', { class: 'v', text: money(v) }), h('div', { class: 'l', text: l }))));
   }
-  /* Same arithmetic as store.balances over a chosen row set (As-of); estimates never join. */
-  function sumsFrom(rows) { let due = 0; for (const e of rows) due += e.amountCents; return { patientDue: Math.max(0, due), credit: due < 0 ? -due : 0 }; }
   function eligibilityChip(pid) { const a = apptsToday(pid).find((x) => !['checked_out', 'checked_out_unfiled'].includes(x.status)) || apptsToday(pid)[0]; const e = a ? ELIG[a.eligibility] || ELIG.none : ['info', 'Not checked today']; return chip(e[0], e[1]); }
 
   /* ---------------- Patient Rail ---------------- */
@@ -204,7 +207,8 @@
   /* One wording for the empty Explain, on the Ledger and in the rail, with the step that ends it. */
   function explainEmpty(patientVoice) { return patientVoice ? 'Nothing to explain: no charges on this account. A charge appears once the visit\'s note is filed.' : 'No charges on this account, so there is nothing to explain. Filing the visit\'s note releases the charge.'; }
   function explainBlock(pid, st, r) {
-    const rows = Proto.store.explain(pid);
+    // Under As-of the sentences allocate over the same rows as the three numbers: the account as it stood that day.
+    const rows = Proto.store.explain(pid, st.asof);
     if (!rows.length) return h('div', { class: 'explain' }, h('p', { class: 'sentence muted', text: explainEmpty(st.patientVoice) }));
     return h('div', { class: 'explain', 'aria-live': 'polite' },
       st.patientVoice ? h('p', { class: 'small muted', text: 'Patient view: no reason codes, no poster names; estimate lines are labelled estimate. Turn the screen or print (this is recorded as a disclosure).' }) : null,
@@ -212,19 +216,39 @@
         st.patientVoice ? null : btn('Rows', { kind: 'quiet', class: 'compact', testid: 'ledger.explain.rows.' + x.chargeId, ariaLabel: 'Highlight the ledger rows behind this sentence', onClick: () => { const ch = S().ledger.find((e) => e.id === x.chargeId); st.hi = S().ledger.filter((e) => e.patientId === pid && (e.id === ch.id || (e.kind !== 'charge' && e.effective >= ch.effective))).map((e) => e.id); rerender(r, 'ledger.explain.rows.' + x.chargeId); const el = document.getElementById('row-' + x.chargeId); if (el) el.scrollIntoView({ block: 'center' }); } }))));
   }
 
-  /* Money Desk is where the biller works an account: a navigation, not a posting, so it claims nothing. */
-  function openMoneyDesk(r, st) { if (st) st.gate = null; Proto.router.go(r.persona || P().persona || 'frontdesk', 'money'); }
+  /* Money Desk is where the biller works an account: a navigation, not a posting, so it claims nothing. Every gate
+     here points at Statements due, so that is the tab it lands on; the ERA tab had nothing to do with a statement. */
+  function openMoneyDesk(r, st) { if (st) st.gate = null; if (Proto.screens.moneydesk) Proto.screens.moneydesk.setTab('statements'); Proto.router.go(r.persona || P().persona || 'frontdesk', 'money'); }
+  /* The store's control words get something to do on this screen: the Andon's support line for an outage, the PIN field
+     for a PIN, Explain for a zero balance, Money Desk for a hold or a statement already sent (the "Open the ledger" the
+     store offers is where we already are). */
+  const focusPin = () => { const el = document.querySelector('[data-testid="ledger.pin"]'); if (el) el.focus(); };
+  function storeGate(r, st, res) {
+    if (res.code === 'outage') return Object.assign({}, res, { severity: 'stop', onControl: () => { const a = document.querySelector('[data-testid="andon.control"]'); if (a) a.focus(); else Proto.ui.support(); } });
+    // A second wrong PIN reads the same as the first and is still a second refusal (ui.js `fresh`, consumed by the first draw);
+    // Close on the lock empties the PIN and drops the gate, as Checkout's does.
+    if (res.code === 'pin_locked') return Object.assign({}, res, { fresh: true, onControl: () => { st.pin = ''; st.gate = null; rerender(r, 'ledger.pin'); } });
+    if (/^pin_/.test(res.code)) return Object.assign({}, res, { fresh: res.code === 'pin_no_match', onControl: focusPin });
+    if (res.code === 'zero_collect_refused') return Object.assign({}, res, { control: 'Explain', onControl: () => { st.explain = true; st.gate = null; rerender(r, 'ledger.explain'); } });
+    if (res.code === 'already_decided' || res.code === 'statement_held') return Object.assign({}, res, { control: 'Open Money Desk', onControl: () => openMoneyDesk(r, st) });
+    // The entitlement and closed-day words act as on Checkout: Roles, the author pad, Daily Close.
+    if (res.code === 'entitlement' && res.control === 'Switch author') return Object.assign({}, res, { onControl: () => Proto.screens.shell.openPinPad(r) });
+    if (res.code === 'entitlement') return Object.assign({}, res, { control: res.control || 'Open Roles', onControl: () => { location.hash = '#/owner/roles'; } });
+    if (res.code === 'already_closed') return Object.assign({}, res, { control: res.control || 'Open the day', onControl: () => Proto.router.go(r.persona, 'close') });
+    return res;
+  }
+  /* The Ledger sends the row Money Desk raised; with none open it asks the store to raise one first, and the store's
+     reasons for not raising (a claim still out, nothing due) are the gate. The Ledger used to word those holds itself and
+     to send an account with a balance and no row to a tab with nothing to press. */
   function sendStatement(r, pid, st) {
-    const st0 = S(); const b = Proto.store.balances(pid);
-    const sd = st0.statementsDue.find((x) => x.patientId === pid && !x.sent);
-    if (sd) { const res = Proto.store.sendStatement(sd.id); if (res.ok) { st.sent = { id: sd.id, channel: 'mail' }; st.gate = null; announce('Sent the statement by mail'); } else st.gate = res; return rerender(r, 'ledger.statement.send'); }
-    const pend = st0.claims.filter((c) => c.patientId === pid && ['submitted', 'pended'].includes(c.status));
-    // The verb interpolates a number, never a payer name: "Delta Dental" would push the line past eight words.
-    if (pend.length) { const c = pend[0]; st.gate = { code: 'statement_held', verb: 'Held: claim pending ' + (c.age || 0) + ' days', control: 'Open Money Desk', onControl: () => openMoneyDesk(r, st), why: c.payer + ' is still reviewing ' + cdtName(c.cdt) + '. A statement never goes out on a balance still waiting on insurance. The hold reason is shown on Money Desk → Statements due; after ' + MAX_HOLD_DAYS + ' days the row surfaces regardless of the pending claim.' }; return rerender(r, 'ledger.statement.send'); }
-    if (b.patientDue === 0) { st.gate = { code: 'zero_collect_refused', verb: 'Nothing due — no statement to send', control: 'Explain', onControl: () => { st.explain = true; st.gate = null; rerender(r, 'ledger.explain'); }, why: 'A statement for $0 is noise to the patient and a disclosure row for nothing. Explain shows why the balance is zero; a credit is refunded from Money Desk, never billed.' }; return rerender(r, 'ledger.statement.send'); }
-    /* Nothing is queued for this account, and the Ledger cannot freeze a statement of its own: it sends the row the
-       statements-due run raised. Minting an id here sent nothing, wrote nothing, and did it again on every press. */
-    st.gate = { code: 'statement_held', verb: 'Queue this statement on Money Desk', control: 'Open Money Desk', onControl: () => openMoneyDesk(r, st), why: 'A statement is frozen from the statements-due run, which is what the Ledger sends and what the disclosure row records. This account has ' + money(b.patientDue) + ' due and no row raised yet; Money Desk → Statements due is where it is raised.' };
+    const extras = { pin: st.pin || null };
+    // A row already sent is the store's to refuse (already_decided), not a reason to raise a second one on the same balance.
+    let sd = S().statementsDue.find((x) => x.patientId === pid && !x.sent) || S().statementsDue.find((x) => x.patientId === pid);
+    if (!sd) { const raised = Proto.store.raiseStatement(pid, extras); if (!raised.ok) { st.gate = storeGate(r, st, raised); return rerender(r, 'ledger.statement.send'); } sd = raised.statement; }
+    const res = Proto.store.sendStatement(sd.id, extras);
+    // The PIN named the sender of this statement and is spent; the keyboard lands on the sent stamp, not back on Send.
+    if (res.ok) { st.sent = { id: sd.id, channel: 'mail' }; st.gate = null; st.pin = ''; announce('Sent the statement by mail'); return rerender(r, '#ledger-sent'); }
+    st.gate = storeGate(r, st, res);
     rerender(r, 'ledger.statement.send');
   }
   function previewStatement(pid, st) {
@@ -262,10 +286,15 @@
     if (!p) { const nf = Proto.store.notFound('patient'); Proto.screens.shell.mount(h('div', { class: 'stack' }, h('h1', { text: 'Nothing here' }), h('p', { class: 'muted', text: nf.why }), btn('Back to home', { kind: 'quiet', testid: 'notfound.home', onClick: () => Proto.router.go(r.persona, Proto.router.HOME[r.persona]) }))); return; }
     if (rail.pid !== pid) open(pid, r, { keepFocus: true }); else { rail.r = r; renderRail(); }
     const st = ledState(pid); const priv = !!P().privacy; const all = rowsFor(pid);
+    // A gate whose cause is gone falls on the next render: the outage ended, or the desk is no longer shared.
+    if (st.gate && ((st.gate.code === 'outage' && !S().outage) || (/^pin_/.test(st.gate.code) && !shared()))) st.gate = null;
+    if (!shared()) st.pin = '';
     const rows = st.asof ? all.filter((e) => e.posted <= st.asof) : all;
-    const live = Proto.store.balances(pid);
-    const b = st.asof ? Object.assign(sumsFrom(rows), { insurancePending: live.insurancePending }) : live;
+    // One allocation pass for the three numbers and Explain, as of today or as of the chosen day.
+    const b = Proto.store.balances(pid, st.asof);
     const gateNode = st.gate ? refusal(Object.assign({ onControl: () => { st.gate = null; rerender(r, 'ledger.statement.send'); } }, st.gate)) : null;
+    if (st.gate) st.gate.fresh = false;                  // the first draw after the press logged it; a redraw does not
+    const pinField = shared() ? h('div', { class: 'field' }, h('label', { for: 'ledger-pin', text: 'Your PIN' }), h('input', { class: 'input co-pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', id: 'ledger-pin', testid: 'ledger.pin', value: st.pin, onInput: (ev) => { st.pin = ev.target.value; if (st.gate && /^pin_/.test(st.gate.code)) { st.gate = null; rerender(r, 'ledger.pin'); const el = document.querySelector('[data-testid="ledger.pin"]'); if (el) el.setSelectionRange(el.value.length, el.value.length); } } }), h('p', { class: 'hint', text: 'Shared desk: the PIN makes you the frozen sender of this statement.' })) : null;
     const page = h('div', { class: 'stack ledger-page' },
       pageHead('Ledger', displayName(p.name, priv) + ' · ' + identLine(p, priv) + ' · ' + p.mrn,
         btn('Explain', { kind: 'reversible', testid: 'ledger.explain', pressed: pressed(st.explain), onClick: () => { st.explain = !st.explain; rerender(r, 'ledger.explain'); } }),
@@ -278,7 +307,8 @@
       st.asofOpen ? section('As of', asOfBlock(pid, st, r, all)) : null,
       section('Rows', h('p', { class: 'small muted', text: 'Newest first by posted date. Reversals and reposts name the row they correct; nothing is edited in place.' }), ledgerTable(rows, st)),
       section('Statement',
-        st.sent ? h('div', { class: 'ledger-sent row' }, chip('clear', 'Statement sent'), h('span', { text: 'Frozen and sent by ' + st.sent.channel + ' on ' + longDate(today()) + '; disclosure row written' })) : null,
+        st.sent ? h('div', { class: 'ledger-sent row', id: 'ledger-sent', tabindex: '-1' }, chip('clear', 'Statement sent'), h('span', { text: 'Frozen and sent by ' + st.sent.channel + ' on ' + longDate(today()) + '; disclosure row written' })) : null,
+        pinField,
         gateNode,
         h('div', { class: 'btnrow' },
           // A held primary renders the word Held from ui.btn; the label passed in becomes its accessible name.
@@ -287,13 +317,14 @@
         h('details', { class: 'ledger-details' }, h('summary', { testid: 'ledger.statement.why' }, 'Why this statement'), h('p', { class: 'muted', text: 'The patient-voice sentences under three numbers; pending claims listed under Waiting on insurance with no patient dollar figure; family members by first name. Send freezes the statement with an id and writes a disclosure row per channel. A balance still waiting on insurance holds for a stated reason.' }))));
     Proto.screens.shell.mount(page);
   }
-  function rerender(r, focusTestid) {
+  function rerender(r, focus) {
     renderLedger(r); Proto.screens.shell.refreshAndon(r);
-    if (focusTestid) { const el = document.querySelector('[data-testid="' + focusTestid + '"]'); if (el && el.focus) el.focus(); }
+    if (focus) { const el = document.querySelector(focus[0] === '#' ? focus : '[data-testid="' + focus + '"]'); if (el && el.focus) el.focus(); }
   }
 
-  /* The rail persists across routes: keep it current on navigation and when privacy mode flips. */
-  window.addEventListener('hashchange', () => { const r = Proto.router.current(); if (r.route === 'signin') { close(); return; } if (isOpen()) { rail.r = r; rail.msg = null; renderRail(); } });
+  /* The rail persists across routes: keep it current on navigation and when privacy mode flips. A PIN is typed for the
+     posting at hand, so leaving the route disarms it for every account. */
+  window.addEventListener('hashchange', () => { for (const v of Object.values(led)) v.pin = ''; const r = Proto.router.current(); if (r.route === 'signin') { close(); return; } if (isOpen()) { rail.r = r; rail.msg = null; renderRail(); } });
   if (window.MutationObserver) new MutationObserver(() => { if (isOpen()) renderRail(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-privacy'] });
   /* The rail shows the same facts as the work canvas, so it redraws when the canvas does. Waiting for the next
      hashchange left the open rail reading the balance from before a Post that the canvas beside it already showed. */

@@ -25,7 +25,9 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
   const approvalRow = (p, id) => p.evaluate((id) => { const a = window.__proto.state().approvals.find((x) => x.id === id); return a ? { id: a.id, status: a.status, decidedBy: a.decidedBy, decidedAt: a.decidedAt, keys: Object.keys(a) } : null; }, id);
   // The biller's held request from the Money Desk (Sam Dawson, u-bl-1): ar-1 pending, $410 courtesy on p-306.
   const heldWriteoff = async (p) => { await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await click(p, 'money.writeoff.post'); await p.waitForTimeout(200); };
-  const approveWithPin = async (p, reqId) => { await click(p, 'phone.request.' + reqId + '.approve'); await p.waitForTimeout(100); for (const d of ['1', '2', '3', '4']) await click(p, 'phone.stepup.' + d); await click(p, 'phone.stepup.submit'); await p.waitForTimeout(250); };
+  // The step-up verifies the approver's OWN PIN (store.js verifyPin(pin, approver.id)), so the digits are read from the current user at run time.
+  const ownPin = (p) => p.evaluate(() => String((Proto.store.currentUser() || {}).pin || ''));
+  const approveWithPin = async (p, reqId) => { await click(p, 'phone.request.' + reqId + '.approve'); await p.waitForTimeout(100); for (const d of await ownPin(p)) await click(p, 'phone.stepup.' + d); await click(p, 'phone.stepup.submit'); await p.waitForTimeout(250); };
   const visibleLeaf = (p, re) => p.evaluate((src) => {
     const RE = new RegExp(src, 'i');
     return [...document.querySelectorAll('#canvas *')].filter((e) => e.children.length === 0 && RE.test((e.textContent || '').trim()))

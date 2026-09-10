@@ -13,34 +13,35 @@
   const S = () => Proto.store.get();
   const P = () => window.__proto;
   /* The sim plays the biller's side. The store keeps one open request per held posting, so a second press
-     plays the next scenario instead of re-announcing the first one. */
+     plays the next scenario instead of re-announcing the first one. Each scenario writes off no more than the
+     account owes (the store refuses a write-off above the balance), and at least the dual-release threshold. */
   const SIMS = [
     { pid: 'p-306', cents: 41000, reason: 'courtesy' },
-    { pid: 'p-303', cents: 22500, reason: 'hardship' },
+    { pid: 'p-313', cents: 22500, reason: 'hardship' },
   ];
   const REASON_LABEL = { courtesy: 'Courtesy', hardship: 'Hardship', contractual_ppo: 'Contractual (PPO)', small_balance: 'Small balance', promo: 'Promotion' };
 
   let lastRoute = null;
   let keysOn = false;
-  let pad = null;                 // step-up state while the dialog is open: {reqId, digits, dots, hint, close}
-  /* Card state is per user, never global: the name one approver disclosed, the gate they answered and the
-     line they read after deciding belong to them, not to whoever opens the card next on a shared phone. */
-  const byUser = {};
+  let pad = null;                 // step-up state while the dialog is open: {reqId, digits, dots, hint, close, store}
+  /* Card state is per user, never global: the gate one approver answered and the line they read after deciding
+     belong to them, not to whoever opens the card next on a shared phone. It is keyed to the store instance, so a
+     rebuilt store (reset) starts every card clean; a disclosed name is read from the store's own rows, not kept here. */
+  let byUser = {}; let lastStore = null;
   function st() {
+    const s = S(); if (s !== lastStore) { lastStore = s; byUser = {}; }
     const uid = Proto.store.currentUser().id;
-    return (byUser[uid] = byUser[uid] || { refusal: {}, declineOpen: {}, declineReason: {}, declineHint: {}, done: {}, nameShown: {}, simNote: null });
+    return (byUser[uid] = byUser[uid] || { refusal: {}, declineOpen: {}, declineReason: {}, declineHint: {}, done: {}, simNote: null, notice: null });
   }
+  // A gate whose cause is gone (outage over, hours resumed) falls: on the next render, and on a press of the Held primary before it focuses anything.
+  const stale = (g) => !!g && ((g.code === 'outage' && !S().outage) || (g.code === 'after_hours' && !S().clock.afterHours));
+  const nameDisclosed = (a) => S().disclosures.some((d) => d.purpose === 'approval' && d.patientId === a.patientId && d.actor === me().name && (d.recordIds || []).includes(a.id));
 
   /* ---- helpers ---- */
   function pat(pid) { return Proto.store.patient(pid) || { name: '—', mrn: '—' }; }
   function requestedAt(a) { return a.requestedAt || S().clock.time; }
-  /* The sentence is the store's (it is privacy-aware and built at read time); the card only redacts the
-     patient name it keeps behind Show name. */
-  function cardSentence(a) {
-    const p = pat(a.patientId);
-    const s = Proto.store.approvalSentence(a) || '';
-    return p.name && s.includes(p.name) ? s.split(p.name).join(initials(p.name) + ' · ' + p.mrn) : s;
-  }
+  // The store's redacted sentence (initials · MRN): the name stays behind Show name, a logged read.
+  const cardSentence = (a) => Proto.store.approvalSentence(a, { redact: true });
   function denialLine(a) {
     const s = S();
     const denied = (s.claims || []).filter((c) => c.patientId === a.patientId && c.status === 'denied');
@@ -73,23 +74,30 @@
     focusOn(focus);
   }
 
-  /* ---- step-up: 'Confirm your PIN' (any 4-6 digits pass in the prototype) ---- */
+  /* ---- step-up: 'Confirm your PIN' (the store matches the digits against the approver's own PIN) ---- */
   function openStepup(r, a) {
-    const dots = h('div', { class: 'pindots', 'aria-live': 'polite', 'aria-label': 'PIN digits entered', text: '' });
+    // The display is where the keyboard lands and where Enter is Approve, as pin.display is Go on the author pad.
+    const dots = h('div', { class: 'pindots', testid: 'phone.stepup.display', tabindex: '0', role: 'textbox', 'aria-readonly': 'true', 'aria-live': 'polite', 'aria-label': 'PIN typed so far; Enter is Approve', text: '' });
     const hint = h('p', { class: 'hint ph-hint', text: 'Four to six digits.' });
-    const state = { reqId: a.id, digits: '', dots, hint, close: null };
+    const state = { reqId: a.id, digits: '', dots, hint, close: null, store: S() };
     function paint() { dots.textContent = '•'.repeat(state.digits.length); }
     state.add = (d) => { if (state.digits.length < 6) { state.digits += d; paint(); } };
     state.back = () => { state.digits = state.digits.slice(0, -1); paint(); };
     state.submit = () => {
       if (state.digits.length < 4) { hint.textContent = 'Enter at least four digits, then tap Approve.'; hint.classList.add('ph-hint-warn'); return; }
+      state.done = true;
+      // The store may have been rebuilt under the pad: then there is no request to decide, and the person is told so.
+      if (state.store !== S() || !S().approvals.some((x) => x.id === a.id)) { state.close(); notice(r, a.id); return; }
       const s = st();
-      const res = Proto.store.decideApproval(a.id, me().id, 'approved', true);
+      // The digits go to the store, which owns the PIN rule; until verifyPin lands the older store takes the bare step-up.
+      const res = Proto.store.decideApproval(a.id, me().id, 'approved', Proto.store.verifyPin ? { pin: state.digits } : true);
       state.close();
-      if (!res.ok) { s.refusal[a.id] = gate(r, a, res); rerender(r, 'refusal.control'); return; }
+      if (!res.ok) { s.refusal[a.id] = gate(r, a, res); if (res.code === 'pin_no_match') s.refusal[a.id].fresh = true; rerender(r, 'refusal.control'); return; }
       s.refusal[a.id] = null;
-      s.done[a.id] = { kind: 'approved', text: 'Approved · posted with your name as second approver · the biller’s write-off is on the ledger' };
-      say('Approved. Posted with your name as second approver.');
+      // What posted, not what was asked: the store settles min(amount, due), so a partial approval says its own figure.
+      const posted = money(res.postedCents != null ? res.postedCents : a.amountCents);
+      s.done[a.id] = { kind: 'approved', text: 'Approved ' + posted + ' · posted with your name as second approver · the biller’s write-off is on the ledger' };
+      say('Approved ' + posted + '. Posted with your name as second approver.');
       rerender(r, '.ph-done');
     };
     const keys = h('div', { class: 'pinpad', role: 'group', 'aria-label': 'PIN keypad' },
@@ -103,20 +111,33 @@
       h('p', { class: 'small muted', text: 'Approving ' + money(a.amountCents) + ' ' + (REASON_LABEL[a.reason] || a.reason) + ' write-off for ' + initials(pat(a.patientId).name) + ' · ' + pat(a.patientId).mrn + '. Your name is recorded as second approver.' }),
       hint, dots, keys,
       btn('Cancel', { testid: 'phone.stepup.cancel', kind: 'quiet', onClick: () => state.close() }));
-    state.close = Proto.ui.dialog(body, { label: 'Confirm your PIN', focus: '[data-testid="phone.stepup.1"]', onClose: () => { if (pad === state) pad = null; } });
+    // A pad closed over a rebuilt store (reset) confirmed nothing: the next render says so where focus can land.
+    state.close = Proto.ui.dialog(body, { label: 'Confirm your PIN', focus: '[data-testid="phone.stepup.display"]', onClose: () => { if (pad === state) pad = null; if (!state.done && state.store !== S()) { const s = st(); s.notice = NOTICE(a.id); s.noticeFresh = true; } } });
     pad = state;
   }
 
   /* ---- decisions ---- */
   /* A refusal the store raised keeps the store's own verb and control word; the screen only wires the way
-     out (blocked_same_person names Send back, everything else names Switch author). */
+     out: Send back (blocked_same_person) opens the reason line, Open the ledger (already_decided) opens the
+     patient's ledger, Support line (outage) announces the number; anything else names Switch author. */
+  const WAY_OUT = {
+    'Send back': (r, a) => onDecline(r, a),
+    'Open the ledger': (r, a) => Proto.router.go(r.persona, 'ledger', a.patientId),
+    'Support line': () => Proto.ui.support(),
+  };
+  // A missed PIN reopens the pad; a locked pad has nothing to reopen, so its control dismisses the gate.
+  const BY_CODE = {
+    pin_no_match: (r, a) => { st().refusal[a.id] = null; openStepup(r, a); },
+    pin_locked: (r, a) => { st().refusal[a.id] = null; rerender(r, 'phone.request.' + a.id + '.approve'); },
+  };
   function gate(r, a, res) {
     const control = res.control || 'Switch author';
-    const onControl = control === 'Send back'
-      ? () => onDecline(r, a)
-      : () => Proto.screens.shell.openPinPad(r);
-    return Object.assign({}, res, { control, onControl });
+    const out = BY_CODE[res.code] || WAY_OUT[control] || ((rr) => Proto.screens.shell.openPinPad(rr));
+    return Object.assign({}, res, { control, onControl: () => out(r, a) });
   }
+  // The request the pad was confirming is gone (store rebuilt, or decided elsewhere): say so where focus can land.
+  const NOTICE = (reqId) => 'Request ' + reqId + ' is no longer waiting here; nothing was approved.';
+  function notice(r, reqId) { const s = st(); s.notice = NOTICE(reqId); say(s.notice); rerender(r, '.ph-notice'); }
   function onApprove(r, a) {
     const s = st();
     s.refusal[a.id] = null;
@@ -146,15 +167,18 @@
     say('Sent back: ' + reason);
     rerender(r, '.ph-done');
   }
+  /* The sim plays the biller's side all the way: on a shared device it types the biller's own PIN, so the store's
+     PIN rule is met the way the biller would meet it. A refusal left over (outage, a locked pad, nothing to write off)
+     renders through the gate component beside the control that raised it, never as bare text. */
   function simulate(r) {
-    const s = st(); const x = nextSim();
+    const s = st(); const x = nextSim(); s.notice = null; s.simGate = null;
     const p = P(); const prev = p.persona;
     let res;
-    try { p.persona = 'biller'; res = Proto.store.requestWriteoff(x.pid, x.cents, x.reason); }
+    try { p.persona = 'biller'; res = Proto.store.requestWriteoff(x.pid, x.cents, x.reason, { pin: me().pin || null }); }
     finally { p.persona = prev; }
     if (res && res.held) { s.simNote = 'Sam (biller) tapped Post on the ' + simWords(x) + '; it is waiting on you as request ' + res.requestId + '.'; say('Request ' + res.requestId + ' is waiting for you'); }
     else if (res && res.ok) { s.simNote = 'Below the threshold: the write-off posted without a second approver.'; say(s.simNote); }
-    else { s.simNote = (res && res.verb) || 'Nothing was requested.'; say(s.simNote); }
+    else { s.simNote = null; s.simGate = Object.assign({ fresh: true }, res, { onControl: res.code === 'outage' ? () => Proto.ui.support() : () => { st().simGate = null; rerender(r, 'phone.simulate'); } }); rerender(r, 'refusal.control'); return; }
     rerender(r, 'phone.simulate');
   }
 
@@ -167,6 +191,7 @@
     const who = me();
     const mine = a.requestedById === who.id;
     const at = requestedAt(a);
+    if (stale(s.refusal[a.id])) s.refusal[a.id] = null;
     const gated = !!s.refusal[a.id];
     const card = h('article', { class: 'card ph-card', 'aria-label': 'Approval request ' + a.id, dataset: { req: a.id } });
     card.append(h('div', { class: 'ph-head' },
@@ -176,9 +201,14 @@
         h('div', { class: 'small muted', text: (REASON_LABEL[a.reason] || a.reason) + ' write-off · ' + a.id })),
       chip('review', 'Waiting')));
     const nameRow = h('div', { class: 'ph-kv' }, h('span', { class: 'ph-k', text: 'Patient' }),
-      s.nameShown[a.id]
-        ? h('span', { class: 'ph-v', text: p.name + ' · ' + p.mrn })
-        : h('span', { class: 'ph-v' }, initials(p.name) + ' · ' + p.mrn + ' ', btn('Show name', { testid: 'phone.request.' + a.id + '.name', kind: 'quiet', class: 'compact', ariaLabel: 'Show the patient’s full name (this tap is logged)', onClick: () => { st().nameShown[a.id] = true; rerender(r, 'phone.request.' + a.id + '.approve'); } })));
+      nameDisclosed(a)
+        ? h('span', { class: 'ph-v', id: 'ph-name-' + a.id, tabindex: '-1', text: p.name + ' · ' + p.mrn })
+        : h('span', { class: 'ph-v' }, initials(p.name) + ' · ' + p.mrn + ' ', btn('Show name', { testid: 'phone.request.' + a.id + '.name', kind: 'quiet', class: 'compact', ariaLabel: 'Show the patient’s full name (this tap is logged)', onClick: () => {
+          // The tap is the logged read the label promises; the store owns the disclosures row, and the card reads it back.
+          if (Proto.store.disclose) Proto.store.disclose({ patientId: a.patientId, purpose: 'approval', recordIds: [a.id] });
+          // Focus lands on the name the tap revealed, never on Approve: a repeated Enter must not open the step-up.
+          rerender(r, '#ph-name-' + a.id);
+        } })));
     card.append(h('div', { class: 'ph-grid' },
       nameRow,
       kv('Requested by', a.requestedBy + (mine ? ' (you)' : '')),
@@ -188,7 +218,7 @@
     const denial = denialLine(a);
     if (denial) card.append(h('p', { class: 'ph-line' }, chip('required', 'Denial'), ' ', denial));
     if (heldForHours(a)) card.append(h('p', { class: 'ph-line' }, chip('info', 'After hours'), ' Requested at ' + time(at) + ', location closed at ' + time(S().tenant.businessHours.close) + '.'));
-    if (gated) card.append(refusal(s.refusal[a.id]));
+    if (gated) { card.append(refusal(s.refusal[a.id])); s.refusal[a.id].fresh = false; }
     if (s.declineOpen[a.id]) {
       // Validation is silent until blur; the hint updates in place so a blur never re-renders the
       // card under a tap that is landing on Approve or Send back.
@@ -204,7 +234,7 @@
     // word Held is the button's whole label; what is held stays in its accessible name.
     card.append(h('div', { class: 'ph-actions' },
       gated
-        ? btn('Approve ' + money(a.amountCents) + ' write-off', { testid: 'phone.request.' + a.id + '.approve', kind: 'held', onClick: () => focusOn('refusal.control') })
+        ? btn('Approve ' + money(a.amountCents) + ' write-off', { testid: 'phone.request.' + a.id + '.approve', kind: 'held', onClick: () => (stale(s.refusal[a.id]) ? onApprove(r, a) : focusOn('refusal.control')) })
         : btn('Approve', { testid: 'phone.request.' + a.id + '.approve', kind: 'irreversible', ariaLabel: 'Approve ' + money(a.amountCents) + ' write-off; you will confirm your PIN', onClick: () => onApprove(r, a) }),
       btn('Send back', { testid: 'phone.request.' + a.id + '.decline', kind: 'reversible', ariaLabel: s.declineOpen[a.id] ? 'Send back with the reason above' : 'Send back with a one-line reason', onClick: () => onDecline(r, a) })));
     card.append(h('details', { class: 'ph-why' }, h('summary', { testid: 'phone.request.' + a.id + '.why', text: 'Why am I seeing this?' }),
@@ -212,13 +242,17 @@
     return card;
   }
 
-  function decidedCard(a) {
-    const done = st().done[a.id];
+  function decidedCard(r, a) {
+    const done = st().done[a.id]; const gated = st().refusal[a.id];
     const s = a.status === 'approved' ? ['clear', 'Approved'] : ['required', 'Sent back'];
     return h('article', { class: 'card flat ph-decided', 'aria-label': 'Decided request ' + a.id },
-      h('div', { class: 'ph-head' }, chip(s[0], s[1]), h('span', { class: 'ph-amount small', text: money(a.amountCents) }), h('span', { class: 'small muted grow', text: a.id })),
+      h('div', { class: 'ph-head' }, chip(s[0], s[1]), h('span', { class: 'ph-amount small', text: money(a.postedCents != null ? a.postedCents : a.amountCents) }), h('span', { class: 'small muted grow', text: a.id })),
       done ? h('p', { class: 'ph-done', role: 'status', tabindex: '-1', text: done.text }) : null,
-      h('p', { class: 'small muted', text: cardSentence(a) + (a.decidedBy ? ' · ' + s[1] + ' · ' + a.decidedBy + ' at ' + time(a.decidedAt) : '') }));
+      // A gate raised against a request that was decided under this approver's hands renders here, on the row it names.
+      gated ? refusal(gated) : null,
+      h('p', { class: 'small muted', text: cardSentence(a) + (a.decidedBy ? ' · ' + s[1] + ' · ' + a.decidedBy + ' at ' + time(a.decidedAt) : '') }),
+      // The approver's one line rides with the decision; the requester reads it here, not just who sent it back.
+      a.status === 'declined' && a.decisionReason && !done ? h('p', { class: 'small' }, h('b', { text: 'Their line: ' }), a.decisionReason) : null);
   }
 
   function renderNotFound(r) {
@@ -236,10 +270,12 @@
     // checkout, encounter and ledger, not the Approvals screen wearing someone else's id.
     if (r && r.id && r.id !== 'approvals') { renderNotFound(r); return; }
     const s = S(); const who = me(); const cards = st();
+    if (pad && pad.store !== s) { const gone = pad; pad = null; gone.close(); }   // its onClose leaves the notice
     const pending = Proto.store.pendingApprovalsFor();
     const decided = s.approvals.filter((a) => a.status !== 'pending');
     const root = h('div', { class: 'phone ph-page' });
     root.append(pageHead('Approvals', 'Signed in as ' + who.name + (iAmEligible() ? ' · eligible second approver' : ' · not an approver')));
+    if (cards.notice) root.append(h('p', { class: 'small ph-notice', role: 'status', tabindex: '-1', text: cards.notice }));
     if (pending.length) {
       root.append(h('p', { class: 'small muted', text: pending.length + ' waiting. One decision per card; there is no Approve all.' }));
       pending.forEach((a) => root.append(requestCard(r, a)));
@@ -251,16 +287,20 @@
         h('p', { class: 'practice-line muted', text: 'Decided here today: ' + done + '. A held posting appears the moment someone asks.' })));
     }
     if (decided.length) {
-      root.append(h('section', { class: 'stack', 'aria-label': 'Decided' }, h('h2', { class: 'ph-h2', text: 'Decided' }), ...decided.slice().reverse().map((a) => decidedCard(a))));
+      root.append(h('section', { class: 'stack', 'aria-label': 'Decided' }, h('h2', { class: 'ph-h2', text: 'Decided' }), ...decided.slice().reverse().map((a) => decidedCard(r, a))));
     }
     const sim = nextSim();
     root.append(h('section', { class: 'card flat stack ph-sim', 'aria-label': 'Simulate a request' },
       h('h2', { class: 'ph-h2', text: 'Test the flow alone' }),
       h('p', { class: 'small muted', text: 'Plays the biller’s side of the request so you can approve from here.' }),
-      btn('Simulate: the biller requests the ' + simWords(sim), { testid: 'phone.simulate', kind: 'reversible', class: 'ph-wrap', onClick: () => simulate(r) }),
+      // While the sim's gate stands the control carries the Held identity; its press re-runs the sim, which re-evaluates the gate.
+      btn('Simulate: the biller requests the ' + simWords(sim), { testid: 'phone.simulate', kind: cards.simGate ? 'held' : 'reversible', class: 'ph-wrap', onClick: () => simulate(r) }),
+      cards.simGate ? refusal(cards.simGate) : null,
       cards.simNote ? h('p', { class: 'small', role: 'status', text: cards.simNote }) : null));
+    if (cards.simGate) cards.simGate.fresh = false;
     Proto.screens.shell.mount(root);
     attachKeys();
+    if (cards.noticeFresh) { cards.noticeFresh = false; say(cards.notice); focusOn('.ph-notice'); }
   }
 
   /* ---- keyboard: digits, Backspace, Enter drive the step-up pad while this screen is mounted ---- */
@@ -270,10 +310,10 @@
     const t = ev.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
     if (/^[0-9]$/.test(ev.key)) { ev.preventDefault(); pad.add(ev.key); }
     else if (ev.key === 'Backspace') { ev.preventDefault(); pad.back(); }
-    /* Enter finishes the PIN wherever the keyboard happens to be sitting. The pad opens with focus on its
-       landing key, so excluding focused buttons meant Enter typed a fifth digit instead of submitting and
-       only the submit key would finish. Cancel keeps its own Enter, because it is a different verb. */
-    else if (ev.key === 'Enter' && !(t && t.getAttribute && t.getAttribute('data-testid') === 'phone.stepup.cancel')) { ev.preventDefault(); pad.submit(); }
+    /* One grammar with the author pad (shell.js onPadKey): Enter on a focused control is that control's own
+       activation (a digit key enters its digit, Backspace deletes one, Cancel cancels); only Enter off a control,
+       on the display the pad opens on, submits. Intercepting it ran Approve from a digit key. */
+    else if (ev.key === 'Enter' && !(t && t.closest && t.closest('button, summary, a, [role="button"]'))) { ev.preventDefault(); pad.submit(); }
   }
   function attachKeys() { if (!keysOn) { document.addEventListener('keydown', onKey); keysOn = true; } }
   function detachKeys() { if (keysOn) { document.removeEventListener('keydown', onKey); keysOn = false; } }
