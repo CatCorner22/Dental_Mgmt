@@ -173,6 +173,9 @@
       }
     }
     document.addEventListener('keydown', onKey, true);
+    // A press on the dialog's own prose (a verb line, the heading, the Why text) is nowhere the keyboard can go: the browser
+    // moved focus to body, outside the modal, until the next Tab. The click still lands; only the focus move is refused.
+    box.addEventListener('mousedown', (ev) => { if (!(ev.target.closest && ev.target.closest('button, input, select, textarea, summary, a[href], [tabindex]'))) ev.preventDefault(); });
     // The backdrop closes the dialog, so it is a control and carries an id like every other control.
     overlay.setAttribute('data-testid', 'dialog.backdrop');
     overlay.addEventListener('click', (ev) => { if (ev.target === overlay && !opts.modal) close(); });

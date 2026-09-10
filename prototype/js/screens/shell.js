@@ -21,6 +21,14 @@
   // A toggle that rebuilds the bar it lives in removes the element that had focus, so the keyboard fell to
   // body after every press. Each such handler puts the keyboard back on the control's replacement.
   function refocus(testid) { const el = document.querySelector('[data-testid="' + testid + '"]'); if (el) el.focus(); }
+  // A scripted set() (theme, device, motion) repaints the bars the same way: whichever control held the keyboard gets it
+  // back by test id, or the bar's first control does — never body (focus-preservation rule).
+  function keepFocus(bar, paint) {
+    const a = document.activeElement; const holder = a && bar.contains(a) && a.closest ? a.closest('[data-testid]') : null;
+    const had = holder ? holder.getAttribute('data-testid') : null;
+    paint();
+    if (had) { const el = bar.querySelector('[data-testid="' + had + '"]') || bar.querySelector('button'); if (el) el.focus({ preventScroll: true }); }
+  }
 
   let authorId = null;                                   // who the chip last painted; a store write may move it
   function renderTopbar(r) {
@@ -28,14 +36,14 @@
     const P = window.__proto; const S = Proto.store.get();
     // One word per concept: the theme control reads "Dark" / "Light" here, in the signed-in bar and on sign-in.
     // Sign-in mirrors the same option, so its canvas repaints with the bar. P.set repaints the bar itself.
-    if (!r.persona) { authorId = null; top.replaceChildren(h('span', { class: 'brand' }, h('span', { class: 'mark', 'aria-hidden': 'true' }), 'Riverbend Dental'), h('span', { class: 'spacer' }), btn(P.theme === 'dark' ? 'Light' : 'Dark', { testid: 'topbar.theme', ariaLabel: 'Switch to ' + (P.theme === 'dark' ? 'light' : 'dark'), onClick: () => { P.set({ theme: P.theme === 'dark' ? 'light' : 'dark' }); Proto.router.render(); refocus('topbar.theme'); } })); return; }
+    if (!r.persona) { authorId = null; keepFocus(top, () => top.replaceChildren(h('span', { class: 'brand' }, h('span', { class: 'mark', 'aria-hidden': 'true' }), 'Riverbend Dental'), h('span', { class: 'spacer' }), btn(P.theme === 'dark' ? 'Light' : 'Dark', { testid: 'topbar.theme', ariaLabel: 'Switch to ' + (P.theme === 'dark' ? 'light' : 'dark'), onClick: () => { P.set({ theme: P.theme === 'dark' ? 'light' : 'dark' }); Proto.router.render(); refocus('topbar.theme'); } }))); return; }
     const u = Proto.store.currentUser(); authorId = u.id;
     const loc = S.locations[0];
     const nav = h('nav', { 'aria-label': 'Primary' }, ...(NAV[r.persona] || NAV.frontdesk).map(([route, label]) => btn(label, { testid: 'nav.' + route, onClick: () => Proto.router.go(r.persona, route), class: r.route === route ? 'current' : '' })));
     nav.querySelectorAll('button').forEach((b) => { if (b.classList.contains('current')) b.setAttribute('aria-current', 'page'); });
     // A missing day pass is not a person: the chip says so instead of printing the placeholder's initials.
     const authorChip = h('button', { type: 'button', class: 'authorchip', testid: 'topbar.author', 'aria-label': 'Who is charting: ' + u.name + (u.licence ? ', ' + u.licence : '') + '. Switch author', onClick: () => openPinPad(r) }, h('span', { text: u.noPass ? u.short : (P.device === 'shared' || P.device === 'operatory') ? (Proto.ui.initials(u.name) + (u.licence ? ' · ' + u.licence : '')) : (u.short || u.name) }));
-    top.replaceChildren(
+    keepFocus(top, () => top.replaceChildren(
       h('span', { class: 'brand' }, h('span', { class: 'mark', 'aria-hidden': 'true' }), 'Riverbend'),
       btn(loc.short, { testid: 'topbar.location', ariaLabel: 'Location: ' + loc.name + '. Switch location', onClick: () => Proto.router.announce('Switch location: not in this prototype') }),
       btn('Search  ⌘K', { testid: 'topbar.search', ariaLabel: 'Search patients, claims, and actions (Ctrl or Cmd K)', onClick: () => Proto.screens.palette.open(r) }),
@@ -47,7 +55,7 @@
       btn('Privacy mode', { testid: 'topbar.privacy', pressed: P.privacy, ariaLabel: 'Privacy mode: hide patient names on operatory glass', onClick: () => { P.set({ privacy: !P.privacy }); refocus('topbar.privacy'); } }),
       btn(P.theme === 'dark' ? 'Light' : 'Dark', { testid: 'topbar.theme', ariaLabel: 'Switch to ' + (P.theme === 'dark' ? 'light' : 'dark'), onClick: () => { P.set({ theme: P.theme === 'dark' ? 'light' : 'dark' }); refocus('topbar.theme'); } }),
       btn('Sign out', { testid: 'topbar.signout', onClick: () => { location.hash = '#/signin'; } }),
-    );
+    ));
   }
 
   const supportLine = Proto.ui.support;                 // one support line for every outage gate (ui.js)
@@ -59,11 +67,11 @@
     const a = document.getElementById('andon'); const P = window.__proto;
     if (!r.persona) { a.replaceChildren(); return; }
     if (P.outage) {
-      a.replaceChildren(chip('required', 'Server unreachable', {}), h('span', { class: 'grow', text: 'Showing the Board from 7:58 am · reads only, no postings · incident INC-2093' }), btn('Support line', { testid: 'andon.control', kind: 'reversible', onClick: supportLine }));
+      keepFocus(a, () => a.replaceChildren(chip('required', 'Server unreachable', {}), h('span', { class: 'grow', text: 'Showing the Board from 7:58 am · reads only, no postings · incident INC-2093' }), btn('Support line', { testid: 'andon.control', kind: 'reversible', onClick: supportLine })));
       return;
     }
     const pending = Proto.store.pendingApprovalsFor();      // one count for the Andon, the phone and the tab
-    if (pending.length) { a.replaceChildren(chip('review', pending.length + ' approval' + (pending.length > 1 ? 's' : '') + ' waiting', {}), h('span', { class: 'grow', text: minimumSentence(pending[0]) }), btn('Open approvals', { testid: 'andon.control', kind: 'reversible', onClick: () => { location.hash = '#/phone/approvals'; } })); return; }
+    if (pending.length) { keepFocus(a, () => a.replaceChildren(chip('review', pending.length + ' approval' + (pending.length > 1 ? 's' : '') + ' waiting', {}), h('span', { class: 'grow', text: minimumSentence(pending[0]) }), btn('Open approvals', { testid: 'andon.control', kind: 'reversible', onClick: () => { location.hash = '#/phone/approvals'; } }))); return; }
     a.replaceChildren();
   }
 
@@ -86,8 +94,10 @@
     return Object.assign({ ok: false, code: 'pin_no_match' }, NO_MATCH);
   }
 
-  function openPinPad(r) {
-    const P = window.__proto; const S = Proto.store.get();
+  // opts.onSwitch(who) runs once the other person's session is open, before the route repaints under their name: the
+  // caller that must carry something across the switch (the read-back's draft) hands it over there.
+  function openPinPad(r, opts) {
+    const P = window.__proto; const S = Proto.store.get(); opts = opts || {};
     let digits = '';
     // The keyboard lands on the digit display, not on a key: typed digits fill it and Enter there is Go, while Enter
     // on a focused key presses that key (one grammar with the phone step-up, whose landing key is its display).
@@ -96,7 +106,8 @@
     // behind a disclosure instead of standing in front of the first digit.
     const status = h('p', { class: 'hint', text: 'Enter the other person\'s PIN' });
     const policy = h('details', null, h('summary', { class: 'small', testid: 'pin.why' }, 'Why this signs you out'),
-      h('p', { class: 'small muted', text: P.device === 'desk' ? 'This desk is not shared, so switching signs you out and in as the other person.' : 'Their session opens on this page; yours is revoked and local drafts are wiped after autosave.' }));
+      // The sentence says what the product does: drafts are kept per author (perio.js stateFor, encounter.js state), not wiped.
+      h('p', { class: 'small muted', text: P.device === 'desk' ? 'This desk is not shared, so switching signs you out and in as the other person.' : 'Their session opens on this page and yours is revoked; your unsaved draft waits under your PIN.' }));
     let close;
     const refusalSlot = h('div', { class: 'pin-refusal' });
     // Rebuilding the slot removes the control that may hold the keyboard; it lands on the new gate's control, never body.
@@ -124,6 +135,7 @@
       // used to emit a write event for a table the store did not hold, so the log named a row nothing wrote.
       const opened = Proto.store.openSession(who.id);
       if (!opened.ok) { showStoreRefusal(opened); return; }
+      if (opts.onSwitch) opts.onSwitch(who);
       close();
       const p = persona[0]; P.set({ persona: p });
       location.hash = '#/' + p + '/' + (r.route === 'signin' ? Proto.router.HOME[p] : r.route) + (r.id ? '/' + r.id : '');
@@ -157,7 +169,7 @@
     const S = Proto.store.get(); const steps = Proto.store.railSteps();
     if (!bar) { bar = h('div', { class: 'rail1', id: 'rail1', 'aria-label': 'Your first shift' }); document.getElementById('andon').after(bar); }
     if (S.rail1Collapsed) { bar.replaceChildren(btn('Show first-shift steps', { testid: 'rail1.toggle', onClick: () => { S.rail1Collapsed = false; renderRail1(r); refocus('rail1.toggle'); } })); return; }
-    bar.replaceChildren(h('span', { class: 'small muted', text: 'Your first shift:' }), ...steps.map(([code, label], i) => { const retired = !!Proto.store.railStateFor()[code]; return btn(retired ? label + ' ✓' : label, { testid: 'rail1.chip.' + i, dataset: { retired: retired ? '1' : '0' }, ariaLabel: label + (retired ? ', done' : ', show me'), onClick: () => pulseFor(code, r) }); }), btn('Hide', { testid: 'rail1.toggle', onClick: () => { S.rail1Collapsed = true; renderRail1(r); refocus('rail1.toggle'); } }));
+    keepFocus(bar, () => bar.replaceChildren(h('span', { class: 'small muted', text: 'Your first shift:' }), ...steps.map(([code, label], i) => { const retired = !!Proto.store.railStateFor()[code]; return btn(retired ? label + ' ✓' : label, { testid: 'rail1.chip.' + i, dataset: { retired: retired ? '1' : '0' }, ariaLabel: label + (retired ? ', done' : ', show me'), onClick: () => pulseFor(code, r) }); }), btn('Hide', { testid: 'rail1.toggle', onClick: () => { S.rail1Collapsed = true; renderRail1(r); refocus('rail1.toggle'); } })));
   }
   // One timer per ring. A single shared timer let the next press cancel the previous element's clear, so the
   // ring from an earlier "show me" stayed on its control for the rest of the shift.

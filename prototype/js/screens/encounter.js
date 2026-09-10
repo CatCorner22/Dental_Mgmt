@@ -26,9 +26,22 @@
   let st = {}; // encId -> { tooth, surfaces:[{s, mixed}], temporality, note:{assessment, plan}, checked, killers, readback, filed, dismissing:{tagId: reason}, quoted }
   const S = () => Proto.store.get();
   const P = () => window.__proto;
-  function syncStore() { const s = S(); if (s !== lastStore) { lastStore = s; st = {}; } }
-  // A draft belongs to its author: the PIN switch on a shared device wipes local drafts, so the next author starts clean.
-  function state(encId) { syncStore(); const k = encId + '|' + Proto.store.currentUser().id; if (!st[k]) st[k] = { tooth: null, surfaces: [], temporality: 'today', note: { assessment: '', plan: '' }, checked: false, killers: [], readback: false, filed: null, dismissing: {}, quoted: null }; return st[k]; }
+  function syncStore() { const s = S(); if (s !== lastStore) { lastStore = s; st = {}; handoff = null; } }
+  /* A draft belongs to its author: the PIN switch on a shared device leaves each author's draft under their own key, so
+     the next author starts clean and the first finds theirs again. The one exception is the read-back gate's own
+     Switch author: it says "this work is the other person's", so the draft moves to the author the pad names (once,
+     and only through that control) — otherwise the correction the gate offers drops the note it was meant to file. */
+  let handoff = null;                                   // { encId, fromKey, draft } set by the read-back's Switch author
+  function state(encId) {
+    syncStore(); const k = encId + '|' + Proto.store.currentUser().id;
+    if (handoff && handoff.encId === encId && handoff.fromKey !== k) { st[k] = handoff.draft; delete st[handoff.fromKey]; handoff = null; }
+    if (!st[k]) st[k] = { tooth: null, surfaces: [], temporality: 'today', note: { assessment: '', plan: '' }, checked: false, killers: [], readback: false, filed: null, dismissing: {}, quoted: null };
+    return st[k];
+  }
+  function switchAuthorWithDraft(r, enc, x) {
+    const fromKey = enc.id + '|' + Proto.store.currentUser().id;
+    Proto.screens.shell.openPinPad(r, { onSwitch: () => { handoff = { encId: enc.id, fromKey, draft: x }; } });
+  }
 
   // ---- lookups ------------------------------------------------------------------------------
   const isSurgeon = () => P().persona === 'surgeon';
@@ -81,7 +94,8 @@
   }
   // A gate that has just been raised lands the keyboard on its verb, one Tab from its control: focusing the control
   // let the Enter that raised the read-back confirm it (invariants-r2-8).
-  function focusGateVerb() { const v = document.querySelector('#enc-gate .refusal .verb'); if (!v) return false; v.setAttribute('tabindex', '-1'); v.focus({ preventScroll: true }); return true; }
+  function focusGateVerb() { const v = document.querySelector('#enc-gate .refusal .verb') || document.querySelector('#enc-gate h2'); if (!v) return false; v.setAttribute('tabindex', '-1'); v.focus({ preventScroll: true }); return true; }
+  const focusId = (id) => { const el = document.getElementById(id); if (!el) return false; el.focus({ preventScroll: true }); return true; };
   // Below 1280 px the gate column is pinned over the bottom of the page, so a field it points at is scrolled above it.
   function reveal(el) {
     el.scrollIntoView({ block: 'center' });
@@ -459,7 +473,7 @@
       const res = Proto.store.fileNote(enc.id, x.note, false);
       if (res.ok === false && res.code === 'readback') {
         wrap.append(refusal({ code: res.code, verb: res.verb, control: res.control, controlKind: 'irreversible', why: res.why, severity: 'info', onControl: () => doFile(r, enc, x, true) }));
-        area.append(h('div', { class: 'row' }, h('span', { class: 'small muted grow', text: detail }), btn('Switch author', { kind: 'reversible', testid: 'enc.readback.switch', onClick: () => Proto.screens.shell.openPinPad(r) })),
+        area.append(h('div', { class: 'row' }, h('span', { class: 'small muted grow', text: detail }), btn('Switch author', { kind: 'reversible', testid: 'enc.readback.switch', onClick: () => switchAuthorWithDraft(r, enc, x) })),
           btn('Confirm the read-back', { kind: 'held', testid: 'enc.file', ariaLabel: 'Held: confirm the read-back', onClick: () => focusFirst('refusal.control') }));
         return area;
       }
@@ -491,7 +505,7 @@
       x.note.assessment = strip(x.note.assessment); x.note.plan = strip(x.note.plan);
       const plan = S().planItems.slice().reverse().find((pl) => pl.encounterId === enc.id); x.quoted = { planId: plan ? plan.id : null, date: S().tenant.today };
       x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3); rerender(r);
-      focusFirst('enc.killer.0.fix', 'enc.file'); Proto.router.announce('Moved to plan card'); return;
+      focusGateVerb() || focusFirst('enc.file'); Proto.router.announce('Moved to plan card'); return;
     }
     if (k.fix === 'contradiction') {
       // The tooth comes from the killer row itself; reading it back out of the verb broke the moment the
@@ -501,7 +515,7 @@
       const fix = (txt) => (txt || '').replace(/#(\d{1,2})\b/g, (all, n) => (n === chartTooth ? all : '#' + chartTooth));
       x.note.assessment = fix(x.note.assessment); x.note.plan = fix(x.note.plan);
       x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3); rerender(r);
-      focusFirst('enc.killer.0.fix', 'enc.file'); Proto.router.announce('Note now says #' + chartTooth + ', matching the chart'); return;
+      focusGateVerb() || focusFirst('enc.file'); Proto.router.announce('Note now says #' + chartTooth + ', matching the chart'); return;
     }
     if (k.fix === 'assessment') {
       const ta = document.getElementById('note-assessment');
@@ -525,13 +539,15 @@
     // The filing gate is the live one, so no earlier gate is left holding the contract selectors (§6).
     x.checked = true; x.sendGate = null; x.gateNode = null; x.undoGate = null; x.fileGate = null;
     const res = Proto.store.fileNote(enc.id, x.note, confirmed);
-    if (res.ok) { x.filed = res.filed; x.readback = false; rerender(r); focusFirst('enc.back'); Proto.router.announce('Filed · ' + (res.released ? 'charges released' : 'nothing to release') + (res.claim ? ' · claim queued' : '')); return; }
+    // Filed lands on the Filed card's stamp, never on Back to Exams: Enter twice used to leave before the card could be read.
+    if (res.ok) { x.filed = res.filed; x.readback = false; rerender(r); focusId('enc-filed-head') || focusFirst('enc.rail'); Proto.router.announce('Filed · ' + (res.released ? 'charges released' : 'nothing to release') + (res.claim ? ' · claim queued' : '')); return; }
     if (res.killers) { x.killers = res.killers; x.readback = false; }
     else if (res.code === 'readback') { x.killers = []; x.readback = true; }
     else { x.fileGate = res; x.readback = false; }
     rerender(r);
-    if (res.code === 'readback' || x.fileGate) focusGateVerb();
-    else if (res.killers) focusFirst('enc.killer.0.fix', 'enc.file');
+    // Refused: the keyboard lands on the gate's verb, one Tab from its control. The first killer control used to take it,
+    // and for a hygienist that control is Send to Exams to sign, so Enter twice on File sent the chair.
+    focusGateVerb() || focusFirst('enc.file');
   }
   function renderFiledCard(enc, filed, x) {
     // The claim and the charges are the encounter's own: a claim looked up by patient said "queued" on a visit
@@ -540,7 +556,7 @@
     const released = filed ? s.ledger.filter((e) => e.releasedByNoteId === filed.id) : s.ledger.filter((e) => e.kind === 'charge' && procs.includes(e.procedureId));
     const claim = s.claims.find((c) => c.encounterId === enc.id) || null;
     return h('div', { class: 'card stack enc-filed', 'aria-label': 'Filed note' },
-      h('div', { class: 'row' }, chip('clear', 'Filed', { big: true }), chip('clear', 'Audit passed')),
+      h('div', { class: 'row', id: 'enc-filed-head', tabindex: '-1', 'aria-label': 'Filed, audit passed' }, chip('clear', 'Filed', { big: true }), chip('clear', 'Audit passed')),
       filed ? h('p', { class: 'small muted', text: 'By ' + filed.author + ' at ' + dateTime((filed.filedOn || '') + ' ' + (filed.filedTime || '')) + ' · text and version frozen; corrections are addenda, never edits.' }) : null,
       h('ul', { class: 'enc-rows' },
         h('li', null, h('b', { text: 'Charges released: ' + released.length }), released.length ? ' · ' + released.map((e) => money(e.amountCents) + (e.tooth ? ' #' + e.tooth : '')).join(', ') : ' (nothing pending)'),
