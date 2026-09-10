@@ -48,9 +48,12 @@
     if (focus) { const el = document.querySelector(focus[0] === '#' ? focus : '[data-testid="' + focus + '"]'); if (el && el.focus) el.focus(); }
   }
   const focusPin = () => { const el = document.querySelector('[data-testid="checkout.pin"]'); if (el) el.focus(); };
-  const removeWriteoff = (r, st) => { st.writeoffOpen = false; st.writeoffStr = ''; st.writeoffReason = null; st.refusalNode = null; rerender(r, 'checkout.writeoff.add'); };
+  const removeWriteoff = (r, st, focus) => { st.writeoffOpen = false; st.writeoffStr = ''; st.writeoffReason = null; st.refusalNode = null; rerender(r, focus || 'checkout.writeoff.add'); };
+  const focusField = (t) => () => { const el = document.querySelector('[data-testid="' + t + '"]'); if (el && el.focus) el.focus(); };
+  const openRoles = () => { location.hash = '#/owner/roles'; };   // the seat that issues a pass, not the pass-less temp's own Roles
 
-  /* Every gate has one control. The store leaves a few controls null; supply the obvious one. */
+  /* Every gate has one control, and the control does what the store's word says. The store leaves a few controls
+     null; supply the obvious one. */
   function withControl(res, r, a, st) {
     const v = { code: res.code, verb: res.verb, control: res.control, why: res.why };
     if (res.code === 'zero_collect_refused') { v.control = res.control || 'Nothing due today'; v.onControl = () => { st.decision = 'zero_due'; st.refusalNode = null; rerender(r, 'checkout.collect.seg.zero-due'); }; }
@@ -59,12 +62,16 @@
     else if (res.code === 'pin_locked') { v.control = res.control || 'Close'; v.fresh = true; v.onControl = () => { st.pin = ''; st.refusalNode = null; rerender(r, 'checkout.pin'); }; }
     // After hours the write-off waits for business hours; the payment need not. The control takes the write-off
     // off this posting rather than requesting an approval the hours policy would still hold.
-    else if (res.code === 'after_hours') { v.control = 'Remove write-off'; v.onControl = () => removeWriteoff(r, st); }
+    else if (res.code === 'after_hours' || (res.code === 'amount_required' && res.control === 'Remove the write-off')) { v.control = res.control || 'Remove the write-off'; v.onControl = () => removeWriteoff(r, st, 'checkout.post'); }
+    // The store's write-off cap names the field the number goes in.
+    else if (res.code === 'amount_required') { v.control = res.control || 'Go to amount'; v.onControl = focusField('checkout.writeoff.amount'); }
     else if (res.code === 'tender_required') { v.control = 'Choose card'; v.onControl = () => { st.tender = 'card'; st.refusalNode = null; rerender(r, 'checkout.card.number'); }; }
     // The control that says "Open the ledger" opens the ledger. Every unnamed code used to fall through to the
     // Board, so the one gate whose label named a destination landed somewhere else.
     else if (res.code === 'already_decided') { v.control = res.control || 'Open the ledger'; v.onControl = () => Proto.router.go(r.persona, 'ledger', a.patientId); }
-    else if (res.code === 'entitlement') { v.control = res.control || 'Open Roles'; v.onControl = () => Proto.router.go(r.persona, 'roles'); }
+    // Two entitlement gates: no pass (Open Roles) and a seat without post_payment (Switch author, the PIN pad).
+    else if (res.code === 'entitlement' && res.control === 'Switch author') { v.onControl = () => Proto.screens.shell.openPinPad(r); }
+    else if (res.code === 'entitlement') { v.control = res.control || 'Open Roles'; v.onControl = openRoles; }
     else if (res.code === 'outage') { v.control = res.control || 'Support line'; v.severity = 'stop'; v.onControl = Proto.ui.support; }
     else { v.control = res.control || 'Back to Board'; v.onControl = () => Proto.router.go(r.persona, 'board'); }
     return v;
@@ -340,9 +347,12 @@
     // A gate goes with its cause (the Board prunes its own the same way): Post is never Held for an outage the
     // Andon no longer shows or a pass that has since been issued.
     const code = st.refusalNode ? st.refusalNode.dataset.code : null;
-    if ((code === 'outage' && !P.outage) || (code === 'entitlement' && !Proto.store.currentUser().noPass)) st.refusalNode = null;
+    // Only the pass gate ("Open Roles") falls with a pass: a seat without post_payment keeps its Switch author gate.
+    const ctl = st.refusalNode ? ((st.refusalNode.querySelector('button') || {}).textContent || '') : '';
+    const me = Proto.store.currentUser();
+    if ((code === 'outage' && !P.outage) || (code === 'entitlement' && ctl === 'Open Roles' && !me.noPass) || (code === 'entitlement' && ctl === 'Switch author' && (me.entitlements || []).includes('post_payment'))) st.refusalNode = null;
     // The PIN authorises the person who typed it: a switch of author (the pad, a persona change) discards it.
-    const uid = Proto.store.currentUser().id;
+    const uid = me.id;
     if (st.pinOwner !== uid) { if (st.pinOwner) st.pin = ''; st.pinOwner = uid; }
     if (st.heldReq) st.heldReq = S.approvals.find((x) => x.id === st.heldReq.id) || st.heldReq;
     const procs = S.procedures.filter((p) => p.encounterId === a.encounterId);

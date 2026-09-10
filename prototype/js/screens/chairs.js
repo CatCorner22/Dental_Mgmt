@@ -97,9 +97,17 @@
     if (focus) { const el = document.getElementById(focus) || document.querySelector('[data-testid="' + focus + '"]'); if (el) el.focus(); }
     if (announce) Proto.router.announce(announce);
   }
-  function gateFor(res) {
-    const g = { code: res.code, verb: res.verb, control: res.control, why: res.why };
-    g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, severity: g.code === 'outage' ? 'stop' : 'required', onControl: () => { if (g.code === 'outage') support(); } });
+  // The store's control words, each doing the thing it names; the gate remembers whose press raised it.
+  const BY_WORD = {
+    'Switch author': (r) => Proto.screens.shell.openPinPad(r),
+    'Open Roles': () => { location.hash = '#/owner/roles'; },   // the seat that issues a pass
+    'Support line': support,
+  };
+  function gateFor(res, id, r) {
+    const g = { code: res.code, verb: res.verb, control: res.control, why: res.why, userId: Proto.store.currentUser().id };
+    // An unnamed word drops the gate and returns the keyboard to the verb it held.
+    const act = g.code === 'outage' ? support : BY_WORD[g.control] || (() => { delete gates[id]; after(r, null, 'chairs.card.' + id + '.ready'); });
+    g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, severity: g.code === 'outage' ? 'stop' : 'required', onControl: () => act(r) });
     return g;
   }
 
@@ -112,7 +120,7 @@
     const a = Proto.store.appt(id); if (!a || !canReady(a)) return;
     const focusId = 'chairs.card.' + id + '.ready';
     const res = Proto.store.readyForExam(id);
-    if (!res.ok) { gates[id] = gateFor(res); render(r); const b = document.querySelector('[data-testid="' + focusId + '"]'); if (b) b.focus(); return; }
+    if (!res.ok) { gates[id] = gateFor(res, id, r); render(r); const b = document.querySelector('[data-testid="' + focusId + '"]'); if (b) b.focus(); return; }
     delete gates[id];
     Proto.store.retireChip('ready');
     const name = displayName(Proto.store.patient(a.patientId).name, P().privacy);
@@ -206,8 +214,9 @@
   function render(r) {
     syncStore();
     const s = S(); const u = Proto.store.currentUser(); const list = mine(); const hyg = isHygienist(u);
-    // The gate the outage raised belongs to the outage: once the server answers again the card offers the verb.
-    for (const id of Object.keys(gates)) if (gates[id].code === 'outage' && !s.outage) delete gates[id];
+    // A gate belongs to its cause: the outage (the server answers again), the author whose press raised it (another
+    // author's press asks the store afresh), the missing pass (issued since).
+    for (const id of Object.keys(gates)) { const g = gates[id]; if ((g.code === 'outage' && !s.outage) || (g.code !== 'outage' && g.userId !== u.id) || (g.code === 'entitlement' && !u.noPass)) delete gates[id]; }
     const sub = fmtTime(s.clock.time) + ' · ' + list.length + ' chair' + (list.length === 1 ? '' : 's') + (hyg ? ' · yours' : ' · all hygiene chairs at ' + s.locations[0].name + ' and yours') + (P().outage ? ' · read-only during the outage' : '') + ' · keys: P perio, N note, R focus Ready for exam';
     // The heading names the set below it: for a hygienist that is her own chairs, for anyone else
     // every hygiene chair at this location plus their own.

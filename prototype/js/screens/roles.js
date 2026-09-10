@@ -224,7 +224,7 @@
     if (!res.ok && res.code === 'sod_conflict' && s.previewOn) { s.saveGate = null; return rerender(r, 'refusal.control'); }
     // The control does what its label says: Support line announces the number and the gate stands; anything else returns to the primary.
     if (!res.ok) return gate({ code: res.code, verb: res.verb, control: res.control, why: res.why, severity: 'stop', onControl: () => { if (res.code === 'outage') { Proto.ui.support(); return; } s.saveGate = null; rerender(r, 'roles.daypass.save'); } });
-    s.issued = { dayPass: res.dayPass, downgraded: res.downgraded, requestedRole: f.role };
+    s.issued = { dayPass: res.dayPass, pin: res.pin, downgraded: res.downgraded, requestedRole: f.role };
     Object.assign(s, { formOpen: false, saveGate: null, decision: null, previewOn: false, credentialNote: false, touched: {}, form: freshState().form });
     Proto.router.announce('Day pass issued to ' + res.dayPass.name);
     rerender(r, 'roles.daypass.signin');
@@ -274,6 +274,8 @@
       h('div', { class: 'row' }, chip('clear', 'Issued'), i.downgraded ? chip('required', 'Downgraded to ' + roleLabel('frontdesk')) : null, dp.sodDecision ? chip('review', 'SoD decision: ' + (dp.sodDecision === 'compensate' ? 'Compensating control' : 'Accepted on purpose') + ' · review ' + longDate((decRow || {}).reviewBy || REVIEW_AT_SAVE)) : null),
       h('p', { class: 'rl-sentence', text: 'Day pass issued to ' + dp.name + ' · ' + roleLabel(dp.role) + ' · expires ' + clock12(dp.shiftEnd) + ' + 30 min grace · magic link sent to their phone; TOTP on their own device' }),
       i.downgraded ? h('p', { class: 'rl-note', text: 'Issued as ' + roleLabel('frontdesk') + ', not ' + roleLabel(i.requestedRole) + ': no verified ' + (wanted.licence || 'clinical') + ' credential on file for ' + dp.name + '. Nothing clinical was granted; clinical entitlements issue only after the credential is verified.' }) : null,
+      // Shown once, at issue: the PIN is how the holder posts under their own name on a shared desk.
+      i.pin ? h('p', { class: 'rl-sentence', text: 'PIN ' + i.pin + ' — for shared-desk postings; shown once' }) : null,
       h('div', { class: 'rl-chips' }, h('span', { class: 'small muted', text: 'Granted:' }), ...dp.entitlements.map((e) => chip('info', entLabel(e)))),
       h('div', { class: 'btnrow' }, btn('Sign in as this temp', { kind: 'reversible', testid: 'roles.daypass.signin', onClick: () => { P().set({ persona: 'temp' }); location.hash = '#/temp/board'; } })),
       h('details', null, h('summary', { testid: 'roles.daypass.expiry.why' }, 'Why it expires'), h('p', { class: 'hint', text: 'At ' + clock12(dp.shiftEnd) + ' + 30 min the grants lapse and the session is revoked. The account remains as a frozen name on everything it posted; issued by ' + dp.createdBy + ' for ' + (S().locations.find((l) => l.id === dp.locationId) || {}).name + '.' })));

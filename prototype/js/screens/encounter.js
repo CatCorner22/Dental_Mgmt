@@ -188,11 +188,19 @@
   }
   /* A gate this screen renders from a store refusal: one verb line, one control, and the control does what its
      label says (the support line, the undo, the procedure strip, the dentist's queue), never only a re-render. */
+  // The store's control words, each doing the thing it names (the same words the Phone and Perio act on).
+  const BY_WORD = {
+    'Switch author': (r) => Proto.screens.shell.openPinPad(r),
+    'Open Roles': () => { location.hash = '#/owner/roles'; },   // the seat that issues a pass
+    'Open the note': (r, enc) => Proto.router.go(r.persona, 'encounter', enc.id),
+    'Open the ledger': (r, enc) => Proto.router.go(r.persona, 'ledger', enc.patientId),
+    'Open the procedure list': () => focusFirst('enc.proc.' + PROCS[0][0]),
+  };
   function gateNode(r, enc, x, res, fallback) {
     const act = res.code === 'outage' ? () => (Proto.ui.support ? Proto.ui.support() : Proto.router.announce('Call support: 615-555-0100, 7 am to 6 pm'))
       : res.code === 'duplicate_paint' ? (res.undoable ? () => { x.gateNode = null; undo(r, enc, x, res.chartEventId); } : () => focusFirst('enc.proc.' + PROCS[0][0]))
+      : BY_WORD[res.control] ? () => BY_WORD[res.control](r, enc, x)
       : res.code === 'licence_scope' ? () => { x.gateNode = null; fixKiller(r, enc, x, { fix: 'licence' }); }
-      : res.code === 'entitlement' ? () => Proto.router.go(r.persona, 'roles')
       : fallback || (() => focusFirst('enc.tooth.' + (openTags(enc.id)[0] || { tooth: 30 }).tooth, 'enc.tooth.30', 'enc.back'));
     return refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, severity: res.code === 'outage' ? 'stop' : undefined, onControl: act });
   }
@@ -249,7 +257,7 @@
     const ces = eventsOf(enc.id); const tagged = openTags(enc.id).map((t) => t.tooth);
     // The gate belongs to its cause and falls with it: a tooth picked, the server back (stale-gate rule).
     const gc = x.gateNode && x.gateNode.dataset.code;
-    if ((gc === 'tooth_required' && x.tooth) || (gc === 'outage' && !S().outage)) x.gateNode = null;
+    if ((gc === 'tooth_required' && x.tooth) || (gc === 'outage' && !S().outage) || (gc === 'entitlement' && !Proto.store.currentUser().noPass)) x.gateNode = null;
     const toothBtn = (n) => {
       const has = ces.some((c) => c.tooth === n); const isTag = tagged.includes(n); const sel = x.tooth === n;
       // Charted is never colour alone: the tooth carries a mark and a fill as well as its rail (B5).
@@ -350,7 +358,7 @@
   function renderUndo(r, enc, x) {
     if (!x.undoGate) return btn('Undo last paint', { kind: 'reversible', testid: 'enc.undo', onClick: () => undo(r, enc, x) });
     return h('div', { class: 'stack' },
-      refusal(Object.assign({}, x.undoGate, { onControl: () => { focusFirst('enc.note.field.assessment'); } })),
+      gateNode(r, enc, x, x.undoGate, () => focusFirst('enc.note.field.assessment')),
       btn('Undo last paint', { kind: 'held', testid: 'enc.undo', ariaLabel: 'Held: ' + x.undoGate.verb, onClick: () => focusFirst('refusal.control', 'enc.note.field.assessment') }));
   }
   // `ceId` names the paint to reverse (the duplicate's original from chartPaint's refusal); without it, the last one.

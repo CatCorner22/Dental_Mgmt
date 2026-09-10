@@ -187,8 +187,18 @@
     return out;
   }
   const support = Proto.ui.support;                     // one support line for every outage gate (ui.js)
-  // Every control acts: the support line under outage, otherwise the gate falls and the keyboard returns to the cursor.
-  function mkGate(st, res, onControl) { st.gate = { code: res.code, node: refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, severity: res.code === 'outage' ? 'stop' : 'required', onControl: onControl || (res.code === 'outage' ? support : () => { st.gate = null; rerender(Proto.router.current()); }) }) }; }
+  // Every control acts: the store's words each do the thing they name (the pad, Roles, the note, the support line);
+  // otherwise the gate falls and the keyboard returns to the cursor.
+  const BY_WORD = {
+    'Switch author': (st) => Proto.screens.shell.openPinPad(Proto.router.current()),
+    'Open Roles': () => { location.hash = '#/owner/roles'; },   // the seat that issues a pass
+    'Open the note': (st) => { const r = Proto.router.current(); Proto.router.go(r.persona, 'encounter', st.encId); },
+    'Support line': support,
+  };
+  function mkGate(st, res, onControl) {
+    const act = onControl || (res.code === 'outage' ? support : BY_WORD[res.control] ? () => BY_WORD[res.control](st) : () => { st.gate = null; rerender(Proto.router.current()); });
+    st.gate = { code: res.code, node: refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, severity: res.code === 'outage' ? 'stop' : 'required', onControl: act }) };
+  }
   // A gate names the next thing to do, so the keyboard lands on it rather than on the Held primary behind it.
   function focusGateControl() { const c = document.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); }
   /* Who may author an exam: a clinical licence on the account, or a day pass that grants perio. The old test read
@@ -198,6 +208,8 @@
     // A second dispatch in the same tick lands on a saved exam: it is the amend path, not a second Save.
     if (st.saved) { openAmendGate(st, r); return; }
     const u = Proto.store.currentUser();
+    // A pass-less temp is nobody to attribute the exam to: the store's own words for it (clinician()), and its control.
+    if (u.noPass) { mkGate(st, { code: 'entitlement', verb: 'Issue a day pass before charting', control: 'Open Roles', why: 'A temp works under their own day pass: it is the name every record is frozen onto. Until Roles issues one there is nobody to post as.' }); rerender(r); focusGateControl(); return; }
     // The remedy here is "hand the chart to someone licensed", not "type your own PIN", so the code is the licence
     // one and the control carries the one label this action has everywhere (Encounter, Phone, the pad's own dialog).
     if (!mayChart(u)) { mkGate(st, { code: 'licence_scope', verb: 'Switch to a licensed author before Save', control: 'Switch author', why: 'The exam is attributed to the author who is signed in, and only a clinical licence or a day pass that grants perio can carry one. Switching author opens the PIN pad; nothing is written until then.' }, () => Proto.screens.shell.openPinPad(r)); rerender(r); focusGateControl(); return; }
@@ -430,6 +442,7 @@
     // A gate answers a condition, and clears when the condition does: switching to a licensed author used to
     // leave Save reading Held with a refusal nothing could clear, and coding the last sextant left it too.
     if (st.gate && st.gate.code === 'licence_scope' && mayChart(Proto.store.currentUser())) st.gate = null;
+    if (st.gate && st.gate.code === 'entitlement' && !Proto.store.currentUser().noPass) st.gate = null;    // the pass was issued
     if (st.gate && st.gate.code === 'screening_incomplete' && !st.sextants.some((c) => c === '')) st.gate = null;
     if (st.gate && st.gate.code === 'depth_gt_15' && (st.cur !== st.gate.cur || siteDepth(st) != null)) st.gate = null;   // the next key answered it, or the site kept a valid depth
     if (st.gate && st.gate.code === 'omission_licence' && !skippedCount(st)) { st.gate = null; st.licenceOpen = false; }
