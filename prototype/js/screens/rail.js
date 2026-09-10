@@ -204,6 +204,10 @@
   /* One wording for the empty Explain, on the Ledger and in the rail, with the step that ends it. */
   function explainEmpty(patientVoice) { return patientVoice ? 'Nothing to explain: no charges on this account. A charge appears once the visit\'s note is filed.' : 'No charges on this account, so there is nothing to explain. Filing the visit\'s note releases the charge.'; }
   function explainBlock(pid, st, r) {
+    /* store.explain allocates over today's ledger. Under As-of the three numbers are sums over the rows posted by that
+       day, so a live sentence beneath them ("MetLife paid $61.00 on 8/20; paid in full" under "Patient due $217.00")
+       described a different instant. Until the store explains as of a day, the block says which rows it would read. */
+    if (st.asof) return h('div', { class: 'explain' }, h('p', { class: 'sentence muted', text: 'Explain reads today\'s ledger; the numbers above are the rows posted on or before ' + longDate(st.asof) + '. Back to today to read the sentences.' }));
     const rows = Proto.store.explain(pid);
     if (!rows.length) return h('div', { class: 'explain' }, h('p', { class: 'sentence muted', text: explainEmpty(st.patientVoice) }));
     return h('div', { class: 'explain', 'aria-live': 'polite' },
@@ -212,12 +216,21 @@
         st.patientVoice ? null : btn('Rows', { kind: 'quiet', class: 'compact', testid: 'ledger.explain.rows.' + x.chargeId, ariaLabel: 'Highlight the ledger rows behind this sentence', onClick: () => { const ch = S().ledger.find((e) => e.id === x.chargeId); st.hi = S().ledger.filter((e) => e.patientId === pid && (e.id === ch.id || (e.kind !== 'charge' && e.effective >= ch.effective))).map((e) => e.id); rerender(r, 'ledger.explain.rows.' + x.chargeId); const el = document.getElementById('row-' + x.chargeId); if (el) el.scrollIntoView({ block: 'center' }); } }))));
   }
 
-  /* Money Desk is where the biller works an account: a navigation, not a posting, so it claims nothing. */
-  function openMoneyDesk(r, st) { if (st) st.gate = null; Proto.router.go(r.persona || P().persona || 'frontdesk', 'money'); }
+  /* Money Desk is where the biller works an account: a navigation, not a posting, so it claims nothing. Every gate
+     here points at Statements due, so that is the tab it lands on; the ERA tab had nothing to do with a statement. */
+  function openMoneyDesk(r, st) { if (st) st.gate = null; if (Proto.screens.moneydesk) Proto.screens.moneydesk.setTab('statements'); Proto.router.go(r.persona || P().persona || 'frontdesk', 'money'); }
+  /* The store's control words get something to do on this screen: the Andon's support line for an outage, Money Desk
+     for a statement already sent (the "Open the ledger" the store offers is where we already are). */
+  function storeGate(r, st, res) {
+    if (res.code === 'outage') return Object.assign({}, res, { severity: 'stop', onControl: () => { const a = document.querySelector('[data-testid="andon.control"]'); if (a) a.focus(); else announce('Call support: 615-555-0100, 7 am to 6 pm'); } });
+    if (res.code === 'already_decided') return Object.assign({}, res, { control: 'Open Money Desk', onControl: () => openMoneyDesk(r, st) });
+    return res;
+  }
   function sendStatement(r, pid, st) {
     const st0 = S(); const b = Proto.store.balances(pid);
-    const sd = st0.statementsDue.find((x) => x.patientId === pid && !x.sent);
-    if (sd) { const res = Proto.store.sendStatement(sd.id); if (res.ok) { st.sent = { id: sd.id, channel: 'mail' }; st.gate = null; announce('Sent the statement by mail'); } else st.gate = res; return rerender(r, 'ledger.statement.send'); }
+    // A row already sent is the store's to refuse (already_decided); falling past it said "no row raised yet" under the Statement sent chip.
+    const sd = st0.statementsDue.find((x) => x.patientId === pid && !x.sent) || st0.statementsDue.find((x) => x.patientId === pid);
+    if (sd) { const res = Proto.store.sendStatement(sd.id); if (res.ok) { st.sent = { id: sd.id, channel: 'mail' }; st.gate = null; announce('Sent the statement by mail'); } else st.gate = storeGate(r, st, res); return rerender(r, 'ledger.statement.send'); }
     const pend = st0.claims.filter((c) => c.patientId === pid && ['submitted', 'pended'].includes(c.status));
     // The verb interpolates a number, never a payer name: "Delta Dental" would push the line past eight words.
     if (pend.length) { const c = pend[0]; st.gate = { code: 'statement_held', verb: 'Held: claim pending ' + (c.age || 0) + ' days', control: 'Open Money Desk', onControl: () => openMoneyDesk(r, st), why: c.payer + ' is still reviewing ' + cdtName(c.cdt) + '. A statement never goes out on a balance still waiting on insurance. The hold reason is shown on Money Desk → Statements due; after ' + MAX_HOLD_DAYS + ' days the row surfaces regardless of the pending claim.' }; return rerender(r, 'ledger.statement.send'); }

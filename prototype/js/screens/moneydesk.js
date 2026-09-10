@@ -14,10 +14,13 @@
   const AGING_ACTION = { call: 'Call payer', attach: 'Attach and resubmit', escalate: 'Escalate' };
   const WRITEOFF_PID = 'p-306';
 
-  let tab = 'era'; // remembered across renders
+  /* View state is the person's, not the workstation's: one biller's open write-off form and selected tab used to
+     follow the next persona onto their own Money Desk. Keyed by user id, like the Ledger's ledState; cleared on reset. */
+  const views = {};
   let lastRoute = null; let lastStore = null; let keysOn = false;
-  let st = null; // module state; rebuilt on store reset
-  const fresh = () => ({ writeoffOpen: false, writeoffStr: '', writeoffReason: null, woRefusal: null, woHeldReq: null, woPosted: false, appealFor: null, appealPacket: null, appealSent: null, denialRefusal: {}, previewFor: null, announced: '' });
+  let st = null; // the current user's view, set by render()
+  const fresh = () => ({ tab: 'era', writeoffOpen: false, writeoffStr: '', writeoffReason: null, woRefusal: null, woHeldReq: null, woPosted: false, appealFor: null, appealPacket: null, appealSent: null, denialRefusal: {}, sendGate: null, eraGate: null, lineGate: {}, stmtGate: {}, previewFor: null, announced: '' });
+  const viewFor = () => { const k = Proto.store.currentUser().id; return (views[k] = views[k] || fresh()); }
 
   const priv = () => !!(window.__proto && window.__proto.privacy);
   const pname = (S, pid) => { const p = S.patients.find((x) => x.id === pid); return displayName(p ? p.name : pid, priv()); };
@@ -30,6 +33,18 @@
   const pressed = (b) => (b ? 'true' : 'false');
   const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
   const say = (text) => { st.announced = text; Proto.router.announce(text); };
+  /* A store refusal is rendered as the shared gate beside the control that raised it (verb, one control, Why), and the
+     store's control word is given something to do: the Andon's support line for an outage, the account's ledger for a
+     correction, the ERA tab otherwise. Announcing res.verb alone left no gate, no event and a live irreversible primary. */
+  function gate(r, res, pid) {
+    const onControl = res.code === 'outage'
+      ? () => { const a = document.querySelector('[data-testid="andon.control"]'); if (a) a.focus(); else Proto.router.announce('Call support: 615-555-0100, 7 am to 6 pm'); }
+      : pid && /ledger/i.test(res.control || '') ? () => Proto.router.go(r.persona, 'ledger', pid)
+      : () => { st.tab = 'era'; rerender(r, 'money.tab.era'); };
+    return refusal({ code: res.code, verb: res.verb, control: res.control || 'Back to ERA', why: res.why, severity: res.code === 'outage' ? 'stop' : undefined, onControl });
+  }
+  // An outage gate stands only while the outage does; the pressed control retries and the store decides again.
+  const outageOver = (g) => g && g.code === 'outage' && !Proto.store.get().outage;
 
   function rerender(r, focusTestid) {
     r = r || lastRoute || Proto.router.current();
@@ -42,25 +57,32 @@
   function eraView(S) {
     const b = S.eraBatches[0]; const lines = S.eraLines.filter((l) => l.batchId === b.id);
     const by = (s) => lines.filter((l) => l.status === s);
-    return { b, lines, deltas: by('delta'), posted: by('posted'), held: by('held'), disputed: by('disputed'), denied: by('denied') };
+    /* "Posted" is a ledger fact: a matched line counts as posted once a ledger row carries its id, which Post matched
+       writes. The card used to say "37 posted" over a ledger with no era-1 row. The read-back is every line the payer
+       paid differently (a CARC), decided or not, so a decided row keeps its place below the ones still waiting. */
+    const onLedger = new Set(S.ledger.filter((e) => e.eraLineId).map((e) => e.eraLineId));
+    const posted = by('posted');
+    return { b, lines, deltas: by('delta'), matched: posted, posted: posted.filter((l) => onLedger.has(l.id)), held: by('held'), disputed: by('disputed'), denied: by('denied'), readback: lines.filter((l) => l.carc && l.status !== 'denied') };
   }
   const denials = (S) => S.claims.filter((c) => c.status === 'denied' || c.status === 'appealed');
   const aging = (S) => S.claims.filter((c) => c.status === 'submitted' || c.status === 'pended');
   const statements = (S) => S.statementsDue;   // a sent row stays, carrying its confirmation
   const myVariances = (S) => { const u = Proto.store.currentUser(); return S.variances.filter((v) => v.status === 'open').filter((v) => { const rr = S.reconciliation.find((x) => x.id === v.reconciliationId); return rr && (rr.closer === u.name || u.role === 'biller' || u.role === 'owner' || u.role === 'office_manager'); }); };
-  /* One meaning for every badge: work still open on that tab. A finished row stays on its tab carrying its
-     confirmation, but it is no longer counted — Statements read 2 and Denials 1 with nothing left to do. */
+  /* One meaning for every badge: rows still open on that tab. A finished row stays on its tab carrying its
+     confirmation, but it is no longer counted — Statements read 2 and Denials 1 with nothing left to do. Approvals
+     counts the Waiting rows the tab lists (the biller's badge read 0 over her own Waiting request); the Andon and
+     the phone count what is mine to decide, which is a different question. */
   function counts(S) {
     const e = eraView(S);
-    return { era: e.b.status === 'review' ? 1 : e.deltas.length, aging: aging(S).length, denials: denials(S).filter((c) => c.status === 'denied').length, statements: statements(S).filter((s) => !s.sent).length, credits: S.credits.length, variances: myVariances(S).length, approvals: Proto.store.pendingApprovalsFor().length };
+    return { era: e.b.status === 'review' ? 1 : e.deltas.length, aging: aging(S).length, denials: denials(S).filter((c) => c.status === 'denied').length, statements: statements(S).filter((s) => !s.sent).length, credits: S.credits.length, variances: myVariances(S).length, approvals: S.approvals.filter((a) => a.status === 'pending').length };
   }
 
   /* ---- tabs ---- */
   function tabs(r, S) {
     const c = counts(S);
     return h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Worklists' }, ...TABS.map(([code, label]) => {
-      const b = btn([label, h('span', { class: 'count', 'aria-label': plural(c[code], 'item'), text: String(c[code]) })], { testid: 'money.tab.' + code, onClick: () => { tab = code; rerender(r, 'money.tab.' + code); } });
-      b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', pressed(tab === code)); return b;
+      const b = btn([label, h('span', { class: 'count', 'aria-label': plural(c[code], 'item'), text: String(c[code]) })], { testid: 'money.tab.' + code, onClick: () => { st.tab = code; rerender(r, 'money.tab.' + code); } });
+      b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', pressed(st.tab === code)); return b;
     }));
   }
 
@@ -68,47 +90,57 @@
   function postMatched(r) {
     const res = Proto.store.eraPostMatched('era-1');
     // One verb line, no storage id: an announcement is read aloud, not skimmed.
-    if (res.ok) say(res.readback.length ? 'Read back ' + plural(res.readback.length, 'line') + ' that differ' : 'Posted the batch');
-    else say(res.verb);
+    if (res.ok) { st.eraGate = null; say(res.readback.length ? 'Read back ' + plural(res.readback.length, 'line') + ' that differ' : 'Posted the batch'); }
+    else { st.eraGate = res; rerender(r, 'refusal.control'); return; }
     rerender(r, res.readback && res.readback.length ? 'money.era.line.' + res.readback[0].id + '.confirm' : 'money.tab.era');
   }
   function handleLine(r, fn, lineId, word) {
     const res = fn(lineId);
-    if (!res.ok) { say(res.verb); return; }
+    if (!res.ok) { st.lineGate[lineId] = res; rerender(r, 'refusal.control'); return; }
+    delete st.lineGate[lineId];
     const S = Proto.store.get(); const left = eraView(S).deltas;
     say(word + ' line ' + lineId.replace('el-', '') + (left.length ? ' — ' + plural(left.length, 'line') + ' left' : ' — batch complete'));
-    if (!left.length) tab = 'denials';                       // the batch is done: go where the work went
+    if (!left.length) st.tab = 'denials';                       // the batch is done: go where the work went
     rerender(r, left.length ? 'money.era.line.' + left[0].id + '.confirm' : 'money.tab.denials');
   }
   function eraTab(r, S) {
-    const e = eraView(S); const b = e.b;
-    const head = h('p', { class: 'md-batchline', text: 'Delta 835 · ' + plural(b.lines, 'line') + ' · ' + b.postedLines + ' posted before you sat down · EFT ' + money(b.eftCents) + ' · ' + b.trn + ' · matched to bank line' });
-    const status = h('div', { class: 'row' }, chip('clear', e.posted.length + ' posted'), e.deltas.length ? chip('review', plural(e.deltas.length, 'delta')) : null, e.held.length ? chip('info', e.held.length + ' set aside') : null, e.disputed.length ? chip('style', e.disputed.length + ' disputed') : null, e.denied.length ? chip('required', plural(e.denied.length, 'denial')) : null);
+    const e = eraView(S); const b = e.b; const review = b.status === 'review';
+    if (outageOver(st.eraGate)) st.eraGate = null;
+    const head = h('p', { class: 'md-batchline', text: 'Delta 835 · ' + plural(b.lines, 'line') + ' · ' + (review ? e.matched.length + ' matched, ready to post' : e.posted.length + ' posted') + ' · EFT ' + money(b.eftCents) + ' · ' + b.trn + ' · matched to bank line' });
+    const status = h('div', { class: 'row' }, review ? chip('info', e.matched.length + ' matched') : chip('clear', e.posted.length + ' posted'), e.deltas.length ? chip('review', plural(e.deltas.length, 'delta')) : null, e.held.length ? chip('info', e.held.length + ' set aside') : null, e.disputed.length ? chip('style', e.disputed.length + ' disputed') : null, e.denied.length ? chip('required', plural(e.denied.length, 'denial')) : null);
     const card = h('section', { class: 'card stack md-batch', 'aria-label': 'ERA batch era-1' }, h('h2', { text: 'Delta Dental 835 · era-1' }), head, status);
-    if (b.status === 'review') {
-      card.append(h('div', { class: 'btnrow' }, btn('Post matched', { kind: 'irreversible', testid: 'money.era.era-1.postmatched', ariaLabel: 'Post matched lines (P)', onClick: () => postMatched(r) }), h('span', { class: 'small muted', text: 'Posts the ' + b.postedLines + ' matched lines; only lines that differ from the claim will ask you.' })),
-        h('details', { class: 'md-details' }, h('summary', { text: 'Why are ' + b.postedLines + ' already posted?', testid: 'money.era.' + b.id + '.why' }), h('p', { class: 'muted', text: 'The worker posted every clean line before you opened the batch. Each insurance payment and computed contractual write-off links to its 835 segment, claim line, and fee-schedule row; "Why did this post?" on any ledger row shows the four-line trace.' })));
+    if (review) {
+      const g = st.eraGate;
+      card.append(h('div', { class: 'btnrow' }, btn('Post matched', { kind: g ? 'held' : 'irreversible', testid: 'money.era.era-1.postmatched', ariaLabel: g ? 'Post matched is held: ' + g.verb : 'Post matched lines (P)', onClick: () => postMatched(r) }), h('span', { class: 'small muted', text: 'Posts the ' + e.matched.length + ' matched lines; only lines that differ from the claim will ask you.' })),
+        ...(g ? [gate(r, g)] : []),
+        h('details', { class: 'md-details' }, h('summary', { text: 'Why are ' + e.matched.length + ' already matched?', testid: 'money.era.' + b.id + '.why' }), h('p', { class: 'muted', text: 'The worker matched every clean line to its claim and fee-schedule row before you opened the batch; nothing is on the ledger until you post. Post matched writes each insurance payment and computed contractual write-off linked to its 835 segment, claim line, and fee-schedule row; "Why did this post?" on any ledger row shows the four-line trace.' })));
       return card;
     }
-    if (e.deltas.length) {
-      card.append(h('h3', { text: 'Read back: ' + e.deltas.length + ' line' + (e.deltas.length > 1 ? 's' : '') + ' differ from the claim' }), h('div', { class: 'worklist' }, ...e.deltas.map((l) => deltaRow(r, S, l))));
-      return card;
-    }
+    /* Decided rows stay where they were: removing a confirmed row moved the next line's Confirm under the pointer, so a
+       double-click posted two lines. The list is the read-back record until the batch is done, and after. */
+    const rows = h('div', { class: 'worklist' }, ...e.readback.map((l) => deltaRow(r, S, l)));
+    if (e.deltas.length) { card.append(h('h3', { text: 'Read back: ' + e.deltas.length + ' line' + (e.deltas.length > 1 ? 's' : '') + ' differ from the claim' }), rows); return card; }
     const parts = [e.posted.length + ' posted']; if (e.held.length) parts.push(e.held.length + ' set aside'); if (e.disputed.length) parts.push(e.disputed.length + ' disputed'); parts.push(plural(e.denied.length, 'denial') + ' moved to Denials');
-    card.append(h('div', { class: 'row md-complete' }, chip('clear', 'Batch complete'), h('span', { text: 'Batch complete: ' + parts.join(', ') })), h('p', { class: 'small muted', text: 'The denied line is on the Denials tab with its plain reason and next action.' }));
+    card.append(h('div', { class: 'row md-complete' }, chip('clear', 'Batch complete'), h('span', { text: 'Batch complete: ' + parts.join(', ') })), h('p', { class: 'small muted', text: 'The denied line is on the Denials tab with its plain reason and next action.' }), rows);
     return card;
   }
+  const DECIDED = { posted: ['clear', 'Confirmed'], held: ['info', 'Set aside'], disputed: ['style', 'Disputed'] };
   function deltaRow(r, S, l) {
     const carc = CARC[l.carc] || 'payer reason ' + l.carc;
-    const isVariance = l.carc === '45';
-    return h('div', { class: 'md-row', role: 'group', 'aria-label': 'Line ' + l.id.replace('el-', '') },
-      h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, l.patientId) }), h('span', { class: 'muted', text: 'Line ' + l.id.replace('el-', '') + ' · ' + cdtLine(S, l.cdt, l.tooth) }), chip(isVariance ? 'review' : 'style', isVariance ? 'Contract variance' : 'Downcoded')),
+    const isVariance = l.carc === '45'; const n = l.id.replace('el-', '');
+    if (outageOver(st.lineGate[l.id])) delete st.lineGate[l.id];
+    const g = st.lineGate[l.id]; const done = DECIDED[l.status];
+    return h('div', { class: 'md-row' + (done ? ' decided' : ''), role: 'group', 'aria-label': 'Line ' + n },
+      h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, l.patientId) }), h('span', { class: 'muted', text: 'Line ' + n + ' · ' + cdtLine(S, l.cdt, l.tooth) }), chip(isVariance ? 'review' : 'style', isVariance ? 'Contract variance' : 'Downcoded')),
       h('p', { class: 'md-delta', text: 'expected ' + money(l.expectedCents) + ', ERA says ' + money(l.paidCents) + ' · CARC ' + l.carc + ' (' + carc + ')' }),
-      h('div', { class: 'btnrow' },
-        btn('Confirm · post ' + money(l.paidCents) + ', write-off ' + money(l.expectedCents - l.paidCents), { kind: 'irreversible', testid: 'money.era.line.' + l.id + '.confirm', ariaLabel: 'Confirm line ' + l.id.replace('el-', '') + ': post ' + money(l.paidCents) + ' and a contractual write-off of ' + money(l.expectedCents - l.paidCents), onClick: () => handleLine(r, Proto.store.eraConfirm, l.id, 'Confirmed') }),
-        // "Held" is the gated primary's identity (CONTRACTS §6); an ERA line that waits for a look is set aside.
-        btn('Set aside', { kind: 'reversible', testid: 'money.era.line.' + l.id + '.hold', ariaLabel: 'Set aside line ' + l.id.replace('el-', '') + ' until you look at the note', onClick: () => handleLine(r, Proto.store.eraHold, l.id, 'Set aside') }),
-        btn(isVariance ? 'Dispute contract variance' : 'Dispute', { kind: 'reversible', testid: 'money.era.line.' + l.id + '.dispute', onClick: () => handleLine(r, Proto.store.eraDispute, l.id, 'Disputed') })),
+      done
+        ? h('div', { class: 'btnrow' }, chip(done[0], done[1]), h('span', { class: 'small muted', text: l.status === 'posted' ? 'Posted ' + money(l.paidCents) + ' and a contractual write-off of ' + money(l.expectedCents - l.paidCents) + '; on the ledger.' : l.status === 'held' ? 'Out of the ledger until you look at the note.' : 'An appeal row cites the fee-schedule line.' }))
+        : h('div', { class: 'btnrow' },
+          btn('Confirm · post ' + money(l.paidCents) + ', write-off ' + money(l.expectedCents - l.paidCents), { kind: g ? 'held' : 'irreversible', testid: 'money.era.line.' + l.id + '.confirm', ariaLabel: g ? 'Confirm line ' + n + ' is held: ' + g.verb : 'Confirm line ' + n + ': post ' + money(l.paidCents) + ' and a contractual write-off of ' + money(l.expectedCents - l.paidCents), onClick: () => handleLine(r, Proto.store.eraConfirm, l.id, 'Confirmed') }),
+          // "Held" is the gated primary's identity (CONTRACTS §6); an ERA line that waits for a look is set aside.
+          btn('Set aside', { kind: 'reversible', testid: 'money.era.line.' + l.id + '.hold', ariaLabel: 'Set aside line ' + n + ' until you look at the note', onClick: () => handleLine(r, Proto.store.eraHold, l.id, 'Set aside') }),
+          btn(isVariance ? 'Dispute contract variance' : 'Dispute', { kind: 'reversible', testid: 'money.era.line.' + l.id + '.dispute', onClick: () => handleLine(r, Proto.store.eraDispute, l.id, 'Disputed') })),
+      g && !done ? gate(r, g, l.patientId) : null,
       h('details', { class: 'md-details' }, h('summary', { text: 'Why', testid: 'money.era.line.' + l.id + '.why' }), h('p', { class: 'muted', text: isVariance ? 'Paid ' + money(l.paidCents) + '; the Delta PPO fee schedule allows ' + money(l.expectedCents) + ' for ' + l.cdt.toUpperCase() + '. Dispute creates an appeal row citing the fee-schedule line. Confirm accepts it as contractual and posts the write-off with the frozen delta.' : 'The payer paid a different code than was billed. Confirm posts what was paid and the difference as contractual; Set aside keeps the line out of the ledger until you look at the note.' })));
   }
 
@@ -120,10 +152,13 @@
     const card = section('Open balances', row);
     if (st.woPosted) { card.append(h('div', { class: 'row' }, chip('clear', 'Write-off posted'), h('span', { class: 'muted', text: 'On the ledger with its reason code.' }))); return card; }
     if (st.woHeldReq && st.woHeldReq.status === 'approved') { card.append(h('div', { class: 'row' }, chip('clear', 'Write-off ' + money(st.woHeldReq.amountCents) + ' approved by ' + st.woHeldReq.decidedBy), h('span', { class: 'muted', text: 'Posted to the ledger by the approval.' }))); return card; }
-    // A request that came back says so here, in the approver's word: the card used to fall through to a plain
-    // Post with nothing to show that the phone had already answered.
+    // A request that came back says so here, in the approver's words: the card used to fall through to a plain
+    // Post with nothing to show that the phone had already answered, and the needs_second gate that had held the
+    // first Post stayed on screen with nothing left to hold.
     if (st.woHeldReq && (st.woHeldReq.status === 'declined' || st.woHeldReq.status === 'sent_back')) {
-      card.append(h('div', { class: 'row' }, chip('required', 'Sent back'), h('span', { class: 'muted', text: 'Sent back by ' + st.woHeldReq.decidedBy + ' · nothing posted. Their line is on the approvals card; Post requests it again.' })));
+      const line = st.woHeldReq.decisionReason;
+      if (st.woRefusal && st.woRefusal.dataset.code === 'needs_second') st.woRefusal = null;
+      card.append(h('div', { class: 'row' }, chip('required', 'Sent back'), h('span', { class: 'muted' }, 'Sent back by ' + st.woHeldReq.decidedBy + (line ? ': ' : ' · no line given · '), line ? h('q', { class: 'md-line', text: line }) : null, (line ? ' · ' : '') + 'nothing posted. Post requests it again.')));
     }
     if (!st.writeoffOpen) { card.append(h('div', { class: 'btnrow' }, btn('Write-off or adjustment', { kind: 'reversible', testid: 'money.writeoff.' + WRITEOFF_PID, ariaLabel: 'Write-off or adjustment for ' + pname(S, WRITEOFF_PID) + ' (W)', onClick: () => openWriteoff(r) }))); return card; }
     const amt = h('input', { class: 'input md-amount', type: 'text', inputmode: 'decimal', testid: 'money.writeoff.amount', value: st.writeoffStr, 'aria-label': 'Write-off amount in dollars', onInput: (ev) => { st.writeoffStr = ev.target.value; } });
@@ -134,9 +169,10 @@
     // The eligible approvers are one list, the one the request was written with; the biller is not told a
     // different set of names from the one the phone card and the verb line read.
     const approvers = held ? (st.woHeldReq.eligible || []).join(' or ') : '';
+    if (outageOver(st.woRefusal && st.woRefusal.dataset)) st.woRefusal = null;
     const post = held
       ? btn('Held', { kind: 'held', testid: 'money.writeoff.post', ariaLabel: 'Held: waiting on a second approver', onClick: () => say('Waiting on ' + approvers) })
-      : btn('Post', { kind: 'irreversible', testid: 'money.writeoff.post', onClick: () => postWriteoff(r) });
+      : btn('Post', { kind: st.woRefusal ? 'held' : 'irreversible', testid: 'money.writeoff.post', ariaLabel: st.woRefusal ? 'Post is held: ' + st.woRefusal.querySelector('.verb').textContent : null, onClick: () => postWriteoff(r) });
     const postRow = h('div', { class: 'btnrow' }, post, held ? h('span', { class: 'row' }, chip('review', 'Approval requested'), h('span', { class: 'small muted', text: approvers + ' will see it on their phone; this flips to Posted when they approve.' })) : null);
     // The gate stays on screen while the request is open: the refusal is the only thing that says what is
     // holding the posting and where to go next, and nulling it here left the Held button with no verb line.
@@ -157,20 +193,28 @@
     if (!(amountCents > 0)) { st.woRefusal = refusal({ code: 'amount_required', verb: 'Enter an amount above zero', control: 'Fix amount', why: 'A write-off needs a dollar amount; the balance is prefilled.', onControl: () => { st.woRefusal = null; rerender(r, 'money.writeoff.amount'); } }); rerender(r, 'refusal.control'); return; }
     if (!st.writeoffReason) { st.woRefusal = refusal({ code: 'reason_required', verb: 'Choose a reason code', control: 'Courtesy', why: 'Every write-off carries a reason code so the ledger sentence and the reason digest can explain it.', onControl: () => { st.writeoffReason = 'courtesy'; st.woRefusal = null; rerender(r, 'money.writeoff.post'); } }); rerender(r, 'refusal.control'); return; }
     const res = Proto.store.requestWriteoff(WRITEOFF_PID, amountCents, st.writeoffReason);
-    if (res.ok) { st.woPosted = true; st.woRefusal = null; say('Posted the ' + money(amountCents) + ' write-off'); rerender(r, 'money.tab.' + tab); return; }
+    if (res.ok) { st.woPosted = true; st.woRefusal = null; say('Posted the ' + money(amountCents) + ' write-off'); rerender(r, 'money.tab.' + st.tab); return; }
     if (res.held) {
       const S = Proto.store.get(); st.woHeldReq = S.approvals.find((x) => x.id === res.requestId) || null;
       // The store wrote the request at Post (the Held button and its chip say so), so a control reading
       // "Request approval" would promise a write that had already happened and then do nothing. The next
       // step for the biller is to see the request where it waits: the Approvals tab.
-      st.woRefusal = refusal({ code: res.code, verb: res.verb, control: 'Open approvals', why: res.why, onControl: () => { tab = 'approvals'; rerender(r, 'money.tab.approvals'); } });
+      st.woRefusal = refusal({ code: res.code, verb: res.verb, control: 'Open approvals', why: res.why, onControl: () => { st.tab = 'approvals'; rerender(r, 'money.tab.approvals'); } });
       rerender(r, 'refusal.control'); return;
     }
-    st.woRefusal = refusal({ code: res.code, verb: res.verb, control: res.control || 'Back to ERA', why: res.why, onControl: () => { tab = 'era'; st.woRefusal = null; rerender(r, 'money.tab.era'); } });
+    st.woRefusal = gate(r, res, WRITEOFF_PID);
     rerender(r, 'refusal.control');
   }
 
   /* ---- Denials tab ---- */
+  /* A row action that changes a claim (a claimEvents row, a new next action) is a store verb; the screen renders the
+     store's answer. Until the store carries claimAction, the control can only say what it would do. */
+  function claimAct(r, S, c, action, fallback) {
+    if (!Proto.store.claimAction) { say(fallback); return; }
+    const res = Proto.store.claimAction(c.id, action);
+    if (!res.ok) { st.denialRefusal[c.id] = gate(r, res, c.patientId); rerender(r, 'refusal.control'); return; }
+    say('Recorded on claim ' + c.id.replace('c-', '')); rerender(r, 'money.tab.' + st.tab);
+  }
   function openAppeal(r, claimId) {
     const res = Proto.store.buildAppeal(claimId);
     if (!res.ok) { say(res.verb); return; }
@@ -192,9 +236,12 @@
       h('p', { class: 'md-next' }, h('b', { text: 'Next: ' }), c.nextAction),
       h('div', { class: 'btnrow' },
         btn('Appeal', { kind: 'reversible', testid: 'money.denial.' + c.id + '.appeal', ariaLabel: 'Appeal claim ' + c.id + ' with a packet built from the record (A)', onClick: () => openAppeal(r, c.id) }),
-        btn('Fix', { kind: 'quiet', testid: 'money.denial.' + c.id + '.fix', onClick: () => say('Opens the note field the payer cited') }),
+        btn('Fix', { kind: 'quiet', testid: 'money.denial.' + c.id + '.fix', onClick: () => claimAct(r, S, c, 'fix', 'Fix for ' + pname(S, c.patientId)) }),
         btn('Bill patient', { kind: 'quiet', testid: 'money.denial.' + c.id + '.bill', onClick: () => {
-          st.denialRefusal[c.id] = refusal({ code: 'denial_suppression', verb: 'Appeal first — denial with no appeal', control: 'Build appeal', why: 'A write-off or patient bill after a denial with no appeal routes through dual release at any amount and cannot be posted by the claim\'s submitter.', onControl: () => openAppeal(r, c.id) });
+          // The gate names the record's state: "no appeal" is false once the appeal has gone.
+          st.denialRefusal[c.id] = c.status === 'appealed'
+            ? refusal({ code: 'denial_suppression', verb: 'Wait for the payer — appeal in review', control: 'Open the ledger', why: 'The appeal for this claim was sent and ' + c.payer + ' has not answered. A patient bill on a denial under appeal routes through dual release at any amount; the ledger shows what the account owes meanwhile.', onControl: () => Proto.router.go(r.persona, 'ledger', c.patientId) })
+            : refusal({ code: 'denial_suppression', verb: 'Appeal first — denial with no appeal', control: 'Build appeal', why: 'A write-off or patient bill after a denial with no appeal routes through dual release at any amount and cannot be posted by the claim\'s submitter.', onControl: () => openAppeal(r, c.id) });
           rerender(r, 'refusal.control');
         } })),
       st.denialRefusal[c.id] || null,
@@ -208,18 +255,21 @@
     const list = h('ul', { class: 'md-slots' }, ...slots.map(([k, label, detail]) => h('li', { class: 'row' }, chip(pk.slots[k] ? 'clear' : 'required', pk.slots[k] ? 'Clear' : 'Required'), h('span', null, h('b', { text: label }), h('span', { class: 'muted', text: ' · ' + (pk.slots[k] ? detail : 'not on the record; add before sending') })))));
     const missing = slots.filter(([k]) => !pk.slots[k]).length;
     const drawer = h('div', { class: 'md-drawer stack', role: 'region', 'aria-label': 'Appeal packet for claim ' + c.id },
-      h('div', { class: 'row drawer-head' }, h('h3', { class: 'grow', text: 'Appeal packet · built from the record' }), btn('Close', { kind: 'quiet', class: 'compact', testid: 'money.appeal.close', onClick: () => { st.appealFor = null; st.appealPacket = null; rerender(r, 'money.denial.' + c.id + '.appeal'); } })),
+      h('div', { class: 'row drawer-head' }, h('h3', { class: 'grow', text: 'Appeal packet · built from the record' }), btn('Close', { kind: 'quiet', class: 'compact', testid: 'money.appeal.close', onClick: () => { st.appealFor = null; st.appealPacket = null; st.sendGate = null; rerender(r, 'money.denial.' + c.id + '.appeal'); } })),
       list,
       h('div', { class: 'md-sentence' }, h('span', { class: 'small muted', text: 'What the patient reads: ' }), h('span', { text: pk.patientSentence })));
     if (st.appealSent === c.id) { drawer.append(sentLine()); return drawer; }
-    drawer.append(h('div', { class: 'btnrow' }, btn('Send', { kind: 'irreversible', testid: 'money.appeal.send', ariaLabel: 'Send appeal for claim ' + c.id, onClick: () => {
-      if (missing) { st.denialRefusal[c.id] = refusal({ code: 'packet_incomplete', verb: 'Add the required slot before sending', control: 'Show slots', why: 'An appeal that cites prose loses; every slot is a frozen record artifact.', onControl: () => rerender(r, 'money.appeal.send') }); rerender(r, 'refusal.control'); return; }
+    if (outageOver(st.sendGate && st.sendGate.dataset)) st.sendGate = null;
+    const g = st.sendGate;
+    drawer.append(...[g, h('div', { class: 'btnrow' }, btn('Send', { kind: g ? 'held' : 'irreversible', testid: 'money.appeal.send', ariaLabel: g ? 'Send is held: ' + g.querySelector('.verb').textContent : 'Send appeal for claim ' + c.id, onClick: () => {
+      if (missing) { st.sendGate = refusal({ code: 'packet_incomplete', verb: 'Add the required slot before sending', control: 'Show slots', why: 'An appeal that cites prose loses; every slot is a frozen record artifact.', onControl: () => { st.sendGate = null; rerender(r, 'money.appeal.send'); } }); rerender(r, 'refusal.control'); return; }
       const res = Proto.store.sendAppeal(c.id);
-      if (!res.ok) { say(res.verb); return; }
+      if (!res.ok) { st.sendGate = gate(r, res, c.patientId); rerender(r, 'refusal.control'); return; }
+      st.sendGate = null;
       // The packet is gone; its confirmation stays on the row, the way a sent statement keeps its own.
       st.appealSent = c.id; st.appealFor = null; st.appealPacket = null;
       say('Sent the appeal — disclosure recorded'); rerender(r, 'money.tab.denials');
-    } }), h('span', { class: 'small muted', text: 'Irreversible: writes a disclosure row with artifact hashes.' })));
+    } }), h('span', { class: 'small muted', text: 'Irreversible: writes a disclosure row with artifact hashes.' }))].filter(Boolean));
     return drawer;
   }
 
@@ -230,7 +280,7 @@
     const out = section('Claims aging', h('p', { class: 'small muted', text: 'Submitted and pended claims by age with one next action each. Counts are by payer, never by person.' }));
     for (const [, label, f] of groups) {
       const g = rows.filter(f); if (!g.length) continue;
-      out.append(h('h3', { text: label + ' · ' + g.length }), h('div', { class: 'worklist' }, ...g.map((c) => { const act = agingAction(c); return h('div', { class: 'wrow' }, h('span', { class: 'obj', text: pname(S, c.patientId) }), h('span', { class: 'amt', text: money(c.amountCents) }), h('span', { class: 'why', text: c.id + ' · ' + cdtLine(S, c.cdt, c.tooth) + ' · ' + c.payer + ' · ' + c.age + ' days · ' + c.nextAction }), btn(AGING_ACTION[act], { kind: 'reversible', testid: 'money.aging.row.' + c.id + '.' + act, onClick: () => say(AGING_ACTION[act] + ' for ' + pname(S, c.patientId)) })); })));
+      out.append(h('h3', { text: label + ' · ' + g.length }), h('div', { class: 'worklist' }, ...g.map((c) => { const act = agingAction(c); return h('div', { class: 'wrow' }, h('span', { class: 'obj', text: pname(S, c.patientId) }), h('span', { class: 'amt', text: money(c.amountCents) }), h('span', { class: 'why', text: c.id + ' · ' + cdtLine(S, c.cdt, c.tooth) + ' · ' + c.payer + ' · ' + c.age + ' days · ' + c.nextAction }), btn(AGING_ACTION[act], { kind: 'reversible', testid: 'money.aging.row.' + c.id + '.' + act, onClick: () => claimAct(r, S, c, act, AGING_ACTION[act] + ' for ' + pname(S, c.patientId)) })); })));
     }
     return out;
   }
@@ -240,17 +290,26 @@
     const rows = statements(S);
     if (!rows.length) return section('Statements due', h('div', { class: 'row' }, chip('clear', 'Nothing due'), h('span', { class: 'muted', text: 'Statements sent today are disclosure rows on the ledger.' })));
     return section('Statements due', h('div', { class: 'worklist' }, ...rows.map((s) => {
+      if (outageOver(st.stmtGate[s.id])) delete st.stmtGate[s.id];
+      const g = st.stmtGate[s.id];
       const row = h('div', { class: 'md-row' + (s.sent ? ' sent' : '') }, h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, s.patientId) }), h('span', { class: 'amt', text: money(s.amountCents) }), chip('info', 'Deferred'), h('span', { class: 'muted', text: 'deferred at the window ' + shortDate(s.created) + ' so insurance could settle first' })),
         s.sent
           ? h('div', { class: 'row' }, chip('clear', 'Statement sent'), h('span', { class: 'small muted', text: 'Sent to ' + pname(S, s.patientId) + ' · disclosure recorded · ' + shortDate(S.tenant.today) }))
-          : h('div', { class: 'btnrow' }, btn('Send statement', { kind: 'irreversible', testid: 'money.statement.' + s.id + '.send', onClick: () => { const res = Proto.store.sendStatement(s.id); say(res.ok ? 'Sent the statement — disclosure recorded' : res.verb); rerender(r, 'money.tab.statements'); } }), btn('Preview', { kind: 'reversible', testid: 'money.statement.' + s.id + '.preview', pressed: pressed(st.previewFor === s.id), onClick: () => { st.previewFor = st.previewFor === s.id ? null : s.id; rerender(r, 'money.statement.' + s.id + '.preview'); } })));
+          : h('div', { class: 'btnrow' }, btn('Send statement', { kind: g ? 'held' : 'irreversible', testid: 'money.statement.' + s.id + '.send', ariaLabel: g ? 'Send statement is held: ' + g.verb : null, onClick: () => { const res = Proto.store.sendStatement(s.id); if (!res.ok) { st.stmtGate[s.id] = res; rerender(r, 'refusal.control'); return; } delete st.stmtGate[s.id]; say('Sent the statement — disclosure recorded'); rerender(r, 'money.tab.statements'); } }), btn('Preview', { kind: 'reversible', testid: 'money.statement.' + s.id + '.preview', pressed: pressed(st.previewFor === s.id), onClick: () => { st.previewFor = st.previewFor === s.id ? null : s.id; rerender(r, 'money.statement.' + s.id + '.preview'); } })),
+        g && !s.sent ? gate(r, g, s.patientId) : null);
       if (st.previewFor === s.id) { const ex = Proto.store.explain(s.patientId); row.append(h('div', { class: 'explain', 'aria-label': 'Patient-voice preview' }, h('p', { class: 'sentence', text: ex.length ? ex.map((x) => x.patientVoice).join(' ') : 'Your share is ' + money(s.amountCents) + ' after insurance. We held this statement so your plan could settle first; nothing here is an estimate.' }), h('p', { class: 'small muted', text: 'Same rows the biller sees, rendered in the patient voice: no reason codes, no poster names.' }))); }
       return row;
     })));
   }
   function creditsTab(r, S) {
     if (!S.credits.length) return section('Unallocated credits', h('div', { class: 'row' }, chip('clear', 'None'), h('span', { class: 'muted', text: 'Credits appear when a payment lands before its charges.' })));
-    return section('Unallocated credits', h('div', { class: 'worklist' }, ...S.credits.map((cr) => h('div', { class: 'wrow' }, h('span', { class: 'obj', text: pname(S, cr.patientId) }), h('span', { class: 'amt', text: money(-cr.amountCents) + ' credit' }), h('span', { class: 'why', text: cr.reason }), btn('Apply when charges post', { kind: 'reversible', testid: 'money.credit.' + cr.id + '.apply', onClick: () => say('Apply ' + money(-cr.amountCents) + ' when the charges post') })))));
+    /* A credit waiting for charges applies itself when the visit's note files (store.fileNote), so the row's one action
+       is to open that chart: "Apply when charges post" promised a posting the biller cannot make and did nothing. */
+    return section('Unallocated credits', h('div', { class: 'worklist' }, ...S.credits.map((cr) => {
+      const enc = S.encounters.find((e) => String(cr.intents || '').includes(e.id));
+      return h('div', { class: 'wrow' }, h('span', { class: 'obj', text: pname(S, cr.patientId) }), h('span', { class: 'amt', text: money(-cr.amountCents) + ' credit' }), h('span', { class: 'why', text: cr.reason + (enc ? ' · applies when the note files' : '') }),
+        btn(enc ? 'Open the chart' : 'Open the ledger', { kind: 'reversible', testid: 'money.credit.' + cr.id + '.apply', ariaLabel: enc ? 'Open the chart whose filed note releases the charges this credit applies to' : 'Open the ledger for this account', onClick: () => (enc ? Proto.router.go(r.persona, 'encounter', enc.id) : Proto.router.go(r.persona, 'ledger', cr.patientId)) }));
+    })));
   }
   function variancesTab(r, S) {
     const rows = myVariances(S);
@@ -261,8 +320,9 @@
     const STATUS = { pending: ['review', 'Waiting'], approved: ['clear', 'Approved'], declined: ['required', 'Sent back'], sent_back: ['required', 'Sent back'] };
     if (!S.approvals.length) return section('Approvals', h('div', { class: 'row' }, chip('clear', 'None waiting'), h('span', { class: 'muted', text: 'Held postings appear here with the frozen sentence the approver reads.' })));
     // The sentence is built at read time (privacy hides the name on glass) and the decision keeps the one word
-    // the chip, the phone and the write-off card all use — never the raw status beside it.
-    return section('Approvals', h('div', { class: 'worklist' }, ...S.approvals.map((a) => { const s = STATUS[a.status] || ['info', a.status]; return h('div', { class: 'wrow' }, chip(s[0], s[1]), h('span', { class: 'amt', text: money(a.amountCents) }), h('span', { class: 'why', text: Proto.store.approvalSentence(a) + (a.decidedBy ? ' · ' + s[1] + ' by ' + a.decidedBy : '') })); })));
+    // the chip, the phone and the write-off card all use — never the raw status beside it. The approver's line
+    // rides with the decision: the card points here for it.
+    return section('Approvals', h('div', { class: 'worklist' }, ...S.approvals.map((a) => { const s = STATUS[a.status] || ['info', a.status]; return h('div', { class: 'wrow' }, chip(s[0], s[1]), h('span', { class: 'amt', text: money(a.amountCents) }), h('span', { class: 'why' }, Proto.store.approvalSentence(a) + (a.decidedBy ? ' · ' + s[1] + ' by ' + a.decidedBy : ''), a.decisionReason ? [': ', h('q', { class: 'md-line', text: a.decisionReason })] : null)); })));
   }
 
   /* ---- keys: active only while mounted ---- */
@@ -273,16 +333,16 @@
     const k = ev.key.toUpperCase(); const r = lastRoute || Proto.router.current(); const S = Proto.store.get();
     // An accelerator takes you to the control; the control does the thing. A bare letter used to run Post
     // matched (irreversible) and to write an appeal packet, with no gate between the keystroke and the write.
-    if (k === 'P') { if (eraView(S).b.status === 'review') { ev.preventDefault(); tab = 'era'; rerender(r, 'money.era.era-1.postmatched'); } else say('Matched lines are already posted'); }
+    if (k === 'P') { if (eraView(S).b.status === 'review') { ev.preventDefault(); st.tab = 'era'; rerender(r, 'money.era.era-1.postmatched'); } else say('Matched lines are already posted'); }
     else if (k === 'W') {
       ev.preventDefault();
       // No rerender once the card has stopped drawing an amount field: the focus target would not exist and
       // shell.mount() would have already dropped focus to body.
       if (st.woPosted) { say('Write-off already posted'); return; }
       if (st.woHeldReq && st.woHeldReq.status === 'approved') { say('Write-off already approved'); return; }
-      if (tab !== 'era' && tab !== 'aging') tab = 'era';
+      if (st.tab !== 'era' && st.tab !== 'aging') st.tab = 'era';
       if (!st.writeoffOpen) openWriteoff(r); else rerender(r, 'money.writeoff.amount');
-    } else if (k === 'A') { const d = denials(S).find((c) => c.status === 'denied'); if (d) { ev.preventDefault(); tab = 'denials'; rerender(r, 'money.denial.' + d.id + '.appeal'); } else say('No open denials to appeal'); }
+    } else if (k === 'A') { const d = denials(S).find((c) => c.status === 'denied'); if (d) { ev.preventDefault(); st.tab = 'denials'; rerender(r, 'money.denial.' + d.id + '.appeal'); } else say('No open denials to appeal'); }
   }
   function attachKeys() { if (!keysOn) { document.addEventListener('keydown', onKey); keysOn = true; } }
   function detachKeys() { if (keysOn) { document.removeEventListener('keydown', onKey); keysOn = false; } }
@@ -290,13 +350,14 @@
   /* ---- render ---- */
   function render(r) {
     const S = Proto.store.get();
-    if (lastStore !== S) { lastStore = S; st = fresh(); tab = 'era'; }
-    lastRoute = r;
-    const body = { era: eraTab, aging: agingTab, denials: denialsTab, statements: statementsTab, credits: creditsTab, variances: variancesTab, approvals: approvalsTab }[tab](r, S);
+    if (lastStore && lastStore !== S) for (const k of Object.keys(views)) delete views[k];   // store reset: every view is stale
+    lastStore = S;
+    st = viewFor(); lastRoute = r;
+    const body = { era: eraTab, aging: agingTab, denials: denialsTab, statements: statementsTab, credits: creditsTab, variances: variancesTab, approvals: approvalsTab }[st.tab](r, S);
     const page = h('div', { class: 'stack md-page' },
       pageHead('Money Desk', 'Every row is patient, amount, one-line reason, one primary action. Keys: P post matched · W write-off · A appeal'),
       tabs(r, S),
-      h('div', { class: 'stack', role: 'tabpanel', 'aria-label': (TABS.find((t) => t[0] === tab) || [])[1] }, body, writeoffCard(r, S)),
+      h('div', { class: 'stack', role: 'tabpanel', 'aria-label': (TABS.find((t) => t[0] === st.tab) || [])[1] }, body, writeoffCard(r, S)),
       h('p', { class: 'sr-only', 'aria-live': 'polite', text: st.announced }));
     Proto.screens.shell.mount(page);
     attachKeys();
@@ -304,6 +365,6 @@
 
   window.addEventListener('hashchange', () => { if (Proto.router.current().route !== 'money') detachKeys(); });
 
-  Proto.screens.moneydesk = { render, setTab: (t) => { tab = t; }, state: () => st };
+  Proto.screens.moneydesk = { render, setTab: (t) => { viewFor().tab = t; }, state: () => st };
   Proto.router.on('money', (r) => Proto.screens.moneydesk.render(r));
 })();
