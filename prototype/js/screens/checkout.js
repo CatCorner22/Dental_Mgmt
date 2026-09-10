@@ -69,6 +69,10 @@
     // The control that says "Open the ledger" opens the ledger. Every unnamed code used to fall through to the
     // Board, so the one gate whose label named a destination landed somewhere else.
     else if (res.code === 'already_decided') { v.control = res.control || 'Open the ledger'; v.onControl = () => Proto.router.go(r.persona, 'ledger', a.patientId); }
+    // "Open the day" opens Daily Close, where the closed day is read.
+    else if (res.code === 'already_closed') { v.control = res.control || 'Open the day'; v.onControl = () => Proto.router.go(r.persona, 'close'); }
+    // The requester cannot be the approver: the gate stands until the request is dismissed here.
+    else if (res.code === 'blocked_same_person') { v.control = res.control || 'Dismiss'; v.onControl = () => { st.refusalNode = null; rerender(r, 'checkout.post'); }; }
     // Two entitlement gates: no pass (Open Roles) and a seat without post_payment (Switch author, the PIN pad).
     else if (res.code === 'entitlement' && res.control === 'Switch author') { v.onControl = () => Proto.screens.shell.openPinPad(r); }
     else if (res.code === 'entitlement') { v.control = res.control || 'Open Roles'; v.onControl = openRoles; }
@@ -88,6 +92,8 @@
     if (st.decision !== 'collect') return [];
     return [...st.selfPay].filter((pid) => { const p = S.procedures.find((x) => x.id === pid && x.encounterId === a.encounterId); return p && !p.selfPayRestricted && payCents >= p.feeCents; });
   }
+  // A statement or plan bills what the write-off typed beside it leaves: the row the store writes carries the same number.
+  const afterWriteoff = (st, est) => { const wo = st.writeoffOpen ? cents(st.writeoffStr) : 0; return Math.max(0, est.patientCents - (wo > 0 ? wo : 0)); };
   const AMOUNT_WHY = 'A payment posts the number in the field against the balance, so it cannot be blank, negative, or a value that is not a number. To take nothing at the window, choose Nothing due today.';
   const WRITEOFF_WHY = 'A write-off posts the number in the field against the balance, so it cannot be blank, negative, or a value that is not a number. Remove the write-off to post without one.';
 
@@ -125,12 +131,14 @@
       // The request row is written when this control is pressed, by the store verb that owns it. Post writes
       // nothing here, so a control labelled "Request approval" performs the request it names.
       st.refusalNode = refusal({ code: res.code, verb: res.verb, control: res.control || 'Request approval', why: res.why, onControl: () => {
+        // The pending request names the PIN poster (store.js posterId), so the phone's same-person rule reads the right name.
         const out = Proto.store.requestApproval(res.pendingRequest);
         if (!out.ok) { st.refusalNode = refusal(withControl(out, r, a, st)); rerender(r, 'refusal.control'); return; }
         st.heldReq = Proto.store.get().approvals.find((x) => x.id === out.requestId) || null;
-        st.requested = true; st.refusalNode = null;
+        st.requested = true; st.refusalNode = null; st.pin = '';
         Proto.router.announce('Approval requested');
-        rerender(r, 'checkout.post');
+        // The keyboard lands on the request stamp, not on the Held primary.
+        rerender(r, '#co-requested');
       } });
       rerender(r, 'refusal.control');
       return;
@@ -207,11 +215,11 @@
       body.append(h('div', { class: 'co-two' }, af.node, unfiled ? h('p', { class: 'hint co-alloc', text: 'The note is not filed yet: this payment waits as credit until the charges post.' }) : null));
       policy.push('Allocates to oldest open charge first' + (unfiled ? '; until the note is filed the payment waits as credit rather than landing on a charge.' : '.'));
     } else if (st.decision === 'send_statement') {
-      body.append(h('p', { class: 'muted', text: 'No ledger entry today. A statement-due row for ' + money(est.patientCents) + ' appears on Money Desk → Statements due.' }));
+      body.append(h('p', { class: 'muted', text: 'No ledger entry today. A statement-due row for ' + money(afterWriteoff(st, est)) + ' appears on Money Desk → Statements due.' }));
       policy.push('The window defers the balance to a statement, and the decision is reversible until the statement job runs.');
     } else if (st.decision === 'payment_plan') {
       body.append(h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Cadence' }, ...CADENCES.map(([code, label]) => btn(label, { testid: 'checkout.plan.cadence.' + code, pressed: pressed(st.cadence === code), onClick: () => { st.cadence = code; st.refusalNode = null; rerender(r, 'checkout.plan.cadence.' + code); } }))));
-      body.append(h('p', { class: 'muted', text: 'Plan for ' + money(est.patientCents) + ', ' + CADENCES.find((c) => c[0] === st.cadence)[1].toLowerCase() + ', on the processor token.' }));
+      body.append(h('p', { class: 'muted', text: 'Plan for ' + money(afterWriteoff(st, est)) + ', ' + CADENCES.find((c) => c[0] === st.cadence)[1].toLowerCase() + ', on the processor token.' }));
       policy.push('Only patient-due charges are eligible; charges waiting on insurance are greyed.');
     } else {
       body.append(h('p', { class: 'muted', text: 'Nothing due today; there is nothing to collect at the window.' }));
@@ -253,7 +261,7 @@
     }
     if (held) {
       row.append(btn('Post', { kind: 'held', testid: 'checkout.post', ariaLabel: 'Held: waiting on a second approver', onClick: () => Proto.router.announce('Waiting on ' + ((st.heldReq.eligible || []).slice(0, 2).join(' or ') || 'a second approver')) }));
-      if (st.requested) row.append(h('span', { class: 'row' }, chip('review', 'Request ' + st.heldReq.id + ' waiting'), h('span', { class: 'small muted', text: 'Dana or Dr. Reagan will see it on their phone; this screen flips to Post when they approve.' })));
+      if (st.requested) row.append(h('span', { class: 'row', id: 'co-requested', tabindex: '-1' }, chip('review', 'Request ' + st.heldReq.id + ' waiting'), h('span', { class: 'small muted', text: ((st.heldReq.eligible || []).join(' or ') || 'The approver') + ' will see it on their phone; this screen flips to Post when they approve.' })));
     } else if (gated) {
       // A press on Held re-evaluates first: a gate whose cause is gone has fallen on the render, and the press posts.
       row.append(btn('Post', { kind: 'held', testid: 'checkout.post', ariaLabel: 'Held: Post', onClick: () => { render(r); const el = document.querySelector('[data-testid="refusal.control"]'); if (el) el.focus(); else if (!st.refusalNode) doPost(r, a, st); } }));
@@ -290,7 +298,8 @@
     const chargeName = (lid) => { const e = S.ledger.find((y) => y.id === lid); return e && e.cdt ? (S.cdt[e.cdt] || [e.cdt])[0] + (e.tooth ? ' #' + e.tooth : '') : 'the oldest open charge'; };
     const cadenceWord = (code) => ((CADENCES.find((c) => c[0] === code) || [null, code])[1] || '').toLowerCase();
     const waiting = (e) => e.gl === 'unapplied_credit' && !(enc && enc.noteFiled);
-    p.ledger.forEach((e) => items.push(li((KIND_WORD[e.kind] || e.kind) + ' ' + money(Math.abs(e.amountCents)) + (e.tender ? ' by ' + e.tender : '') + (e.cdt ? ' · ' + (S.cdt[e.cdt] || [e.cdt])[0] : '') + (waiting(e) ? ' · held as credit until the note is filed' : ''))));
+    // A row that landed on a day already closed says so here, as Daily Close counts it (store.js ledgerRow).
+    p.ledger.forEach((e) => items.push(li((KIND_WORD[e.kind] || e.kind) + ' ' + money(Math.abs(e.amountCents)) + (e.tender ? ' by ' + e.tender : '') + (e.cdt ? ' · ' + (S.cdt[e.cdt] || [e.cdt])[0] : '') + (waiting(e) ? ' · held as credit until the note is filed' : '') + (e.postedAfterClose ? ' · posted into the closed day' : ''))));
     p.allocations.forEach((x) => items.push(li('Applied ' + money(x.amountCents) + ' to ' + chargeName(x.chargeId))));
     p.intents.forEach((x) => items.push(li('Allocation intent ' + money(x.amountCents) + (x.appliedTo ? ' applied to ' + procName(x.appliedTo) + ' when the note filed' : ' waits for this visit\'s charges (Filed-later lane)'))));
     p.statements.forEach((x) => items.push(li('Statement due ' + money(x.amountCents) + ' · goes out on the next statement run')));
@@ -331,16 +340,10 @@
     // sentence under them: the address keeps the bad id, so Back returns to the screen before it (A6, docs/04).
     if (!a) { const nf = Proto.store.notFound('appointment'); Proto.screens.shell.mount(h('div', { class: 'stack' }, h('h1', { text: 'Nothing here' }), h('p', { class: 'muted', text: nf.why }), btn('Back to home', { kind: 'quiet', testid: 'notfound.home', onClick: () => Proto.router.go(r.persona, Proto.router.HOME[r.persona]) }))); return; }
     const pt = Proto.store.patient(a.patientId); const enc = Proto.store.encounter(a.encounterId);
-    const seedEst = S.estimates[aid] || { patientCents: a.balanceCents || 0, insuranceCents: 0, writeoffCents: 0, note: 'No plan estimate on file; the patient portion shown is the appointment balance.' };
-    /* What the window collects is what the ledger still says is open, never a stored estimate on its own.
-       A $410 write-off approved from the phone landed on the ledger and took Patient due to zero while this
-       screen went on footing "$410.00 est.", prefilling Collect 410.00 and offering a live Post, so the same
-       visit read two ways on two screens (C5, A7). The plan estimate stays a separate number and still never
-       joins the balance (docs/13 feature 23); it is only capped by what is actually still owed. */
-    const openNow = Proto.store.balances(a.patientId).patientDue;
-    const notYetCharged = S.procedures.filter((p) => p.encounterId === a.encounterId && !Proto.store.charged(p)).reduce((t, p) => t + p.feeCents, 0);
-    const collectible = openNow + notYetCharged;
-    const est = Object.assign({}, seedEst, { patientCents: Math.min(seedEst.patientCents, collectible) });
+    /* What the window collects is the store's one estimate (windowEstimate: the plan estimate capped by what the
+       ledger still leaves open, or the released charges' patient side). This screen used to foot its own from
+       S.estimates / a.balanceCents, so a visit charted and filed today read $130 due above a $0.00 est. footer. */
+    const est = Object.assign({ note: 'No plan estimate on file; the patient portion shown is what the account still owes.' }, Proto.store.windowEstimate(aid));
     const st = state[aid] || (state[aid] = fresh(est.patientCents));
     // A stale prefill outlives the state it was built from: re-read it when the ledger has moved under it.
     if (st.decision !== 'zero_due' && est.patientCents <= 0 && !st.posted) { st.decision = 'zero_due'; st.amountStr = dollars(0); st.tender = null; }
@@ -349,10 +352,11 @@
     const code = st.refusalNode ? st.refusalNode.dataset.code : null;
     // Only the pass gate ("Open Roles") falls with a pass: a seat without post_payment keeps its Switch author gate.
     const ctl = st.refusalNode ? ((st.refusalNode.querySelector('button') || {}).textContent || '') : '';
-    const me = Proto.store.currentUser();
-    if ((code === 'outage' && !P.outage) || (code === 'entitlement' && ctl === 'Open Roles' && !me.noPass) || (code === 'entitlement' && ctl === 'Switch author' && (me.entitlements || []).includes('post_payment'))) st.refusalNode = null;
+    const me = Proto.store.currentUser(); const uid = me.id;
+    // A gate remembers who raised it: another author at the desk re-evaluates rather than inheriting it.
+    if (st.refusalNode) { const o = st.refusalNode.dataset.owner; if (!o) st.refusalNode.dataset.owner = uid; else if (o !== uid) st.refusalNode = null; }
+    if ((code === 'outage' && !P.outage) || (code === 'after_hours' && !S.clock.afterHours) || (code === 'entitlement' && ctl === 'Open Roles' && !me.noPass) || (code === 'entitlement' && ctl === 'Switch author' && (me.entitlements || []).includes('post_payment'))) st.refusalNode = null;
     // The PIN authorises the person who typed it: a switch of author (the pad, a persona change) discards it.
-    const uid = me.id;
     if (st.pinOwner !== uid) { if (st.pinOwner) st.pin = ''; st.pinOwner = uid; }
     if (st.heldReq) st.heldReq = S.approvals.find((x) => x.id === st.heldReq.id) || st.heldReq;
     const procs = S.procedures.filter((p) => p.encounterId === a.encounterId);

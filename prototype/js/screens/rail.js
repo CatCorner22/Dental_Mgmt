@@ -231,6 +231,10 @@
     if (/^pin_/.test(res.code)) return Object.assign({}, res, { fresh: res.code === 'pin_no_match', onControl: focusPin });
     if (res.code === 'zero_collect_refused') return Object.assign({}, res, { control: 'Explain', onControl: () => { st.explain = true; st.gate = null; rerender(r, 'ledger.explain'); } });
     if (res.code === 'already_decided' || res.code === 'statement_held') return Object.assign({}, res, { control: 'Open Money Desk', onControl: () => openMoneyDesk(r, st) });
+    // The entitlement and closed-day words act as on Checkout: Roles, the author pad, Daily Close.
+    if (res.code === 'entitlement' && res.control === 'Switch author') return Object.assign({}, res, { onControl: () => Proto.screens.shell.openPinPad(r) });
+    if (res.code === 'entitlement') return Object.assign({}, res, { control: res.control || 'Open Roles', onControl: () => { location.hash = '#/owner/roles'; } });
+    if (res.code === 'already_closed') return Object.assign({}, res, { control: res.control || 'Open the day', onControl: () => Proto.router.go(r.persona, 'close') });
     return res;
   }
   /* The Ledger sends the row Money Desk raised; with none open it asks the store to raise one first, and the store's

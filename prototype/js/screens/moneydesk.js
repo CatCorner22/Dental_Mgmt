@@ -56,6 +56,10 @@
       : word === 'Remove the write-off' ? () => removeWriteoff(r)
       : word === 'Open the claim' && o.claimId ? () => { st.tab = denials(Proto.store.get()).some((c) => c.id === o.claimId) ? 'denials' : 'aging'; rerender(r, '#md-claim-' + o.claimId); }
       : word === 'Go to the deltas' ? () => { st.tab = 'era'; rerender(r, '#md-readback'); }
+      // The entitlement words act as on Checkout: the seat that issues a pass, or the pad that names another author.
+      : word === 'Open Roles' ? () => { location.hash = '#/owner/roles'; }
+      : word === 'Switch author' ? () => Proto.screens.shell.openPinPad(r)
+      : word === 'Open the day' ? () => Proto.router.go(r.persona, 'close')
       : pid && /ledger/i.test(word) ? () => Proto.router.go(r.persona, 'ledger', pid)
       : () => rerender(r, o.focus || 'money.tab.' + st.tab);
     const v = { code: res.code, verb: res.verb, control: word || 'Back to the worklist', why: res.why, severity: res.code === 'outage' ? 'stop' : undefined, fresh: !!res.fresh, onControl };
@@ -64,7 +68,11 @@
   }
   /* A gate whose cause is gone falls on the next render: the outage ended, the desk is no longer shared, business hours
      began. The pressed Held primary re-asks the store either way. */
-  const outageOver = (g) => { const code = g && ((g.dataset || g).code || ''); const S = Proto.store.get(); return code === 'outage' ? !S.outage : /^pin_/.test(code) ? !shared() : code === 'after_hours' ? !S.clock.afterHours : false; };
+  const outageOver = (g) => {
+    const code = g && ((g.dataset || g).code || ''); const S = Proto.store.get();
+    const ctl = g ? g.control || ((g.querySelector && g.querySelector('[data-testid="refusal.control"]')) || {}).textContent || '' : '';
+    return code === 'outage' ? !S.outage : /^pin_/.test(code) ? !shared() : code === 'after_hours' ? !S.clock.afterHours : code === 'entitlement' && ctl === 'Open Roles' ? !Proto.store.currentUser().noPass : false;
+  };
   // Typing a PIN dissolves the gates that asked for one, as typing an amount does; the primaries are live again.
   const isPinGate = (g) => !!g && /^pin_/.test((g.dataset || g).code || '');
   function dropPinGates() {
@@ -104,7 +112,10 @@
   /* A statement bills the live balance (store.sendStatement), so the row prints it and a row whose balance has since
      settled leaves the worklist; a sent row stays, carrying its confirmation and the amount it froze. */
   const due = (s) => Proto.store.balances(s.patientId).patientDue;
-  const statements = (S) => S.statementsDue.filter((s) => s.sent || due(s) > 0);
+  /* A statement queued at the window on a visit whose note is unfiled waits for the note: its charges are not on the ledger
+     yet, so the live balance reads $0 while the row is real. It was on no tab and off the badge until the dentist filed. */
+  const waitingEnc = (S, s) => { if (s.sent || due(s) > 0) return null; const a = S.appointments.find((x) => x.patientId === s.patientId && x.status === 'checked_out_unfiled'); return a ? a.encounterId : null; };
+  const statements = (S) => S.statementsDue.filter((s) => s.sent || due(s) > 0 || waitingEnc(S, s));
   /* Credits are what the ledger says: every account whose rows net to money on hand, with the visit a payment is waiting to
      land on. The tab listed the S.credits rows, so an over-payment at the window was missing and an applied credit stayed
      listed, and counted, after the note filed. */
@@ -276,7 +287,8 @@
     if (!res.ok) { say(res.verb); return; }
     st.appealFor = claimId; st.appealPacket = res.packet; st.denialRefusal[claimId] = null;
     say('Built the appeal packet from the record');
-    rerender(r, 'money.appeal.send');
+    // The drawer opens on its heading, never on Send: a repeated Enter on Appeal must not mail the packet.
+    rerender(r, '#md-appeal-head');
   }
   function denialsTab(r, S) {
     const rows = denials(S);
@@ -312,7 +324,7 @@
     const list = h('ul', { class: 'md-slots' }, ...slots.map(([k, label, detail]) => h('li', { class: 'row' }, chip(pk.slots[k] ? 'clear' : 'required', pk.slots[k] ? 'Clear' : 'Required'), h('span', null, h('b', { text: label }), h('span', { class: 'muted', text: ' · ' + (pk.slots[k] ? detail : 'not on the record; add before sending') })))));
     const missing = slots.filter(([k]) => !pk.slots[k]).length;
     const drawer = h('div', { class: 'md-drawer stack', role: 'region', 'aria-label': 'Appeal packet for claim ' + c.id },
-      h('div', { class: 'row drawer-head' }, h('h3', { class: 'grow', text: 'Appeal packet · built from the record' }), btn('Close', { kind: 'quiet', class: 'compact', testid: 'money.appeal.close', onClick: () => { st.appealFor = null; st.appealPacket = null; st.sendGate = null; rerender(r, 'money.denial.' + c.id + '.appeal'); } })),
+      h('div', { class: 'row drawer-head' }, landing(h('h3', { class: 'grow', text: 'Appeal packet · built from the record' }), 'md-appeal-head'), btn('Close', { kind: 'quiet', class: 'compact', testid: 'money.appeal.close', onClick: () => { st.appealFor = null; st.appealPacket = null; st.sendGate = null; rerender(r, 'money.denial.' + c.id + '.appeal'); } })),
       list,
       h('div', { class: 'md-sentence' }, h('span', { class: 'small muted', text: 'What the patient reads: ' }), h('span', { text: pk.patientSentence })));
     if (st.appealSent === c.id) { drawer.append(sentLine()); return drawer; }
@@ -353,11 +365,13 @@
     if (!rows.length) out.append(h('div', { class: 'row' }, chip('clear', 'Nothing due'), h('span', { class: 'muted', text: 'Statements sent today are disclosure rows on the ledger.' })));
     else out.append(h('div', { class: 'worklist' }, ...rows.map((s) => {
       if (outageOver(st.stmtGate[s.id])) delete st.stmtGate[s.id];
-      const g = st.stmtGate[s.id];
+      const g = st.stmtGate[s.id]; const enc = waitingEnc(S, s);
       // The stamp is where the keyboard lands after Send or Raise; the row group is where a gate's control lands.
-      const row = landing(h('div', { class: 'md-row' + (s.sent ? ' sent' : '') }, h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, s.patientId) }), h('span', { class: 'amt', text: money(s.sent ? s.amountCents : due(s)) }), landing(chip('info', s.reason === 'balance_due' ? 'Raised' : 'Deferred'), 'md-sd-stamp-' + s.id), h('span', { class: 'muted', text: (RAISED[s.reason] || RAISED.window_deferred)(s) })),
+      const row = landing(h('div', { class: 'md-row' + (s.sent ? ' sent' : '') }, h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, s.patientId) }), h('span', { class: 'amt', text: money(s.sent || enc ? s.amountCents : due(s)) }), landing(chip(enc ? 'review' : 'info', enc ? 'Waiting for the note' : s.reason === 'balance_due' ? 'Raised' : 'Deferred'), 'md-sd-stamp-' + s.id), h('span', { class: 'muted', text: enc ? 'deferred at the window ' + shortDate(s.created) + ' · charges post when the note files' : (RAISED[s.reason] || RAISED.window_deferred)(s) })),
         s.sent
           ? h('div', { class: 'row' }, chip('clear', 'Statement sent'), h('span', { class: 'small muted', text: 'Sent to ' + pname(S, s.patientId) + ' · disclosure recorded · ' + shortDate(S.tenant.today) }))
+          // Nothing to send until the charges exist: the one action opens the chart whose filed note releases them.
+          : enc ? h('div', { class: 'btnrow' }, btn('Open the chart', { kind: 'reversible', testid: 'money.statement.' + s.id + '.chart', ariaLabel: 'Open the chart whose filed note releases the charges this statement bills', onClick: () => Proto.router.go(r.persona, 'encounter', enc) }))
           : h('div', { class: 'btnrow' }, btn('Send statement', { kind: g ? 'held' : 'irreversible', testid: 'money.statement.' + s.id + '.send', ariaLabel: g ? 'Send statement is held: ' + g.verb : null, onClick: () => { const res = post(Proto.store.sendStatement, s.id); if (!res.ok) { st.stmtGate[s.id] = res; rerender(r, 'refusal.control'); return; } delete st.stmtGate[s.id]; say('Sent the statement — disclosure recorded'); rerender(r, '#md-sd-stamp-' + s.id); } }), btn('Preview', { kind: 'reversible', testid: 'money.statement.' + s.id + '.preview', pressed: pressed(st.previewFor === s.id), onClick: () => { st.previewFor = st.previewFor === s.id ? null : s.id; rerender(r, 'money.statement.' + s.id + '.preview'); } })),
         g && !s.sent ? gate(r, g, s.patientId, { focus: '#md-sd-' + s.id }) : null), 'md-sd-' + s.id);
       if (st.previewFor === s.id) { const ex = Proto.store.explain(s.patientId); row.append(h('div', { class: 'explain', 'aria-label': 'Patient-voice preview' }, h('p', { class: 'sentence', text: ex.length ? ex.map((x) => x.patientVoice).join(' ') : 'Your share is ' + money(s.amountCents) + ' after insurance. We held this statement so your plan could settle first; nothing here is an estimate.' }), h('p', { class: 'small muted', text: 'Same rows the biller sees, rendered in the patient voice: no reason codes, no poster names.' }))); }
