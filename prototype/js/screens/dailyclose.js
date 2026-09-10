@@ -267,6 +267,21 @@
         rerender(r, '#dc-reviewed-' + d.id);
       };
       const act = (action, label, kind) => btn(label, { kind: held.by === action ? 'held' : kind, testid: 'close.decision.' + d.id + '.' + action, onClick: () => (held.by === action ? heldPress(r, st.decisionRefusal, d.id, () => review(action)) : review(action)) });
+      const act = (action, label, kind) => btn(label, { kind, testid: 'close.decision.' + d.id + '.' + action, onClick: () => {
+        const res = Proto.store.reviewDecision(d.id, action);
+        if (res.ok) {
+          // The store sets the next review date when a decision is kept or tightened; printing a second
+          // computation of it here is how the sentence and the row underneath it come to disagree.
+          const next = shortDate(res.reviewBy);
+          // Read the threshold after the store has moved it: the sentence names the value now in force.
+          const threshold = money(Proto.store.get().tenant.dualReleaseThresholdCents);
+          st.decisionResult[d.id] = action === 'keep' ? 'Kept 90 more days; review on ' + next + '.'
+            : action === 'tighten' ? 'Tightened: write-off threshold back to ' + threshold + '; review on ' + next + '.'
+              : 'Retired: write-off threshold back to ' + threshold + '. Nothing auto-renews.';
+          say(action === 'keep' ? 'Kept 90 more days' : action === 'tighten' ? 'Tightened the write-off threshold' : 'Retired the raised threshold');
+        }
+        rerender(r, 'close.closeday');
+      } });
       return h('div', { class: 'card flat stack', 'aria-label': 'Decision ' + d.id },
         h('div', { class: 'row' }, chip('review', 'Review ' + (late > 0 ? 'was due ' + shortDate(d.reviewBy) + ' (' + plural(late, 'day') + ' ago)' : 'due ' + shortDate(d.reviewBy))), h('span', { class: 'small muted', text: 'Decided ' + shortDate(d.decidedAt) + ' by ' + shortName(S, d.decidedBy) })),
         h('p', null, h('b', { text: d.text })),

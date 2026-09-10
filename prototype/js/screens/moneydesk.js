@@ -21,6 +21,8 @@
   let st = null; // the current user's view, set by render()
   const fresh = () => ({ tab: 'era', pin: '', writeoffOpen: false, writeoffStr: '', writeoffReason: null, woRefusal: null, woHeldReq: null, woPosted: false, appealFor: null, appealPacket: null, appealSent: null, denialRefusal: {}, sendGate: null, eraGate: null, lineGate: {}, stmtGate: {}, previewFor: null, announced: '' });
   const viewFor = () => { const k = Proto.store.currentUser().id; return (views[k] = views[k] || fresh()); }
+  let st = null; // module state; rebuilt on store reset
+  const fresh = () => ({ writeoffOpen: false, writeoffStr: '', writeoffReason: null, woRefusal: null, woHeldReq: null, woPosted: false, appealFor: null, appealPacket: null, appealSent: null, denialRefusal: {}, previewFor: null, announced: '' });
 
   const priv = () => !!(window.__proto && window.__proto.privacy);
   const pname = (S, pid) => { const p = S.patients.find((x) => x.id === pid); return displayName(p ? p.name : pid, priv()); };
@@ -270,6 +272,7 @@
       // "Request approval" would promise a write that had already happened and then do nothing. The next
       // step for the biller is to see the request where it waits: the Approvals tab.
       st.woRefusal = refusal({ code: res.code, verb: res.verb, control: 'Open approvals', why: res.why, onControl: () => { st.tab = 'approvals'; rerender(r, 'money.tab.approvals'); } });
+      st.woRefusal = refusal({ code: res.code, verb: res.verb, control: 'Open approvals', why: res.why, onControl: () => { tab = 'approvals'; rerender(r, 'money.tab.approvals'); } });
       rerender(r, 'refusal.control'); return;
     }
     st.woRefusal = gate(r, res, WRITEOFF_PID);
