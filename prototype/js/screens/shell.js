@@ -111,6 +111,8 @@
       h('p', { class: 'small muted', text: P.device === 'desk' ? 'This desk is not shared, so switching signs you out and in as the other person.' : 'Their session opens on this page and yours is revoked; your unsaved draft waits under your PIN.' }));
     let close;
     const refusalSlot = h('div', { class: 'pin-refusal' });
+    // The slot is emptied before the next gate is built, so each wrong PIN is a fresh raise: one refusal event, one announcement.
+    function showRefusal(v) { refusalSlot.replaceChildren(); refusalSlot.append(Proto.ui.refusal(v)); }
     // Rebuilding the slot removes the control that may hold the keyboard; it lands on the new gate's control, never body.
     function showRefusal(v) { refusalSlot.replaceChildren(Proto.ui.refusal(v)); if (document.activeElement === document.body) { const k = refusalSlot.querySelector('[data-testid="refusal.control"]') || dots; k.focus(); } }
     // The store's refusal, the pad's way out: retype puts the keyboard on the first key, a lock or an outage
@@ -153,6 +155,17 @@
       const top = Proto.ui.topDialog(); if (!top || !top.contains(pad)) return;   // the top dialog owns the keyboard
       if (/^[0-9]$/.test(ev.key)) { ev.preventDefault(); if (digits.length < 6) { digits += ev.key; dots.textContent = '•'.repeat(digits.length); } }
       else if (ev.key === 'Backspace') { ev.preventDefault(); digits = digits.slice(0, -1); dots.textContent = '•'.repeat(digits.length); }
+      else if (ev.key === 'Enter') {
+        // Enter submits from a digit key or from nowhere in particular; on any other control in the pad
+        // (Go, Backspace, Cancel, a gate's control, a Why disclosure) it stays the control's own activation.
+        const tid = (t && t.getAttribute && t.getAttribute('data-testid')) || '';
+        const interactive = t && /^(BUTTON|SUMMARY|A)$/.test(t.tagName || '');
+        if (/^pin\.key\./.test(tid) || !interactive) { ev.preventDefault(); submit(); }
+      }
+    };
+    document.addEventListener('keydown', onPadKey, true);
+    // The dialog owns the cleanup: Escape, the backdrop and a route change close it as surely as Cancel or Go.
+    close = Proto.ui.dialog(h('div', { class: 'stack' }, h('h2', { text: 'Who is charting?' }), status, refusalSlot, dots, pad, policy, btn('Cancel', { testid: 'pin.cancel', onClick: () => close() })), { label: 'Switch author', focus: '[data-testid="pin.key.1"]', onClose: () => document.removeEventListener('keydown', onPadKey, true) });
       else if (ev.key === 'Enter' && !(t && t.closest && t.closest('button, summary, a, [role="button"]'))) { ev.preventDefault(); submit(); }
     };
     document.addEventListener('keydown', onPadKey, true);
@@ -211,4 +224,7 @@
   document.addEventListener('keydown', (ev) => {
     if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'k' || ev.key === 'K')) { const r = Proto.router.current(); if (r.persona) { ev.preventDefault(); if (!Proto.ui.topDialog()) Proto.screens.palette.open(r); } }
   });
+  // The skip link moves the keyboard, not the route: the hash is the router's, so the link never writes it.
+  const skip = document.querySelector('[data-testid="skip.canvas"]');
+  if (skip) skip.addEventListener('click', (ev) => { ev.preventDefault(); const c = canvas(); if (c) { c.focus(); c.scrollIntoView({ block: 'start' }); } });
 })();

@@ -23,6 +23,7 @@
   const WROTE = { ledger: 'appended a ledger row', approvals: 'created an approval request', approvalsLog: 'decided an approval request', dayCloses: 'closed a business day', deposits: 'prepared a deposit slip', reconciliationMatches: 'matched or cleared a variance', controlDecisions: 'reviewed a control decision', appointmentEvents: 'moved an appointment', eligibilityChecks: 're-ran eligibility', messages: 'pinged a chair', perioExams: 'saved a perio exam', tags: 'tagged a tooth for the dentist', chartEvents: 'painted the chart', planItems: 'added a plan item', notes: 'edited the note', filedNotes: 'filed a note', claims: 'changed a claim', claimEvents: 'recorded a claim event', appealPackets: 'built an appeal packet', disclosures: 'disclosed records (logged)', statementsDue: 'queued a statement', collectionDecisions: 'recorded a collection decision', allocations: 'allocated a payment', dayPasses: 'issued a day pass', userEntitlements: 'changed entitlements', firstRunState: 'retired a first-shift chip', sessions: 'switched author with a PIN' };
 
   let st = null, lastStore = null, lastRoute = null, keysOn = false;
+  const fresh = () => ({ tileOpen: false, locOpen: null, invOpen: {}, changedOpen: false, lateOpen: false, varRefusal: {}, closeStep: 'idle', closeRefusal: null, dayClose: null, decisionResult: {}, decisionRefusal: {}, riskDone: {}, logOpen: false });
   const fresh = () => ({ tileOpen: false, locOpen: null, invOpen: {}, changedOpen: false, lateOpen: false, varRefusal: {}, closeStep: 'idle', closeRefusal: null, dayClose: null, decisionResult: {}, decisionRefusal: {}, riskDone: {}, logOpen: false, pin: '', device: null });
   const priv = () => !!(window.__proto && window.__proto.privacy);
   const shared = () => !!(window.__proto && window.__proto.device === 'shared');
@@ -186,11 +187,11 @@
     return detail;
   }
   function varianceCard(r, S, rr, v) {
-    const me = Proto.store.currentUser(); const ents = me.entitlements || [];
+    const me = Proto.store.currentUser();
     const isCloser = rr.closer === me.name || rr.posters === me.name;
-    // Clear is offered to an independent seat that carries the money it would be clearing, and to nobody
-    // else: it used to be offered to (and accepted from) any seat that had not closed the day.
-    const mayClear = !isCloser && CLEAR_ENTS.some((e) => ents.includes(e));
+    // Match and Clear are offered to an independent seat that carries the money it would be settling, and to
+    // nobody else: the store's gate decides, so the control on screen is the control the store accepts.
+    const mayClear = !Proto.store.reconcileGate(rr, me);
     const clearers = table(S, 'users').filter((u) => u.name !== me.name && u.name !== rr.closer && CLEAR_ENTS.some((e) => (u.entitlements || []).includes(e))).map((u) => u.short);
     const pm = v.proposedMatch || {};
     const candidates = () => S.ledger.filter((e) => e.locationId === v.locationId && e.kind === 'patient_payment' && e.tender === v.tender && e.posted === rr.date).slice(-(pm.ledgerEntries || 2));
@@ -207,6 +208,17 @@
       refuse('match', res);
     };
     const controls = h('div', { class: 'btnrow' },
+      mayClear ? btn('Match these', { kind: 'irreversible', testid: 'close.variance.' + v.id + '.match', onClick: () => { const res = Proto.store.matchVariance(v.id); if (res.ok) say('Matched ' + money(v.amountCents) + ' at ' + locOf(S, v.locationId).name); rerender(r, 'close.tied.tile'); } }) : null,
+      btn(st.invOpen[v.id] ? 'Hide rows' : 'Investigate', { kind: 'reversible', testid: 'close.variance.' + v.id + '.investigate', pressed: !!st.invOpen[v.id], onClick: () => { st.invOpen[v.id] = !st.invOpen[v.id]; rerender(r, 'close.variance.' + v.id + '.investigate'); } }));
+    if (mayClear) controls.append(btn('Clear with reason', { kind: st.varRefusal[v.id] ? 'held' : 'quiet', testid: 'close.variance.' + v.id + '.clear', onClick: () => {
+      const res = Proto.store.clearVariance(v.id);
+      if (res.ok) { say('Cleared with reason'); rerender(r, 'close.tied.tile'); return; }
+      st.varRefusal[v.id] = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: null });
+      rerender(r, 'close.variance.' + v.id + '.clear');
+    } }));
+    card.append(controls);
+    if (!mayClear) card.append(h('p', { class: 'small muted', text: (isCloser ? 'Same hands closed ' + locOf(S, rr.locationId).name + ' on ' + shortDate(rr.date) + '. ' : 'Clearing belongs to a seat that reconciles the bank or closes the books. ') + (clearers.length ? orList(clearers) + ' can clear. ' : '') + 'Investigate stays open to you.' }));
+    if (st.varRefusal[v.id]) card.append(st.varRefusal[v.id]);
       btn('Match these', { kind: held.by === 'match' ? 'held' : 'irreversible', testid: 'close.variance.' + v.id + '.match', onClick: () => (held.by === 'match' ? heldPress(r, st.varRefusal, v.id, doMatch) : doMatch()) }),
       btn(st.invOpen[v.id] ? 'Hide rows' : 'Investigate', { kind: 'reversible', testid: 'close.variance.' + v.id + '.investigate', pressed: !!st.invOpen[v.id], onClick: () => {
         st.invOpen[v.id] = !st.invOpen[v.id];
@@ -247,6 +259,9 @@
     const due = S.decisions.filter((d) => d.status === 'review_due');
     const results = Object.keys(st.decisionResult);
     if (!due.length && !results.length) return null;
+    // The review controls render for the seats the store lets review: owner and the office manager.
+    const me = Proto.store.currentUser();
+    const mayReview = me.role === 'owner' || (me.entitlements || []).includes('grant_roles');
     const rows = due.map((d) => {
       const late = days(d.reviewBy, S.tenant.today);
       const held = live(st.decisionRefusal, d.id);
@@ -276,16 +291,19 @@
           // Read the threshold after the store has moved it: the sentence names the value now in force.
           const threshold = money(Proto.store.get().tenant.dualReleaseThresholdCents);
           st.decisionResult[d.id] = action === 'keep' ? 'Kept 90 more days; review on ' + next + '.'
-            : action === 'tighten' ? 'Tightened: write-off threshold back to ' + threshold + '; review on ' + next + '.'
-              : 'Retired: write-off threshold back to ' + threshold + '. Nothing auto-renews.';
+            : action === 'tighten' ? 'Tightened: write-off threshold back to ' + money(res.thresholdCents) + '; review on ' + next + '.'
+              : 'Retired: write-off threshold back to ' + money(res.thresholdCents) + '. Nothing auto-renews.';
           say(action === 'keep' ? 'Kept 90 more days' : action === 'tighten' ? 'Tightened the write-off threshold' : 'Retired the raised threshold');
-        }
+        } else st.decisionRefusal[d.id] = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: null });
         rerender(r, 'close.closeday');
       } });
       return h('div', { class: 'card flat stack', 'aria-label': 'Decision ' + d.id },
         h('div', { class: 'row' }, chip('review', 'Review ' + (late > 0 ? 'was due ' + shortDate(d.reviewBy) + ' (' + plural(late, 'day') + ' ago)' : 'due ' + shortDate(d.reviewBy))), h('span', { class: 'small muted', text: 'Decided ' + shortDate(d.decidedAt) + ' by ' + shortName(S, d.decidedBy) })),
         h('p', null, h('b', { text: d.text })),
         h('p', { class: 'row' }, h('span', { text: 'Since this raise: ' + d.measuredEffect + '.' }), chip('info', 'Directional')),
+        mayReview ? h('div', { class: 'btnrow' }, act('keep', 'Keep 90 more days', 'reversible'), act('tighten', 'Tighten', 'reversible'), act('retire', 'Retire', 'irreversible'))
+          : h('p', { class: 'small muted', text: 'Reviewing this decision belongs to Dr. Reagan or Dana; it is shown here so the practice can see what is due.' }),
+        st.decisionRefusal[d.id] || null,
         h('div', { class: 'btnrow' }, act('keep', 'Keep 90 more days', 'reversible'), act('tighten', 'Tighten', 'reversible'), act('retire', 'Retire', 'irreversible')),
         held.node || null,
         h('details', null, h('summary', { class: 'small', testid: 'close.decision.' + d.id + '.why' }, 'Why directional'), h('p', { class: 'small muted', text: 'Under the digest minimum sample the effect sentence is computed from domain events since the decision and labelled directional. An unreviewed decision stops applying at midnight of its review date and becomes a finding; neglect tightens, never loosens.' })));

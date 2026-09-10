@@ -80,6 +80,12 @@
     if (focus) { const el = document.querySelector(focus[0] === '#' ? focus : '[data-testid="' + focus + '"]'); if (el) el.focus(); }
     if (announce) Proto.router.announce(announce);
   }
+  /* Wrap a store refusal so its DOM node is built (and logged) once and reused across re-renders. The
+     component logs and announces the gate; this screen never announces one itself. */
+  // `slot` names the card, queue row or strip the gate stands in, so the same gate raised on two cards logs twice.
+  function gateFor(res, slot, onControl) {
+    const g = { code: res.code, verb: res.verb, control: res.control, why: res.why };
+    g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, severity: g.code === 'outage' ? 'stop' : 'required', slot, onControl: () => { if (g.code === 'outage') Proto.router.announce(SUPPORT); if (onControl) onControl(g); } });
   // "Open Roles" / "Add day pass" mean the seat that issues a pass, as on Checkout, Encounter, Perio and Chairs.
   const openRoles = () => { location.hash = '#/owner/roles'; };
   /* Wrap a store refusal so its DOM node is built (and logged) once and reused across re-renders. The component
@@ -100,6 +106,7 @@
   function doArrive(id, r) {
     const a = Proto.store.appt(id); if (!a || !ARRIVABLE.includes(a.status)) return;
     const res = Proto.store.arrive(id);
+    if (!res.ok) { gates[id] = gateFor(res, 'board.card.' + id); render(r); const b = document.querySelector('[data-testid="board.card.' + id + '.arrive"]'); if (b) b.focus(); return; }
     if (!res.ok) { raise(gates, id, res, r); render(r); const b = document.querySelector('[data-testid="board.card.' + id + '.arrive"]'); if (b) b.focus(); return; }
     delete gates[id];
     // Focus lands on the arrived stamp, not on Seat: a repeated Enter must never seat in the same gesture.
@@ -108,6 +115,7 @@
   function doSeat(id, r) {
     const a = Proto.store.appt(id); if (!a || a.status !== 'arrived') return;
     const res = Proto.store.seat(id);
+    if (!res.ok) { gates[id] = gateFor(res, 'board.card.' + id); render(r); const b = document.querySelector('[data-testid="board.card.' + id + '.seat"]'); if (b) b.focus(); return; }
     if (!res.ok) { raise(gates, id, res, r); render(r); const b = document.querySelector('[data-testid="board.card.' + id + '.seat"]'); if (b) b.focus(); return; }
     delete gates[id];
     // Focus stays on the card that was worked, not on the chair strip at the top of the page.
@@ -116,6 +124,7 @@
   function doReverify(id, r) {
     const a = Proto.store.appt(id); if (!a) return;
     const res = Proto.store.reverify(id);
+    if (!res.ok) { gates[id] = gateFor(res, 'board.card.' + id); render(r); focusGate(); return; }
     if (!res.ok) { raise(gates, id, res, r); render(r); const b = document.querySelector('[data-testid="board.card.' + id + '.reverify"]'); if (b) b.focus(); return; }
     delete gates[id];
     after(r, 'Eligibility re-run: active, deductible met.', 'board.card.' + id + '.expand');
@@ -124,6 +133,9 @@
      would refuse on arrival. */
   function goCheckout(id, r, where) {
     if (P().outage) {
+      const g = gateFor(outageRefusal('checkout is read-only'), (where === 'queue' ? 'board.queue.' : 'board.card.') + id);
+      if (where === 'queue') rowGates[id] = g; else gates[id] = g;
+      render(r); focusGate(); return;
       const scope = where === 'queue' ? 'board.queue.row.' + id : 'board.card.' + id;
       raise(where === 'queue' ? rowGates : gates, id, outageRefusal('checkout is read-only'), r);
       render(r); focusGate(scope); return;
@@ -134,6 +146,9 @@
     const a = Proto.store.appt(id); if (!a) return;
     const res = Proto.store.pingChair(id);
     if (!res.ok) {
+      // The gate's one control opens the chart it names.
+      pings[id] = { code: res.code, node: refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why || 'One ping per encounter per 15 minutes. The chair device saw the first one; a second would only add noise.', severity: res.code === 'outage' ? 'stop' : 'required', slot: 'board.ping.' + id, onControl: () => { if (res.code === 'outage') Proto.router.announce(SUPPORT); else Proto.router.go(r.persona, 'encounter', a.encounterId); } }) };
+      render(r); focusGate(); return;
       // The rate gate's one control opens the chart it names; outage and pass gates carry their own controls.
       raise(pings, id, Object.assign({}, res, { why: res.why || 'One ping per encounter per 15 minutes. The chair device saw the first one; a second would only add noise.' }), r, () => Proto.router.go(r.persona, 'encounter', a.encounterId));
       render(r); focusGate('board.queue.row.' + id); return;
@@ -141,6 +156,7 @@
     pings[id] = { text: 'Pinged chair ' + a.op + ' · ' + clock12(S().clock.time) + ' · one-to-one, not broadcast' };
     after(r, 'Pinged chair ' + a.op, 'board.queue.row.' + id + '.ping');
   }
+  function holdStrip(r) { stripGate = stripGate || gateFor(outageRefusal('readiness is read-only'), 'board.readiness'); render(r); focusGate(); }
   function holdStrip(r, res, testid) { dropGates(res.code); stripGate = gateFor(res, r); stripGate.testid = testid; render(r); focusGate(); }
 
   // ---- Readiness strip ---------------------------------------------------------------------

@@ -250,6 +250,11 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 /* ---- end module: perio ---- */
 
 /* ---- module: encounter (js/screens/encounter.js) — appended, never edits rules above ---- */
+/* The odontogram scrolls inside its own wrapper; the columns never grow to it, so the canvas never pans sideways. */
+.enc-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.enc-layout > * { min-width: 0; }
+@media (max-width: 1279px) { .enc-layout { grid-template-columns: minmax(0, 1fr); } }
+.enc-odont-wrap { overflow-x: auto; max-width: 100%; padding-bottom: var(--space-1); display: flex; flex-direction: column; gap: var(--gap); }
 .enc-layout { display: grid; grid-template-columns: minmax(856px, 1.25fr) minmax(320px, 1fr); grid-template-rows: auto 1fr; grid-template-areas: "chart note" "chart gate"; gap: var(--space-4); align-items: start; }
 .enc-col-chart { grid-area: chart; min-width: 0; }
 .enc-col-note { grid-area: note; min-width: 0; }

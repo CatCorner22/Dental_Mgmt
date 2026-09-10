@@ -7,7 +7,7 @@
    that rides with the request, two taps). No 'Approve all'. Refusals render through the shared component;
    the store's requester ≠ approver check (blocked_same_person) is honored before the PIN pad opens. */
 (function () {
-  const Proto = window.Proto; const { h, btn, chip, refusal, money, time, initials, pageHead } = Proto.ui;
+  const Proto = window.Proto; const { h, btn, chip, refusal, money, time, initials, displayName, pageHead } = Proto.ui;
   Proto.screens = Proto.screens || {};
 
   const S = () => Proto.store.get();
@@ -31,6 +31,11 @@
   function st() {
     const s = S(); if (s !== lastStore) { lastStore = s; byUser = {}; }
     const uid = Proto.store.currentUser().id;
+    const s = (byUser[uid] = byUser[uid] || { refusal: {}, declineOpen: {}, declineReason: {}, declineHint: {}, done: {}, nameShown: {}, privacy: null, simNote: null });
+    // A reveal belongs to the glass it was made on: when privacy flips, every shown name goes back behind the tap (B8).
+    const privacy = !!window.__proto.privacy;
+    if (s.privacy !== privacy) { s.nameShown = {}; s.privacy = privacy; }
+    return s;
     return (byUser[uid] = byUser[uid] || { refusal: {}, declineOpen: {}, declineReason: {}, declineHint: {}, done: {}, simNote: null, notice: null });
   }
   // A gate whose cause is gone (outage over, hours resumed) falls: on the next render, and on a press of the Held primary before it focuses anything.
@@ -174,6 +179,7 @@
     const s = st(); const x = nextSim(); s.notice = null; s.simGate = null;
     const p = P(); const prev = p.persona;
     let res;
+    try { p.persona = 'biller'; res = Proto.store.requestWriteoff(x.pid, x.cents, x.reason); if (res && res.held) { const out = Proto.store.requestApproval(res.pendingRequest); res = out.ok ? Object.assign(res, { requestId: out.requestId }) : out; } }
     try { p.persona = 'biller'; res = Proto.store.requestWriteoff(x.pid, x.cents, x.reason, { pin: me().pin || null }); }
     finally { p.persona = prev; }
     if (res && res.held) { s.simNote = 'Sam (biller) tapped Post on the ' + simWords(x) + '; it is waiting on you as request ' + res.requestId + '.'; say('Request ' + res.requestId + ' is waiting for you'); }
@@ -200,7 +206,17 @@
         h('div', { class: 'ph-amount', text: money(a.amountCents) }),
         h('div', { class: 'small muted', text: (REASON_LABEL[a.reason] || a.reason) + ' write-off · ' + a.id })),
       chip('review', 'Waiting')));
+    // Privacy glass never prints a full name, so it offers no tap to print one; the reveal is a logged disclosure.
+    const privacy = !!window.__proto.privacy;
     const nameRow = h('div', { class: 'ph-kv' }, h('span', { class: 'ph-k', text: 'Patient' }),
+      privacy ? h('span', { class: 'ph-v', text: displayName(p.name, true) + ' · ' + p.mrn })
+        : s.nameShown[a.id]
+          ? h('span', { class: 'ph-v', text: displayName(p.name, false) + ' · ' + p.mrn })
+          : h('span', { class: 'ph-v' }, initials(p.name) + ' · ' + p.mrn + ' ', btn('Show name', { testid: 'phone.request.' + a.id + '.name', kind: 'quiet', class: 'compact', ariaLabel: 'Show the patient’s full name (this tap is logged)', onClick: () => {
+            const out = Proto.store.discloseName(a.patientId, a.id);
+            if (!out.ok) { st().refusal[a.id] = gate(r, a, out); rerender(r, 'refusal.control'); return; }
+            st().nameShown[a.id] = true; rerender(r, 'phone.request.' + a.id + '.approve');
+          } })));
       nameDisclosed(a)
         ? h('span', { class: 'ph-v', id: 'ph-name-' + a.id, tabindex: '-1', text: p.name + ' · ' + p.mrn })
         : h('span', { class: 'ph-v' }, initials(p.name) + ' · ' + p.mrn + ' ', btn('Show name', { testid: 'phone.request.' + a.id + '.name', kind: 'quiet', class: 'compact', ariaLabel: 'Show the patient’s full name (this tap is logged)', onClick: () => {
@@ -246,6 +262,7 @@
     const done = st().done[a.id]; const gated = st().refusal[a.id];
     const s = a.status === 'approved' ? ['clear', 'Approved'] : ['required', 'Sent back'];
     return h('article', { class: 'card flat ph-decided', 'aria-label': 'Decided request ' + a.id },
+      h('div', { class: 'ph-head' }, chip(s[0], s[1]), h('span', { class: 'ph-amount small', text: money(a.postedCents != null ? a.postedCents : a.amountCents) + (a.postedCents != null && a.postedCents !== a.amountCents ? ' of ' + money(a.amountCents) + ' asked' : '') }), h('span', { class: 'small muted grow', text: a.id })),
       h('div', { class: 'ph-head' }, chip(s[0], s[1]), h('span', { class: 'ph-amount small', text: money(a.postedCents != null ? a.postedCents : a.amountCents) }), h('span', { class: 'small muted grow', text: a.id })),
       done ? h('p', { class: 'ph-done', role: 'status', tabindex: '-1', text: done.text }) : null,
       // A gate raised against a request that was decided under this approver's hands renders here, on the row it names.

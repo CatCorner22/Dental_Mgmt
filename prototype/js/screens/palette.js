@@ -138,12 +138,13 @@
     rows.forEach((row, i) => nodes.push(renderRow(row, i)));
     st.list.replaceChildren(...nodes);
     // The count names what is on screen: the number of recents rendered, and the number of rows the search
-    // returned — which is a capped list, not the number of rows that matched.
+    // returned. "Capped" is said only when the store cut the list; a whole match set is not capped.
+    const capped = !!rows.capped;
     if (q.length === 0) st.hint.textContent = isRecents ? 'Your last ' + (COUNT_WORD[rows.length] || rows.length) + '. Type three letters to search.' : 'Type three letters of a name, phone, claim, or the word you know from your old system.';
     else if (q.length < 3) st.hint.textContent = 'Type ' + (3 - q.length) + ' more letter' + (3 - q.length === 1 ? '' : 's') + '.';
     else if (!rows.length) st.hint.textContent = 'Nothing matches "' + q + '". Patient search does not widen to phonetic matches; try the last four digits of the phone or the MRN.';
-    else st.hint.textContent = rows.length + ' shown — the list is capped, so add letters to narrow it. Arrow keys move, Enter opens.';
-    st.status.textContent = q.length >= 3 ? (rows.length ? rows.length + ' shown, the list is capped' : 'No results') : '';
+    else st.hint.textContent = rows.length + ' shown' + (capped ? ' — the list is capped, so add letters to narrow it' : '') + '. Arrow keys move, Enter opens.';
+    st.status.textContent = q.length >= 3 ? (rows.length ? rows.length + ' shown' + (capped ? ', the list is capped' : '') : 'No results') : '';
     syncSelection();
     // A search retires the temp's "find" step in the store; the rail says so now, not at the next route.
     if (q.length >= 3 && Proto.screens.shell && Proto.screens.shell.refreshRail1) Proto.screens.shell.refreshRail1(st.r);

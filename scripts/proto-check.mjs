@@ -27,6 +27,15 @@ const PERSONAS = ['frontdesk', 'biller', 'hygienist', 'dentist', 'surgeon', 'own
 const HOME = { frontdesk: 'board', biller: 'money', hygienist: 'chairs', dentist: 'exams', surgeon: 'exams', owner: 'close', compliance: 'risk', temp: 'board' };
 const ROUTES = ['#/signin', ...PERSONAS.map((p) => '#/' + p + '/' + HOME[p]), '#/frontdesk/checkout/a-1044', '#/frontdesk/checkout/a-1045', '#/frontdesk/checkout/a-1046', '#/frontdesk/checkout/a-1047', '#/hygienist/perio/enc-9001', '#/dentist/encounter/enc-9002', '#/surgeon/encounter/enc-9020', '#/biller/ledger/p-303', '#/owner/roles', '#/owner/money', '#/phone/approvals', '#/frontdesk/board?outage=1', '#/frontdesk/board?privacy=1&device=shared'];
 const WIDTHS = [1280, 1024, 820, 420]; // 420 added after the beta panel found phone-width defects the first three widths missed
+// Controls that exist only behind a gate or a shortcut (PIN pad, refusal control, step-up keypad, palette): the targets and contrast
+// sweeps open each of these before measuring, so a control no landing route shows is still held to 44 px / 8 px / contrast.
+const GATED = [
+  { id: 'checkout pin_required refusal', start: '#/frontdesk/checkout/a-1044?device=shared', press: ['checkout.tender.card', 'checkout.post'], expect: 'refusal.control' },
+  { id: 'checkout PIN pad', start: '#/frontdesk/checkout/a-1044?device=shared', press: ['checkout.tender.card', 'checkout.post', 'refusal.control'], expect: 'checkout.pin' },
+  { id: 'phone step-up keypad', start: '#/owner/close', hop: '#/phone/approvals', press: ['phone.simulate', 'phone.request.ar-1.approve'], expect: 'phone.stepup.1' },
+  { id: 'author PIN pad', start: '#/frontdesk/board', press: ['topbar.author'], expect: 'pin.key.1' },
+  { id: 'palette', start: '#/frontdesk/board', key: 'Control+k', expect: 'palette.close' },
+];
 
 const results = {};
 const fail = (name, msg) => { results[name] = results[name] || { pass: true, failures: [] }; results[name].pass = false; results[name].failures.push(msg); };
@@ -39,6 +48,21 @@ async function open(page, hash, theme) {
   await page.waitForFunction(() => window.__proto && window.__proto.ready, null, { timeout: 5000 });
   await page.evaluate((h) => { if (location.hash !== h) location.hash = h; }, hash.split('?')[0] + (hash.includes('?') ? '?' + hash.split('?')[1] : ''));
   await page.waitForTimeout(120);
+}
+
+// Drives one GATED state on a freshly loaded page; returns null when the expected control is on screen, else the reason it is not.
+async function openGated(page, g, theme) {
+  await open(page, g.start, theme);
+  if (g.hop) { await page.evaluate((h) => { location.hash = h; }, g.hop); await page.waitForTimeout(150); }
+  if (g.key) { await page.keyboard.press(g.key); await page.waitForTimeout(150); }
+  for (const t of g.press || []) {
+    const sel = `[data-testid="${t}"]`;
+    if (!(await page.$(sel))) return `missing control ${t}`;
+    await page.click(sel); await page.waitForTimeout(120);
+  }
+  await page.waitForTimeout(150);
+  const shown = await page.$(`[data-testid="${g.expect}"]`);
+  return shown && (await shown.isVisible()) ? null : `${g.expect} not shown`;
 }
 
 async function fresh(browser, width, opts) {
@@ -105,7 +129,10 @@ async function checkFlows(browser) {
     errors.length = 0;
     const r = await runFlow(page, flow);
     if (r.problems.length) fail('flows', `${flow.id}: ${r.problems.join('; ')}`);
+    // The budget holds for the taps the page recorded under CONTRACTS §5, not for the number of scripted steps.
     if (r.taps > flow.budgetTaps) fail('flows', `${flow.id}: ${r.taps} taps > budget ${flow.budgetTaps}`);
+    if (r.evTaps > flow.budgetTaps) fail('flows', `${flow.id}: ${r.evTaps} page-recorded taps > budget ${flow.budgetTaps} (${r.taps} scripted)`);
+    if (r.evTaps < r.taps) fail('flows', `${flow.id}: page recorded ${r.evTaps} taps for ${r.taps} scripted presses`);
     if (flow.budgetKeystrokes && r.keys > flow.budgetKeystrokes) fail('flows', `${flow.id}: ${r.keys} keystrokes > budget ${flow.budgetKeystrokes}`);
     for (const e of errors) fail('flows', `${flow.id}: ${e}`);
     results.flows.detail = results.flows.detail || {}; results.flows.detail[flow.id] = r;
@@ -127,17 +154,27 @@ async function checkTargetsAt(browser, width) {
   await page.goto(URL + '#/signin'); await page.waitForFunction(() => window.__proto && window.__proto.ready);
   for (const r of ROUTES) {
     await page.evaluate((h) => { location.hash = h; }, r); await page.waitForTimeout(150);
-    const bad = await page.evaluate((sel) => {
-      const out = []; const els = [...document.querySelectorAll(sel)].filter((e) => e.offsetParent !== null && !e.disabled && !e.closest('[hidden]'));
-      for (const e of els) { const b = e.getBoundingClientRect(); if (b.width === 0 && b.height === 0) continue; if (b.width < 44 || b.height < 44) out.push((e.getAttribute('data-testid') || e.tagName.toLowerCase() + ':' + (e.textContent || '').trim().slice(0, 20)) + ` ${Math.round(b.width)}x${Math.round(b.height)}`); }
-      // sibling gaps among interactive siblings
-      const parents = new Set(els.map((e) => e.parentElement));
-      for (const p of parents) { const kids = [...p.children].filter((k) => k.matches(sel) && k.offsetParent !== null); for (let i = 0; i < kids.length; i++) for (let j = i + 1; j < kids.length; j++) { const a = kids[i].getBoundingClientRect(), b = kids[j].getBoundingClientRect(); const dx = Math.max(0, Math.max(a.left, b.left) - Math.min(a.right, b.right)); const dy = Math.max(0, Math.max(a.top, b.top) - Math.min(a.bottom, b.bottom)); const overlapX = a.left < b.right && b.left < a.right, overlapY = a.top < b.bottom && b.top < a.bottom; if (overlapX && overlapY) { out.push('overlap ' + (kids[i].getAttribute('data-testid') || '?') + ' / ' + (kids[j].getAttribute('data-testid') || '?')); continue; } const gap = overlapY ? dx : overlapX ? dy : Math.hypot(dx, dy); if (gap < 8) out.push('gap ' + Math.round(gap) + 'px ' + (kids[i].getAttribute('data-testid') || '?') + ' / ' + (kids[j].getAttribute('data-testid') || '?')); } }
-      return out;
-    }, FOCUSABLE);
-    for (const b of bad) fail('targets', `${width}px ${r}: ${b}`);
+    for (const b of await badTargets(page)) fail('targets', `${width}px ${r}: ${b}`);
   }
   await ctx.close();
+  for (const g of GATED) {
+    const { ctx: gctx, page: gpage } = await fresh(browser, width);
+    const why = await openGated(gpage, g);
+    if (why) fail('targets', `${width}px ${g.id}: ${why}`);
+    else for (const b of await badTargets(gpage)) fail('targets', `${width}px ${g.id}: ${b}`);
+    await gctx.close();
+  }
+}
+
+function badTargets(page) {
+  return page.evaluate((sel) => {
+    const out = []; const els = [...document.querySelectorAll(sel)].filter((e) => e.offsetParent !== null && !e.disabled && !e.closest('[hidden]'));
+    for (const e of els) { const b = e.getBoundingClientRect(); if (b.width === 0 && b.height === 0) continue; if (b.width < 44 || b.height < 44) out.push((e.getAttribute('data-testid') || e.tagName.toLowerCase() + ':' + (e.textContent || '').trim().slice(0, 20)) + ` ${Math.round(b.width)}x${Math.round(b.height)}`); }
+    // sibling gaps among interactive siblings
+    const parents = new Set(els.map((e) => e.parentElement));
+    for (const p of parents) { const kids = [...p.children].filter((k) => k.matches(sel) && k.offsetParent !== null); for (let i = 0; i < kids.length; i++) for (let j = i + 1; j < kids.length; j++) { const a = kids[i].getBoundingClientRect(), b = kids[j].getBoundingClientRect(); const dx = Math.max(0, Math.max(a.left, b.left) - Math.min(a.right, b.right)); const dy = Math.max(0, Math.max(a.top, b.top) - Math.min(a.bottom, b.bottom)); const overlapX = a.left < b.right && b.left < a.right, overlapY = a.top < b.bottom && b.top < a.bottom; if (overlapX && overlapY) { out.push('overlap ' + (kids[i].getAttribute('data-testid') || '?') + ' / ' + (kids[j].getAttribute('data-testid') || '?')); continue; } const gap = overlapY ? dx : overlapX ? dy : Math.hypot(dx, dy); if (gap < 8) out.push('gap ' + Math.round(gap) + 'px ' + (kids[i].getAttribute('data-testid') || '?') + ' / ' + (kids[j].getAttribute('data-testid') || '?')); } }
+    return out;
+  }, FOCUSABLE);
 }
 
 async function checkContrast(browser) {
@@ -147,27 +184,40 @@ async function checkContrast(browser) {
     await page.goto(URL + '#/signin'); await page.waitForFunction(() => window.__proto && window.__proto.ready);
     for (const r of ROUTES) {
       await page.evaluate((h) => { location.hash = h; }, r); await page.evaluate((t) => window.__proto.set({ theme: t }), theme); await page.waitForTimeout(150);
-      const samples = await page.evaluate(() => {
-        const out = []; const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-        let n; const seen = new Set();
-        while ((n = walker.nextNode())) {
-          const t = n.textContent.trim(); if (!t) continue; const el = n.parentElement; if (!el || el.closest('.sr-only, [hidden], script, style')) continue; if (el.offsetParent === null && el.tagName !== 'BODY') continue;
-          const key = el.getAttribute('data-testid') || (el.className + ':' + t.slice(0, 20)); if (seen.has(key)) continue; seen.add(key);
-          const cs = getComputedStyle(el); let bg = null; let p = el;
-          while (p) { const c = getComputedStyle(p).backgroundColor; if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') { bg = c; break; } p = p.parentElement; }
-          out.push({ key, color: cs.color, bg: bg || getComputedStyle(document.body).backgroundColor, font: parseFloat(cs.fontSize), weight: cs.fontWeight, text: t.slice(0, 30) });
-        }
-        return out;
-      });
-      for (const s of samples) {
-        const fg = parseColor(s.color), bg = parseColor(s.bg); if (!fg || !bg) continue;
-        const bgo = bg.a < 1 ? blend(bg, { r: 255, g: 255, b: 255 }) : bg; const fgo = fg.a < 1 ? blend(fg, bgo) : fg;
-        const c = contrast(fgo, bgo); const req = required(s.font, s.weight);
-        if (c < req) fail('contrast', `${theme} ${r}: ${s.key} "${s.text}" ${c.toFixed(2)}:1 < ${req} (${s.color} on ${s.bg})`);
-      }
+      for (const b of await badContrast(page)) fail('contrast', `${theme} ${r}: ${b}`);
     }
     await ctx.close();
+    for (const g of GATED) {
+      const { ctx: gctx, page: gpage } = await fresh(browser, 1280);
+      const why = await openGated(gpage, g, theme);
+      if (why) fail('contrast', `${theme} ${g.id}: ${why}`);
+      else for (const b of await badContrast(gpage)) fail('contrast', `${theme} ${g.id}: ${b}`);
+      await gctx.close();
+    }
   }
+}
+
+async function badContrast(page) {
+  const samples = await page.evaluate(() => {
+    const out = []; const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let n; const seen = new Set();
+    while ((n = walker.nextNode())) {
+      const t = n.textContent.trim(); if (!t) continue; const el = n.parentElement; if (!el || el.closest('.sr-only, [hidden], script, style')) continue; if (el.offsetParent === null && el.tagName !== 'BODY') continue;
+      const key = el.getAttribute('data-testid') || (el.className + ':' + t.slice(0, 20)); if (seen.has(key)) continue; seen.add(key);
+      const cs = getComputedStyle(el); let bg = null; let p = el;
+      while (p) { const c = getComputedStyle(p).backgroundColor; if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') { bg = c; break; } p = p.parentElement; }
+      out.push({ key, color: cs.color, bg: bg || getComputedStyle(document.body).backgroundColor, font: parseFloat(cs.fontSize), weight: cs.fontWeight, text: t.slice(0, 30) });
+    }
+    return out;
+  });
+  const bad = [];
+  for (const s of samples) {
+    const fg = parseColor(s.color), bg = parseColor(s.bg); if (!fg || !bg) continue;
+    const bgo = bg.a < 1 ? blend(bg, { r: 255, g: 255, b: 255 }) : bg; const fgo = fg.a < 1 ? blend(fg, bgo) : fg;
+    const c = contrast(fgo, bgo); const req = required(s.font, s.weight);
+    if (c < req) bad.push(`${s.key} "${s.text}" ${c.toFixed(2)}:1 < ${req} (${s.color} on ${s.bg})`);
+  }
+  return bad;
 }
 
 async function checkOverflow(browser) {

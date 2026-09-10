@@ -8,6 +8,8 @@ export default ({ ctx, go, hop, click, txt, rec }) => {
   const writeEvents = (p) => p.evaluate(() => window.__events.filter((e) => e.kind === 'write').map((e) => ({ seq: e.seq, table: e.table, id: e.id })));
   const lastSeq = async (p) => { const ev = await writeEvents(p); return ev.length ? ev[ev.length - 1].seq : 0; };
   const heldWriteoff = async (p) => { await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await click(p, 'money.writeoff.post'); await p.waitForTimeout(200); };
+  // Post holds the write-off; the held gate's control is what writes the approvals row (store.requestApproval).
+  const requestedWriteoff = async (p) => { await heldWriteoff(p); await click(p, 'refusal.control'); await p.waitForTimeout(200); };
 
   return {
     // dailyclose.js decisions(): Tighten and Retire built their result sentence from `T`, a const that a
@@ -68,7 +70,7 @@ export default ({ ctx, go, hop, click, txt, rec }) => {
       const { c, p } = await ctx(b);
       try {
         await go(p, '#/biller/money');
-        await heldWriteoff(p);
+        await requestedWriteoff(p);
         await hop(p, '#/owner/close');
         const o = await p.evaluate(() => {
           const a = document.getElementById('andon');
@@ -82,11 +84,10 @@ export default ({ ctx, go, hop, click, txt, rec }) => {
       } finally { await c.close(); }
     },
 
-    // moneydesk.js postWriteoff(): store.requestWriteoff writes the approval at Post, and the card says so
-    // (Held, "Approval requested"); the gate beside it still offered a "Request approval" control whose press
-    // wrote nothing and only announced a request that had already gone. Negative control: a compliant gate's
-    // control either writes the request it names or does something else it names; here the press must leave
-    // the approvals count unchanged AND the label must promise a request for the check to report true.
+    // moneydesk.js postWriteoff(): the held gate offered a "Request approval" control whose press wrote nothing
+    // and only announced a request (the store had written it at Post). Negative control: a compliant gate's
+    // control either writes the request it names or does something else it names; here the label must promise
+    // a request AND the press must leave the approvals count unchanged for the check to report true.
     async 'A-misc-2-4'(b) {
       const { c, p } = await ctx(b);
       try {
@@ -102,7 +103,7 @@ export default ({ ctx, go, hop, click, txt, rec }) => {
         const landed = await p.evaluate(() => ({ selectedTab: [...document.querySelectorAll('[data-testid^="money.tab."]')].filter((e) => e.getAttribute('aria-selected') === 'true').map((e) => e.getAttribute('data-testid')), focused: (document.activeElement.getAttribute && document.activeElement.getAttribute('data-testid')) || document.activeElement.tagName }));
         const promisesRequest = /request/i.test(label || '');
         rec('A-misc-2-4', 'After Post writes the write-off request, the held gate still offers "Request approval": pressing it writes nothing and changes nothing, and the card beside it already says the approval was requested', 'CONTRACTS §6 — the control is the first next step and does what its label says (moneydesk.js postWriteoff)',
-          approvalsAtPost > 0 && promisesRequest && approvalsAfterPress === approvalsAtPost && writesAfterPress.length === 0,
+          promisesRequest && approvalsAfterPress === approvalsAtPost && writesAfterPress.length === 0,
           { label, approvalsAtPost, approvalsAfterPress, writesAfterPress, landedOn: landed, writesAtPost: (await writeEvents(p)).filter((w) => w.seq > seq0 && w.seq <= seq1) });
       } finally { await c.close(); }
     },
@@ -117,7 +118,7 @@ export default ({ ctx, go, hop, click, txt, rec }) => {
       const { c, p } = await ctx(b);
       try {
         await go(p, '#/biller/money');
-        await heldWriteoff(p);
+        await requestedWriteoff(p);
         const reqId = await p.evaluate(() => (window.__proto.state().approvals[0] || {}).id || null);
         await hop(p, '#/owner/close'); await hop(p, '#/phone/approvals');
         if (reqId) {
