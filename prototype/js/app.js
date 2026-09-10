@@ -4,20 +4,29 @@
   const root = document.documentElement;
   const P = (window.__proto = { ready: false, persona: null, theme: 'light', device: 'desk', outage: false, privacy: false, motion: 'auto', grayscale: false });
 
+  // The option values are the contract's (§3, §5): a value outside them is ignored, never stamped on <html>
+  // and on every event.
+  const THEMES = ['light', 'dark'], DEVICES = ['desk', 'operatory', 'shared', 'phone'], MOTION = ['auto', 'reduced'];
   P.set = function (opts) {
     opts = opts || {};
-    if (opts.theme) { P.theme = opts.theme; root.setAttribute('data-theme', opts.theme); }
-    if (opts.device) { P.device = opts.device; root.setAttribute('data-device', opts.device); }
+    if (THEMES.includes(opts.theme)) { P.theme = opts.theme; root.setAttribute('data-theme', opts.theme); }
+    if (DEVICES.includes(opts.device)) { P.device = opts.device; root.setAttribute('data-device', opts.device); }
     if (opts.outage != null) { P.outage = !!opts.outage && opts.outage !== '0'; Proto.store.get().outage = P.outage; }
     if (opts.privacy != null) { P.privacy = !!opts.privacy && opts.privacy !== '0'; root.toggleAttribute('data-privacy', P.privacy); }
     if (opts.grayscale != null) { P.grayscale = !!opts.grayscale && opts.grayscale !== '0'; if (P.grayscale) root.setAttribute('data-grayscale', '1'); else root.removeAttribute('data-grayscale'); }
-    if (opts.motion) { P.motion = opts.motion; if (opts.motion === 'reduced') root.setAttribute('data-motion', 'reduced'); else root.removeAttribute('data-motion'); }
-    if (opts.persona) P.persona = opts.persona;
+    if (MOTION.includes(opts.motion)) { P.motion = opts.motion; if (opts.motion === 'reduced') root.setAttribute('data-motion', 'reduced'); else root.removeAttribute('data-motion'); }
+    if (Proto.router.PERSONAS.includes(opts.persona)) P.persona = opts.persona;
     if (opts.afterHours != null) Proto.store.get().clock.afterHours = !!opts.afterHours && opts.afterHours !== '0';
   };
-  // reset() rebuilds the store, so the outage flag it carried has to be put back or the Andon says the server
-  // is unreachable while every posting verb happily writes.
-  P.reset = function (seed) { Proto.store.reset(seed); Proto.store.get().outage = P.outage; Proto.events.reset(); if (Proto.ui.resetGates) Proto.ui.resetGates(); Proto.router.render(); };
+  // reset() rebuilds the store, so the flags it carried (outage, after hours) have to be put back or the Andon
+  // says the server is unreachable while every posting verb happily writes; and the shell repaints with the
+  // canvas, or the Andon keeps announcing an approval the rebuilt store no longer holds.
+  P.reset = function (seed) {
+    const afterHours = Proto.store.get().clock.afterHours;
+    Proto.store.reset(seed); Proto.store.get().outage = P.outage; Proto.store.get().clock.afterHours = afterHours;
+    Proto.events.reset(); if (Proto.ui.resetGates) Proto.ui.resetGates();
+    Proto.screens.shell.render(Proto.router.current()); Proto.router.render();
+  };
   P.state = function () { return JSON.parse(JSON.stringify(Proto.store.get())); };
   P.events = function () { return Proto.events.all(); };
 

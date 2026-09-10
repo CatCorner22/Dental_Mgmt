@@ -26,12 +26,14 @@
     const top = document.getElementById('topbar');
     const P = window.__proto; const S = Proto.store.get();
     // One word per concept: the theme control reads "Dark" / "Light" here, in the signed-in bar and on sign-in.
-    if (!r.persona) { top.replaceChildren(h('span', { class: 'brand' }, h('span', { class: 'mark', 'aria-hidden': 'true' }), 'Riverbend Dental'), h('span', { class: 'spacer' }), btn(P.theme === 'dark' ? 'Light' : 'Dark', { testid: 'topbar.theme', ariaLabel: 'Switch to ' + (P.theme === 'dark' ? 'light' : 'dark'), onClick: () => { P.set({ theme: P.theme === 'dark' ? 'light' : 'dark' }); renderTopbar(r); refocus('topbar.theme'); } })); return; }
+    // Sign-in mirrors the same option, so its canvas repaints with the bar.
+    if (!r.persona) { top.replaceChildren(h('span', { class: 'brand' }, h('span', { class: 'mark', 'aria-hidden': 'true' }), 'Riverbend Dental'), h('span', { class: 'spacer' }), btn(P.theme === 'dark' ? 'Light' : 'Dark', { testid: 'topbar.theme', ariaLabel: 'Switch to ' + (P.theme === 'dark' ? 'light' : 'dark'), onClick: () => { P.set({ theme: P.theme === 'dark' ? 'light' : 'dark' }); Proto.router.render(); renderTopbar(r); refocus('topbar.theme'); } })); return; }
     const u = Proto.store.currentUser();
     const loc = S.locations[0];
     const nav = h('nav', { 'aria-label': 'Primary' }, ...(NAV[r.persona] || NAV.frontdesk).map(([route, label]) => btn(label, { testid: 'nav.' + route, onClick: () => Proto.router.go(r.persona, route), class: r.route === route ? 'current' : '' })));
     nav.querySelectorAll('button').forEach((b) => { if (b.classList.contains('current')) b.setAttribute('aria-current', 'page'); });
-    const authorChip = h('button', { type: 'button', class: 'authorchip', testid: 'topbar.author', 'aria-label': 'Who is charting: ' + u.name + (u.licence ? ', ' + u.licence : '') + '. Switch author', onClick: () => openPinPad(r) }, h('span', { text: (P.device === 'shared' || P.device === 'operatory') ? (Proto.ui.initials(u.name) + (u.licence ? ' · ' + u.licence : '')) : (u.short || u.name) }));
+    // A missing day pass is not a person: the chip says so instead of printing the placeholder's initials.
+    const authorChip = h('button', { type: 'button', class: 'authorchip', testid: 'topbar.author', 'aria-label': 'Who is charting: ' + u.name + (u.licence ? ', ' + u.licence : '') + '. Switch author', onClick: () => openPinPad(r) }, h('span', { text: u.noPass ? u.short : (P.device === 'shared' || P.device === 'operatory') ? (Proto.ui.initials(u.name) + (u.licence ? ' · ' + u.licence : '')) : (u.short || u.name) }));
     top.replaceChildren(
       h('span', { class: 'brand' }, h('span', { class: 'mark', 'aria-hidden': 'true' }), 'Riverbend'),
       btn(loc.short, { testid: 'topbar.location', ariaLabel: 'Location: ' + loc.name + '. Switch location', onClick: () => Proto.router.announce('Switch location: not in this prototype') }),
@@ -47,18 +49,31 @@
     );
   }
 
+  // One support line for every control that names it: the Andon's and the PIN pad's outage gate.
+  function supportLine() { Proto.router.announce('Call support: 615-555-0100, 7 am to 6 pm'); }
+  // The Andon stands on every home, so it prints what the phone card prints before Show name: initials and MRN
+  // in place of the patient's name (docs/13 feature 24, minimum necessary). The sentence is still the store's.
+  function minimumSentence(req) {
+    const p = Proto.store.patient(req.patientId); const s = Proto.store.approvalSentence(req) || '';
+    return p && p.name && s.includes(p.name) ? s.split(p.name).join(Proto.ui.initials(p.name) + ' · ' + p.mrn) : s;
+  }
+
   function renderAndon(r) {
     const a = document.getElementById('andon'); const P = window.__proto;
     if (!r.persona) { a.replaceChildren(); return; }
     if (P.outage) {
-      a.replaceChildren(chip('required', 'Server unreachable', {}), h('span', { class: 'grow', text: 'Showing the Board from 7:58 am · reads only, no postings · incident INC-2093' }), btn('Support line', { testid: 'andon.control', kind: 'reversible', onClick: () => Proto.router.announce('Call support: 615-555-0100, 7 am to 6 pm') }));
+      a.replaceChildren(chip('required', 'Server unreachable', {}), h('span', { class: 'grow', text: 'Showing the Board from 7:58 am · reads only, no postings · incident INC-2093' }), btn('Support line', { testid: 'andon.control', kind: 'reversible', onClick: supportLine }));
       return;
     }
-    const S = Proto.store.get();
     const pending = Proto.store.pendingApprovalsFor();      // one count for the Andon, the phone and the tab
-    if (pending.length) { a.replaceChildren(chip('review', pending.length + ' approval' + (pending.length > 1 ? 's' : '') + ' waiting', {}), h('span', { class: 'grow', text: Proto.store.approvalSentence(pending[0]) }), btn('Open approvals', { testid: 'andon.control', kind: 'reversible', onClick: () => { location.hash = '#/phone/approvals'; } })); return; }
+    if (pending.length) { a.replaceChildren(chip('review', pending.length + ' approval' + (pending.length > 1 ? 's' : '') + ' waiting', {}), h('span', { class: 'grow', text: minimumSentence(pending[0]) }), btn('Open approvals', { testid: 'andon.control', kind: 'reversible', onClick: () => { location.hash = '#/phone/approvals'; } })); return; }
     a.replaceChildren();
   }
+
+  // Three misses lock this device for five minutes (docs/13 feature 28). The count is the device's, so it
+  // outlives the pad that raised it; the finding the lock raises is the store's to write, when it has the verb.
+  const pinLock = { misses: 0, until: 0 };
+  const PIN_LOCK_MS = 5 * 60 * 1000;
 
   function openPinPad(r) {
     const P = window.__proto; const S = Proto.store.get();
@@ -72,13 +87,20 @@
     let close;
     const refusalSlot = h('div', { class: 'pin-refusal' });
     function showRefusal(v) { refusalSlot.replaceChildren(Proto.ui.refusal(v)); }
+    const locked = () => pinLock.until > Date.now();
+    function showLock() { showRefusal({ code: 'pin_locked', verb: 'Wait five minutes — device locked', control: 'Close', onControl: () => close(), why: 'Three PINs missed in a row. This device takes no PIN for five minutes, and a finding is raised for the practice, never for the person.', severity: 'stop', fresh: true }); }
     function submit() {
-      const who = S.users.find((u) => u.pin === digits);
-      digits = ''; dots.textContent = '';
+      const typed = digits; digits = ''; dots.textContent = '';
+      if (locked()) { showLock(); return; }
+      const who = S.users.find((u) => u.pin === typed);
       if (!who) {
-        showRefusal({ code: 'pin_no_match', verb: 'Retype the PIN — no match', control: 'Clear and retype', onControl: () => { const k = pad.querySelector('[data-testid="pin.key.1"]'); if (k) k.focus(); }, why: 'Six digits at most. Three misses lock this device for five minutes and raise a finding for the practice, never for the person.', severity: 'required' });
+        // Each wrong PIN is its own refusal even though it reads like the last one; an empty Go is not a miss.
+        if (typed) pinLock.misses += 1;
+        if (pinLock.misses >= 3) { pinLock.misses = 0; pinLock.until = Date.now() + PIN_LOCK_MS; if (typeof Proto.store.pinLockout === 'function') Proto.store.pinLockout(); showLock(); return; }
+        showRefusal({ code: 'pin_no_match', verb: 'Retype the PIN — no match', control: 'Clear and retype', onControl: () => { const k = pad.querySelector('[data-testid="pin.key.1"]'); if (k) k.focus(); }, why: 'Six digits at most. Three misses lock this device for five minutes and raise a finding for the practice, never for the person.', severity: 'required', fresh: true });
         return;
       }
+      pinLock.misses = 0;
       const persona = Object.entries(S.personaUser).find(([, uid]) => uid === who.id);
       if (!persona) {
         // No chart persona for this account in the prototype: refuse rather than write a session that changes nothing.
@@ -88,7 +110,8 @@
       // The switch opens that person's session through the store, which writes the row and logs it. The shell
       // used to emit a write event for a table the store did not hold, so the log named a row nothing wrote.
       const opened = Proto.store.openSession(who.id);
-      if (!opened.ok) { showRefusal({ code: opened.code, verb: opened.verb, control: opened.control, why: opened.why, onControl: () => close(), severity: 'stop' }); return; }
+      // The outage gate's control is the support line, so it says the number the Andon's says.
+      if (!opened.ok) { showRefusal({ code: opened.code, verb: opened.verb, control: opened.control, why: opened.why, onControl: opened.code === 'outage' ? () => { close(); supportLine(); } : () => close(), severity: 'stop' }); return; }
       close();
       const p = persona[0]; P.set({ persona: p });
       location.hash = '#/' + p + '/' + (r.route === 'signin' ? Proto.router.HOME[p] : r.route) + (r.id ? '/' + r.id : '');
@@ -105,9 +128,10 @@
       else if (ev.key === 'Enter' && !(t && t.getAttribute && t.getAttribute('data-testid') === 'pin.cancel')) { ev.preventDefault(); submit(); }
     };
     document.addEventListener('keydown', onPadKey, true);
-    close = Proto.ui.dialog(h('div', { class: 'stack' }, h('h2', { text: 'Who is charting?' }), status, refusalSlot, dots, pad, policy, btn('Cancel', { testid: 'pin.cancel', onClick: () => close() })), { label: 'Switch author', focus: '[data-testid="pin.key.1"]' });
-    const closeDialog = close;
-    close = () => { document.removeEventListener('keydown', onPadKey, true); closeDialog(); };
+    // Escape, the backdrop and a route change close the dialog without passing through Cancel, so the listener
+    // leaves with the dialog itself: a wrapper around close() left it alive and typed digits kept switching authors.
+    close = Proto.ui.dialog(h('div', { class: 'stack' }, h('h2', { text: 'Who is charting?' }), status, refusalSlot, dots, pad, policy, btn('Cancel', { testid: 'pin.cancel', onClick: () => close() })), { label: 'Switch author', focus: '[data-testid="pin.key.1"]', onClose: () => document.removeEventListener('keydown', onPadKey, true) });
+    if (locked()) showLock();
   }
 
   function renderRail1(r) {
@@ -123,9 +147,11 @@
   // ring from an earlier "show me" stayed on its control for the rest of the shift.
   const pointTimers = new Map();
   function pulseFor(code, r) {
-    const map = { arrive: '[data-testid$=".arrive"]', seat: '[data-testid$=".seat"]', checkout: '[data-testid$=".checkout"]', payment: '[data-testid="checkout.post"]', find: '[data-testid="topbar.search"]', perio: '[data-testid$=".perio"]', save: '[data-testid="perio.save"]', tag: '[data-testid="perio.tag.add"]', ready: '[data-testid$=".ready"]' };
+    // Payment is posted from Checkout; on the Board the step points at the Checkout control that gets there.
+    const map = { arrive: '[data-testid$=".arrive"]', seat: '[data-testid$=".seat"]', checkout: '[data-testid$=".checkout"]', payment: '[data-testid="checkout.post"], [data-testid$=".checkout"]', find: '[data-testid="topbar.search"]', perio: '[data-testid$=".perio"]', save: '[data-testid="perio.save"]', tag: '[data-testid="perio.tag.add"]', ready: '[data-testid$=".ready"]' };
     const el = document.querySelector(map[code]);
-    const verb = { arrive: 'Tap Arrive on the first card', seat: 'Seat the arrived patient', checkout: 'Open Checkout from the card', payment: 'Post after choosing a tender', find: 'Type three letters of a name', perio: 'Tap Perio on your first card', save: 'Save the exam', tag: 'Tag a tooth for the dentist', ready: 'Mark ready for exam' }[code];
+    let verb = { arrive: 'Tap Arrive on the first card', seat: 'Seat the arrived patient', checkout: 'Open Checkout from the card', payment: 'Post after choosing a tender', find: 'Type three letters of a name', perio: 'Tap Perio on your first card', save: 'Save the exam', tag: 'Tag a tooth for the dentist', ready: 'Mark ready for exam' }[code];
+    if (code === 'payment' && el && el.getAttribute('data-testid') !== 'checkout.post') verb = 'Open Checkout from the card, then post';
     if (el) {
       el.classList.remove('pulse', 'pointed'); void el.offsetWidth;
       el.classList.add('pulse', 'pointed');                       // 'pointed' is a static ring: it survives reduced motion
@@ -141,7 +167,12 @@
     mount, canvas, openPinPad, refreshAndon: renderAndon, refreshRail1: renderRail1,
   };
 
-  Proto.router.on('notfound', (r) => mount(h('div', { class: 'stack' }, h('h1', { text: 'Nothing here' }), btn('Back to home', { testid: 'notfound.home', onClick: () => Proto.router.go(r.persona, Proto.router.HOME[r.persona]) }))));
+  // A hash with no persona in it still has a way home: the persona signed in, or sign-in itself.
+  Proto.router.on('notfound', (r) => mount(h('div', { class: 'stack' }, h('h1', { text: 'Nothing here' }), btn('Back to home', { testid: 'notfound.home', onClick: () => { const p = r.persona || window.__proto.persona; if (Proto.router.HOME[p]) Proto.router.go(p, Proto.router.HOME[p]); else location.hash = '#/signin'; } }))));
+
+  // The skip link moves the keyboard, never the route: its href is a hash the router would read as a persona.
+  const skip = document.querySelector('[data-testid="skip.canvas"]');
+  if (skip) skip.addEventListener('click', (ev) => { ev.preventDefault(); canvas().focus(); });
 
   document.addEventListener('keydown', (ev) => {
     if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'k' || ev.key === 'K')) { const r = Proto.router.current(); if (r.persona) { ev.preventDefault(); Proto.screens.palette.open(r); } }

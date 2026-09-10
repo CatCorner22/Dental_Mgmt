@@ -57,9 +57,11 @@
     const sev = v.severity || 'required';
     // A screen that re-renders rebuilds the gate it is already showing. Logging and announcing on every
     // construction turned one visible gate into six refusal events and read the verb aloud again each time,
-    // so the event log counted gates that were never raised. The same gate is logged once until it changes.
+    // so the event log counted gates that were never raised. The same gate is logged once until it changes —
+    // unless the caller says the press raised it again (`fresh`): a second wrong PIN or date of birth reads
+    // the same as the first and is still a second refusal.
     const key = v.code + '|' + v.verb + '|' + (v.control || '');
-    if (lastGate !== key) {
+    if (lastGate !== key || v.fresh) {
       lastGate = key;
       Proto.events.refusal(v.code, v.verb, v.control);
       Proto.router.announce(v.verb);                    // one verb line: the control label is not read as a second sentence

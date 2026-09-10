@@ -17,9 +17,12 @@
     const unescape = (s) => { try { return decodeURIComponent(s); } catch { return String(s); } };
     (qs || '').split('&').filter(Boolean).forEach((kv) => { const [k, v] = kv.split('='); query[unescape(k)] = unescape(v == null ? '1' : v); });
     if (parts[0] === 'phone') return { persona: (window.__proto && window.__proto.persona) || 'owner', route: 'phone', id: parts[1] || 'approvals', query, raw: h };
-    if (!parts.length || parts[0] === 'signin') return { persona: null, route: 'signin', id: null, query, raw: h };
-    const persona = PERSONAS.includes(parts[0]) ? parts[0] : null;
-    if (!persona) return { persona: null, route: 'signin', id: null, query, raw: h };
+    // Case is not identity: #/FRONTDESK/board is the Board. A first segment that names no persona is not
+    // sign-in either; it is nowhere, and says so instead of dropping the working screen for the picker.
+    const head = String(parts[0] || '').toLowerCase();
+    if (!parts.length || head === 'signin') return { persona: null, route: 'signin', id: null, query, raw: h };
+    const persona = PERSONAS.includes(head) ? head : null;
+    if (!persona) return { persona: null, route: 'notfound', id: null, query, raw: h };
     return { persona, route: parts[1] || HOME[persona], id: parts[2] || null, query, raw: h };
   }
 
