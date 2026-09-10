@@ -57,7 +57,7 @@ export default ({ ctx, go, click, txt, state, events, rec }) => {
         const countAfter = await p.$eval('.pe-count', (e) => e.textContent).catch(() => null);
         await click(p, 'perio.save'); await p.waitForTimeout(200);
         const ex = (await state(p)).perioExams.find((e) => e.encounterId === 'enc-9001') || null;
-        rec('A-storm2-enc-2', 'On a shared device a 168-site chart typed by Bree survives the PIN switch to Jo and Save writes the exam with author Jo Ramirez and probed 168', 'shell.js PIN pad policy line — local drafts are wiped on the switch; docs/01 principle 22 — every row carries the frozen name of the person who did the work (perio.js stateFor)',
+        rec('A-storm2-enc-2', 'On a shared device a 168-site chart typed by Bree survives the PIN switch to Jo and Save writes the exam with author Jo Ramirez and probed 168', 'shell.js PIN pad policy line — your unsaved draft waits under your PIN; docs/01 principle 22 — every row carries the frozen name of the person who did the work (perio.js stateFor)',
           before === 'Bree Lawson' && /168\/168/.test(countBefore || '') && afterWho === 'Jo Ramirez' && (/168\/168/.test(countAfter || '') || (!!ex && ex.author === 'Jo Ramirez' && ex.probed === 168)), { before, countBefore, afterWho, countAfter, exam: ex && { author: ex.author, probed: ex.probed, skipped: ex.skipped } });
       } finally { await c.close(); }
     },
@@ -75,7 +75,7 @@ export default ({ ctx, go, click, txt, state, events, rec }) => {
         const text = await p.$eval('#note-assessment', (e) => e.value).catch(() => null);
         await click(p, 'enc.file'); await p.waitForTimeout(150); await click(p, 'refusal.control'); await p.waitForTimeout(200);
         const f = (await state(p)).filedNotes.find((n) => n.encounterId === 'enc-9002') || null;
-        rec('A-storm2-enc-3', 'On a shared device the encounter note Dr. Kim drafted survives the PIN switch to Dr. Reagan and files as "Dr. Blake Reagan" with Dr. Kim\'s text', 'shell.js PIN pad policy line — local drafts are wiped on the switch; docs/01 principle 22 (encounter.js state)',
+        rec('A-storm2-enc-3', 'On a shared device the encounter note Dr. Kim drafted survives the PIN switch to Dr. Reagan and files as "Dr. Blake Reagan" with Dr. Kim\'s text', 'shell.js PIN pad policy line — your unsaved draft waits under your PIN; docs/01 principle 22 (encounter.js state)',
           before.who === 'Dr. Hana Kim' && !!before.text && afterWho === 'Dr. Blake Reagan' && (!!text || (!!f && f.author === 'Dr. Blake Reagan' && f.markdown.includes(before.text))), { before, afterWho, assessmentAfterSwitch: text, filed: f && { author: f.author, hasDraftText: f.markdown.includes(before.text) } });
       } finally { await c.close(); }
     },

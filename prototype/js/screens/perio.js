@@ -41,7 +41,7 @@
 
   function stateFor(enc) {
     syncStore();
-    // A draft belongs to its author: the PIN switch on a shared device wipes local drafts, so the next author starts clean.
+    // A draft belongs to its author: drafts are keyed per author, so the PIN switch on a shared device shows the next author their own.
     const k = enc.id + '|' + Proto.store.currentUser().id;
     if (states[k]) return states[k];
     const prior = priorExam(enc.patientId);

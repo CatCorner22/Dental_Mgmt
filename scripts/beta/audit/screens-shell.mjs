@@ -274,27 +274,36 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
           const seq0 = await lastSeq(p);
           await press(p, 'phone.request.ar-1.approve'); await p.waitForTimeout(150);
           stepup.focusOnOpen = await focused(p);
-          await p.keyboard.type('1234', { delay: 20 }); await p.waitForTimeout(120);
+          await p.keyboard.type('123', { delay: 20 }); await p.waitForTimeout(120);
           stepup.dotsAfterTyping = await dots(p);
+          // Round-4 grammar: Enter on a focused key activates that key; only Enter on the display (or Approve) submits.
+          await p.focus('[data-testid="phone.stepup.4"]');
           stepup.focusBeforeEnter = await focused(p);
           await p.keyboard.press('Enter'); await p.waitForTimeout(200);
-          stepup.dotsAfterEnter = await dots(p);
-          stepup.approvalAfterEnter = await p.evaluate(() => (window.__proto.state().approvals.find((a) => a.id === 'ar-1') || {}).status);
-          stepup.padOpenAfterEnter = await dialogOpen(p);
-          await press(p, 'phone.stepup.submit'); await p.waitForTimeout(250);
-          stepup.approvalAfterSubmit = await p.evaluate(() => (window.__proto.state().approvals.find((a) => a.id === 'ar-1') || {}).status);
+          stepup.dotsAfterEnterOnKey = await dots(p);
+          stepup.approvalAfterEnterOnKey = await p.evaluate(() => (window.__proto.state().approvals.find((a) => a.id === 'ar-1') || {}).status);
+          stepup.padOpenAfterEnterOnKey = await dialogOpen(p);
+          await p.focus('[data-testid="phone.stepup.display"]');
+          await p.keyboard.press('Enter'); await p.waitForTimeout(250);
+          stepup.padOpenAfterEnterOnDisplay = await dialogOpen(p);
+          stepup.refusalAfterEnterOnDisplay = await dialogRefusal(p);
+          stepup.approvalAfterEnterOnDisplay = await p.evaluate(() => (window.__proto.state().approvals.find((a) => a.id === 'ar-1') || {}).status);
           const ev = await after(p, seq0);
           stepup.writes = writes(ev); stepup.seqRange = range(ev, seq0);
         } finally { await c.close(); } }
-      const authorOpened = author.focusOnOpen && author.focusOnOpen.testid === 'pin.display';
-      const stepupOpened = stepup.focusOnOpen && stepup.focusOnOpen.testid === 'phone.stepup.1';
+      const authorOpened = !!author.focusOnOpen && author.focusOnOpen.testid === 'pin.display';
+      const stepupOpened = !!stepup.focusOnOpen && stepup.focusOnOpen.testid === 'phone.stepup.display';
       const authorIgnoresTyping = authorOpened && author.keyEvents.length === 4 && (author.dotsAfterTyping || '').length === 0 && !!author.refusalAfterSubmit && author.refusalAfterSubmit.code === 'pin_no_match';
-      const stepupAcceptsTyping = stepupOpened && (stepup.dotsAfterTyping || '').length === 4;
+      const stepupAcceptsTyping = stepupOpened && (stepup.dotsAfterTyping || '').length === 3;
       const grammarsDiffer = authorIgnoresTyping && stepupAcceptsTyping;
-      const enterAppended = stepupAcceptsTyping && stepup.focusBeforeEnter.testid === 'phone.stepup.1' && (stepup.dotsAfterEnter || '').length === 5 && stepup.approvalAfterEnter === 'pending' && stepup.padOpenAfterEnter;
-      const reproduced = grammarsDiffer || enterAppended;
-      rec('A-screens-shell-8', 'Typing 1234 into the author pad leaves the dots empty and Go refuses pin_no_match, while the same keys in the phone step-up show four dots; on the step-up, Enter with focus on the landing key appends a fifth dot instead of submitting, and only the Approve key submits', 'B4 (same concept, same shape) / B10; shell.js:84 (no keydown grammar) versus phone.js:212-219 (Enter clause excludes the focused key)',
-        reproduced, { authorPad: author, stepupPad: stepup, authorIgnoresTyping, stepupAcceptsTyping, grammarsDiffer, enterAppended });
+      const keyFocused = stepupAcceptsTyping && !!stepup.focusBeforeEnter && stepup.focusBeforeEnter.testid === 'phone.stepup.4';
+      // Breach: Enter on the focused digit key did anything but append that digit (submitted, closed the pad, or left the dots at three).
+      const enterOnKeySubmitted = keyFocused && ((stepup.dotsAfterEnterOnKey || '').length !== 4 || stepup.approvalAfterEnterOnKey !== 'pending' || !stepup.padOpenAfterEnterOnKey);
+      // Breach: Enter on the display did not submit (pad still open with no refusal and the request still pending).
+      const enterOnDisplayIgnored = keyFocused && !enterOnKeySubmitted && stepup.padOpenAfterEnterOnDisplay && !stepup.refusalAfterEnterOnDisplay && stepup.approvalAfterEnterOnDisplay === 'pending';
+      const reproduced = !authorOpened || !stepupOpened || !keyFocused || grammarsDiffer || enterOnKeySubmitted || enterOnDisplayIgnored;
+      rec('A-screens-shell-8', 'The author pad and the phone step-up pad disagree on the keyboard grammar: one opens on its display and the other on a key, typed digits show as dots on one pad only, or Enter on a focused digit key submits the PIN instead of entering that digit while Enter on the display does not submit', 'B4 (same concept, same shape) / B10; shell.js onPadKey versus phone.js onKey — both open on the display, Enter on a focused button activates it, Enter on the display submits',
+        reproduced, { authorPad: author, stepupPad: stepup, authorOpened, stepupOpened, keyFocused, authorIgnoresTyping, stepupAcceptsTyping, grammarsDiffer, enterOnKeySubmitted, enterOnDisplayIgnored });
     },
 
     // RC-135 · A3 · shell.js:78 calls Proto.events.write('sessions', 'sess-' + who.id) directly — an event, not a store write — so the log

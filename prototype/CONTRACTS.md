@@ -60,7 +60,7 @@ Every element with a click or key handler carries `data-testid`, lowercase, dot-
 | Board | `board.readiness.row.<id>.<control>`, `board.readiness.toggle`, `board.readiness.handled`, `board.card.<apptId>`, `board.card.<apptId>.arrive`, `board.card.<apptId>.seat`, `board.card.<apptId>.reverify`, `board.card.<apptId>.checkout`, `board.card.<apptId>.expand`, `board.queue.row.<apptId>`, `board.queue.row.<apptId>.ping`, `board.queue.row.<apptId>.checkout`, `board.chair.<n>` |
 | Checkout | `checkout.line.<procId>`, `checkout.line.<procId>.selfpay`, `checkout.collect.seg.<collect|send-statement|payment-plan|zero-due>`, `checkout.tender.<card|cash|check>`, `checkout.card.number`, `checkout.amount`, `checkout.writeoff.add`, `checkout.writeoff.remove`, `checkout.writeoff.amount`, `checkout.writeoff.reason.<code>`, `checkout.plan.cadence.<weekly|biweekly|monthly>`, `checkout.receipt`, `checkout.payment.why`, `checkout.pin`, `checkout.post`, `checkout.explain`, `checkout.showpatient`, `checkout.back` |
 | Refusal (shared) | `refusal.verb`, `refusal.control`, `refusal.why`; while a dialog is open the gates beneath it read `refusal.prior.verb`, `refusal.prior.control`, `refusal.prior.why` and are restored when the last dialog closes |
-| Phone | `phone.request.<reqId>.approve`, `phone.request.<reqId>.decline`, `phone.request.<reqId>.reason`, `phone.stepup.<0-9>`, `phone.stepup.submit`, `phone.stepup.backspace`, `phone.stepup.cancel` |
+| Phone | `phone.request.<reqId>.approve`, `phone.request.<reqId>.decline`, `phone.request.<reqId>.reason`, `phone.stepup.display` (the digit display; focus lands here on open and Enter here is Approve), `phone.stepup.<0-9>`, `phone.stepup.submit`, `phone.stepup.backspace`, `phone.stepup.cancel` |
 | Chairs | `chairs.card.<apptId>`, `chairs.card.<apptId>.perio`, `chairs.card.<apptId>.note`, `chairs.card.<apptId>.ready`, `chairs.card.<apptId>.expand` |
 | Perio | `perio.grid.cell.t<tooth>-s<1-6>`, `perio.pad.toggle`, `perio.pad.key.<0-9>`, `perio.pad.bleed`, `perio.pad.skip`, `perio.pad.undo`, `perio.pad.next`, `perio.screening`, `perio.save`, `perio.licence.<code>`, `perio.licence.cancel`, `perio.tag.add`, `perio.tag.tooth`, `perio.tag.text`, `perio.tag.save`, `perio.settings` |
 | Encounter | `exams.row.<encId>`, `exams.row.<encId>.open`, `enc.tag.<tagId>.chart`, `enc.tag.<tagId>.dismiss`, `enc.tooth.<1-32>`, `enc.surface.<tooth>.<m|o|d|b|l>`, `enc.proc.<cdt>`, `enc.temporality.<today|planned|existing>`, `enc.note.field.<id>`, `enc.note.starter.<n>`, `enc.killer.<n>.fix`, `enc.readback.switch`, `enc.file`, `enc.undo` |
@@ -135,7 +135,7 @@ Tenant Riverbend Dental; locations `loc-1` Main Street, `loc-2` Riverbend East, 
 | `a-1050` / `enc-9010` | Checked out with the note unfiled (Filed-later lane) |
 | `a-1073` / `enc-9033` | Bree's 11:00 hygiene visit with no exam yet (task hy-6 charts its screening) |
 | `a-1060` / `enc-9020` / `p-320` | Referred-in oral surgery consult for Dr. Okafor (sedation note) |
-| `era-1` | Delta Dental 835, 41 lines, 37 matched, 3 deltas (`el-14`, `el-22`, `el-31`), 1 denial (`el-40` → claim `c-88`, CARC 16) |
+| `era-1` | Delta Dental 835, 41 lines, 37 matched, 3 deltas (`el-14`, `el-22`, `el-31`), 1 denial (`el-40` → claim `c-88`, CARC 16); the header EFT equals the sum of the lines' paid amounts; posted rows carry `chargeIds` and settle only the claim's charges |
 | `c-88` | Denied claim, appeal built from the record |
 | `v-1` | Hillsboro card-settlement timing variance $312.40 with a proposed match |
 | `d-1` | Threshold raise for vacation cover, review due |
