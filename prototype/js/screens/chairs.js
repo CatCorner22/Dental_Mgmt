@@ -53,7 +53,8 @@
     const u = Proto.store.currentUser(); const hyg = isHygienist(u);
     return S().appointments.filter((a) => a.locationId === 'loc-1' && (a.providerId === u.id || (!hyg && a.type === 'hygiene'))).sort(byTime);
   }
-  const perioToday = (a) => S().perioExams.find((e) => e.encounterId === a.encounterId && e.date === TODAY);
+  // The latest row is the record: an addendum supersedes the exam it amends, and the strip reads the addendum.
+  const perioToday = (a) => S().perioExams.filter((e) => e.encounterId === a.encounterId && e.date === TODAY).pop();
   function lastPerio(a) {
     if (a.perioLast) return a.perioLast;
     const prior = S().perioExams.filter((e) => e.patientId === a.patientId && e.date < TODAY).map((e) => e.date).sort();
@@ -71,7 +72,12 @@
   function deltas(a, pt) {
     const out = [];
     const today = perioToday(a);
-    if (today) out.push({ sev: 'clear', word: 'Perio charted today', text: today.probed + ' sites probed, deepest ' + today.deepest + ' mm' });
+    if (today && today.mode === 'screening') {
+      // A screening records six codes, not sites; a 3 or 4 books the full chart (docs/13 feature 5).
+      const codes = today.sextantCodes || [];
+      out.push({ sev: 'clear', word: 'Perio charted today', text: 'screening, ' + codes.length + ' sextants coded' });
+      if (codes.some((x) => x === '3' || x === '4')) out.push({ sev: 'required', word: 'Full chart due', text: 'screening code 3 or 4' });
+    } else if (today) out.push({ sev: 'clear', word: 'Perio charted today', text: today.probed + ' sites probed, deepest ' + today.deepest + ' mm' });
     for (const alert of pt.alerts || []) if (MED_HX.test(alert)) out.push({ sev: 'stop', word: 'Med hx changed', text: alert });
     const lp = lastPerio(a);
     const lpm = lp ? monthsAgo(lp) : null;
@@ -219,6 +225,6 @@
 
   window.addEventListener('hashchange', () => { if (keysOn && Proto.router.current().route !== 'chairs') { document.removeEventListener('keydown', onKey); keysOn = false; } });
 
-  Proto.screens.chairs = { render, ready: doReady, perio: goPerio, note: goNote, monthsAgo };
+  Proto.screens.chairs = { render, ready: doReady, perio: goPerio, note: goNote, monthsAgo, SUPPORT };
   Proto.router.on('chairs', (r) => Proto.screens.chairs.render(r));
 })();
