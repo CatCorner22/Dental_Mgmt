@@ -45,7 +45,7 @@
   // Per-screen UI state; cleared whenever the store is rebuilt (window.__proto.reset).
   let lastStore = null; let st = null;
   function freshState() {
-    return { formOpen: false, expanded: {}, form: { name: '', role: 'frontdesk', location: 'loc-1', end: '17:30', extra: [] }, touched: {}, previewOn: false, decision: null, saveGate: null, issued: null, credentialNote: false, previewKey: null, previewNode: null };
+    return { formOpen: false, expanded: {}, form: { name: '', role: 'frontdesk', location: 'loc-1', end: '17:30', extra: [] }, touched: {}, previewOn: false, decision: null, saveGate: null, issued: null, credentialNote: false, credentialRequested: false, previewKey: null, previewNode: null };
   }
   function state() { const s = S(); if (s !== lastStore) { lastStore = s; st = freshState(); } return st; }
   const clock12 = Proto.ui.time;                       // one clock for every screen (ui.js)
@@ -57,7 +57,7 @@
   const validEnd = (end) => /^\d{2}:\d{2}$/.test(end || '') && end > now();
   const endBadText = () => 'Shift end must be later than now (' + clock12(now()) + ').';
   const q = (testid) => document.querySelector('[data-testid="' + testid + '"]');
-  const focusTestid = (id) => { const el = id && q(id); if (el && el.focus) el.focus(); };
+  const focusTestid = (id) => { const el = id && (/^[[.#]/.test(id) ? document.querySelector(id) : q(id)); if (el && el.focus) el.focus(); };
 
   function rerender(r, focusId) { pendingRefresh = false; render(r); Proto.screens.shell.refreshAndon(r); if (Proto.screens.shell.refreshRail1) Proto.screens.shell.refreshRail1(r); focusTestid(focusId); }
 
@@ -126,7 +126,7 @@
   }
 
   // ---- Day pass form: preview -----------------------------------------------------------------
-  const previewKeyOf = (pv) => JSON.stringify({ gate: !!pv.licenceGate, cred: pv.credential ? pv.credential.id : null, conflicts: pv.conflicts.map((c) => c.id), ents: pv.entitlements, decision: state().decision, note: state().credentialNote, end: state().form.end });
+  const previewKeyOf = (pv) => JSON.stringify({ gate: !!pv.licenceGate, cred: pv.credential ? pv.credential.id : null, conflicts: pv.conflicts.map((c) => c.id), ents: pv.entitlements, decision: state().decision, note: state().credentialNote, requested: state().credentialRequested, end: state().form.end });
 
   /* Remediate on one gate drops that gate's own extra entitlement, not every extra that appears in any pair;
      the group control remediates all of them. The announcement names what went and what is left. */
@@ -154,10 +154,12 @@
     if (tpl && tpl.clinical) {
       if (pv.licenceGate) {
         const g = pv.licenceGate;
-        const node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, onControl: () => { s.credentialNote = true; rerender(r, 'roles.daypass.save'); } });
-        const c = node.querySelector('[data-testid="refusal.control"]'); if (c) c.setAttribute('data-testid', 'roles.daypass.credential.add');
-        box.append(node);
-        if (s.credentialNote) box.append(h('p', { class: 'rl-note', text: 'Credential intake: licence number, state, expiry; verified by Dana; takes about a day. This pass stays Front-desk coordinator only until the credential is verified.' }));
+        // The gate keeps its own control; it opens the intake path, whose control carries the credential id (§4).
+        box.append(refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, onControl: () => { s.credentialNote = true; rerender(r, 'roles.daypass.credential.add'); } }));
+        if (s.credentialNote) box.append(h('p', { class: 'rl-note' }, 'Credential intake: licence number, state, expiry; verified by Dana; takes about a day. This pass stays Front-desk coordinator only until the credential is verified. ',
+          s.credentialRequested
+            ? h('span', { id: 'rl-cred-requested', tabindex: '-1' }, chip('review', 'Credential check requested for ' + (f.name.trim() || 'this temp')))
+            : btn('Request credential check', { kind: 'reversible', class: 'compact', testid: 'roles.daypass.credential.add', onClick: () => { s.credentialRequested = true; Proto.router.announce('Credential check requested; Dana verifies within a day'); rerender(r, '#rl-cred-requested'); } })));
       } else {
         box.append(h('div', { class: 'row' }, credentialChip(pv.credential)));
       }
@@ -193,7 +195,7 @@
     const s = state(); if (!r || !s.previewOn || !s.previewNode || !s.previewNode.isConnected) return;
     if (pressing) { pendingRefresh = true; return; }         // a press is in flight: replacing its control would swallow it
     const pv = Proto.store.previewDayPass(s.form);
-    if (!force && previewKeyOf(pv) === s.previewKey) return; // nothing that matters changed: no re-announce
+    if (!force && previewKeyOf(pv) === s.previewKey && !staleSave(s)) return; // nothing that matters changed: no re-announce
     const next = buildPreview(r); s.previewNode.replaceWith(next); s.previewNode = next;
     const old = q('roles.daypass.save');
     if (old) { const focused = document.activeElement === old; const fresh = saveButton(r); old.replaceWith(fresh); if (focused) fresh.focus(); }
@@ -201,8 +203,13 @@
 
   // ---- Day pass form: save ---------------------------------------------------------------------
   const blocking = () => { const s = state(); return Proto.store.previewDayPass(s.form).conflicts.some((c) => c.severity === 'critical') && !s.decision; };
+  /* A store gate whose cause is gone (outage over, name typed, shift end fixed) falls on the next render; while one
+     stands the primary is Held, and its press asks the store again rather than posting past the gate. */
+  const staleSave = (s) => { const code = s.saveGate && s.saveGate.dataset.code; return (code === 'outage' && !S().outage) || (code === 'name_required' && !!s.form.name.trim()) || (code === 'shift_end_required' && validEnd(s.form.end)); };
+  const dropStaleGate = (s) => { if (s.saveGate && staleSave(s)) { s.saveGate.remove(); s.saveGate = null; } };
   function saveButton(r) {
-    const s = state(); const held = blocking() || (s.touched.name && !s.form.name.trim()) || (s.touched.end && !validEnd(s.form.end));
+    const s = state(); dropStaleGate(s);
+    const held = blocking() || !!s.saveGate || (s.touched.name && !s.form.name.trim()) || (s.touched.end && !validEnd(s.form.end));
     return btn(held ? 'Held' : 'Issue day pass', { kind: held ? 'held' : 'irreversible', testid: 'roles.daypass.save', ariaLabel: held ? 'Held: decide on the conflict or complete the form, then issue' : 'Issue day pass (irreversible: a grant row is written)', onClick: () => doSave(r) });
   }
 
@@ -225,7 +232,7 @@
 
   // ---- Day pass form: fields -------------------------------------------------------------------
   function dayPassForm(r) {
-    const s = state(); const f = s.form;
+    const s = state(); const f = s.form; dropStaleGate(s);
     const nameBad = () => s.touched.name && !f.name.trim(); const endBad = () => s.touched.end && !validEnd(f.end);
     const nameHint = h('span', { id: 'rl-name-hint', class: 'hint', text: nameBad() ? 'Enter the temp\'s full name as it appears on their licence.' : 'Credentials are matched by name, licence type, and state.' });
     const endHint = h('span', { id: 'rl-end-hint', class: 'hint', text: endBad() ? endBadText() : 'Grants lapse 30 minutes after this time; the session is revoked.' });

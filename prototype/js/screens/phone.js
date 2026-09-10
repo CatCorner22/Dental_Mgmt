@@ -23,14 +23,19 @@
 
   let lastRoute = null;
   let keysOn = false;
-  let pad = null;                 // step-up state while the dialog is open: {reqId, digits, dots, hint, close}
-  /* Card state is per user, never global: the name one approver disclosed, the gate they answered and the
-     line they read after deciding belong to them, not to whoever opens the card next on a shared phone. */
-  const byUser = {};
+  let pad = null;                 // step-up state while the dialog is open: {reqId, digits, dots, hint, close, store}
+  /* Card state is per user, never global: the gate one approver answered and the line they read after deciding
+     belong to them, not to whoever opens the card next on a shared phone. It is keyed to the store instance, so a
+     rebuilt store (reset) starts every card clean; a disclosed name is read from the store's own rows, not kept here. */
+  let byUser = {}; let lastStore = null;
   function st() {
+    const s = S(); if (s !== lastStore) { lastStore = s; byUser = {}; }
     const uid = Proto.store.currentUser().id;
-    return (byUser[uid] = byUser[uid] || { refusal: {}, declineOpen: {}, declineReason: {}, declineHint: {}, done: {}, nameShown: {}, simNote: null });
+    return (byUser[uid] = byUser[uid] || { refusal: {}, declineOpen: {}, declineReason: {}, declineHint: {}, done: {}, simNote: null, notice: null });
   }
+  // A gate whose cause is gone falls: on the next render, and on a press of the Held primary before it focuses anything.
+  const stale = (g) => !!g && g.code === 'outage' && !S().outage;
+  const nameDisclosed = (a) => S().disclosures.some((d) => d.purpose === 'approval' && d.patientId === a.patientId && d.actor === me().name && (d.recordIds || []).includes(a.id));
 
   /* ---- helpers ---- */
   function pat(pid) { return Proto.store.patient(pid) || { name: '—', mrn: '—' }; }
@@ -74,20 +79,24 @@
     focusOn(focus);
   }
 
-  /* ---- step-up: 'Confirm your PIN' (any 4-6 digits pass in the prototype) ---- */
+  /* ---- step-up: 'Confirm your PIN' (the store matches the digits against the approver's own PIN) ---- */
   function openStepup(r, a) {
     const dots = h('div', { class: 'pindots', 'aria-live': 'polite', 'aria-label': 'PIN digits entered', text: '' });
     const hint = h('p', { class: 'hint ph-hint', text: 'Four to six digits.' });
-    const state = { reqId: a.id, digits: '', dots, hint, close: null };
+    const state = { reqId: a.id, digits: '', dots, hint, close: null, store: S() };
     function paint() { dots.textContent = '•'.repeat(state.digits.length); }
     state.add = (d) => { if (state.digits.length < 6) { state.digits += d; paint(); } };
     state.back = () => { state.digits = state.digits.slice(0, -1); paint(); };
     state.submit = () => {
       if (state.digits.length < 4) { hint.textContent = 'Enter at least four digits, then tap Approve.'; hint.classList.add('ph-hint-warn'); return; }
+      state.done = true;
+      // The store may have been rebuilt under the pad: then there is no request to decide, and the person is told so.
+      if (state.store !== S() || !S().approvals.some((x) => x.id === a.id)) { state.close(); notice(r, a.id); return; }
       const s = st();
-      const res = Proto.store.decideApproval(a.id, me().id, 'approved', true);
+      // The digits go to the store, which owns the PIN rule; until verifyPin lands the older store takes the bare step-up.
+      const res = Proto.store.decideApproval(a.id, me().id, 'approved', Proto.store.verifyPin ? { pin: state.digits } : true);
       state.close();
-      if (!res.ok) { s.refusal[a.id] = gate(r, a, res); rerender(r, 'refusal.control'); return; }
+      if (!res.ok) { s.refusal[a.id] = gate(r, a, res); if (res.code === 'pin_no_match') s.refusal[a.id].fresh = true; rerender(r, 'refusal.control'); return; }
       s.refusal[a.id] = null;
       s.done[a.id] = { kind: 'approved', text: 'Approved · posted with your name as second approver · the biller’s write-off is on the ledger' };
       say('Approved. Posted with your name as second approver.');
@@ -104,7 +113,8 @@
       h('p', { class: 'small muted', text: 'Approving ' + money(a.amountCents) + ' ' + (REASON_LABEL[a.reason] || a.reason) + ' write-off for ' + initials(pat(a.patientId).name) + ' · ' + pat(a.patientId).mrn + '. Your name is recorded as second approver.' }),
       hint, dots, keys,
       btn('Cancel', { testid: 'phone.stepup.cancel', kind: 'quiet', onClick: () => state.close() }));
-    state.close = Proto.ui.dialog(body, { label: 'Confirm your PIN', focus: '[data-testid="phone.stepup.1"]', onClose: () => { if (pad === state) pad = null; } });
+    // A pad closed over a rebuilt store (reset) confirmed nothing: the next render says so where focus can land.
+    state.close = Proto.ui.dialog(body, { label: 'Confirm your PIN', focus: '[data-testid="phone.stepup.1"]', onClose: () => { if (pad === state) pad = null; if (!state.done && state.store !== S()) { const s = st(); s.notice = NOTICE(a.id); s.noticeFresh = true; } } });
     pad = state;
   }
 
@@ -117,11 +127,19 @@
     'Open the ledger': (r, a) => Proto.router.go(r.persona, 'ledger', a.patientId),
     'Support line': () => Proto.ui.support(),
   };
+  // A missed PIN reopens the pad; a locked pad has nothing to reopen, so its control dismisses the gate.
+  const BY_CODE = {
+    pin_no_match: (r, a) => { st().refusal[a.id] = null; openStepup(r, a); },
+    pin_locked: (r, a) => { st().refusal[a.id] = null; rerender(r, 'phone.request.' + a.id + '.approve'); },
+  };
   function gate(r, a, res) {
     const control = res.control || 'Switch author';
-    const out = WAY_OUT[control] || ((rr) => Proto.screens.shell.openPinPad(rr));
+    const out = BY_CODE[res.code] || WAY_OUT[control] || ((rr) => Proto.screens.shell.openPinPad(rr));
     return Object.assign({}, res, { control, onControl: () => out(r, a) });
   }
+  // The request the pad was confirming is gone (store rebuilt, or decided elsewhere): say so where focus can land.
+  const NOTICE = (reqId) => 'Request ' + reqId + ' is no longer waiting here; nothing was approved.';
+  function notice(r, reqId) { const s = st(); s.notice = NOTICE(reqId); say(s.notice); rerender(r, '.ph-notice'); }
   function onApprove(r, a) {
     const s = st();
     s.refusal[a.id] = null;
@@ -152,7 +170,7 @@
     rerender(r, '.ph-done');
   }
   function simulate(r) {
-    const s = st(); const x = nextSim();
+    const s = st(); const x = nextSim(); s.notice = null;
     const p = P(); const prev = p.persona;
     let res;
     try { p.persona = 'biller'; res = Proto.store.requestWriteoff(x.pid, x.cents, x.reason); }
@@ -172,6 +190,7 @@
     const who = me();
     const mine = a.requestedById === who.id;
     const at = requestedAt(a);
+    if (stale(s.refusal[a.id])) s.refusal[a.id] = null;
     const gated = !!s.refusal[a.id];
     const card = h('article', { class: 'card ph-card', 'aria-label': 'Approval request ' + a.id, dataset: { req: a.id } });
     card.append(h('div', { class: 'ph-head' },
@@ -181,12 +200,12 @@
         h('div', { class: 'small muted', text: (REASON_LABEL[a.reason] || a.reason) + ' write-off · ' + a.id })),
       chip('review', 'Waiting')));
     const nameRow = h('div', { class: 'ph-kv' }, h('span', { class: 'ph-k', text: 'Patient' }),
-      s.nameShown[a.id]
+      nameDisclosed(a)
         ? h('span', { class: 'ph-v', text: p.name + ' · ' + p.mrn })
         : h('span', { class: 'ph-v' }, initials(p.name) + ' · ' + p.mrn + ' ', btn('Show name', { testid: 'phone.request.' + a.id + '.name', kind: 'quiet', class: 'compact', ariaLabel: 'Show the patient’s full name (this tap is logged)', onClick: () => {
-          // The tap is the logged read the label promises; the store owns the disclosures row.
+          // The tap is the logged read the label promises; the store owns the disclosures row, and the card reads it back.
           if (Proto.store.disclose) Proto.store.disclose({ patientId: a.patientId, purpose: 'approval', recordIds: [a.id] });
-          st().nameShown[a.id] = true; rerender(r, 'phone.request.' + a.id + '.approve');
+          rerender(r, 'phone.request.' + a.id + '.approve');
         } })));
     card.append(h('div', { class: 'ph-grid' },
       nameRow,
@@ -197,7 +216,7 @@
     const denial = denialLine(a);
     if (denial) card.append(h('p', { class: 'ph-line' }, chip('required', 'Denial'), ' ', denial));
     if (heldForHours(a)) card.append(h('p', { class: 'ph-line' }, chip('info', 'After hours'), ' Requested at ' + time(at) + ', location closed at ' + time(S().tenant.businessHours.close) + '.'));
-    if (gated) card.append(refusal(s.refusal[a.id]));
+    if (gated) { card.append(refusal(s.refusal[a.id])); s.refusal[a.id].fresh = false; }
     if (s.declineOpen[a.id]) {
       // Validation is silent until blur; the hint updates in place so a blur never re-renders the
       // card under a tap that is landing on Approve or Send back.
@@ -213,7 +232,7 @@
     // word Held is the button's whole label; what is held stays in its accessible name.
     card.append(h('div', { class: 'ph-actions' },
       gated
-        ? btn('Approve ' + money(a.amountCents) + ' write-off', { testid: 'phone.request.' + a.id + '.approve', kind: 'held', onClick: () => focusOn('refusal.control') })
+        ? btn('Approve ' + money(a.amountCents) + ' write-off', { testid: 'phone.request.' + a.id + '.approve', kind: 'held', onClick: () => (stale(s.refusal[a.id]) ? onApprove(r, a) : focusOn('refusal.control')) })
         : btn('Approve', { testid: 'phone.request.' + a.id + '.approve', kind: 'irreversible', ariaLabel: 'Approve ' + money(a.amountCents) + ' write-off; you will confirm your PIN', onClick: () => onApprove(r, a) }),
       btn('Send back', { testid: 'phone.request.' + a.id + '.decline', kind: 'reversible', ariaLabel: s.declineOpen[a.id] ? 'Send back with the reason above' : 'Send back with a one-line reason', onClick: () => onDecline(r, a) })));
     card.append(h('details', { class: 'ph-why' }, h('summary', { testid: 'phone.request.' + a.id + '.why', text: 'Why am I seeing this?' }),
@@ -249,10 +268,12 @@
     // checkout, encounter and ledger, not the Approvals screen wearing someone else's id.
     if (r && r.id && r.id !== 'approvals') { renderNotFound(r); return; }
     const s = S(); const who = me(); const cards = st();
+    if (pad && pad.store !== s) { const gone = pad; pad = null; gone.close(); }   // its onClose leaves the notice
     const pending = Proto.store.pendingApprovalsFor();
     const decided = s.approvals.filter((a) => a.status !== 'pending');
     const root = h('div', { class: 'phone ph-page' });
     root.append(pageHead('Approvals', 'Signed in as ' + who.name + (iAmEligible() ? ' · eligible second approver' : ' · not an approver')));
+    if (cards.notice) root.append(h('p', { class: 'small ph-notice', role: 'status', tabindex: '-1', text: cards.notice }));
     if (pending.length) {
       root.append(h('p', { class: 'small muted', text: pending.length + ' waiting. One decision per card; there is no Approve all.' }));
       pending.forEach((a) => root.append(requestCard(r, a)));
@@ -274,6 +295,7 @@
       cards.simNote ? h('p', { class: 'small', role: 'status', text: cards.simNote }) : null));
     Proto.screens.shell.mount(root);
     attachKeys();
+    if (cards.noticeFresh) { cards.noticeFresh = false; say(cards.notice); focusOn('.ph-notice'); }
   }
 
   /* ---- keyboard: digits, Backspace, Enter drive the step-up pad while this screen is mounted ---- */

@@ -38,25 +38,33 @@
   // A monthly task falls on the same day each month: after that day the next one is next month's.
   const monthlyDue = (today, dom) => { const p = String(today == null ? '' : today).split('-'); if (p.length !== 3) return null; let y = Number(p[0]), m = Number(p[1]); if (Number(p[2]) > dom) { m += 1; if (m > 12) { m = 1; y += 1; } } return y + '-' + String(m).padStart(2, '0') + '-' + String(dom).padStart(2, '0'); };
 
-  function rerender(r, focusTestid) {
+  function rerender(r, focus) {
     r = r || lastRoute || Proto.router.current();
     Proto.router.render();
     Proto.screens.shell.refreshAndon(r);
-    if (focusTestid) { const el = document.querySelector('[data-testid="' + focusTestid + '"]'); if (el && el.focus) el.focus(); }
+    if (focus) { const el = document.querySelector(/^[[.#]/.test(focus) ? focus : '[data-testid="' + focus + '"]'); if (el && el.focus) el.focus(); }
   }
   /* Every store refusal this screen renders goes where its control says: an outage to the support line, a day
-     already closed or a variance already decided to the day itself, an entitlement gate to Approvals. The
-     controls used to have no handler at all, so "Open the day" and "Support line" were dead ends. */
+     already closed or a variance already decided to the day itself, an entitlement gate to Roles or Approvals
+     (whichever its control names). The controls used to have no handler at all, so "Open the day" and "Support
+     line" were dead ends. */
   function openDay(r) { st.tileOpen = true; st.locOpen = st.locOpen || 'loc-1'; rerender(r, 'close.location.' + st.locOpen); }
   function gate(r, res, why, fallback) {
     const onControl = () => {
       if (res.code === 'outage') Proto.ui.support();
       else if (res.code === 'already_closed' || res.code === 'already_decided') openDay(r);
-      else if (res.code === 'entitlement' && res.control === 'Open approvals') location.hash = '#/phone/approvals';
       else if (fallback) fallback();
+      else if (res.code === 'entitlement') { if (/roles/i.test(res.control || '')) Proto.router.go(r.persona, 'roles'); else location.hash = '#/phone/approvals'; }
     };
     return refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why || why, severity: res.code === 'outage' ? 'stop' : 'required', onControl });
   }
+  /* A gate whose cause is gone falls on the next render, and a press on the Held primary re-evaluates before it
+     focuses the gate's control: if the gate has fallen the press acts. A held gate keeps its store refusal (`res`)
+     beside the node it rendered, so the check reads the code, never the DOM. */
+  const stale = (g) => !!g && !!g.res && ((g.res.code === 'outage' && !Proto.store.get().outage) || (g.res.code === 'entitlement' && g.who !== Proto.store.currentUser().id));
+  const heldGate = (by, res, node) => ({ by, res, node, who: Proto.store.currentUser().id });
+  const live = (slot, key) => { if (stale(slot[key])) slot[key] = null; return slot[key] || {}; };
+  const heldPress = (r, slot, key, act) => { if (stale(slot[key])) { slot[key] = null; act(); } else rerender(r, 'refusal.control'); };
   // A name shown on expansion is a logged read; the store owns the row, the screen only asks for it.
   const disclose = (patientId, recordIds) => { if (Proto.store.disclose) Proto.store.disclose({ patientId, purpose: 'payment', recordIds }); };
 
@@ -176,30 +184,32 @@
     const clearers = table(S, 'users').filter((u) => u.name !== me.name && u.name !== rr.closer && CLEAR_ENTS.some((e) => (u.entitlements || []).includes(e))).map((u) => u.short);
     const pm = v.proposedMatch || {};
     const candidates = () => S.ledger.filter((e) => e.locationId === v.locationId && e.kind === 'patient_payment' && e.tender === v.tender && e.posted === rr.date).slice(-(pm.ledgerEntries || 2));
-    const held = st.varRefusal[v.id] || {};
+    const held = live(st.varRefusal, v.id);
     // One gate per card, raised by the control that pressed it; that control carries the Held identity.
-    const refuse = (by, res, fallback) => { st.varRefusal[v.id] = { by, node: gate(r, res, null, fallback) }; rerender(r, 'refusal.control'); };
+    const refuse = (by, res, fallback) => { st.varRefusal[v.id] = heldGate(by, res, gate(r, res, null, fallback)); rerender(r, 'refusal.control'); };
     const card = h('div', { class: 'card flat stack', 'aria-label': 'Variance ' + v.id },
       h('div', { class: 'row' }, chip('required', 'Variance ' + money(v.amountCents)), h('span', { class: 'small muted', text: v.tender + ' · ' + locOf(S, v.locationId).name + ' · ' + shortDate(rr.date) })),
       h('p', { class: 'explain sentence', text: v.sentence }),
       h('p', null, h('b', { text: 'Proposed match: ' }), pm.bankLine + ' ↔ ' + plural(pm.ledgerEntries || 0, 'ledger entry').replace('entrys', 'entries')));
+    const doMatch = () => {
+      const res = Proto.store.matchVariance(v.id);
+      if (res.ok) { st.varRefusal[v.id] = null; say('Matched ' + money(v.amountCents) + ' at ' + locOf(S, v.locationId).name); rerender(r, 'close.tied.tile'); return; }
+      refuse('match', res);
+    };
     const controls = h('div', { class: 'btnrow' },
-      btn('Match these', { kind: held.by === 'match' ? 'held' : 'irreversible', testid: 'close.variance.' + v.id + '.match', onClick: () => {
-        const res = Proto.store.matchVariance(v.id);
-        if (res.ok) { st.varRefusal[v.id] = null; say('Matched ' + money(v.amountCents) + ' at ' + locOf(S, v.locationId).name); rerender(r, 'close.tied.tile'); return; }
-        refuse('match', res);
-      } }),
+      btn('Match these', { kind: held.by === 'match' ? 'held' : 'irreversible', testid: 'close.variance.' + v.id + '.match', onClick: () => (held.by === 'match' ? heldPress(r, st.varRefusal, v.id, doMatch) : doMatch()) }),
       btn(st.invOpen[v.id] ? 'Hide rows' : 'Investigate', { kind: 'reversible', testid: 'close.variance.' + v.id + '.investigate', pressed: !!st.invOpen[v.id], onClick: () => {
         st.invOpen[v.id] = !st.invOpen[v.id];
         if (st.invOpen[v.id]) candidates().forEach((e) => disclose(e.patientId, [e.id]));
         rerender(r, 'close.variance.' + v.id + '.investigate');
       } }));
-    if (mayClear) controls.append(btn('Clear with reason', { kind: held.by === 'clear' ? 'held' : 'quiet', testid: 'close.variance.' + v.id + '.clear', onClick: () => {
+    const doClear = () => {
       const res = Proto.store.clearVariance(v.id);
       if (res.ok) { st.varRefusal[v.id] = null; say('Cleared with reason'); rerender(r, 'close.tied.tile'); return; }
       // The rows are what an independent seat would be handed, so the way out of a who-may-clear gate opens them.
       refuse('clear', res, () => { st.invOpen[v.id] = true; rerender(r, 'close.variance.' + v.id + '.investigate'); });
-    } }));
+    };
+    if (mayClear) controls.append(btn('Clear with reason', { kind: held.by === 'clear' ? 'held' : 'quiet', testid: 'close.variance.' + v.id + '.clear', onClick: () => (held.by === 'clear' ? heldPress(r, st.varRefusal, v.id, doClear) : doClear()) }));
     card.append(controls);
     if (!mayClear) card.append(h('p', { class: 'small muted', text: (isCloser ? 'Same hands closed ' + locOf(S, rr.locationId).name + ' on ' + shortDate(rr.date) + '. ' : 'Clearing belongs to a seat that reconciles the bank or closes the books. ') + (clearers.length ? orList(clearers) + ' can clear. ' : '') + 'Match these and Investigate stay open to you.' }));
     if (held.node) card.append(held.node);
@@ -229,24 +239,24 @@
     if (!due.length && !results.length) return null;
     const rows = due.map((d) => {
       const late = days(d.reviewBy, S.tenant.today);
-      const held = st.decisionRefusal[d.id] || {};
-      const act = (action, label, kind) => btn(label, { kind: held.by === action ? 'held' : kind, testid: 'close.decision.' + d.id + '.' + action, onClick: () => {
+      const held = live(st.decisionRefusal, d.id);
+      const review = (action) => {
         const res = Proto.store.reviewDecision(d.id, action);
-        if (!res.ok) { st.decisionRefusal[d.id] = { by: action, node: gate(r, res, 'A decision is reviewed on the server so the threshold it moves is the one every posting reads.') }; rerender(r, 'refusal.control'); return; }
+        if (!res.ok) { st.decisionRefusal[d.id] = heldGate(action, res, gate(r, res, 'A decision is reviewed on the server so the threshold it moves is the one every posting reads.')); rerender(r, 'refusal.control'); return; }
         st.decisionRefusal[d.id] = null;
-        if (res.ok) {
-          // The store sets the next review date when a decision is kept or tightened; printing a second
-          // computation of it here is how the sentence and the row underneath it come to disagree.
-          const next = shortDate(res.reviewBy);
-          // Read the threshold after the store has moved it: the sentence names the value now in force.
-          const threshold = money(Proto.store.get().tenant.dualReleaseThresholdCents);
-          st.decisionResult[d.id] = action === 'keep' ? 'Kept 90 more days; review on ' + next + '.'
-            : action === 'tighten' ? 'Tightened: write-off threshold back to ' + threshold + '; review on ' + next + '.'
-              : 'Retired: write-off threshold back to ' + threshold + '. Nothing auto-renews.';
-          say(action === 'keep' ? 'Kept 90 more days' : action === 'tighten' ? 'Tightened the write-off threshold' : 'Retired the raised threshold');
-        }
-        rerender(r, 'close.closeday');
-      } });
+        // The store sets the next review date when a decision is kept or tightened; printing a second
+        // computation of it here is how the sentence and the row underneath it come to disagree.
+        const next = shortDate(res.reviewBy);
+        // Read the threshold after the store has moved it: the sentence names the value now in force.
+        const threshold = money(Proto.store.get().tenant.dualReleaseThresholdCents);
+        st.decisionResult[d.id] = action === 'keep' ? 'Kept 90 more days; review on ' + next + '.'
+          : action === 'tighten' ? 'Tightened: write-off threshold back to ' + threshold + '; review on ' + next + '.'
+            : 'Retired: write-off threshold back to ' + threshold + '. Nothing auto-renews.';
+        say(action === 'keep' ? 'Kept 90 more days' : action === 'tighten' ? 'Tightened the write-off threshold' : 'Retired the raised threshold');
+        // Focus lands on the stamp that replaced the control, never on the next primary: a repeated Enter must not close the day.
+        rerender(r, '#dc-reviewed-' + d.id);
+      };
+      const act = (action, label, kind) => btn(label, { kind: held.by === action ? 'held' : kind, testid: 'close.decision.' + d.id + '.' + action, onClick: () => (held.by === action ? heldPress(r, st.decisionRefusal, d.id, () => review(action)) : review(action)) });
       return h('div', { class: 'card flat stack', 'aria-label': 'Decision ' + d.id },
         h('div', { class: 'row' }, chip('review', 'Review ' + (late > 0 ? 'was due ' + shortDate(d.reviewBy) + ' (' + plural(late, 'day') + ' ago)' : 'due ' + shortDate(d.reviewBy))), h('span', { class: 'small muted', text: 'Decided ' + shortDate(d.decidedAt) + ' by ' + shortName(S, d.decidedBy) })),
         h('p', null, h('b', { text: d.text })),
@@ -257,7 +267,7 @@
     });
     return section('Decisions due for review' + (due.length ? ': ' + due.length : ''), ...rows, ...results.map((id) => {
       const d = S.decisions.find((x) => x.id === id);
-      return h('p', { class: 'row' }, chip('clear', 'Reviewed today'), h('span', { text: (d ? d.text : 'This decision') + ' — ' + st.decisionResult[id] }));
+      return h('p', { class: 'row', id: 'dc-reviewed-' + id, tabindex: '-1' }, chip('clear', 'Reviewed today'), h('span', { text: (d ? d.text : 'This decision') + ' — ' + st.decisionResult[id] }));
     }));
   }
   function approvals(r, S) {
@@ -283,17 +293,19 @@
     const done = S.dayCloses.find((d) => d.locationId === 'loc-1' && d.date === today);
     const kids = [];
     if (done) kids.push(h('p', { class: 'row' }, h('span', { class: 'dc-lock', 'aria-hidden': 'true', text: '🔒' }), chip('clear', 'Closed'), h('span', { text: 'Closed ' + shortDate(done.date) + ' at ' + done.closedAt + ' by ' + shortName(S, done.closedBy) + ' · chain head ' + done.chainHeadHash + ' · deposit slip prepared; day sheet frozen.' })));
+    const closeGate = live(st, 'closeRefusal');
     // One label for the control; the held identity supplies the word Held and keeps "Close day" as its name.
-    const primary = btn('Close day', { kind: st.closeRefusal || done ? 'held' : 'irreversible', testid: 'close.closeday', onClick: () => {
-      if (done) { const res = Proto.store.closeDay('loc-1'); if (!res.ok) { st.closeRefusal = gate(r, res, 'A closed day is sealed; corrections post into today as a reversal-and-repost pair.'); } rerender(r, 'close.closeday'); return; }
-      st.closeStep = 'confirm'; rerender(r, 'close.closeday.confirm');
+    const primary = btn('Close day', { kind: closeGate.node || done ? 'held' : 'irreversible', testid: 'close.closeday', onClick: () => {
+      if (done) { const res = Proto.store.closeDay('loc-1'); if (!res.ok) { st.closeRefusal = heldGate('close', res, gate(r, res, 'A closed day is sealed; corrections post into today as a reversal-and-repost pair.')); } rerender(r, 'close.closeday'); return; }
+      // The confirm group opens with focus on its question, not on the irreversible control: a repeated Enter must not close the day.
+      st.closeStep = 'confirm'; rerender(r, '#dc-close-confirm');
     } });
     kids.push(h('div', { class: 'btnrow' }, primary, h('span', { class: 'small muted', text: loc.name + ' · ' + shortDate(today) + ' · totals by tender, deposit slip, day sheet frozen atomically' })));
-    if (st.closeRefusal) kids.push(st.closeRefusal);
+    if (closeGate.node) kids.push(closeGate.node);
     if (st.closeStep === 'confirm' && !done) {
       const tot = todayTotals(S, 'loc-1'); const sum = tot.cash + tot.check + tot.card;
       kids.push(h('div', { class: 'card flat stack', role: 'group', 'aria-label': 'Confirm close day' },
-        h('h3', { text: 'Close ' + loc.name + ' for ' + shortDate(today) + '?' }),
+        h('h3', { id: 'dc-close-confirm', tabindex: '-1', text: 'Close ' + loc.name + ' for ' + shortDate(today) + '?' }),
         h('div', { class: 'tender head', role: 'row' }, h('span', { text: 'Tender' }), h('span', { class: 'num', text: 'Collected today' }), h('span'), h('span')),
         ...TENDERS.map(([t, label]) => h('div', { class: 'tender', role: 'row' }, h('span', { text: label }), h('span', { class: 'num', text: money(tot[t]) }), h('span'), h('span'))),
         h('div', { class: 'tender', role: 'row' }, h('span', null, h('b', { text: 'Total' })), h('span', { class: 'num' }, h('b', { text: money(sum) })), h('span'), h('span')),
@@ -307,7 +319,7 @@
             if (res.ok) { st.closeStep = 'done'; st.closeRefusal = null; say('Day closed — deposit slip prepared'); rerender(r, 'close.closeday'); return; }
             st.closeStep = 'idle';
             // The gate's own words, and its control goes where the control says: the screen adds neither.
-            st.closeRefusal = gate(r, res, 'Closing freezes totals and prepares the deposit, so only the seats that carry it can close.');
+            st.closeRefusal = heldGate('close', res, gate(r, res, 'Closing freezes totals and prepares the deposit, so only the seats that carry it can close.'));
             rerender(r, 'close.closeday');
           } }),
           btn('Cancel', { kind: 'quiet', testid: 'close.closeday.cancel', onClick: () => { st.closeStep = 'idle'; rerender(r, 'close.closeday'); } }))));
