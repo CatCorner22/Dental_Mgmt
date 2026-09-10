@@ -2,24 +2,14 @@
    one column per chair, checkout queue with Note/Claim chips, the Filed later lane,
    read-only outage rendering, and the A / S / C keyboard accelerators while mounted. */
 (function () {
-  const Proto = window.Proto; const { h, btn, chip, refusal, money, displayName, initials, shortDate, pageHead } = Proto.ui;
+  const Proto = window.Proto; const { h, btn, chip, refusal, money, displayName, initials, shortDate, pageHead, support, STATUS, TYPE, ELIG } = Proto.ui;
   Proto.screens = Proto.screens || {};
 
-  /* One word per status code, the same word the Chairs screen and the Rail print: a seated patient is
-     Seated until the chart is open, and only then In chart. */
-  const STATUS = {
-    scheduled: ['info', 'Scheduled'], confirmed: ['info', 'Confirmed'], arrived: ['review', 'Arrived'],
-    seated: ['info', 'Seated'], in_chart: ['info', 'In chart'], ready_for_exam: ['review', 'Exam requested'],
-    note_filed: ['clear', 'Note filed'], checked_out: ['clear', 'Done'], checked_out_unfiled: ['review', 'Filed later'],
-  };
-  const TYPE = { hygiene: ['clear', 'Hygiene'], restorative: ['style', 'Restorative'], exam: ['info', 'Exam'], surgery: ['stop', 'Surgery'], emergency: ['required', 'Emergency'] };
-  const ELIG = { green: ['clear', 'Eligible'], amber: ['review', 'Verify'], none: ['info', 'Self-pay'] };
   const IN_CHAIR = ['seated', 'in_chart', 'ready_for_exam'];
   const ARRIVABLE = ['scheduled', 'confirmed'];
   const CHECKOUTABLE = ['in_chart', 'note_filed'];
 
   const CACHE_TIME = '07:58'; // last successful fetch shown by the Andon slot during an outage
-  const SUPPORT = 'Support: 615-555-0100, answered 7 am to 6 pm Central';
   const OUTAGE_WHY = 'Nothing posts while the server is unreachable: the controls that gate money and records cannot be enforced without it.';
   const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const STALE_DEVICE = { userId: 'u-da-1', op: 2 };  // the shared tablet left signed in overnight
@@ -78,7 +68,7 @@
      component logs and announces the gate; this screen never announces one itself. */
   function gateFor(res, onControl) {
     const g = { code: res.code, verb: res.verb, control: res.control, why: res.why };
-    g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, severity: g.code === 'outage' ? 'stop' : 'required', onControl: () => { if (g.code === 'outage') Proto.router.announce(SUPPORT); if (onControl) onControl(g); } });
+    g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, severity: g.code === 'outage' ? 'stop' : 'required', onControl: () => { if (g.code === 'outage') support(); if (onControl) onControl(g); } });
     return g;
   }
   const focusGate = () => { const c = document.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); };
@@ -121,7 +111,7 @@
     const res = Proto.store.pingChair(id);
     if (!res.ok) {
       // The gate's one control opens the chart it names.
-      pings[id] = { code: res.code, node: refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why || 'One ping per encounter per 15 minutes. The chair device saw the first one; a second would only add noise.', severity: res.code === 'outage' ? 'stop' : 'required', onControl: () => { if (res.code === 'outage') Proto.router.announce(SUPPORT); else Proto.router.go(r.persona, 'encounter', a.encounterId); } }) };
+      pings[id] = { code: res.code, node: refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why || 'One ping per encounter per 15 minutes. The chair device saw the first one; a second would only add noise.', severity: res.code === 'outage' ? 'stop' : 'required', onControl: () => { if (res.code === 'outage') support(); else Proto.router.go(r.persona, 'encounter', a.encounterId); } }) };
       render(r); focusGate(); return;
     }
     pings[id] = { text: 'Pinged chair ' + a.op + ' · ' + clock12(S().clock.time) + ' · one-to-one, not broadcast' };
@@ -230,9 +220,7 @@
     // The primary keeps its place under the outage and switches to Held when the gate is raised (CONTRACTS §6).
     const actions = h('div', { class: 'actions' });
     if (ARRIVABLE.includes(a.status)) actions.append(btn('Arrive', { kind: g ? 'held' : 'reversible', testid: 'board.card.' + a.id + '.arrive', ariaLabel: g ? 'Arrive held: ' + g.verb : 'Arrive ' + name, onClick: () => (g ? focusGate() : doArrive(a.id, r)) }));
-    // Seat renders in the slot Arrive just left, so the second click of a double-click (detail 2) is the tail of
-    // the Arrive gesture, not a decision to seat: one gesture, one step (docs/01 principle 9).
-    else if (a.status === 'arrived') actions.append(btn('Seat', { kind: g ? 'held' : 'reversible', testid: 'board.card.' + a.id + '.seat', ariaLabel: g ? 'Seat held: ' + g.verb : 'Seat ' + name + ' in chair ' + a.op, onClick: (ev) => (g ? focusGate() : ev.detail > 1 ? ev.currentTarget.focus() : doSeat(a.id, r)) }));
+    else if (a.status === 'arrived') actions.append(btn('Seat', { kind: g ? 'held' : 'reversible', testid: 'board.card.' + a.id + '.seat', ariaLabel: g ? 'Seat held: ' + g.verb : 'Seat ' + name + ' in chair ' + a.op, onClick: () => (g ? focusGate() : doSeat(a.id, r)) }));
     else if (CHECKOUTABLE.includes(a.status)) actions.append(btn('Checkout', { kind: g ? 'held' : 'reversible', testid: 'board.card.' + a.id + '.checkout', ariaLabel: g ? 'Checkout held: ' + g.verb : 'Checkout ' + name, onClick: () => (g ? focusGate() : goCheckout(a.id, r, 'card')) }));
     const ex = btn(expanded[a.id] ? 'Less' : 'Details', { kind: 'quiet', class: 'compact', testid: 'board.card.' + a.id + '.expand', ariaLabel: (expanded[a.id] ? 'Hide' : 'Show') + ' forms and balance for ' + name, onClick: () => { expanded[a.id] = !expanded[a.id]; render(r); const b = document.querySelector('[data-testid="board.card.' + a.id + '.expand"]'); if (b) b.focus(); } });
     ex.setAttribute('aria-expanded', String(!!expanded[a.id])); ex.setAttribute('aria-controls', 'board-details-' + a.id);
@@ -354,8 +342,6 @@
 
   window.addEventListener('hashchange', () => { if (keysOn && Proto.router.current().route !== 'board') { document.removeEventListener('keydown', onKey); keysOn = false; } });
 
-  // One word per appointment type, shared with Checkout's subtitle so the same visit never reads two ways.
-  const typeWord = (t) => (TYPE[t] || ['info', String(t || '').replace(/^./, (ch) => ch.toUpperCase())])[1];
-  Proto.screens.board = { render, arrive: doArrive, seat: doSeat, reverify: doReverify, ping: doPing, typeWord };
+  Proto.screens.board = { render, arrive: doArrive, seat: doSeat, reverify: doReverify, ping: doPing };
   Proto.router.on('board', (r) => Proto.screens.board.render(r));
 })();

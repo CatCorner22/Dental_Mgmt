@@ -20,7 +20,6 @@
   // Clearing someone else's variance belongs to the seats that reconcile the bank or close the books;
   // offering the control to any other seat is offering a refusal.
   const CLEAR_ENTS = ['bank_reconcile', 'close_day'];
-  const SUPPORT = 'Call support: 615-555-0100, 7 am to 6 pm';
   const WROTE = { ledger: 'appended a ledger row', approvals: 'created an approval request', approvalsLog: 'decided an approval request', dayCloses: 'closed a business day', deposits: 'prepared a deposit slip', reconciliationMatches: 'matched or cleared a variance', controlDecisions: 'reviewed a control decision', appointmentEvents: 'moved an appointment', eligibilityChecks: 're-ran eligibility', messages: 'pinged a chair', perioExams: 'saved a perio exam', tags: 'tagged a tooth for the dentist', chartEvents: 'painted the chart', planItems: 'added a plan item', filedNotes: 'filed a note', claims: 'changed a claim', claimEvents: 'recorded a claim event', appealPackets: 'built an appeal packet', disclosures: 'disclosed records (logged)', statementsDue: 'queued a statement', collectionDecisions: 'recorded a collection decision', allocations: 'allocated a payment', dayPasses: 'issued a day pass', userEntitlements: 'changed entitlements', firstRunState: 'retired a first-shift chip', sessions: 'switched author with a PIN' };
 
   let st = null, lastStore = null, lastRoute = null, keysOn = false;
@@ -51,7 +50,7 @@
   function openDay(r) { st.tileOpen = true; st.locOpen = st.locOpen || 'loc-1'; rerender(r, 'close.location.' + st.locOpen); }
   function gate(r, res, why, fallback) {
     const onControl = () => {
-      if (res.code === 'outage') say(SUPPORT);
+      if (res.code === 'outage') Proto.ui.support();
       else if (res.code === 'already_closed' || res.code === 'already_decided') openDay(r);
       else if (res.code === 'entitlement' && res.control === 'Open approvals') location.hash = '#/phone/approvals';
       else if (fallback) fallback();

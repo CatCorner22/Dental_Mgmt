@@ -49,8 +49,7 @@
     );
   }
 
-  // One support line for every control that names it: the Andon's and the PIN pad's outage gate.
-  function supportLine() { Proto.router.announce('Call support: 615-555-0100, 7 am to 6 pm'); }
+  const supportLine = Proto.ui.support;                 // one support line for every outage gate (ui.js)
   // The Andon stands on every home, so it prints what the phone card prints before Show name: initials and MRN
   // in place of the patient's name (docs/13 feature 24, minimum necessary). The sentence is still the store's.
   function minimumSentence(req) {

@@ -20,7 +20,6 @@
     { pid: 'p-313', cents: 22500, reason: 'hardship' },
   ];
   const REASON_LABEL = { courtesy: 'Courtesy', hardship: 'Hardship', contractual_ppo: 'Contractual (PPO)', small_balance: 'Small balance', promo: 'Promotion' };
-  const SUPPORT = 'Call support: 615-555-0100, 7 am to 6 pm';
 
   let lastRoute = null;
   let keysOn = false;
@@ -116,7 +115,7 @@
   const WAY_OUT = {
     'Send back': (r, a) => onDecline(r, a),
     'Open the ledger': (r, a) => Proto.router.go(r.persona, 'ledger', a.patientId),
-    'Support line': () => say(SUPPORT),
+    'Support line': () => Proto.ui.support(),
   };
   function gate(r, a, res) {
     const control = res.control || 'Switch author';

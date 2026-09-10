@@ -14,7 +14,6 @@
   const REVIEW_AT_SAVE = '2026-10-03';   // the review date store.js writes on a compensate / accept decision
   const now = () => S().clock.time;      // the store clock; a shift end must be later than it
   const DIGEST_BASE = 3;           // passes already issued this month before this session
-  const SUPPORT = 'Call support: 615-555-0100, 7 am to 6 pm';
 
   const ROLE_LABEL = { owner: 'Owner', dentist: 'Dentist', surgeon: 'Oral surgeon', hygienist: 'Hygienist', assistant: 'Assistant', office_manager: 'Office manager', frontdesk: 'Front-desk coordinator', biller: 'Biller', compliance: 'Compliance lead', cpa: 'CPA seat' };
   // The seed's day-pass templates carry their own labels ("RDH (hygienist)", "Front desk"), so one role read two
@@ -217,7 +216,7 @@
     // verb lines and two controls on one gate, so the press points at the gate on screen instead (B2, C2).
     if (!res.ok && res.code === 'sod_conflict' && s.previewOn) { s.saveGate = null; return rerender(r, 'refusal.control'); }
     // The control does what its label says: Support line announces the number and the gate stands; anything else returns to the primary.
-    if (!res.ok) return gate({ code: res.code, verb: res.verb, control: res.control, why: res.why, severity: 'stop', onControl: () => { if (res.code === 'outage') { Proto.router.announce(SUPPORT); return; } s.saveGate = null; rerender(r, 'roles.daypass.save'); } });
+    if (!res.ok) return gate({ code: res.code, verb: res.verb, control: res.control, why: res.why, severity: 'stop', onControl: () => { if (res.code === 'outage') { Proto.ui.support(); return; } s.saveGate = null; rerender(r, 'roles.daypass.save'); } });
     s.issued = { dayPass: res.dayPass, downgraded: res.downgraded, requestedRole: f.role };
     Object.assign(s, { formOpen: false, saveGate: null, decision: null, previewOn: false, credentialNote: false, touched: {}, form: freshState().form });
     Proto.router.announce('Day pass issued to ' + res.dayPass.name);

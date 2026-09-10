@@ -5,22 +5,13 @@
    P and N open the grid and the note; R moves the keyboard to Ready for exam and writes nothing
    (an irreversible verb never executes from a bare key). Keys are live only while this route is mounted. */
 (function () {
-  const Proto = window.Proto; const { h, btn, chip, refusal, money, displayName, pageHead } = Proto.ui;
+  const Proto = window.Proto; const { h, btn, chip, refusal, money, displayName, pageHead, support, STATUS, TYPE, ELIG } = Proto.ui;
   Proto.screens = Proto.screens || {};
 
   const TODAY = (Proto.seed && Proto.seed.TODAY) || '2026-09-03';
-  const STATUS = {
-    scheduled: ['info', 'Scheduled'], confirmed: ['info', 'Confirmed'], arrived: ['review', 'Arrived'],
-    seated: ['info', 'Seated'], in_chart: ['info', 'In chart'], ready_for_exam: ['review', 'Exam requested'],
-    note_filed: ['clear', 'Note filed'], checked_out: ['clear', 'Done'], checked_out_unfiled: ['review', 'Filed later'],
-  };
-  const TYPE = { hygiene: ['clear', 'Hygiene'], restorative: ['style', 'Restorative'], exam: ['info', 'Exam'], surgery: ['stop', 'Surgery'], emergency: ['required', 'Emergency'] };
-  // The same eligibility words the Patient Rail and the Board print: one word per stored value.
-  const ELIG = { green: ['clear', 'Active'], amber: ['review', 'Re-verify'], red: ['required', 'Inactive'], none: ['info', 'Self-pay'] };
   const READY_FROM = ['seated', 'in_chart'];
   const DONE = ['note_filed', 'checked_out', 'checked_out_unfiled', 'ready_for_exam'];
   const MED_HX = /anticoagulant|premed|apixaban|warfarin|antibiotic/i;
-  const SUPPORT = 'Support: 615-555-0100, answered 7 am to 6 pm Central';
 
   // Per-screen UI state; cleared whenever the store is rebuilt (window.__proto.reset).
   let lastStore = null;
@@ -108,7 +99,7 @@
   }
   function gateFor(res) {
     const g = { code: res.code, verb: res.verb, control: res.control, why: res.why };
-    g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, severity: g.code === 'outage' ? 'stop' : 'required', onControl: () => { if (g.code === 'outage') Proto.router.announce(SUPPORT); } });
+    g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, severity: g.code === 'outage' ? 'stop' : 'required', onControl: () => { if (g.code === 'outage') support(); } });
     return g;
   }
 
@@ -225,6 +216,6 @@
 
   window.addEventListener('hashchange', () => { if (keysOn && Proto.router.current().route !== 'chairs') { document.removeEventListener('keydown', onKey); keysOn = false; } });
 
-  Proto.screens.chairs = { render, ready: doReady, perio: goPerio, note: goNote, monthsAgo, SUPPORT };
+  Proto.screens.chairs = { render, ready: doReady, perio: goPerio, note: goNote, monthsAgo };
   Proto.router.on('chairs', (r) => Proto.screens.chairs.render(r));
 })();

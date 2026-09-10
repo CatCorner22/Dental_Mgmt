@@ -58,7 +58,7 @@
     // Board, so the one gate whose label named a destination landed somewhere else.
     else if (res.code === 'already_decided') { v.control = res.control || 'Open the ledger'; v.onControl = () => Proto.router.go(r.persona, 'ledger', a.patientId); }
     else if (res.code === 'entitlement') { v.control = res.control || 'Open Roles'; v.onControl = () => Proto.router.go(r.persona, 'roles'); }
-    else if (res.code === 'outage') { v.control = res.control || 'Support line'; v.severity = 'stop'; v.onControl = () => Proto.router.announce('Support: 615-555-0100, answered 7 am to 6 pm Central'); }
+    else if (res.code === 'outage') { v.control = res.control || 'Support line'; v.severity = 'stop'; v.onControl = Proto.ui.support; }
     else { v.control = res.control || 'Back to Board'; v.onControl = () => Proto.router.go(r.persona, 'board'); }
     return v;
   }
@@ -319,9 +319,8 @@
     const bal = Proto.store.balances(a.patientId);
     const covers = (fee) => st.decision === 'collect' && cents(st.amountStr) >= fee;
     const name = displayName(pt.name, P.privacy);
-    // The same clock and the same type word as the Board card for this visit (ui.js time; board.js typeWord).
-    const typeWord = Proto.screens.board && Proto.screens.board.typeWord ? Proto.screens.board.typeWord : (t) => String(t || '').replace(/^./, (ch) => ch.toUpperCase());
-    const sub = Proto.ui.time(a.time) + ' · ' + typeWord(a.type) + ' · ' + (S.users.find((u) => u.id === a.providerId) || {}).short + ' · ' + (pt.primary ? Proto.store.carrierName(pt.primary) + (pt.secondary ? ' + ' + Proto.store.carrierName(pt.secondary) : '') : 'Self-pay');
+    // The same clock and the same type word as the Board card for this visit (ui.js time, typeWord).
+    const sub = Proto.ui.time(a.time) + ' · ' + Proto.ui.typeWord(a.type) + ' · ' + (S.users.find((u) => u.id === a.providerId) || {}).short + ' · ' + (pt.primary ? Proto.store.carrierName(pt.primary) + (pt.secondary ? ' + ' + Proto.store.carrierName(pt.secondary) : '') : 'Self-pay');
     const railBtn = Proto.screens.rail ? Proto.screens.rail.button(a.patientId, r, 'checkout.rail') : null;
     const head = pageHead('Checkout · ' + name, sub, railBtn, btn('Back to Board', { kind: 'reversible', testid: 'checkout.back', onClick: () => Proto.router.go(r.persona, 'board') }));
     const status = h('div', { class: 'row' },

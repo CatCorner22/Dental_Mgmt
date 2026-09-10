@@ -35,7 +35,13 @@
     // What is held stays in the accessible name; the verb line beside it says what to do next.
     const held = kind === 'held';
     const visible = held ? 'Held' : label;
-    const b = h('button', { type: 'button', class: 'btn ' + kind + (opts.class ? ' ' + opts.class : ''), testid: opts.testid, onClick: opts.onClick, 'aria-pressed': pressed, 'aria-label': opts.ariaLabel || (held ? 'Held: ' + label : null), 'aria-describedby': opts.describedby, title: opts.title || (held ? String(label) : null), disabled: opts.disabled, dataset: opts.dataset }, visible);
+    // The second click of a double-click is the tail of the first gesture, not a decision. A primary that renders in
+    // the slot another primary just left (Arrive → Seat, one Confirm row under the next) would otherwise take it and
+    // act; a bare key sends detail 0 and a single click detail 1, so both still pass. Quiet keys (pads, toggles) are
+    // pressed in runs on purpose and keep every click.
+    const primary = kind === 'irreversible' || kind === 'reversible';
+    const onClick = primary && opts.onClick ? (ev) => (ev.detail > 1 ? ev.currentTarget.focus() : opts.onClick(ev)) : opts.onClick;
+    const b = h('button', { type: 'button', class: 'btn ' + kind + (opts.class ? ' ' + opts.class : ''), testid: opts.testid, onClick, 'aria-pressed': pressed, 'aria-label': opts.ariaLabel || (held ? 'Held: ' + label : null), 'aria-describedby': opts.describedby, title: opts.title || (held ? String(label) : null), disabled: opts.disabled, dataset: opts.dataset }, visible);
     // Selection is never colour alone: a pressed control carries a check mark as well as its fill.
     if (pressed === 'true') b.prepend(h('span', { class: 'pressmark', 'aria-hidden': 'true', text: '✓' }));
     return b;
@@ -106,6 +112,22 @@
   function initials(name) { const parts = String(name == null ? '' : name).split(/\s+/).filter((p) => p && !HONORIFIC.test(p)); return parts.map((p) => p[0]).join('').slice(0, 2).toUpperCase() || '—'; }
   function displayName(name, privacy) { return privacy ? initials(name) : (name == null ? '—' : name); }
 
+  /* One support line for every outage gate. Six screens carried their own copy in two wordings, so the same
+     "Support line" control read one sentence on the Board and another on Daily Close. */
+  const SUPPORT = 'Call support: 615-555-0100, 7 am to 6 pm';
+  const support = () => Proto.router.announce(SUPPORT);
+  /* One word per stored appointment status, type and eligibility value. The Board and Chairs each held these
+     tables; the eligibility words had drifted, so one amber visit read "Verify" on the Board and "Re-verify" on
+     Chairs and the Rail. Severity first, then the word a person reads. */
+  const STATUS = {
+    scheduled: ['info', 'Scheduled'], confirmed: ['info', 'Confirmed'], arrived: ['review', 'Arrived'],
+    seated: ['info', 'Seated'], in_chart: ['info', 'In chart'], ready_for_exam: ['review', 'Exam requested'],
+    note_filed: ['clear', 'Note filed'], checked_out: ['clear', 'Done'], checked_out_unfiled: ['review', 'Filed later'],
+  };
+  const TYPE = { hygiene: ['clear', 'Hygiene'], restorative: ['style', 'Restorative'], exam: ['info', 'Exam'], surgery: ['stop', 'Surgery'], emergency: ['required', 'Emergency'] };
+  const ELIG = { green: ['clear', 'Active'], amber: ['review', 'Re-verify'], red: ['required', 'Inactive'], none: ['info', 'Self-pay'] };
+  const typeWord = (t) => (TYPE[t] || ['info', String(t || '').replace(/^./, (ch) => ch.toUpperCase())])[1];
+
   /* Dialog: focus trapped, Escape closes, returns close() */
   function dialog(content, opts) {
     opts = opts || {};
@@ -144,5 +166,5 @@
     return h('div', { class: 'page-head' }, h('div', null, h('h1', { text: title }), sub ? h('p', { class: 'sub', text: sub }) : null), controls.length ? h('div', { class: 'btnrow' }, ...controls) : null);
   }
 
-  Proto.ui = { h, btn, chip, refusal, resetGates, money, shortDate, longDate, dateTime, time, initials, displayName, dialog, section, pageHead, GLYPH };
+  Proto.ui = { h, btn, chip, refusal, resetGates, money, shortDate, longDate, dateTime, time, initials, displayName, dialog, section, pageHead, GLYPH, SUPPORT, support, STATUS, TYPE, ELIG, typeWord };
 })();

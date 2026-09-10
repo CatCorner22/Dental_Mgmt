@@ -179,8 +179,7 @@
     for (const key of st.path) { const v = st.sites[key]; out[key] = v && v.depth != null ? { depth: v.depth, bleed: !!v.bleed, sup: !!v.sup, skipped: false } : { depth: null, bleed: false, sup: false, skipped: true }; }
     return out;
   }
-  // The outage control reads the same support line Chairs announces for the same code: one gate, one next step.
-  const support = () => Proto.router.announce(Proto.screens.chairs.SUPPORT);
+  const support = Proto.ui.support;                     // one support line for every outage gate (ui.js)
   function mkGate(st, res, onControl) { st.gate = { code: res.code, node: refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, severity: res.code === 'outage' ? 'stop' : 'required', onControl: onControl || (res.code === 'outage' ? support : () => {}) }) }; }
   // A gate names the next thing to do, so the keyboard lands on it rather than on the Held primary behind it.
   function focusGateControl() { const c = document.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); }
