@@ -65,8 +65,9 @@
     // construction turned one visible gate into six refusal events and read the verb aloud again each time,
     // so the event log counted gates that were never raised. The same gate is logged once until it changes —
     // unless the caller says the press raised it again (`fresh`): a second wrong PIN or date of birth reads
-    // the same as the first and is still a second refusal.
-    const key = v.code + '|' + v.verb + '|' + (v.control || '');
+    // the same as the first and is still a second refusal — and `scope` (the pressing control's test id) tells the
+    // same words raised by another control apart, so Keep, Tighten and Retire on one card each log their gate.
+    const key = v.code + '|' + v.verb + '|' + (v.control || '') + '|' + (v.scope || '');
     if (lastGate !== key || v.fresh) {
       lastGate = key;
       Proto.events.refusal(v.code, v.verb, v.control);
@@ -191,5 +192,5 @@
     return h('div', { class: 'page-head' }, h('div', null, h('h1', { text: title }), sub ? h('p', { class: 'sub', text: sub }) : null), controls.length ? h('div', { class: 'btnrow' }, ...controls) : null);
   }
 
-  Proto.ui = { h, btn, chip, refusal, resetGates, money, shortDate, longDate, dateTime, time, initials, displayName, dialog, topDialog, closeDialogs, section, pageHead, GLYPH, SUPPORT, support, STATUS, TYPE, ELIG, typeWord };
+  Proto.ui = { h, btn, chip, refusal, resetGates, money, shortDate, longDate, dateTime, time, initials, displayName, dialog, topDialog, closeDialogs, shadowGates, section, pageHead, GLYPH, SUPPORT, support, STATUS, TYPE, ELIG, typeWord };
 })();

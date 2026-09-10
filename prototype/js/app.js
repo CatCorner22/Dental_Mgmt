@@ -45,10 +45,12 @@
 
   let lastRoute = null; let rendering = false;
   const focusHead = (c) => { const head = c.querySelector('h1'); if (head) { if (head.getAttribute('tabindex') == null) head.setAttribute('tabindex', '-1'); head.focus({ preventScroll: true }); } return !!head; };
-  // Re-rendering the same path replaces the canvas, so the keyboard has to be put back on it.
+  // Re-rendering the same path replaces the canvas, so the keyboard has to be put back on it — unless a dialog
+  // stands over it: the modal owns the keyboard, so focus stays (or lands) inside it, never on the hidden heading.
   function repaintCanvas() {
     Proto.router.render();
-    const c = document.getElementById('canvas');
+    const c = document.getElementById('canvas'); const top = Proto.ui.topDialog();
+    if (top) { if (!top.contains(document.activeElement)) { const f = top.querySelector('button:not([disabled]), input, [tabindex]'); if (f) f.focus(); } return; }
     if (document.activeElement === document.body || !c.contains(document.activeElement)) focusHead(c);
   }
   function render() {

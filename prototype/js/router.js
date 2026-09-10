@@ -40,6 +40,8 @@
       const r = parse();
       const fn = handlers[r.route] || handlers.notfound;
       if (fn) fn(r);
+      // A canvas repainted under a standing dialog rebuilds its gates with fresh ids; they give them up again (§4).
+      if (Proto.ui && Proto.ui.topDialog && Proto.ui.topDialog()) Proto.ui.shadowGates(true);
     },
     current() { return parse(); },
     announce(text) { const live = document.getElementById('live'); if (live) { live.textContent = ''; setTimeout(() => { live.textContent = text; }, 10); } },

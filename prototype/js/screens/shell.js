@@ -89,7 +89,9 @@
   function openPinPad(r) {
     const P = window.__proto; const S = Proto.store.get();
     let digits = '';
-    const dots = h('div', { class: 'pindots', 'aria-live': 'polite', text: '' });
+    // The keyboard lands on the digit display, not on a key: typed digits fill it and Enter there is Go, while Enter
+    // on a focused key presses that key (one grammar with the phone step-up, whose landing key is its display).
+    const dots = h('div', { class: 'pindots', testid: 'pin.display', tabindex: '0', role: 'textbox', 'aria-readonly': 'true', 'aria-label': 'PIN typed so far; Enter is Go', 'aria-live': 'polite', text: '' });
     // The finish path carries the instruction alone. What switching costs is an explanation, so it sits
     // behind a disclosure instead of standing in front of the first digit.
     const status = h('p', { class: 'hint', text: 'Enter the other person\'s PIN' });
@@ -97,11 +99,12 @@
       h('p', { class: 'small muted', text: P.device === 'desk' ? 'This desk is not shared, so switching signs you out and in as the other person.' : 'Their session opens on this page; yours is revoked and local drafts are wiped after autosave.' }));
     let close;
     const refusalSlot = h('div', { class: 'pin-refusal' });
-    function showRefusal(v) { refusalSlot.replaceChildren(Proto.ui.refusal(v)); }
+    // Rebuilding the slot removes the control that may hold the keyboard; it lands on the new gate's control, never body.
+    function showRefusal(v) { refusalSlot.replaceChildren(Proto.ui.refusal(v)); if (document.activeElement === document.body) { const k = refusalSlot.querySelector('[data-testid="refusal.control"]') || dots; k.focus(); } }
     // The store's refusal, the pad's way out: retype puts the keyboard on the first key, a lock or an outage
     // closes the pad (the outage gate's control is the support line, so it says the number the Andon's says).
     function showStoreRefusal(res) {
-      const retype = () => { const k = pad.querySelector('[data-testid="pin.key.1"]'); if (k) k.focus(); };
+      const retype = () => dots.focus();
       const out = res.code === 'pin_no_match' ? retype : res.code === 'outage' ? () => { close(); supportLine(); } : () => close();
       showRefusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: out, severity: res.code === 'pin_no_match' ? 'required' : 'stop', fresh: res.code === 'pin_no_match' || res.code === 'pin_locked' });
     }
@@ -111,7 +114,7 @@
       const res = typed ? verifyPin(typed) : Object.assign({ ok: false, code: 'pin_no_match' }, NO_MATCH);
       if (!res.ok) { showStoreRefusal(res); return; }
       const who = res.user;
-      const persona = Object.entries(S.personaUser).find(([, uid]) => uid === who.id);
+      const persona = Object.entries(S.personaUser).find(([, uid]) => uid === who.id);   // the day-pass holder is the temp persona's user
       if (!persona) {
         // No chart persona for this account in the prototype: refuse rather than write a session that changes nothing.
         showRefusal({ code: 'no_chart_session', verb: 'Keep the current author — no charting session', control: 'Keep current author', onControl: () => close(), why: who.short + ' can approve and post but does not chart, so there is nothing for that account to open on this screen. The author stays as it was and nothing was written.', severity: 'info' });
@@ -129,18 +132,20 @@
     const pad = h('div', { class: 'pinpad' }, ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => btn(String(d), { testid: 'pin.key.' + d, onClick: () => { if (digits.length < 6) { digits += d; dots.textContent = '•'.repeat(digits.length); } } })), btn('⌫', { testid: 'pin.backspace', ariaLabel: 'Backspace', onClick: () => { digits = digits.slice(0, -1); dots.textContent = '•'.repeat(digits.length); } }), btn('0', { testid: 'pin.key.0', onClick: () => { if (digits.length < 6) { digits += '0'; dots.textContent = '•'.repeat(digits.length); } } }), btn('Go', { testid: 'pin.submit', kind: 'irreversible', onClick: submit }));
     /* One PIN pad, one grammar. The phone step-up took typed digits, Backspace and Enter while this pad took
        clicks only, so the same four keystrokes filled one pad and left the other empty — and Go then refused
-       a PIN nobody had failed to type. The listener lives only while the pad is open. */
+       a PIN nobody had failed to type. The listener lives only while the pad is open. Enter on a focused control
+       (a key, the gate's control, the Why summary, Cancel) is that control's own activation: intercepting it ran Go
+       from a digit key and counted a miss nobody typed. Only Enter off a control submits. */
     const onPadKey = (ev) => {
       const t = ev.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
       const top = Proto.ui.topDialog(); if (!top || !top.contains(pad)) return;   // the top dialog owns the keyboard
       if (/^[0-9]$/.test(ev.key)) { ev.preventDefault(); if (digits.length < 6) { digits += ev.key; dots.textContent = '•'.repeat(digits.length); } }
       else if (ev.key === 'Backspace') { ev.preventDefault(); digits = digits.slice(0, -1); dots.textContent = '•'.repeat(digits.length); }
-      else if (ev.key === 'Enter' && !(t && t.getAttribute && t.getAttribute('data-testid') === 'pin.cancel')) { ev.preventDefault(); submit(); }
+      else if (ev.key === 'Enter' && !(t && t.closest && t.closest('button, summary, a, [role="button"]'))) { ev.preventDefault(); submit(); }
     };
     document.addEventListener('keydown', onPadKey, true);
     // Escape, the backdrop and a route change close the dialog without passing through Cancel, so the listener
     // leaves with the dialog itself: a wrapper around close() left it alive and typed digits kept switching authors.
-    close = Proto.ui.dialog(h('div', { class: 'stack' }, h('h2', { text: 'Who is charting?' }), status, refusalSlot, dots, pad, policy, btn('Cancel', { testid: 'pin.cancel', onClick: () => close() })), { label: 'Switch author', focus: '[data-testid="pin.key.1"]', onClose: () => document.removeEventListener('keydown', onPadKey, true) });
+    close = Proto.ui.dialog(h('div', { class: 'stack' }, h('h2', { text: 'Who is charting?' }), status, refusalSlot, dots, pad, policy, btn('Cancel', { testid: 'pin.cancel', onClick: () => close() })), { label: 'Switch author', focus: '[data-testid="pin.display"]', onClose: () => document.removeEventListener('keydown', onPadKey, true) });
     // A locked device says so before the first digit (the fallback's lock; the store's shows on the first Go).
     if (localLock()) showStoreRefusal(lockedOut());
   }

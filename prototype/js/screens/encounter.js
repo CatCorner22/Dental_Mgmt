@@ -356,10 +356,12 @@
      log one write for an id no table held, which erased part of a clinical record and left the note line
      behind, so the next paint filed the same procedure line twice. */
   function renderUndo(r, enc, x) {
+    if (staleGate(x.undoGate)) x.undoGate = null;
     if (!x.undoGate) return btn('Undo last paint', { kind: 'reversible', testid: 'enc.undo', onClick: () => undo(r, enc, x) });
     return h('div', { class: 'stack' },
       gateNode(r, enc, x, x.undoGate, () => focusFirst('enc.note.field.assessment')),
-      btn('Undo last paint', { kind: 'held', testid: 'enc.undo', ariaLabel: 'Held: ' + x.undoGate.verb, onClick: () => focusFirst('refusal.control', 'enc.note.field.assessment') }));
+      // A Held press re-evaluates first: if the gate has fallen (the outage ended), the press reverses the paint.
+      btn('Undo last paint', { kind: 'held', testid: 'enc.undo', ariaLabel: 'Held: ' + x.undoGate.verb, onClick: () => { rerender(r); if (x.undoGate) focusFirst('refusal.control', 'enc.note.field.assessment'); else undo(r, enc, x); } }));
   }
   // `ceId` names the paint to reverse (the duplicate's original from chartPaint's refusal); without it, the last one.
   function undo(r, enc, x, ceId) {
@@ -417,6 +419,11 @@
   }
 
   // ---- filing gate: at most three rows to fix + one File -------------------------------------
+  // One stale-gate rule for File, Send and Undo: a gate whose cause is gone falls on the next render.
+  const staleGate = (g) => !!g && g.code === 'outage' && !S().outage;
+  // The chair is already in the dentist's queue: the Send killer reads as done, and a repeat writes nothing (A4).
+  const sentToExams = (enc) => { const a = apptOf(enc); return !!a && (a.status === 'ready_for_exam' || S().appointmentEvents.some((e) => e.appointmentId === a.id && e.kind === 'encounter.exam_requested')); };
+  const isSent = (k, enc) => k.fix === 'licence' && (!!k.sent || sentToExams(enc));
   function renderGate(r, enc, x) {
     // One gate, one 44 px control: the read-back used to carry three (Confirm and file, Switch author and
     // the held File). The gate card holds the gate; the author line and the primary stand beside it (§6).
@@ -425,8 +432,8 @@
     area.append(wrap);
     // A File the store refused outright (outage, sealed note) stands here, beside the primary it held (§6),
     // and clears with the condition that raised it so the primary comes back when the server does.
-    if (x.fileGate && x.fileGate.code === 'outage' && !S().outage) x.fileGate = null;
-    if (x.sendGate && x.sendGate.code === 'outage' && !S().outage) x.sendGate = null;
+    if (staleGate(x.fileGate)) x.fileGate = null;
+    if (staleGate(x.sendGate)) x.sendGate = null;
     if (x.fileGate) {
       wrap.append(gateNode(r, enc, x, x.fileGate, () => focusFirst('enc.back')));
       // A Held press re-evaluates first: if the gate has fallen (the outage ended), the press files.
@@ -437,8 +444,9 @@
     // A store refusal from Send to Exams to sign renders here with its own control; the screen's own gates carry theirs.
     if (x.sendGate) wrap.append(x.sendGate.onControl ? refusal(x.sendGate) : gateNode(r, enc, x, x.sendGate, () => focusFirst('enc.back')));
     if (x.checked && x.killers.length) {
+      const open = x.killers.filter((k) => !isSent(k, enc)).length;
       wrap.append(h('div', { class: 'row between' }, h('h2', { text: 'Before File' }),
-        h('span', { class: 'row' }, chip('required', x.killers.length + ' to fix'), total > 3 ? h('span', { class: 'small muted', text: 'of ' + total }) : null)),
+        h('span', { class: 'row' }, open ? chip('required', open + ' to fix') : chip('clear', 'Sent'), total > 3 ? h('span', { class: 'small muted', text: 'of ' + total }) : null)),
         h('div', { class: 'killer' }, ...x.killers.map((k, i) => killerRow(r, enc, x, k, i))));
     } else if (x.checked) wrap.append(h('div', { class: 'row' }, chip('clear', 'Nothing outstanding'), h('span', { class: 'small muted', text: 'File runs the same checks server-side' })));
     else wrap.append(h('p', { class: 'small muted', text: 'Checks run when you leave a field' }));
@@ -462,6 +470,8 @@
     return area;
   }
   function killerRow(r, enc, x, k, i) {
+    // Sent already: the row is the stamp the send lands the keyboard on, not a second Send (Enter-twice rule).
+    if (isSent(k, enc)) return h('div', { class: 'row', id: 'enc-sent', tabindex: '-1', 'aria-label': 'Sent to Exams to sign' }, chip('clear', 'Sent to Exams to sign'), h('span', { class: 'small muted grow', text: k.sent ? k.verb : 'Wait for the dentist to file' }), btn(k.sent && k.control ? k.control : 'Back to Chairs', { kind: 'quiet', testid: 'enc.killer.' + i + '.fix', onClick: () => Proto.router.go(r.persona, 'chairs') }));
     const node = refusal({ code: k.code, verb: k.verb, control: k.control, why: KILLER_WHY[k.fix] || 'The same list runs server-side at File.', severity: k.fix === 'contradiction' ? 'stop' : 'required', onControl: () => fixKiller(r, enc, x, k) });
     const c = node.querySelector('[data-testid="refusal.control"]'); if (c) c.setAttribute('data-testid', 'enc.killer.' + i + '.fix');
     return node;
@@ -493,17 +503,20 @@
       x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3); rerender(r);
       focusFirst('enc.killer.0.fix', 'enc.file'); Proto.router.announce('Note now says #' + chartTooth + ', matching the chart'); return;
     }
-    if (k.fix === 'assessment') { const ta = document.getElementById('note-assessment'); if (ta) { reveal(ta); ta.focus({ preventScroll: true }); } return; }
+    if (k.fix === 'assessment') {
+      const ta = document.getElementById('note-assessment');
+      // A read-only field takes no keys: for a seat that does not write the assessment the way through is the Send row.
+      if (ta && ta.readOnly) { const v = document.querySelector('#enc-gate .refusal[data-code="licence_scope"] .verb'); if (v) { v.setAttribute('tabindex', '-1'); v.focus({ preventScroll: true }); } Proto.router.announce('Only a dentist writes the assessment — send to Exams to sign'); return; }
+      if (ta) { reveal(ta); ta.focus({ preventScroll: true }); } return;
+    }
     if (k.fix === 'licence') {
       // A repeated press does not write a second request (A4): the chair is already in the queue.
-      const a = apptOf(enc);
-      const already = a && (a.status === 'ready_for_exam' || S().appointmentEvents.some((e) => e.appointmentId === a.id && e.kind === 'encounter.exam_requested'));
-      if (already) {
+      if (sentToExams(enc)) {
         x.sendGate = { code: 'already_decided', verb: 'Wait for the dentist to open it', control: 'Back to Chairs', severity: 'info', onControl: () => Proto.router.go(r.persona, 'chairs'), why: 'This chair is already in the dentist\'s queue with its place in line. Asking twice does not move it up; it would show as two chairs waiting for the same note.' };
         rerender(r); focusFirst('refusal.control'); return;
       }
       const res = Proto.store.readyForExam(enc.appointmentId);
-      if (res.ok) { rerender(r); focusFirst('enc.killer.0.fix', 'enc.file'); Proto.router.announce('Sent to Exams to sign'); return; }
+      if (res.ok) { x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3); rerender(r); const stamp = document.getElementById('enc-sent'); if (stamp) stamp.focus({ preventScroll: true }); else focusFirst('enc.file'); Proto.router.announce('Sent to Exams to sign'); return; }
       x.sendGate = res; rerender(r); focusGateVerb();   // the store's verdict renders; a silent refusal is a dead control
       return;
     }
