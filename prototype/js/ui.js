@@ -72,9 +72,9 @@
       Proto.events.refusal(v.code, v.verb, v.control);
       Proto.router.announce(v.verb);                    // one verb line: the control label is not read as a second sentence
     }
-    // Two gates can stand on one page (a dialog over a screen). The contract selectors name the live one,
-    // so any gate already on the page gives them up rather than shadowing it.
-    for (const prior of document.querySelectorAll('[data-testid^="refusal."]')) prior.setAttribute('data-testid', prior.getAttribute('data-testid').replace('refusal.', 'refusal.prior.'));
+    // Two gates can stand on one page. Each keeps its own contract ids: renaming every earlier gate to
+    // refusal.prior.* left the older of two card gates with no refusal.control. Only a dialog shadows the gates
+    // beneath it, and it gives them back when it closes (see dialog()).
     const el = h('div', { class: 'refusal ' + sev, role: 'group', 'aria-labelledby': id, dataset: { code: v.code, severity: sev } },
       h('span', { class: 'glyph', 'aria-hidden': 'true', text: GLYPH[sev] || '▲' }),   // severity three ways: glyph, word, fill
       h('span', { class: 'sevword sr-only', text: sev === 'stop' ? 'Stop' : sev === 'required' ? 'Required' : sev === 'review' ? 'Review' : sev === 'clear' ? 'Clear' : 'Note' }),
@@ -129,14 +129,37 @@
   const typeWord = (t) => (TYPE[t] || ['info', String(t || '').replace(/^./, (ch) => ch.toUpperCase())])[1];
 
   /* Dialog: focus trapped, Escape closes, returns close() */
+  const dialogRoot = () => document.getElementById('dialogs');
+  // The top dialog owns the keyboard: a pad's key handler asks before it takes a key.
+  const topDialog = () => { const r = dialogRoot(); return r && r.lastElementChild ? r.lastElementChild.querySelector('.dialog') : null; };
+  // A closing dialog puts the keyboard on the element that opened it — or, when a repaint replaced that element,
+  // on its replacement (same test id), the dialog beneath, the heading or the first control. Never body.
+  function landFocus(prev, prevId) {
+    const c = document.getElementById('canvas');
+    const top = topDialog();
+    let el = top ? top.querySelector('button:not([disabled]), input, [tabindex]') : null;
+    if (!el && prev && prev !== document.body && prev.isConnected) el = prev;
+    if (!el && prevId) el = document.querySelector('[data-testid="' + prevId + '"]');
+    if (!el && c) { el = c.querySelector('h1') || c.querySelector('button:not([disabled]), input, [tabindex]') || c; if (el.tagName === 'H1' && el.getAttribute('tabindex') == null) el.setAttribute('tabindex', '-1'); }
+    if (el && el.focus) el.focus();
+  }
+  // A gate under an open dialog cannot be pressed, so the contract selectors must resolve to the dialog's own gate:
+  // the gates beneath give up their ids (refusal.* → refusal.prior.*) while a dialog stands and take them back when
+  // the last one closes. Gates on one layer never shadow each other.
+  function shadowGates(on) {
+    const from = on ? 'refusal.' : 'refusal.prior.', to = on ? 'refusal.prior.' : 'refusal.';
+    for (const el of document.querySelectorAll('[data-testid^="' + from + '"]')) { const id = el.getAttribute('data-testid'); if (on ? !id.startsWith('refusal.prior.') && !el.closest('#dialogs') : true) el.setAttribute('data-testid', to + id.slice(from.length)); }
+  }
   function dialog(content, opts) {
     opts = opts || {};
-    const root = document.getElementById('dialogs');
+    const root = dialogRoot();
     const box = h('div', { class: 'dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': opts.label || 'Dialog' }, content);
     const overlay = h('div', { class: 'overlay' }, box);
-    const prev = document.activeElement;
+    const prev = document.activeElement; const prevId = prev && prev.getAttribute ? prev.getAttribute('data-testid') : null;
     let closed = false;
-    function close() { if (closed) return; closed = true; overlay.remove(); if (prev && prev.focus) prev.focus(); document.removeEventListener('keydown', onKey, true); window.removeEventListener('hashchange', close); if (opts.onClose) opts.onClose(); }
+    function close() { if (closed) return; closed = true; overlay.remove(); if (!root.children.length) shadowGates(false); document.removeEventListener('keydown', onKey, true); window.removeEventListener('hashchange', close); if (opts.onClose) opts.onClose(); landFocus(prev, prevId); }
+    if (!root.children.length) shadowGates(true);
+    overlay._close = close;                        // closeDialogs() reaches every open dialog through its overlay
     window.addEventListener('hashchange', close); // a dialog never outlives the route it opened on
     function onKey(ev) {
       if (ev.key === 'Escape') { ev.stopPropagation(); close(); }
@@ -157,6 +180,8 @@
     if (f) f.focus();
     return close;
   }
+  // A rebuilt store leaves no dialog standing over it: each closes through its own close(), so onClose runs.
+  function closeDialogs() { const r = dialogRoot(); if (r) for (const o of [...r.children]) if (o._close) o._close(); }
 
   function section(title, ...children) {
     return h('section', { class: 'card stack', 'aria-label': title }, h('h2', { text: title }), ...children);
@@ -166,5 +191,5 @@
     return h('div', { class: 'page-head' }, h('div', null, h('h1', { text: title }), sub ? h('p', { class: 'sub', text: sub }) : null), controls.length ? h('div', { class: 'btnrow' }, ...controls) : null);
   }
 
-  Proto.ui = { h, btn, chip, refusal, resetGates, money, shortDate, longDate, dateTime, time, initials, displayName, dialog, section, pageHead, GLYPH, SUPPORT, support, STATUS, TYPE, ELIG, typeWord };
+  Proto.ui = { h, btn, chip, refusal, resetGates, money, shortDate, longDate, dateTime, time, initials, displayName, dialog, topDialog, closeDialogs, section, pageHead, GLYPH, SUPPORT, support, STATUS, TYPE, ELIG, typeWord };
 })();

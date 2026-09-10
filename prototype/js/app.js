@@ -17,15 +17,20 @@
     if (MOTION.includes(opts.motion)) { P.motion = opts.motion; if (opts.motion === 'reduced') root.setAttribute('data-motion', 'reduced'); else root.removeAttribute('data-motion'); }
     if (Proto.router.PERSONAS.includes(opts.persona)) P.persona = opts.persona;
     if (opts.afterHours != null) Proto.store.get().clock.afterHours = !!opts.afterHours && opts.afterHours !== '0';
+    // A scripted set() paints what the same flag on the hash paints: the Andon and the top bar at once, and the
+    // canvas for the flags its gates read. Inside render() the render loop itself paints.
+    if (P.ready && !rendering) { Proto.screens.shell.render(Proto.router.current()); if (opts.outage != null || opts.privacy != null || opts.afterHours != null) repaintCanvas(); }
   };
   // reset() rebuilds the store, so the flags it carried (outage, after hours) have to be put back or the Andon
   // says the server is unreachable while every posting verb happily writes; and the shell repaints with the
-  // canvas, or the Andon keeps announcing an approval the rebuilt store no longer holds.
+  // canvas, or the Andon keeps announcing an approval the rebuilt store no longer holds. A dialog open over the
+  // old store closes with it (through its own close, so its listeners leave) and the keyboard lands on the canvas.
   P.reset = function (seed) {
     const afterHours = Proto.store.get().clock.afterHours;
     Proto.store.reset(seed); Proto.store.get().outage = P.outage; Proto.store.get().clock.afterHours = afterHours;
     Proto.events.reset(); if (Proto.ui.resetGates) Proto.ui.resetGates();
-    Proto.screens.shell.render(Proto.router.current()); Proto.router.render();
+    if (Proto.ui.closeDialogs) Proto.ui.closeDialogs();
+    Proto.screens.shell.render(Proto.router.current()); repaintCanvas();
   };
   P.state = function () { return JSON.parse(JSON.stringify(Proto.store.get())); };
   P.events = function () { return Proto.events.all(); };
@@ -38,33 +43,32 @@
     if (Object.keys(o).length) P.set(o);
   }
 
-  let lastRoute = null;
+  let lastRoute = null; let rendering = false;
+  const focusHead = (c) => { const head = c.querySelector('h1'); if (head) { if (head.getAttribute('tabindex') == null) head.setAttribute('tabindex', '-1'); head.focus({ preventScroll: true }); } return !!head; };
+  // Re-rendering the same path replaces the canvas, so the keyboard has to be put back on it.
+  function repaintCanvas() {
+    Proto.router.render();
+    const c = document.getElementById('canvas');
+    if (document.activeElement === document.body || !c.contains(document.activeElement)) focusHead(c);
+  }
   function render() {
     const r = Proto.router.current();
     const changed = lastRoute !== r.raw.split('?')[0];
-    applyQuery(r.query);
+    rendering = true;
+    try { applyQuery(r.query); } finally { rendering = false; }
     if (r.persona) P.persona = r.persona;
     if (changed && Proto.ui.resetGates) Proto.ui.resetGates();   // a new screen starts with no gate already announced
     Proto.screens.shell.render(r);
-    Proto.router.render();
     if (changed) {
+      Proto.router.render();
       // A new screen opens at its own top with its heading in view, and the keyboard lands on it.
       const c = document.getElementById('canvas');
       c.scrollTop = 0; window.scrollTo(0, 0);
       // Focus the heading, never the first control: stamping tabindex="-1" on whatever came first took a real
       // button (the Daily Close tile) out of the Tab order for the rest of the session.
-      const head = c.querySelector('h1');
-      if (head) { if (head.getAttribute('tabindex') == null) head.setAttribute('tabindex', '-1'); head.focus({ preventScroll: true }); }
-      else c.focus({ preventScroll: true });
+      if (!focusHead(c)) c.focus({ preventScroll: true });
       lastRoute = r.raw.split('?')[0];
-    } else {
-      // Re-rendering the same path still replaces the canvas, so the keyboard has to be put back on it.
-      const c = document.getElementById('canvas');
-      if (document.activeElement === document.body || !c.contains(document.activeElement)) {
-        const head = c.querySelector('h1');
-        if (head) { if (head.getAttribute('tabindex') == null) head.setAttribute('tabindex', '-1'); head.focus({ preventScroll: true }); }
-      }
-    }
+    } else repaintCanvas();
     P.ready = true;
   }
   window.addEventListener('hashchange', render);

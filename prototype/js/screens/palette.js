@@ -73,6 +73,7 @@
   /* ---- open / close ---- */
   function open(r) {
     if (closeDialog) close();
+    if (Proto.ui.topDialog()) return;   // one dialog at a time: a pad already open keeps the keyboard
     st = { r, q: '', rows: [], sel: -1, step: 'search', patient: null, row: null, dob: '', dobTouched: false, refused: false };
     const body = h('div', { class: 'stack pal', onKeydown: onKey });
     st.body = body;
