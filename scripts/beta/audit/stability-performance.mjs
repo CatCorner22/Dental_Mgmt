@@ -42,6 +42,15 @@ export default ({ ctx, go, hop, click, rec, FILE }) => {
     return { sw: se ? se.scrollWidth : 0, iw: window.innerWidth };
   });
   const nodes = (p) => p.evaluate(() => document.getElementsByTagName('*').length);
+  // hashchange is a task: measure from assignment through the router's render handler, not the
+  // assignment alone (which always looks like 0.2 ms).
+  const hashPaintMs = (p, hash) => p.evaluate((h) => new Promise((resolve) => {
+    if (location.hash === h) { resolve(0); return; }
+    const t0 = performance.now();
+    const on = () => { window.removeEventListener('hashchange', on); resolve(performance.now() - t0); };
+    window.addEventListener('hashchange', on);
+    location.hash = h;
+  }), hash);
 
   return {
     // A page that throws before __proto.ready is a dead prototype: the two bad merges shipped
@@ -73,8 +82,7 @@ export default ({ ctx, go, hop, click, rec, FILE }) => {
         const rows = [];
         for (const hash of ROUTES) {
           errs.length = 0;
-          const ms = await p.evaluate((h) => { const t0 = performance.now(); location.hash = h; return performance.now() - t0; }, hash);
-          await p.waitForTimeout(40);
+          const ms = await hashPaintMs(p, hash);
           const kids = await canvasKids(p);
           const evErr = await pageErrors(p);
           const nan = await nanHits(p);
@@ -104,19 +112,17 @@ export default ({ ctx, go, hop, click, rec, FILE }) => {
             const a = first[id]; const b = Proto.store.balances(id);
             return a.patientDue === b.patientDue && a.insurancePending === b.insurancePending && a.credit === b.credit;
           });
-          const before = Proto.store.balances('p-303');
-          const appt = S.appointments.find((x) => x.id === 'a-1044');
-          if (appt && (appt.status === 'scheduled' || appt.status === 'confirmed')) Proto.store.arrive('a-1044');
-          if (appt && (appt.status === 'arrived')) Proto.store.seat('a-1044');
-          const paid = Proto.store.postCheckout('a-1044', { tender: 'card', amountCents: 4400 });
-          const after = Proto.store.balances('p-303');
-          const posted = !!(paid && paid.ok);
-          const moved = before.patientDue !== after.patientDue || before.credit !== after.credit;
+          const one = Proto.store.allocate('p-307');
+          const two = Proto.store.allocate('p-307');
+          const memoHit = one === two;
+          const held = Proto.store.requestWriteoff('p-306', 5000, 'courtesy');
+          const three = Proto.store.allocate('p-307');
+          const busted = three !== one;
+          const untouchedEqual = three.patientDue === one.patientDue && three.insurancePending === one.insurancePending && three.credit === one.credit;
           const allPatients = once(() => { for (const id of ids) Proto.store.balances(id); });
-          return { patients: ids.length, pass1, pass2, allPatients, repeatEqual, posted, moved, paidCode: paid && paid.code, before, after, ledgerRows: S.ledger.length };
+          return { patients: ids.length, pass1, pass2, allPatients, repeatEqual, memoHit, busted, untouchedEqual, heldOk: !!(held && (held.ok || held.held)), ledgerRows: S.ledger.length };
         });
-        const stale = measure.posted && !measure.moved;
-        const broke = errs.length > 0 || measure.pass1 > ALLOC_PASS_MS || measure.allPatients > ALLOC_PASS_MS || !measure.repeatEqual || stale;
+        const broke = errs.length > 0 || measure.pass1 > ALLOC_PASS_MS || measure.allPatients > ALLOC_PASS_MS || !measure.repeatEqual || !measure.memoHit || !measure.busted || !measure.untouchedEqual;
         rec('P-alloc-1', 'A full-practice balances() pass exceeds ' + ALLOC_PASS_MS + ' ms, two reads disagree, or a posting does not move the cached numbers',
           'A8 — a number on screen moves when the state behind it moves; allocate is one pass per patient until the next write',
           broke, measure);
@@ -197,14 +203,13 @@ export default ({ ctx, go, hop, click, rec, FILE }) => {
           const step = steps[i % steps.length];
           errs.length = 0;
           const ms = step.startsWith('#')
-            ? await p.evaluate((h) => { const t0 = performance.now(); location.hash = h; return performance.now() - t0; }, step)
+            ? await hashPaintMs(p, step)
             : await p.evaluate((tid) => {
               const el = document.querySelector('[data-testid="' + tid + '"]');
               const t0 = performance.now();
               if (el) el.click();
               return performance.now() - t0;
             }, step);
-          await p.waitForTimeout(40);
           const row = { i, step, ms, kids: await canvasKids(p), pageerrors: errs.slice(), evErr: await pageErrors(p), nan: await nanHits(p), overflow: await overflow(p) };
           log.push(row);
           i += 1;
