@@ -168,8 +168,9 @@ export default ({ ctx, go, hop, press, click, txt, state, rec }) => {
       const { c, p } = await ctx(b);
       try {
         await go(p, '#/frontdesk/checkout/a-1047');
-        await click(p, 'checkout.tender.card'); await click(p, 'checkout.writeoff.add');
-        await p.fill(tid('checkout.writeoff.amount'), '410'); await click(p, 'checkout.writeoff.reason.courtesy');
+        await click(p, 'checkout.tender.card'); await p.fill(tid('checkout.amount'), '100'); await click(p, 'checkout.writeoff.add');
+        // $300 stays under the write-off cap (patient portion less the $100 collected) and above the dual-release threshold.
+        await p.fill(tid('checkout.writeoff.amount'), '300'); await click(p, 'checkout.writeoff.reason.courtesy');
         await click(p, 'checkout.post'); await click(p, 'refusal.control');
         await set(p, { persona: 'owner' }); await hop(p, '#/owner/board'); await hop(p, '#/phone/approvals');
         await click(p, 'phone.request.ar-1.decline'); await p.fill(tid('phone.request.ar-1.reason'), 'appeal first'); await p.waitForTimeout(60);
@@ -177,7 +178,7 @@ export default ({ ctx, go, hop, press, click, txt, state, rec }) => {
         await set(p, { persona: 'frontdesk' }); await hop(p, '#/frontdesk/checkout/a-1047');
         const a = (await state(p)).approvals[0] || null;
         const text = await canvasText(p);
-        rec('A-storm-board-9', 'When the approver sends the $410 write-off back with "appeal first", the requester\'s Checkout shows the decline chip and never the reason', 'docs/13 feature 24 — Send back carries a one-line reason to the requester (checkout.js postRow)',
+        rec('A-storm-board-9', 'When the approver sends the $300 write-off back with "appeal first", the requester\'s Checkout shows the decline chip and never the reason', 'docs/13 feature 24 — Send back carries a one-line reason to the requester (checkout.js postRow)',
           !!a && a.status === 'declined' && a.decisionReason === 'appeal first' && /declined by/.test(text) && !text.includes('appeal first'), { approval: a && { id: a.id, status: a.status, decisionReason: a.decisionReason }, declinedShown: /declined by/.test(text), reasonShown: text.includes('appeal first') });
       } finally { await c.close(); }
     },
