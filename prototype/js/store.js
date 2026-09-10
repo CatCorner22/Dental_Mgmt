@@ -226,13 +226,22 @@
     const a = appt(aid); if (!a) return notFound('appointment');
     const off = offline('Wait for the server — the Board is read-only'); if (off) return off;
     const np = noPass('Issue a day pass before arriving'); if (np) return np;
+    if (a.status === 'arrived') return refuse('already_decided', 'Nothing to do — already arrived', 'Open the chart', 'This visit is already arrived. Doing it again would write a second event for a row that did not change.');
+    if (!['scheduled', 'confirmed'].includes(a.status)) return refuse('wrong_status', 'Open the visit — it is ' + a.status.replace(/_/g, ' '), 'Open the visit', 'A visit moves forward one step at a time: scheduled or confirmed comes before arrived. This one is ' + a.status.replace(/_/g, ' ') + ', so nothing was written.');
     a.status = 'arrived'; a.arrivedAt = S.clock.time; touch('appointments', aid);
     write('appointmentEvents', { id: id('ae'), appointmentId: aid, kind: 'appointment.arrived', actor: currentUser().name });
     if (a.eligibility === 'amber') a.eligibilityRerun = 'running';
     retireChip('arrive');
     return { ok: true };
   }
-  function seat(aid) { const a = appt(aid); if (!a) return notFound('appointment'); const off = offline('Wait for the server — the Board is read-only'); if (off) return off; const np = noPass('Issue a day pass before seating'); if (np) return np; a.status = 'seated'; touch('appointments', aid); write('appointmentEvents', { id: id('ae'), appointmentId: aid, kind: 'appointment.seated', actor: currentUser().name }); retireChip('seat'); return { ok: true }; }
+  function seat(aid) {
+    const a = appt(aid); if (!a) return notFound('appointment');
+    const off = offline('Wait for the server — the Board is read-only'); if (off) return off;
+    const np = noPass('Issue a day pass before seating'); if (np) return np;
+    if (a.status === 'seated') return refuse('already_decided', 'Nothing to do — already seated', 'Open the chart', 'This visit is already seated. Doing it again would write a second event for a row that did not change.');
+    if (a.status !== 'arrived') return refuse('wrong_status', 'Open the visit — it is ' + a.status.replace(/_/g, ' '), 'Open the visit', 'A visit moves forward one step at a time: arrived comes before seated. This one is ' + a.status.replace(/_/g, ' ') + ', so nothing was written.');
+    a.status = 'seated'; touch('appointments', aid); write('appointmentEvents', { id: id('ae'), appointmentId: aid, kind: 'appointment.seated', actor: currentUser().name }); retireChip('seat'); return { ok: true };
+  }
   function reverify(aid) { const a = appt(aid); if (!a) return notFound('appointment'); const off = offline('Wait for the server — eligibility cannot re-run'); if (off) return off; const np = noPass('Issue a day pass before re-verifying'); if (np) return np; a.eligibility = 'green'; a.eligibilityNote = '270/271 re-run at ' + S.clock.time + ': active, deductible met'; touch('appointments', aid); write('eligibilityChecks', { id: id('el'), appointmentId: aid, result: 'active' }); return { ok: true }; }
   function pingChair(aid) {
     const a = appt(aid); if (!a) return notFound('appointment');
@@ -242,8 +251,16 @@
     // so pinging a second chair in between let the same chair be pinged again inside the window.
     const mine = S.messages.filter((m) => m.appointmentId === aid && m.kind === 'board.ping_chair');
     const last = mine[mine.length - 1];
-    if (last && last.sameQuarter) return refuse('ping_rate', 'Wait 15 minutes — chair already pinged', 'Open the chart', 'One ping per encounter per 15 minutes keeps the operatory usable. Open the chart to see what the writer has so far.');
-    write('messages', { id: id('msg'), appointmentId: aid, kind: 'board.ping_chair', to: 'chair ' + a.op, sameQuarter: true });
+    if (last && last.at) {
+      const sameDay = last.date === S.tenant.today;
+      const [ah, am] = String(last.at).split(':').map(Number);
+      const [bh, bm] = String(S.clock.time).split(':').map(Number);
+      const age = (bh * 60 + bm) - (ah * 60 + am);
+      if (sameDay && Number.isFinite(age) && age >= 0 && age < 15) return refuse('ping_rate', 'Wait 15 minutes — chair already pinged', 'Open the chart', 'One ping per encounter per 15 minutes keeps the operatory usable. Open the chart to see what the writer has so far.');
+    } else if (last && last.sameQuarter) {
+      return refuse('ping_rate', 'Wait 15 minutes — chair already pinged', 'Open the chart', 'One ping per encounter per 15 minutes keeps the operatory usable. Open the chart to see what the writer has so far.');
+    }
+    write('messages', { id: id('msg'), appointmentId: aid, kind: 'board.ping_chair', to: 'chair ' + a.op, at: S.clock.time, date: S.tenant.today });
     return { ok: true };
   }
 
@@ -282,8 +299,16 @@
     // The window posts money, so the seat that runs it carries post_payment: a hygienist's PIN used to release
     // two charges and a $168 payment under a seat that carries nothing.
     const ent = needs(u, ['post_payment'], 'Ask a seat that posts payments', 'Switch author', u.short + ' does not carry post_payment, and Checkout releases charges and takes money. The front desk, the biller, Dana or Dr. Reagan post here; the author switch names who.'); if (ent) return ent;
+    if (['scheduled', 'confirmed'].includes(a.status)) return refuse('wrong_status', 'Arrive the visit first', 'Open the Board', 'Checkout is the last step of a visit that has already arrived. This one is still ' + a.status.replace(/_/g, ' ') + ', so nothing was written.');
+    if (/^checked_out/.test(a.status)) return refuse('already_decided', 'Correct this visit from the ledger', 'Open the ledger', 'This visit is already checked out. One typed decision per visit; a correction is a reversal from the ledger.');
+    if (form.decision && !['collect', 'send_statement', 'payment_plan', 'zero_due'].includes(form.decision)) return refuse('invalid_input', 'Choose how to close the window', 'Collect today', 'Collect, send a statement, set a plan, or nothing due today are the four decisions the window can type. Nothing was written.');
     if (form.decision !== 'zero_due' && est.patientCents === 0) return refuse('zero_collect_refused', 'Choose Nothing due today', 'Nothing due today', 'Nothing is due, so a payment, a statement or a plan would post money for nothing; the typed decision keeps the window honest.');
     if (form.decision === 'collect' && !form.tender) return refuse('tender_required', 'Choose a tender', 'Choose card', 'The tender is what the day sheet reconciles against the bank, so a payment cannot post without one.');
+    if (form.decision === 'collect' && form.tender && !['card', 'cash', 'check'].includes(form.tender)) return refuse('invalid_input', 'Choose a tender', 'Choose card', 'Card, cash or check are the tenders the day sheet can reconcile. A value outside that list cannot post.');
+    if (form.decision === 'collect' && form.amountCents != null && form.amountCents !== '') {
+      const typed = Number(form.amountCents);
+      if (!Number.isFinite(typed) || typed <= 0 || !Number.isInteger(typed)) return refuse('amount_required', 'Type a dollar amount to collect', 'Go to amount', 'The amount has to be a positive number of cents. A value the ledger cannot store would post NaN against the account.');
+    }
     if (S.collectionDecisions.some((d) => d.encounterId === a.encounterId)) return refuse('already_decided', 'Correct this visit from the ledger', 'Open the ledger', 'One typed decision per visit. To change what was collected, post a correction from the ledger: a reversal and a repost, both linked to the original.');
     const encId = a.encounterId; const enc = encounter(encId);
     const procs = S.procedures.filter((p) => p.encounterId === encId);
@@ -292,7 +317,7 @@
     // biller presses Request approval, not here: writing it at Post created an approval nobody asked for
     // and left the control itself a no-op. After hours nothing is requested either: the hold lifts at 7:30.
     if (form.writeoffCents && form.writeoffCents > 0) {
-      const cap = writeoffCap(form.writeoffCents, est.patientCents - amt); if (cap) return cap;
+      const cap = writeoffCap(form.writeoffCents, Math.max(0, Math.min(est.patientCents - amt, balances(a.patientId).patientDue))); if (cap) return cap;
       const gate = evaluateRelease('write_off', form.writeoffCents, u);
       if (gate.code === 'after_hours') return refuse(gate.code, gate.verb, 'Remove the write-off', gate.why);
       // The request names the PIN's owner, not the persona at the desk: Dr. Reagan's PIN used to raise a request in Priya's name and then approve it as his own.
@@ -318,7 +343,7 @@
     }
     if (form.decision === 'send_statement') write('statementsDue', { id: id('sd'), patientId: a.patientId, amountCents: portion, reason: 'window_deferred', createdBy: u.name, created: S.tenant.today });
     if (form.decision === 'payment_plan') write('paymentPlans', { id: id('pp'), patientId: a.patientId, amountCents: portion, cadence: form.cadence || 'monthly', eligibleBucket: 'patient_ar', createdBy: u.name });
-    for (const pid of form.selfPay || []) { const p = S.procedures.find((x) => x.id === pid); if (p) { p.selfPayRestricted = true; p.restrictedAt = S.tenant.today; write('domainEvents', { id: id('de'), type: 'procedure.self_pay_restricted', procedureId: pid }); } }
+    for (const pid of form.selfPay || []) { const p = S.procedures.find((x) => x.id === pid && x.encounterId === encId); if (p) { p.selfPayRestricted = true; p.restrictedAt = S.tenant.today; write('domainEvents', { id: id('de'), type: 'procedure.self_pay_restricted', procedureId: pid }); } }
     if (form.writeoffCents > 0) ledgerRow({ id: id('le'), kind: 'write_off', patientId: a.patientId, amountCents: -form.writeoffCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: a.locationId, reason: form.writeoffReason || 'courtesy', approvalRequestId: form.approvalRequestId || null });
     write('collectionDecisions', { id: 'cd-' + nextId.cd++, encounterId: encId, decision: form.decision, patientPortionCents: portion, decidedBy: u.name, decidedAt: S.tenant.today + ' ' + S.clock.time, statementDueId: null, paymentPlanId: null });
     a.status = noteFiled ? 'checked_out' : 'checked_out_unfiled'; touch('appointments', aid);
@@ -430,7 +455,7 @@
     const skipped = entries.filter(([, v]) => v && v.skipped).length;
     const bleeding = entries.filter(([, v]) => v && v.bleed).length;
     const deepest = Math.max(0, ...entries.map(([, v]) => (v && v.depth) || 0));
-    if (skipped > 0 && !(extras && extras.licence)) return refuse('omission_licence', 'Name why ' + skipped + (skipped === 1 ? ' site was' : ' sites were') + ' not probed', 'Choose a reason', 'A blank is never forced into a fabrication: pick implant, crown margin, patient could not tolerate, or third molar absent.');
+    if (skipped > 0 && !(extras && extras.licence && Object.prototype.hasOwnProperty.call(LICENCE_WORDS, extras.licence))) return refuse('omission_licence', 'Name why ' + skipped + (skipped === 1 ? ' site was' : ' sites were') + ' not probed', 'Choose a reason', 'A blank is never forced into a fabrication: pick implant, crown margin, patient could not tolerate, or third molar absent.');
     const mode = (extras && extras.mode) || 'full';
     const codes = entries.filter(([, v]) => v && v.code != null).map(([, v]) => v.code);
     const prior = S.perioExams.filter((e) => e.encounterId === encId).pop();
@@ -480,7 +505,7 @@
   const WHOLE_PATIENT = ['d0120', 'd0140', 'd0274', 'd1110', 'd9230', 'd9243'];
   const wholePatient = (cdtCode) => WHOLE_PATIENT.includes(cdtCode);
   const liveEvents = (encId) => S.chartEvents.filter((c) => c.encounterId === encId && !c.reversed && c.kind !== 'reversal');
-  const sameSurfaces = (a, b) => (a || []).slice().sort().join('') === (b || []).slice().sort().join('');
+  const sameSurfaces = (a, b) => (Array.isArray(a) ? a : []).slice().sort().join('') === (Array.isArray(b) ? b : []).slice().sort().join('');
   function chartPaint(encId, tooth, surfaces, cdtCode, temporality) {
     const enc = encounter(encId); if (!enc) return notFound('encounter');
     const off = offline('Wait for the server — charting is paused'); if (off) return off;
@@ -488,7 +513,13 @@
     if (!S.cdt[cdtCode]) return refuse('licence_scope', 'Choose a procedure from the list', 'Open the procedure list', 'Only codes on the practice fee schedule can be charted; an unknown code would write a procedure with no fee and no claim line.');
     const fee = (S.cdt[cdtCode] || [null, 0])[1];
     if (wholePatient(cdtCode)) { tooth = null; surfaces = []; }
+    else {
+      const t = Number(tooth);
+      if (!Number.isInteger(t) || t < 1 || t > 32) return refuse('tooth_required', 'Choose a tooth on the chart', 'Go to the odontogram', 'A procedure that belongs to a tooth has to name one of the 32. A number outside that range would write a chart event nobody can find on the odontogram.');
+      if (!Array.isArray(surfaces) || surfaces.some((s) => typeof s !== 'string' || !/^[modbl]$/i.test(s))) return refuse('invalid_input', 'Choose surfaces from the chart', 'Go to the odontogram', 'Surfaces are the letters M, O, D, B and L from the odontogram. A string or an empty value would throw when the note tried to print them.');
+    }
     temporality = temporality || 'today';
+    if (!['today', 'planned', 'existing'].includes(temporality)) return refuse('invalid_input', 'Choose today, planned or existing', 'Go to temporality', 'Every paint is today, planned or existing. A value outside that list would write a procedure the visit cannot bill.');
     // A duplicate is the same code, tooth and surfaces already standing on this visit: a live paint (the reversed
     // ones no longer count) or a procedure the visit carried before the chart was opened. The verb names no
     // procedure: interpolating it ran the line to ten words on a two-surface composite.
@@ -519,7 +550,7 @@
   }
   /* The note's procedure lines are the live paints, one line each, rebuilt from the chart events after every paint and
      every undo: the note used to keep its own list and Undo dropped the last line whatever paint it reversed. */
-  const noteLine = (ce) => (S.cdt[ce.cdt] || [ce.cdt])[0] + (ce.tooth ? ' #' + ce.tooth : '') + (ce.surfaces && ce.surfaces.length ? ' ' + ce.surfaces.join('') : '') + (ce.temporality === 'existing' ? ' (existing, placed elsewhere)' : ce.temporality === 'planned' ? ' (planned)' : '');
+  const noteLine = (ce) => (S.cdt[ce.cdt] || [ce.cdt])[0] + (ce.tooth ? ' #' + ce.tooth : '') + (Array.isArray(ce.surfaces) && ce.surfaces.length ? ' ' + ce.surfaces.join('') : '') + (ce.temporality === 'existing' ? ' (existing, placed elsewhere)' : ce.temporality === 'planned' ? ' (planned)' : '');
   function noteLines(encId) {
     const n = (S.notes[encId] = S.notes[encId] || {});
     n.procedures = liveEvents(encId).map(noteLine);
@@ -693,7 +724,8 @@
   function settleBatch(batchId) { const b = S.eraBatches.find((x) => x.id === batchId); if (b && b.status === 'deltas' && !S.eraLines.some((l) => l.batchId === batchId && OPEN_LINE.includes(l.status))) { b.status = 'posted'; touch('eraBatches', b.id); } }
   function eraConfirm(lineId, extras) {
     const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — postings are paused'); if (off) return off;
-    if (l.status === 'posted') return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'This line is posted. A correction is a reversal and a repost, both linked to the original.');
+    if (l.status === 'posted' || l.status === 'disputed') return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'This line is already decided. A correction is a reversal and a repost, both linked to the original.');
+    if (l.status === 'denied') return refuse('already_decided', 'Appeal or attach — this line paid nothing', 'Open the denial', 'A denied line paid $0. Confirming it would post a $0 insurance payment and a write-off of the whole expected amount; the denial worklist is where that line is worked.');
     const pin = requirePin(extras); if (!pin.ok) return pin; const ent = bills(pin.user); if (ent) return ent;
     // A contractual write-off is still a write-off: the after-hours hold applies to it as to any other.
     const gate = evaluateRelease('write_off', l.expectedCents - l.paidCents, pin.user, { contractual: true });
