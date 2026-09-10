@@ -20,10 +20,11 @@
   // Clearing someone else's variance belongs to the seats that reconcile the bank or close the books;
   // offering the control to any other seat is offering a refusal.
   const CLEAR_ENTS = ['bank_reconcile', 'close_day'];
+  const SUPPORT = 'Call support: 615-555-0100, 7 am to 6 pm';
   const WROTE = { ledger: 'appended a ledger row', approvals: 'created an approval request', approvalsLog: 'decided an approval request', dayCloses: 'closed a business day', deposits: 'prepared a deposit slip', reconciliationMatches: 'matched or cleared a variance', controlDecisions: 'reviewed a control decision', appointmentEvents: 'moved an appointment', eligibilityChecks: 're-ran eligibility', messages: 'pinged a chair', perioExams: 'saved a perio exam', tags: 'tagged a tooth for the dentist', chartEvents: 'painted the chart', planItems: 'added a plan item', filedNotes: 'filed a note', claims: 'changed a claim', claimEvents: 'recorded a claim event', appealPackets: 'built an appeal packet', disclosures: 'disclosed records (logged)', statementsDue: 'queued a statement', collectionDecisions: 'recorded a collection decision', allocations: 'allocated a payment', dayPasses: 'issued a day pass', userEntitlements: 'changed entitlements', firstRunState: 'retired a first-shift chip', sessions: 'switched author with a PIN' };
 
   let st = null, lastStore = null, lastRoute = null, keysOn = false;
-  const fresh = () => ({ tileOpen: false, locOpen: null, invOpen: {}, changedOpen: false, lateOpen: false, varRefusal: {}, closeStep: 'idle', closeRefusal: null, dayClose: null, decisionResult: {}, riskDone: {}, logOpen: false });
+  const fresh = () => ({ tileOpen: false, locOpen: null, invOpen: {}, changedOpen: false, lateOpen: false, varRefusal: {}, closeStep: 'idle', closeRefusal: null, dayClose: null, decisionResult: {}, decisionRefusal: {}, riskDone: {}, logOpen: false });
   const priv = () => !!(window.__proto && window.__proto.privacy);
   const bool = (b) => (b ? 'true' : 'false');
   const say = (t) => Proto.router.announce(t);
@@ -44,6 +45,21 @@
     Proto.screens.shell.refreshAndon(r);
     if (focusTestid) { const el = document.querySelector('[data-testid="' + focusTestid + '"]'); if (el && el.focus) el.focus(); }
   }
+  /* Every store refusal this screen renders goes where its control says: an outage to the support line, a day
+     already closed or a variance already decided to the day itself, an entitlement gate to Approvals. The
+     controls used to have no handler at all, so "Open the day" and "Support line" were dead ends. */
+  function openDay(r) { st.tileOpen = true; st.locOpen = st.locOpen || 'loc-1'; rerender(r, 'close.location.' + st.locOpen); }
+  function gate(r, res, why, fallback) {
+    const onControl = () => {
+      if (res.code === 'outage') say(SUPPORT);
+      else if (res.code === 'already_closed' || res.code === 'already_decided') openDay(r);
+      else if (res.code === 'entitlement' && res.control === 'Open approvals') location.hash = '#/phone/approvals';
+      else if (fallback) fallback();
+    };
+    return refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why || why, severity: res.code === 'outage' ? 'stop' : 'required', onControl });
+  }
+  // A name shown on expansion is a logged read; the store owns the row, the screen only asks for it.
+  const disclose = (patientId, recordIds) => { if (Proto.store.disclose) Proto.store.disclose({ patientId, purpose: 'payment', recordIds }); };
 
   /* ---- computed views (read-only over store.get()) ----
      Each helper is exported, so each answers on ordinary, boundary and missing input: a row or a table it
@@ -91,15 +107,21 @@
     });
     return tot;
   }
+  /* A grant is a grant: the seed's standing grants and the day passes issued this session are scanned alike, and
+     a pass's decision is the controlDecisions row the store wrote for it. Reading currentGrants alone left an
+     accepted day-pass conflict off the owner home. */
   function sodView(S) {
     const findings = [], exceptions = [];
-    table(S, 'currentGrants').forEach((g) => {
-      const ents = new Set(g.entitlements);
+    const scan = (entitlements, decided) => {
+      const ents = new Set(entitlements || []);
       table(S, 'sodRules').filter((rule) => rule.pair.every((e) => ents.has(e))).forEach((rule) => {
-        if (g.accepted && g.accepted.ruleId === rule.id) exceptions.push({ rule, reviewBy: g.accepted.reviewBy, decisionId: g.accepted.decisionId });
+        const d = decided(rule);
+        if (d) exceptions.push({ rule, reviewBy: d.reviewBy, decisionId: d.decisionId, kind: d.kind || 'accept_residual' });
         else findings.push({ rule });
       });
-    });
+    };
+    table(S, 'currentGrants').forEach((g) => scan(g.entitlements, (rule) => (g.accepted && g.accepted.ruleId === rule.id ? g.accepted : null)));
+    table(S, 'dayPasses').forEach((dp) => scan(dp.entitlements, (rule) => { const d = table(S, 'controlDecisions').find((x) => x.dayPassId === dp.id && x.ruleId === rule.id); return d ? { reviewBy: d.reviewBy, decisionId: d.id, kind: d.kind } : null; }));
     return { findings, exceptions };
   }
 
@@ -154,24 +176,36 @@
     const mayClear = !isCloser && CLEAR_ENTS.some((e) => ents.includes(e));
     const clearers = table(S, 'users').filter((u) => u.name !== me.name && u.name !== rr.closer && CLEAR_ENTS.some((e) => (u.entitlements || []).includes(e))).map((u) => u.short);
     const pm = v.proposedMatch || {};
+    const candidates = () => S.ledger.filter((e) => e.locationId === v.locationId && e.kind === 'patient_payment' && e.tender === v.tender && e.posted === rr.date).slice(-(pm.ledgerEntries || 2));
+    const held = st.varRefusal[v.id] || {};
+    // One gate per card, raised by the control that pressed it; that control carries the Held identity.
+    const refuse = (by, res, fallback) => { st.varRefusal[v.id] = { by, node: gate(r, res, null, fallback) }; rerender(r, 'refusal.control'); };
     const card = h('div', { class: 'card flat stack', 'aria-label': 'Variance ' + v.id },
       h('div', { class: 'row' }, chip('required', 'Variance ' + money(v.amountCents)), h('span', { class: 'small muted', text: v.tender + ' · ' + locOf(S, v.locationId).name + ' · ' + shortDate(rr.date) })),
       h('p', { class: 'explain sentence', text: v.sentence }),
       h('p', null, h('b', { text: 'Proposed match: ' }), pm.bankLine + ' ↔ ' + plural(pm.ledgerEntries || 0, 'ledger entry').replace('entrys', 'entries')));
     const controls = h('div', { class: 'btnrow' },
-      btn('Match these', { kind: 'irreversible', testid: 'close.variance.' + v.id + '.match', onClick: () => { const res = Proto.store.matchVariance(v.id); if (res.ok) say('Matched ' + money(v.amountCents) + ' at ' + locOf(S, v.locationId).name); rerender(r, 'close.tied.tile'); } }),
-      btn(st.invOpen[v.id] ? 'Hide rows' : 'Investigate', { kind: 'reversible', testid: 'close.variance.' + v.id + '.investigate', pressed: !!st.invOpen[v.id], onClick: () => { st.invOpen[v.id] = !st.invOpen[v.id]; rerender(r, 'close.variance.' + v.id + '.investigate'); } }));
-    if (mayClear) controls.append(btn('Clear with reason', { kind: st.varRefusal[v.id] ? 'held' : 'quiet', testid: 'close.variance.' + v.id + '.clear', onClick: () => {
+      btn('Match these', { kind: held.by === 'match' ? 'held' : 'irreversible', testid: 'close.variance.' + v.id + '.match', onClick: () => {
+        const res = Proto.store.matchVariance(v.id);
+        if (res.ok) { st.varRefusal[v.id] = null; say('Matched ' + money(v.amountCents) + ' at ' + locOf(S, v.locationId).name); rerender(r, 'close.tied.tile'); return; }
+        refuse('match', res);
+      } }),
+      btn(st.invOpen[v.id] ? 'Hide rows' : 'Investigate', { kind: 'reversible', testid: 'close.variance.' + v.id + '.investigate', pressed: !!st.invOpen[v.id], onClick: () => {
+        st.invOpen[v.id] = !st.invOpen[v.id];
+        if (st.invOpen[v.id]) candidates().forEach((e) => disclose(e.patientId, [e.id]));
+        rerender(r, 'close.variance.' + v.id + '.investigate');
+      } }));
+    if (mayClear) controls.append(btn('Clear with reason', { kind: held.by === 'clear' ? 'held' : 'quiet', testid: 'close.variance.' + v.id + '.clear', onClick: () => {
       const res = Proto.store.clearVariance(v.id);
-      if (res.ok) { say('Cleared with reason'); rerender(r, 'close.tied.tile'); return; }
-      st.varRefusal[v.id] = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: null });
-      rerender(r, 'close.variance.' + v.id + '.clear');
+      if (res.ok) { st.varRefusal[v.id] = null; say('Cleared with reason'); rerender(r, 'close.tied.tile'); return; }
+      // The rows are what an independent seat would be handed, so the way out of a who-may-clear gate opens them.
+      refuse('clear', res, () => { st.invOpen[v.id] = true; rerender(r, 'close.variance.' + v.id + '.investigate'); });
     } }));
     card.append(controls);
     if (!mayClear) card.append(h('p', { class: 'small muted', text: (isCloser ? 'Same hands closed ' + locOf(S, rr.locationId).name + ' on ' + shortDate(rr.date) + '. ' : 'Clearing belongs to a seat that reconciles the bank or closes the books. ') + (clearers.length ? orList(clearers) + ' can clear. ' : '') + 'Match these and Investigate stay open to you.' }));
-    if (st.varRefusal[v.id]) card.append(st.varRefusal[v.id]);
+    if (held.node) card.append(held.node);
     if (st.invOpen[v.id]) {
-      const rows = S.ledger.filter((e) => e.locationId === v.locationId && e.kind === 'patient_payment' && e.tender === v.tender && e.posted === rr.date).slice(-(pm.ledgerEntries || 2));
+      const rows = candidates();
       card.append(h('div', { class: 'stack' }, h('p', { class: 'small muted', text: 'Candidate rows (same tender, two-day window; names shown on expansion and logged as a payment-purpose read):' }),
         h('ul', { class: 'dc-sentences' }, ...rows.map((e) => h('li', { text: pname(S, e.patientId) + ' · ' + e.tender + ' payment ' + money(-e.amountCents) + ' · posted ' + shortDate(e.posted) + ' after 6 pm · #' + e.id }))),
         h('p', { class: 'small muted', text: 'Investigate opens a control finding with these rows attached, routed to Money Desk → Variances.' })));
@@ -196,8 +230,11 @@
     if (!due.length && !results.length) return null;
     const rows = due.map((d) => {
       const late = days(d.reviewBy, S.tenant.today);
-      const act = (action, label, kind) => btn(label, { kind, testid: 'close.decision.' + d.id + '.' + action, onClick: () => {
+      const held = st.decisionRefusal[d.id] || {};
+      const act = (action, label, kind) => btn(label, { kind: held.by === action ? 'held' : kind, testid: 'close.decision.' + d.id + '.' + action, onClick: () => {
         const res = Proto.store.reviewDecision(d.id, action);
+        if (!res.ok) { st.decisionRefusal[d.id] = { by: action, node: gate(r, res, 'A decision is reviewed on the server so the threshold it moves is the one every posting reads.') }; rerender(r, 'refusal.control'); return; }
+        st.decisionRefusal[d.id] = null;
         if (res.ok) {
           // The store sets the next review date when a decision is kept or tightened; printing a second
           // computation of it here is how the sentence and the row underneath it come to disagree.
@@ -216,6 +253,7 @@
         h('p', null, h('b', { text: d.text })),
         h('p', { class: 'row' }, h('span', { text: 'Since this raise: ' + d.measuredEffect + '.' }), chip('info', 'Directional')),
         h('div', { class: 'btnrow' }, act('keep', 'Keep 90 more days', 'reversible'), act('tighten', 'Tighten', 'reversible'), act('retire', 'Retire', 'irreversible')),
+        held.node || null,
         h('details', null, h('summary', { class: 'small', testid: 'close.decision.' + d.id + '.why' }, 'Why directional'), h('p', { class: 'small muted', text: 'Under the digest minimum sample the effect sentence is computed from domain events since the decision and labelled directional. An unreviewed decision stops applying at midnight of its review date and becomes a finding; neglect tightens, never loosens.' })));
     });
     return section('Decisions due for review' + (due.length ? ': ' + due.length : ''), ...rows, ...results.map((id) => {
@@ -235,7 +273,7 @@
   function exceptions(r, S) {
     const v = sodView(S);
     return section('Expiring exceptions and open SoD findings',
-      ...v.exceptions.map((x) => h('div', { class: 'dc-row' }, chip('review', 'Expires ' + shortDate(x.reviewBy)), h('span', { class: 'text', text: 'Accepted exception: one seat ' + pairWords(x.rule.pair) + ' · ' + plural(days(S.tenant.today, x.reviewBy), 'day') + ' left · compensating: ' + x.rule.compensating }))),
+      ...v.exceptions.map((x) => h('div', { class: 'dc-row' }, chip('review', 'Expires ' + shortDate(x.reviewBy)), h('span', { class: 'text', text: (x.kind === 'compensate' ? 'Compensated exception' : 'Accepted exception') + ': one seat ' + pairWords(x.rule.pair) + ' · ' + plural(days(S.tenant.today, x.reviewBy), 'day') + ' left · compensating: ' + x.rule.compensating }))),
       ...v.findings.map((f) => h('div', { class: 'dc-row' }, chip(f.rule.severity === 'critical' ? 'stop' : 'required', cap(f.rule.severity)), h('span', { class: 'text', text: 'Open finding: one seat ' + pairWords(f.rule.pair) + ' · ' + f.rule.fraudPath + ' Compensating: ' + f.rule.compensating }))),
       h('div', { class: 'row' }, h('span', { class: 'small muted grow', text: plural(v.findings.length, 'open finding') + ', ' + plural(v.exceptions.length, 'accepted exception') + ' · practice-level; remediate, compensate, or accept on the Roles screen.' }), btn('Roles', { kind: 'quiet', testid: 'close.sod.roles', onClick: () => Proto.router.go(r.persona, 'roles') })));
   }
@@ -248,7 +286,7 @@
     if (done) kids.push(h('p', { class: 'row' }, h('span', { class: 'dc-lock', 'aria-hidden': 'true', text: '🔒' }), chip('clear', 'Closed'), h('span', { text: 'Closed ' + shortDate(done.date) + ' at ' + done.closedAt + ' by ' + shortName(S, done.closedBy) + ' · chain head ' + done.chainHeadHash + ' · deposit slip prepared; day sheet frozen.' })));
     // One label for the control; the held identity supplies the word Held and keeps "Close day" as its name.
     const primary = btn('Close day', { kind: st.closeRefusal || done ? 'held' : 'irreversible', testid: 'close.closeday', onClick: () => {
-      if (done) { const res = Proto.store.closeDay('loc-1'); if (!res.ok) { st.closeRefusal = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why || 'A closed day is sealed; corrections post into today as a reversal-and-repost pair.' }); } rerender(r, 'close.closeday'); return; }
+      if (done) { const res = Proto.store.closeDay('loc-1'); if (!res.ok) { st.closeRefusal = gate(r, res, 'A closed day is sealed; corrections post into today as a reversal-and-repost pair.'); } rerender(r, 'close.closeday'); return; }
       st.closeStep = 'confirm'; rerender(r, 'close.closeday.confirm');
     } });
     kids.push(h('div', { class: 'btnrow' }, primary, h('span', { class: 'small muted', text: loc.name + ' · ' + shortDate(today) + ' · totals by tender, deposit slip, day sheet frozen atomically' })));
@@ -270,7 +308,7 @@
             if (res.ok) { st.closeStep = 'done'; st.closeRefusal = null; say('Day closed — deposit slip prepared'); rerender(r, 'close.closeday'); return; }
             st.closeStep = 'idle';
             // The gate's own words, and its control goes where the control says: the screen adds neither.
-            st.closeRefusal = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why || 'Closing freezes totals and prepares the deposit, so only the seats that carry it can close.', onControl: res.code === 'entitlement' ? () => { location.hash = '#/phone/approvals'; } : null });
+            st.closeRefusal = gate(r, res, 'Closing freezes totals and prepares the deposit, so only the seats that carry it can close.');
             rerender(r, 'close.closeday');
           } }),
           btn('Cancel', { kind: 'quiet', testid: 'close.closeday.cancel', onClick: () => { st.closeStep = 'idle'; rerender(r, 'close.closeday'); } }))));
@@ -320,32 +358,45 @@
   }
 
   /* ---- render: risk ---- */
+  /* The first write for a row is its creation; a later one on the same row is the edit the store logged with
+     touch(), so the approver's decide step reads as the decision it was, not as creating the request. */
+  const DECIDED = { approved: 'approved an approval request', declined: 'sent back an approval request' };
+  function wroteWords(S, all, e) {
+    const first = all.find((x) => x.table === e.table && x.id === e.id);
+    if (e.table === 'approvals' && first && first.seq !== e.seq) { const a = table(S, 'approvals').find((x) => x.id === e.id) || {}; return DECIDED[a.status] || 'changed an approval request'; }
+    return WROTE[e.table] || 'wrote a record';
+  }
   function auditSentences(S) {
-    const ev = (window.__events || []).filter((e) => e.kind === 'write').slice(-8).reverse();
-    return ev.map((e) => {
+    const all = (window.__events || []).filter((e) => e.kind === 'write');
+    return all.slice(-8).reverse().map((e) => {
       const uid = S.personaUser[e.persona]; const u = S.users.find((x) => x.id === uid);
       const who = e.persona === 'temp' ? 'The day-pass seat' : u ? u.short + ' (' + e.persona + ')' : 'Someone signed in as ' + e.persona;
-      return who + ' ' + (WROTE[e.table] || 'wrote a record') + ' #' + e.id + ' at +' + Math.round(e.t / 1000) + ' s on ' + e.route + ' (event ' + e.seq + ').';
+      return who + ' ' + wroteWords(S, all, e) + ' #' + e.id + ' at +' + Math.round(e.t / 1000) + ' s on ' + e.route + ' (event ' + e.seq + ').';
     });
   }
   function renderRisk(r) {
     const S = Proto.store.get();
     if (lastStore !== S) { lastStore = S; st = fresh(); }
     lastRoute = r; detachKeys();
-    const row = (id, action, sev, word, text, label, kind, onClick, extra) => h('div', { class: 'dc-row' }, chip(sev, word), h('span', { class: 'text' }, h('span', { text: text }), extra ? h('span', { class: 'small muted', text: ' ' + extra }) : null), btn(label, { kind, testid: 'risk.row.' + id + '.' + action, onClick }));
+    // Each row carries its own Why (risk.row.<id>.why, CONTRACTS §4): the rule behind the row, read on demand.
+    const row = (id, action, sev, word, text, label, kind, onClick, extra, why) => h('div', { class: 'dc-row' }, chip(sev, word),
+      h('span', { class: 'text' }, h('span', { text: text }), extra ? h('span', { class: 'small muted', text: ' ' + extra }) : null,
+        why ? h('details', null, h('summary', { class: 'small', testid: 'risk.row.' + id + '.why' }, 'Why'), h('p', { class: 'small muted', text: why })) : null),
+      btn(label, { kind, testid: 'risk.row.' + id + '.' + action, onClick }));
     const due = S.decisions.filter((d) => d.status === 'review_due');
     const items = [];
     /* A standing row's control marks the task for this session only: nothing here has a store verb to write
        through yet, so a repeat press is a visible no-op that says it was already done, never the completed
        action announced a second time. */
-    const standing = (key, id, action, sev, word, text, label, doneLabel, firstSay, againSay, doneExtra) => {
+    const standing = (key, id, action, sev, word, text, label, doneLabel, firstSay, againSay, doneExtra, why) => {
       const done = !!st.riskDone[key]; const tid = 'risk.row.' + id + '.' + action;
       return row(id, action, sev, word, text, done ? doneLabel : label, done ? 'quiet' : 'reversible', () => {
         if (st.riskDone[key]) { say(againSay); rerender(r, tid); return; }
         st.riskDone[key] = true; say(firstSay); rerender(r, tid);
-      }, done ? doneExtra : null);
+      }, done ? doneExtra : null, why);
     };
-    due.forEach((d) => items.push(row(d.id, 'open', 'required', 'Past review', d.text + ': past review date (review was ' + shortDate(d.reviewBy) + ').', 'Open', 'reversible', () => Proto.router.go(r.persona, 'close'))));
+    due.forEach((d) => items.push(row(d.id, 'open', 'required', 'Past review', d.text + ': past review date (review was ' + shortDate(d.reviewBy) + ').', 'Open', 'reversible', () => Proto.router.go(r.persona, 'close'), null,
+      'An unreviewed decision stops applying at midnight of its review date and becomes a finding; neglect tightens, never loosens. Keep, Tighten or Retire it on Daily Close.')));
     if (!due.length) items.push(h('div', { class: 'dc-row' }, chip('clear', 'Nothing due'), h('span', { class: 'text', text: 'No decisions past their review date.' })));
     // Countdowns and counts are read against today and the practice's own records, so the list moves with them.
     const baaExpires = '2026-09-24';
@@ -353,18 +404,21 @@
     const baaWord = baaLeft >= 0 ? plural(baaLeft, 'day') : 'Expired';
     items.push(standing('baa', 'baa-lab', 'renew', 'review', baaWord,
       'BAA: Ridge Dental Lab ' + (baaLeft >= 0 ? 'expires in ' + plural(baaLeft, 'day') : 'expired ' + plural(-baaLeft, 'day') + ' ago') + ' (' + shortDate(baaExpires) + ').',
-      'Renew', 'Renewal sent', 'Renewal requested', 'Already requested today', 'Renewal requested today; the row stays until the countersigned copy is filed.'));
+      'Renew', 'Renewal sent', 'Renewal requested', 'Already requested today', 'Renewal requested today; the row stays until the countersigned copy is filed.',
+      'A business associate agreement that lapses leaves PHI flowing to a vendor with no signed terms. The countdown reads the practice calendar against today.'));
     const withCred = new Set(table(S, 'credentials').filter((c) => c.userId && c.verifiedBy).map((c) => c.userId));
     const untrained = table(S, 'users').filter((u) => u.licence && !withCred.has(u.id)).length;
     items.push(standing('training', 'training', 'assign', 'review', 'Due',
       'Training due: ' + plural(untrained, 'clinical seat') + ' with no verified credential on file (practice).',
-      'Assign', 'Assigned', 'Training assigned', 'Already assigned today', 'Assigned today; this row shows the practice count only.'));
+      'Assign', 'Assigned', 'Training assigned', 'Already assigned today', 'Assigned today; this row shows the practice count only.',
+      'A clinical seat charts and records perio under its own licence, so a seat with no verified credential row is a finding. The count is practice-level; nobody is named here.'));
     const logDue = monthlyDue(S.tenant.today, 5);
     const ev = window.__events || [];
     const seen = plural(ev.filter((e) => e.kind === 'write').length, 'write') + ' and ' + plural(ev.filter((e) => e.kind === 'refusal').length, 'refusal');
     items.push(standing('log', 'logreview', 'start', 'review', 'Due ' + shortDate(logDue),
       'Monthly log review: due ' + shortDate(logDue) + '.',
-      'Start', 'Opened', 'Audit log opened', 'Already opened today', 'Opened: ' + seen + ' this session, below; the chain head is verified nightly.'));
+      'Start', 'Opened', 'Audit log opened', 'Already opened today', 'Opened: ' + seen + ' this session, below; the chain head is verified nightly.',
+      'The monthly review reads the audit log as sentences and checks the chain head; it falls due on the 5th of each month.'));
     const sentences = auditSentences(S);
     const page = h('div', { class: 'stack dc-page' },
       pageHead('Practice risk', 'Open decisions past review, BAAs expiring, training due, the monthly log review. Practice-level; nothing here ranks people.'),
@@ -376,7 +430,8 @@
     Proto.screens.shell.mount(page);
   }
 
-  window.addEventListener('hashchange', () => { if (Proto.router.current().route !== 'close') detachKeys(); });
+  // The confirm step belongs to the press that opened it: leaving the screen closes it (docs/01 principle 9).
+  window.addEventListener('hashchange', () => { if (Proto.router.current().route !== 'close') { detachKeys(); if (st && st.closeStep === 'confirm') st.closeStep = 'idle'; } });
 
   Proto.screens.dailyclose = { render: renderClose, renderRisk, grade, overall, changedPairs, lateRows };
   Proto.screens.risk = { render: renderRisk };

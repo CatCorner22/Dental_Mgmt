@@ -13,12 +13,14 @@
   const S = () => Proto.store.get();
   const P = () => window.__proto;
   /* The sim plays the biller's side. The store keeps one open request per held posting, so a second press
-     plays the next scenario instead of re-announcing the first one. */
+     plays the next scenario instead of re-announcing the first one. Each scenario writes off no more than the
+     account owes (the store refuses a write-off above the balance), and at least the dual-release threshold. */
   const SIMS = [
     { pid: 'p-306', cents: 41000, reason: 'courtesy' },
-    { pid: 'p-303', cents: 22500, reason: 'hardship' },
+    { pid: 'p-313', cents: 22500, reason: 'hardship' },
   ];
   const REASON_LABEL = { courtesy: 'Courtesy', hardship: 'Hardship', contractual_ppo: 'Contractual (PPO)', small_balance: 'Small balance', promo: 'Promotion' };
+  const SUPPORT = 'Call support: 615-555-0100, 7 am to 6 pm';
 
   let lastRoute = null;
   let keysOn = false;
@@ -109,13 +111,17 @@
 
   /* ---- decisions ---- */
   /* A refusal the store raised keeps the store's own verb and control word; the screen only wires the way
-     out (blocked_same_person names Send back, everything else names Switch author). */
+     out: Send back (blocked_same_person) opens the reason line, Open the ledger (already_decided) opens the
+     patient's ledger, Support line (outage) announces the number; anything else names Switch author. */
+  const WAY_OUT = {
+    'Send back': (r, a) => onDecline(r, a),
+    'Open the ledger': (r, a) => Proto.router.go(r.persona, 'ledger', a.patientId),
+    'Support line': () => say(SUPPORT),
+  };
   function gate(r, a, res) {
     const control = res.control || 'Switch author';
-    const onControl = control === 'Send back'
-      ? () => onDecline(r, a)
-      : () => Proto.screens.shell.openPinPad(r);
-    return Object.assign({}, res, { control, onControl });
+    const out = WAY_OUT[control] || ((rr) => Proto.screens.shell.openPinPad(rr));
+    return Object.assign({}, res, { control, onControl: () => out(r, a) });
   }
   function onApprove(r, a) {
     const s = st();
@@ -178,7 +184,11 @@
     const nameRow = h('div', { class: 'ph-kv' }, h('span', { class: 'ph-k', text: 'Patient' }),
       s.nameShown[a.id]
         ? h('span', { class: 'ph-v', text: p.name + ' · ' + p.mrn })
-        : h('span', { class: 'ph-v' }, initials(p.name) + ' · ' + p.mrn + ' ', btn('Show name', { testid: 'phone.request.' + a.id + '.name', kind: 'quiet', class: 'compact', ariaLabel: 'Show the patient’s full name (this tap is logged)', onClick: () => { st().nameShown[a.id] = true; rerender(r, 'phone.request.' + a.id + '.approve'); } })));
+        : h('span', { class: 'ph-v' }, initials(p.name) + ' · ' + p.mrn + ' ', btn('Show name', { testid: 'phone.request.' + a.id + '.name', kind: 'quiet', class: 'compact', ariaLabel: 'Show the patient’s full name (this tap is logged)', onClick: () => {
+          // The tap is the logged read the label promises; the store owns the disclosures row.
+          if (Proto.store.disclose) Proto.store.disclose({ patientId: a.patientId, purpose: 'approval', recordIds: [a.id] });
+          st().nameShown[a.id] = true; rerender(r, 'phone.request.' + a.id + '.approve');
+        } })));
     card.append(h('div', { class: 'ph-grid' },
       nameRow,
       kv('Requested by', a.requestedBy + (mine ? ' (you)' : '')),
@@ -212,13 +222,17 @@
     return card;
   }
 
-  function decidedCard(a) {
-    const done = st().done[a.id];
+  function decidedCard(r, a) {
+    const done = st().done[a.id]; const gated = st().refusal[a.id];
     const s = a.status === 'approved' ? ['clear', 'Approved'] : ['required', 'Sent back'];
     return h('article', { class: 'card flat ph-decided', 'aria-label': 'Decided request ' + a.id },
       h('div', { class: 'ph-head' }, chip(s[0], s[1]), h('span', { class: 'ph-amount small', text: money(a.amountCents) }), h('span', { class: 'small muted grow', text: a.id })),
       done ? h('p', { class: 'ph-done', role: 'status', tabindex: '-1', text: done.text }) : null,
-      h('p', { class: 'small muted', text: cardSentence(a) + (a.decidedBy ? ' · ' + s[1] + ' · ' + a.decidedBy + ' at ' + time(a.decidedAt) : '') }));
+      // A gate raised against a request that was decided under this approver's hands renders here, on the row it names.
+      gated ? refusal(gated) : null,
+      h('p', { class: 'small muted', text: cardSentence(a) + (a.decidedBy ? ' · ' + s[1] + ' · ' + a.decidedBy + ' at ' + time(a.decidedAt) : '') }),
+      // The approver's one line rides with the decision; the requester reads it here, not just who sent it back.
+      a.status === 'declined' && a.decisionReason && !done ? h('p', { class: 'small' }, h('b', { text: 'Their line: ' }), a.decisionReason) : null);
   }
 
   function renderNotFound(r) {
@@ -251,7 +265,7 @@
         h('p', { class: 'practice-line muted', text: 'Decided here today: ' + done + '. A held posting appears the moment someone asks.' })));
     }
     if (decided.length) {
-      root.append(h('section', { class: 'stack', 'aria-label': 'Decided' }, h('h2', { class: 'ph-h2', text: 'Decided' }), ...decided.slice().reverse().map((a) => decidedCard(a))));
+      root.append(h('section', { class: 'stack', 'aria-label': 'Decided' }, h('h2', { class: 'ph-h2', text: 'Decided' }), ...decided.slice().reverse().map((a) => decidedCard(r, a))));
     }
     const sim = nextSim();
     root.append(h('section', { class: 'card flat stack ph-sim', 'aria-label': 'Simulate a request' },
