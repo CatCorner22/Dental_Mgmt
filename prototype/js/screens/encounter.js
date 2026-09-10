@@ -392,8 +392,7 @@
   }
 
   // ---- note ---------------------------------------------------------------------------------
-  // A whole-patient paint has no tooth; the starter names the last paint that does, or the open tag, never "#null".
-  function starterTooth(enc, x) { const ces = eventsOf(enc.id).filter((c) => c.tooth != null); if (x.tooth) return x.tooth; if (ces.length) return ces[ces.length - 1].tooth; const t = openTags(enc.id)[0]; return t ? t.tooth : '[tooth]'; }
+  function starterTooth(enc, x) { const ces = eventsOf(enc.id); if (x.tooth) return x.tooth; if (ces.length) return ces[ces.length - 1].tooth; const t = openTags(enc.id)[0]; return t ? t.tooth : '[tooth]'; }
   function starterSurfaces(enc, x) { if (x.surfaces.length) return x.surfaces.map((o) => o.s).join(''); const ces = eventsOf(enc.id); if (ces.length && ces[ces.length - 1].surfaces.length) return ces[ces.length - 1].surfaces.join(''); const t = openTags(enc.id)[0]; return t && t.surfaces ? t.surfaces.join('') : 'DO'; }
   function starters() { return isSurgeon() ? ['sedation', 'caries', 'recurrent', 'fractured'] : ['caries', 'recurrent', 'fractured']; }
   function renderNote(r, enc, x) {
@@ -513,10 +512,7 @@
       // verb was rewritten, and the fix silently did nothing.
       const m = String(k.verb || '').match(/#(\d{1,2})/);
       const chartTooth = k.chartTooth != null ? String(k.chartTooth) : m ? m[1] : null; if (!chartTooth) return;
-      // Only the reference the killer named changes; a tooth the chart agrees with stays as written.
-      const w = String(k.why || '').match(/note says #(\d{1,2})/);
-      const noteTooth = k.noteTooth != null ? Number(k.noteTooth) : w ? Number(w[1]) : null; if (noteTooth == null) return;
-      const fix = (txt) => (txt || '').replace(/(#|\btooth\s+#?)(\d{1,2})\b/gi, (all, pre, n) => (Number(n) === noteTooth ? pre + chartTooth : all));
+      const fix = (txt) => (txt || '').replace(/#(\d{1,2})\b/g, (all, n) => (n === chartTooth ? all : '#' + chartTooth));
       x.note.assessment = fix(x.note.assessment); x.note.plan = fix(x.note.plan);
       x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3); rerender(r);
       focusGateVerb() || focusFirst('enc.file'); Proto.router.announce('Note now says #' + chartTooth + ', matching the chart'); return;
@@ -534,11 +530,6 @@
         rerender(r); focusFirst('refusal.control'); return;
       }
       const res = Proto.store.readyForExam(enc.appointmentId);
-      if (res.ok) { rerender(r); focusFirst('enc.killer.0.fix', 'enc.file'); Proto.router.announce('Sent to Exams to sign'); return; }
-      // The store's refusal is the screen's: a press that wrote nothing shows the gate that stopped it.
-      const outage = res.code === 'outage';
-      x.sendGate = { code: res.code, verb: res.verb, control: outage ? res.control : 'Back to Chairs', severity: outage ? 'stop' : 'required', why: res.why, onControl: () => { if (outage) Proto.router.announce('Support: 615-555-0100, answered 7 am to 6 pm Central'); else Proto.router.go(r.persona, 'chairs'); } };
-      rerender(r); focusFirst('refusal.control');
       if (res.ok) { x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3); rerender(r); const stamp = document.getElementById('enc-sent'); if (stamp) stamp.focus({ preventScroll: true }); else focusFirst('enc.file'); Proto.router.announce('Sent to Exams to sign'); return; }
       x.sendGate = res; rerender(r); focusGateVerb();   // the store's verdict renders; a silent refusal is a dead control
       return;
@@ -548,7 +539,6 @@
     // The filing gate is the live one, so no earlier gate is left holding the contract selectors (§6).
     x.checked = true; x.sendGate = null; x.gateNode = null; x.undoGate = null; x.fileGate = null;
     const res = Proto.store.fileNote(enc.id, x.note, confirmed);
-    if (res.ok) { x.filed = res.filed; x.readback = false; rerender(r); focusFirst('enc.back'); Proto.router.announce(res.claim ? 'Filed · charges released · claim queued' : 'Filed · nothing performed, no charge, no claim'); return; }
     // Filed lands on the Filed card's stamp, never on Back to Exams: Enter twice used to leave before the card could be read.
     if (res.ok) { x.filed = res.filed; x.readback = false; rerender(r); focusId('enc-filed-head') || focusFirst('enc.rail'); Proto.router.announce('Filed · ' + (res.released ? 'charges released' : 'nothing to release') + (res.claim ? ' · claim queued' : '')); return; }
     if (res.killers) { x.killers = res.killers; x.readback = false; }
@@ -560,7 +550,6 @@
     focusGateVerb() || focusFirst('enc.file');
   }
   function renderFiledCard(enc, filed, x) {
-    const s = S(); const released = filed ? s.ledger.filter((e) => e.releasedByNoteId === filed.id) : []; const claim = s.claims.slice().reverse().find((c) => c.encounterId === enc.id) || (released.length ? s.claims.slice().reverse().find((c) => c.patientId === enc.patientId && c.status === 'scrubbed') : null);
     // The claim and the charges are the encounter's own: a claim looked up by patient said "queued" on a visit
     // that queued none, and a seeded filed visit counted no charge.
     const s = S(); const procs = s.procedures.filter((p) => p.encounterId === enc.id).map((p) => p.id);
@@ -571,8 +560,6 @@
       filed ? h('p', { class: 'small muted', text: 'By ' + filed.author + ' at ' + dateTime((filed.filedOn || '') + ' ' + (filed.filedTime || '')) + ' · text and version frozen; corrections are addenda, never edits.' }) : null,
       h('ul', { class: 'enc-rows' },
         h('li', null, h('b', { text: 'Charges released: ' + released.length }), released.length ? ' · ' + released.map((e) => money(e.amountCents) + (e.tooth ? ' #' + e.tooth : '')).join(', ') : ' (nothing pending)'),
-        // A claim follows released charges; a visit that performed nothing sends none, and the card says so.
-        claim || released.length ? h('li', null, h('b', { text: 'Claim queued' }), claim ? ' · ' + claim.id + ' to ' + claim.payer + ' · ' + claim.nextAction : '') : h('li', null, h('b', { text: 'No claim' }), ' · nothing performed this visit, nothing to bill'),
         claim ? h('li', null, h('b', { text: 'Claim queued' }), ' · to ' + claim.payer + ' · ' + claim.nextAction) : h('li', null, h('b', { text: 'No claim queued' }), ' · ' + (released.length ? 'no plan on file to bill' : 'nothing released to bill')),
         h('li', null, 'Board chip flipped to Note filed; checkout releases any held payment.')),
       filed && filed.markdown ? h('div', { class: 'enc-readonly small', text: filed.markdown }) : null);

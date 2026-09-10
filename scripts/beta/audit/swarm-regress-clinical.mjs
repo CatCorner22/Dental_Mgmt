@@ -145,14 +145,15 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const r = await p.evaluate((sites) => {
           const S = window.Proto.store; const E = 'enc-9002';
           const out = {};
+          const hasGate = typeof S.perioGate === 'function';
           for (const lic of ['bogus', 'constructor', 'toString', 'hasOwnProperty']) {
             const before = S.get().perioExams.filter((x) => x.encounterId === E).length;
-            const gate = S.perioGate(E, sites, { mode: 'full', licence: lic });
+            const gate = hasGate ? S.perioGate(E, sites, { mode: 'full', licence: lic }) : null;
             const res = S.savePerio(E, sites, { mode: 'full', licence: lic });
             const n = S.get().notes[E] || {};
-            out[lic] = { gateCode: gate ? gate.code : null, ok: !!res.ok, code: res.code || null, examsBefore: before, examsAfter: S.get().perioExams.filter((x) => x.encounterId === E).length, summary: res.ok ? n.perioSummary : null };
+            out[lic] = { gateCode: gate ? gate.code : (res && res.code) || null, ok: !!res.ok, code: res.code || null, examsBefore: before, examsAfter: S.get().perioExams.filter((x) => x.encounterId === E).length, summary: res.ok ? n.perioSummary : null };
           }
-          return { own: Object.keys(S.LICENCE_WORDS), results: out };
+          return { own: Object.keys(S.LICENCE_WORDS || {}), hasGate, results: out };
         }, fullMouth(19));
         const ev = await after(p, seq0);
         const inherited = ['constructor', 'toString', 'hasOwnProperty'].filter((k) => !r.own.includes(k));

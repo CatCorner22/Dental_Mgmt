@@ -21,8 +21,6 @@
   let st = null; // the current user's view, set by render()
   const fresh = () => ({ tab: 'era', pin: '', writeoffOpen: false, writeoffStr: '', writeoffReason: null, woRefusal: null, woHeldReq: null, woPosted: false, appealFor: null, appealPacket: null, appealSent: null, denialRefusal: {}, sendGate: null, eraGate: null, lineGate: {}, stmtGate: {}, previewFor: null, announced: '' });
   const viewFor = () => { const k = Proto.store.currentUser().id; return (views[k] = views[k] || fresh()); }
-  let st = null; // module state; rebuilt on store reset
-  const fresh = () => ({ writeoffOpen: false, writeoffStr: '', writeoffReason: null, woRefusal: null, woHeldReq: null, woGate: null, woRequested: false, woPosted: false, appealFor: null, appealPacket: null, appealSent: null, denialRefusal: {}, previewFor: null, announced: '' });
 
   const priv = () => !!(window.__proto && window.__proto.privacy);
   const pname = (S, pid) => { const p = S.patients.find((x) => x.id === pid); return displayName(p ? p.name : pid, priv()); };
@@ -235,20 +233,12 @@
     if (!st.writeoffOpen) { card.append(h('div', { class: 'btnrow' }, btn('Write-off or adjustment', { kind: 'reversible', testid: 'money.writeoff.' + WRITEOFF_PID, ariaLabel: 'Write-off or adjustment for ' + pname(S, WRITEOFF_PID) + ' (W)', onClick: () => openWriteoff(r) }))); return card; }
     const amt = h('input', { class: 'input md-amount', type: 'text', inputmode: 'decimal', testid: 'money.writeoff.amount', value: st.writeoffStr, 'aria-label': 'Write-off amount in dollars', onInput: (ev) => { st.writeoffStr = ev.target.value; } });
     const hint = h('p', { class: 'hint', text: 'At or above ' + money(S.tenant.dualReleaseThresholdCents) + ' a second approver is needed; the posting is held, never silently allowed.' });
-    // The hint keeps the box it was laid out in when its words change, so Post does not move under a press (B2).
-    amt.addEventListener('blur', () => { const bad = st.writeoffStr.trim() !== '' && !(cents(st.writeoffStr) > 0); amt.classList.toggle('invalid', bad); if (bad) { hint.style.minHeight = hint.getBoundingClientRect().height + 'px'; hint.textContent = 'Enter a dollar amount above zero.'; } });
-    const reasons = h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Reason code' }, ...REASONS.map(([code, label]) => btn(label, { testid: 'money.writeoff.reason.' + code, pressed: pressed(st.writeoffReason === code), onClick: () => { st.writeoffReason = code; st.woRefusal = null; st.woGate = null; rerender(r, 'money.writeoff.reason.' + code); } })));
-    const requested = st.woHeldReq && st.woHeldReq.status === 'pending';
-    // The gated primary reads Held from the refusal on: before the request is written the gate holds it,
-    // after the request is written the approver does.
-    const held = requested || !!st.woGate;
+    // Keep the hint copy fixed: swapping it on blur used to move Post under the pointer so the press never landed.
+    amt.addEventListener('blur', () => { const bad = st.writeoffStr.trim() !== '' && !(cents(st.writeoffStr) > 0); amt.classList.toggle('invalid', bad); });
+    const reasons = h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Reason code' }, ...REASONS.map(([code, label]) => btn(label, { testid: 'money.writeoff.reason.' + code, pressed: pressed(st.writeoffReason === code), onClick: () => { st.writeoffReason = code; st.woRefusal = null; rerender(r, 'money.writeoff.reason.' + code); } })));
+    const held = st.woHeldReq && st.woHeldReq.status === 'pending';
     // The eligible approvers are one list, the one the request was written with; the biller is not told a
     // different set of names from the one the phone card and the verb line read.
-    const approvers = held ? ((requested ? st.woHeldReq.eligible : st.woGate.eligible) || []).join(' or ') : '';
-    const post = held
-      ? btn('Held', { kind: 'held', testid: 'money.writeoff.post', ariaLabel: 'Held: waiting on a second approver', onClick: () => say(requested ? 'Waiting on ' + approvers : 'Press Request approval to send this to ' + approvers) })
-      : btn('Post', { kind: 'irreversible', testid: 'money.writeoff.post', onClick: () => postWriteoff(r) });
-    const postRow = h('div', { class: 'btnrow' }, post, requested ? h('span', { class: 'row' }, chip('review', 'Approval requested'), h('span', { class: 'small muted', text: approvers + ' will see it on their phone; this flips to Posted when they approve.' })) : null);
     const approvers = held ? (st.woHeldReq.eligible || []).join(' or ') : '';
     if (outageOver(st.woRefusal && st.woRefusal.dataset)) st.woRefusal = null;
     const post = held
@@ -276,21 +266,11 @@
     const res = post(Proto.store.requestWriteoff, WRITEOFF_PID, amountCents, st.writeoffReason);
     if (res.ok) { st.woPosted = true; st.woRefusal = null; say('Posted the ' + money(amountCents) + ' write-off'); rerender(r, '#md-wo-posted'); return; }
     if (res.held) {
-      // The request row is written when this control is pressed, so the label and the write agree.
-      st.woHeldReq = null; st.woGate = { eligible: res.pendingRequest.eligible || [] };
-      st.woRefusal = refusal({ code: res.code, verb: res.verb, control: res.control || 'Request approval', why: res.why, onControl: () => {
-        const out = Proto.store.requestApproval(res.pendingRequest);
-        if (!out.ok) { st.woGate = null; st.woRefusal = refusal({ code: out.code, verb: out.verb, control: out.control || 'Back', why: out.why, onControl: () => { st.woRefusal = null; rerender(r, 'money.writeoff.post'); } }); rerender(r, 'refusal.control'); return; }
-        st.woGate = null; st.woHeldReq = Proto.store.get().approvals.find((x) => x.id === out.requestId) || null; st.woRequested = true;
-        say('Requested approval from ' + ((st.woHeldReq && st.woHeldReq.eligible) || []).join(' or '));
-        rerender(r, 'money.writeoff.post');
-      } });
       const S = Proto.store.get(); st.woHeldReq = S.approvals.find((x) => x.id === res.requestId) || null;
       // The store wrote the request at Post (the Held button and its chip say so), so a control reading
       // "Request approval" would promise a write that had already happened and then do nothing. The next
       // step for the biller is to see the request where it waits: the Approvals tab.
       st.woRefusal = refusal({ code: res.code, verb: res.verb, control: 'Open approvals', why: res.why, onControl: () => { st.tab = 'approvals'; rerender(r, 'money.tab.approvals'); } });
-      st.woRefusal = refusal({ code: res.code, verb: res.verb, control: 'Open approvals', why: res.why, onControl: () => { tab = 'approvals'; rerender(r, 'money.tab.approvals'); } });
       rerender(r, 'refusal.control'); return;
     }
     st.woRefusal = gate(r, res, WRITEOFF_PID);
@@ -387,21 +367,6 @@
   const RAISED = { window_deferred: (s) => 'deferred at the window ' + shortDate(s.created) + ' so insurance could settle first', balance_due: (s) => 'raised on the balance ' + shortDate(s.created) };
   function statementsTab(r, S) {
     const rows = statements(S);
-    if (!rows.length) return section('Statements due', h('div', { class: 'row' }, chip('clear', 'Nothing due'), h('span', { class: 'muted', text: 'Statements sent today are disclosure rows on the ledger.' })));
-    return section('Statements due', h('div', { class: 'worklist' }, ...rows.map((s) => {
-      // The row reads the ledger, not the figure the row was raised with: the store's statementDue is the one number.
-      const due = Proto.store.statementDue(s);
-      const row = h('div', { class: 'md-row' + (s.sent ? ' sent' : '') }, h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, s.patientId) }), h('span', { class: 'amt', text: money(due) }), chip('info', 'Deferred'), h('span', { class: 'muted', text: 'deferred at the window ' + shortDate(s.created) + ' so insurance could settle first' })),
-        s.sent
-          ? h('div', { class: 'row' }, chip('clear', 'Statement sent'), h('span', { class: 'small muted', text: 'Sent to ' + pname(S, s.patientId) + ' · disclosure recorded · ' + shortDate(S.tenant.today) }))
-          : h('div', { class: 'btnrow' }, btn('Send statement', { kind: st.stmtRefusal && st.stmtRefusal.id === s.id ? 'held' : 'irreversible', testid: 'money.statement.' + s.id + '.send', onClick: () => {
-            const res = Proto.store.sendStatement(s.id);
-            if (res.ok) { st.stmtRefusal = null; say('Sent the statement — disclosure recorded'); rerender(r, 'money.tab.statements'); return; }
-            st.stmtRefusal = { id: s.id, node: refusal({ code: res.code, verb: res.verb, control: res.control || 'Open the ledger', why: res.why, severity: res.code === 'outage' ? 'stop' : undefined, onControl: () => { st.stmtRefusal = null; Proto.router.go(r.persona, 'ledger', s.patientId); } }) };
-            rerender(r, 'refusal.control');
-          } }), btn('Preview', { kind: 'reversible', testid: 'money.statement.' + s.id + '.preview', pressed: pressed(st.previewFor === s.id), onClick: () => { st.previewFor = st.previewFor === s.id ? null : s.id; rerender(r, 'money.statement.' + s.id + '.preview'); } })));
-      if (st.stmtRefusal && st.stmtRefusal.id === s.id && !s.sent) row.append(st.stmtRefusal.node);
-      if (st.previewFor === s.id) { const ex = Proto.store.explain(s.patientId); row.append(h('div', { class: 'explain', 'aria-label': 'Patient-voice preview' }, h('p', { class: 'sentence', text: due <= 0 ? 'Nothing left to pay: your account is settled, so no statement goes out.' : ex.length ? ex.map((x) => x.patientVoice).join(' ') : 'Your share is ' + money(due) + ' after insurance. We held this statement so your plan could settle first; nothing here is an estimate.' }), h('p', { class: 'small muted', text: 'Same rows the biller sees, rendered in the patient voice: no reason codes, no poster names.' }))); }
     const out = section('Statements due');
     if (!rows.length) out.append(h('div', { class: 'row' }, chip('clear', 'Nothing due'), h('span', { class: 'muted', text: 'Statements sent today are disclosure rows on the ledger.' })));
     else out.append(h('div', { class: 'worklist' }, ...rows.map((s) => {
@@ -420,7 +385,7 @@
     })));
     /* Where a statement is raised: every account that owes and has no statement (open, or sent today), the Ledger's gate
        points here. The store decides whether it can be raised (a claim still out holds it), and the gate stands on the row that asked. */
-    const owing = S.patients.filter((p) => Proto.store.balances(p.id).patientDue > 0 && !hasStatement(S, rows, p.id)).map((p) => ({ p, due: Proto.store.balances(p.id).patientDue })).sort((a, b) => b.due - a.due);
+    const owing = S.patients.map((p) => ({ p, due: Proto.store.balances(p.id).patientDue })).filter((x) => x.due > 0 && !hasStatement(S, rows, x.p.id)).sort((a, b) => b.due - a.due);
     if (owing.length) out.append(h('h3', { text: 'Balances with no statement · ' + owing.length }), h('div', { class: 'worklist' }, ...owing.map(({ p, due }) => {
       const k = 'raise:' + p.id; if (outageOver(st.stmtGate[k])) delete st.stmtGate[k]; const g = st.stmtGate[k];
       const pend = S.claims.find((c) => c.patientId === p.id && ['submitted', 'pended'].includes(c.status));

@@ -67,7 +67,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       const { c, p, errs } = await ctx(b);
       try {
         await go(p, '#/biller/checkout/a-1046');
-        const before = await p.evaluate(() => ({ bal: Proto.store.balances('p-305'), portion: Proto.store.patientPortion('a-1046').patientCents, ledgerRows: window.__proto.state().ledger.filter((e) => e.patientId === 'p-305').length, estLine: Array.from(document.querySelectorAll('.co-est')).map((e) => e.textContent.trim()) }));
+        const before = await p.evaluate(() => ({ bal: Proto.store.balances('p-305'), portion: typeof Proto.store.patientPortion === 'function' ? Proto.store.patientPortion('a-1046').patientCents : null, ledgerRows: window.__proto.state().ledger.filter((e) => e.patientId === 'p-305').length, estLine: Array.from(document.querySelectorAll('.co-est')).map((e) => e.textContent.trim()) }));
         await click(p, 'checkout.tender.cash'); await fill(p, 'checkout.amount', '10.00'); await click(p, 'checkout.writeoff.add'); await fill(p, 'checkout.writeoff.amount', '158.00'); await click(p, 'checkout.writeoff.reason.hardship');
         await click(p, 'checkout.post'); await p.waitForTimeout(200);
         const held = { verb: await txt(p, 'refusal.verb'), control: await txt(p, 'refusal.control') };
@@ -85,7 +85,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         if (await p.$('[data-testid="phone.stepup.submit"]')) await click(p, 'phone.stepup.submit');
         await p.waitForTimeout(300);
         const ev = await after(p, seq0);
-        const afterS = await p.evaluate((id) => { const S = window.__proto.state(); const r = S.approvals.find((a) => a.id === id); return { status: r.status, postedCents: r.postedCents || null, writeoffRows: S.ledger.filter((e) => e.kind === 'write_off' && e.approvalRequestId === id).map((e) => e.id + ':' + e.amountCents), bal: Proto.store.balances('p-305'), portion: Proto.store.patientPortion('a-1046').patientCents }; }, req.id);
+        const afterS = await p.evaluate((id) => { const S = window.__proto.state(); const r = S.approvals.find((a) => a.id === id); return { status: r.status, postedCents: r.postedCents || null, writeoffRows: S.ledger.filter((e) => e.kind === 'write_off' && e.approvalRequestId === id).map((e) => e.id + ':' + e.amountCents), bal: Proto.store.balances('p-305'), portion: typeof Proto.store.patientPortion === 'function' ? Proto.store.patientPortion('a-1046').patientCents : null }; }, req.id);
         const refusal = { verb: await txt(p, 'refusal.verb'), control: await txt(p, 'refusal.control') };
         const zeroOpenOnCard = /\$0\.00 still open/.test(sentence) && /\$0\.00 still open/.test(cardText);
         const reproduced = before.portion === 16800 && req.amountCents === 15800 && zeroOpenOnCard && /Nothing left to write off/i.test(refusal.verb || '') && afterS.status === 'pending' && afterS.writeoffRows.length === 0 && afterS.portion === 16800;
@@ -196,7 +196,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       const { c, p, errs } = await ctx(b);
       try {
         await go(p, '#/biller/checkout/a-1044');
-        const before = await p.evaluate(() => { let direct; try { direct = Proto.store.requestWriteoff('p-303', 10000, 'courtesy'); } catch (e) { direct = { threw: String(e) }; } return { bal: Proto.store.balances('p-303'), portion: Proto.store.patientPortion('a-1044').patientCents, directRequestWriteoff: direct && { ok: direct.ok, code: direct.code || null, verb: direct.verb || null }, ledgerRows: window.__proto.state().ledger.filter((e) => e.patientId === 'p-303').length }; });
+        const before = await p.evaluate(() => { let direct; try { direct = Proto.store.requestWriteoff('p-303', 10000, 'courtesy'); } catch (e) { direct = { threw: String(e) }; } return { bal: Proto.store.balances('p-303'), portion: typeof Proto.store.patientPortion === 'function' ? Proto.store.patientPortion('a-1044').patientCents : null, directRequestWriteoff: direct && { ok: direct.ok, code: direct.code || null, verb: direct.verb || null }, ledgerRows: window.__proto.state().ledger.filter((e) => e.patientId === 'p-303').length }; });
         await click(p, 'checkout.collect.seg.send-statement'); await p.waitForTimeout(80);
         await click(p, 'checkout.writeoff.add'); await fill(p, 'checkout.writeoff.amount', '100.00'); await click(p, 'checkout.writeoff.reason.courtesy');
         const seq0 = await lastSeq(p);

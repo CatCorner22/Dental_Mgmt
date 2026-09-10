@@ -4,23 +4,6 @@
   const root = document.documentElement;
   const P = (window.__proto = { ready: false, persona: null, theme: 'light', device: 'desk', outage: false, privacy: false, motion: 'auto', grayscale: false });
 
-  // Options hold only the CONTRACTS §3 values: an enum outside its list is ignored, and a boolean is read from
-  // 1|true|0|false (or a real boolean) alone, so "false" is false and "purple" leaves the theme as it was.
-  const THEMES = ['light', 'dark']; const DEVICES = ['desk', 'operatory', 'shared', 'phone']; const MOTIONS = ['auto', 'reduced'];
-  const pick = (list, v) => (list.includes(v) ? v : null);
-  const flag = (v) => (v === true || v === 1 || v === '1' || v === 'true' ? true : v === false || v === 0 || v === '0' || v === 'false' ? false : null);
-  P.set = function (opts) {
-    opts = opts || {};
-    const theme = pick(THEMES, opts.theme); const device = pick(DEVICES, opts.device); const motion = pick(MOTIONS, opts.motion);
-    const outage = flag(opts.outage); const privacy = flag(opts.privacy); const grayscale = flag(opts.grayscale); const afterHours = flag(opts.afterHours);
-    if (theme) { P.theme = theme; root.setAttribute('data-theme', theme); }
-    if (device) { P.device = device; root.setAttribute('data-device', device); }
-    if (outage != null) { P.outage = outage; Proto.store.get().outage = P.outage; }
-    if (privacy != null) { P.privacy = privacy; root.toggleAttribute('data-privacy', P.privacy); }
-    if (grayscale != null) { P.grayscale = grayscale; if (P.grayscale) root.setAttribute('data-grayscale', '1'); else root.removeAttribute('data-grayscale'); }
-    if (motion) { P.motion = motion; if (motion === 'reduced') root.setAttribute('data-motion', 'reduced'); else root.removeAttribute('data-motion'); }
-    if (opts.persona) P.persona = opts.persona;
-    if (afterHours != null) Proto.store.get().clock.afterHours = afterHours;
   // The option values are the contract's (§3, §5): a value outside them is ignored, never stamped on <html>
   // and on every event.
   const THEMES = ['light', 'dark'], DEVICES = ['desk', 'operatory', 'shared', 'phone'], MOTION = ['auto', 'reduced'];
@@ -28,12 +11,12 @@
     opts = opts || {};
     if (THEMES.includes(opts.theme)) { P.theme = opts.theme; root.setAttribute('data-theme', opts.theme); }
     if (DEVICES.includes(opts.device)) { P.device = opts.device; root.setAttribute('data-device', opts.device); }
-    if (opts.outage != null) { P.outage = !!opts.outage && opts.outage !== '0'; Proto.store.get().outage = P.outage; }
-    if (opts.privacy != null) { P.privacy = !!opts.privacy && opts.privacy !== '0'; root.toggleAttribute('data-privacy', P.privacy); }
-    if (opts.grayscale != null) { P.grayscale = !!opts.grayscale && opts.grayscale !== '0'; if (P.grayscale) root.setAttribute('data-grayscale', '1'); else root.removeAttribute('data-grayscale'); }
+    if (opts.outage != null) { P.outage = opts.outage === true || opts.outage === 1 || opts.outage === '1' || opts.outage === 'true'; Proto.store.get().outage = P.outage; }
+    if (opts.privacy != null) { P.privacy = opts.privacy === true || opts.privacy === 1 || opts.privacy === '1' || opts.privacy === 'true'; root.toggleAttribute('data-privacy', P.privacy); }
+    if (opts.grayscale != null) { P.grayscale = opts.grayscale === true || opts.grayscale === 1 || opts.grayscale === '1' || opts.grayscale === 'true'; if (P.grayscale) root.setAttribute('data-grayscale', '1'); else root.removeAttribute('data-grayscale'); }
     if (MOTION.includes(opts.motion)) { P.motion = opts.motion; if (opts.motion === 'reduced') root.setAttribute('data-motion', 'reduced'); else root.removeAttribute('data-motion'); }
     if (Proto.router.PERSONAS.includes(opts.persona)) P.persona = opts.persona;
-    if (opts.afterHours != null) Proto.store.get().clock.afterHours = !!opts.afterHours && opts.afterHours !== '0';
+    if (opts.afterHours != null) Proto.store.get().clock.afterHours = opts.afterHours === true || opts.afterHours === 1 || opts.afterHours === '1' || opts.afterHours === 'true';
     // A scripted set() paints what the same flag on the hash paints: the Andon and the top bar at once, and the
     // canvas for the flags its gates read. Inside render() the render loop itself paints.
     if (P.ready && !rendering) { Proto.screens.shell.render(Proto.router.current()); if (opts.outage != null || opts.privacy != null || opts.afterHours != null) repaintCanvas(); }
