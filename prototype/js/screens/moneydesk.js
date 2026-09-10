@@ -116,6 +116,11 @@
      yet, so the live balance reads $0 while the row is real. It was on no tab and off the badge until the dentist filed. */
   const waitingEnc = (S, s) => { if (s.sent || due(s) > 0) return null; const a = S.appointments.find((x) => x.patientId === s.patientId && x.status === 'checked_out_unfiled'); return a ? a.encounterId : null; };
   const statements = (S) => S.statementsDue.filter((s) => s.sent || due(s) > 0 || waitingEnc(S, s));
+  /* An account has a statement while a row is open or one went out today for the balance as it still is: the store owns that
+     rule (openStatement, the row raiseStatement returns or refuses on); until it lands, a row sent today stands in. */
+  const hasStatement = (S, rows, pid) => (Proto.store.openStatement ? !!Proto.store.openStatement(pid) : rows.some((s) => s.patientId === pid && (!s.sent || (s.sentOn || S.tenant.today) === S.tenant.today)));
+  // A decided approval prints what posted (the store settles min(amount, due)), never the figure that was asked for.
+  const postedCents = (a) => (a.postedCents != null ? a.postedCents : a.amountCents);
   /* Credits are what the ledger says: every account whose rows net to money on hand, with the visit a payment is waiting to
      land on. The tab listed the S.credits rows, so an over-payment at the window was missing and an applied credit stayed
      listed, and counted, after the note filed. */
@@ -216,7 +221,7 @@
     if (st.woHeldReq) st.woHeldReq = S.approvals.find((x) => x.id === st.woHeldReq.id) || st.woHeldReq;
     const card = section('Open balances', row);
     if (st.woPosted) { card.append(h('div', { class: 'row' }, landing(chip('clear', 'Write-off posted'), 'md-wo-posted'), h('span', { class: 'muted', text: 'On the ledger with its reason code.' }))); return card; }
-    if (st.woHeldReq && st.woHeldReq.status === 'approved') { card.append(h('div', { class: 'row' }, chip('clear', 'Write-off ' + money(st.woHeldReq.amountCents) + ' approved by ' + st.woHeldReq.decidedBy), h('span', { class: 'muted', text: 'Posted to the ledger by the approval.' }))); return card; }
+    if (st.woHeldReq && st.woHeldReq.status === 'approved') { card.append(h('div', { class: 'row' }, chip('clear', 'Write-off ' + money(postedCents(st.woHeldReq)) + ' approved by ' + st.woHeldReq.decidedBy), h('span', { class: 'muted', text: 'Posted to the ledger by the approval.' }))); return card; }
     // A request that came back says so here, in the approver's words: the card used to fall through to a plain
     // Post with nothing to show that the phone had already answered, and the needs_second gate that had held the
     // first Post stayed on screen with nothing left to hold.
@@ -377,9 +382,9 @@
       if (st.previewFor === s.id) { const ex = Proto.store.explain(s.patientId); row.append(h('div', { class: 'explain', 'aria-label': 'Patient-voice preview' }, h('p', { class: 'sentence', text: ex.length ? ex.map((x) => x.patientVoice).join(' ') : 'Your share is ' + money(s.amountCents) + ' after insurance. We held this statement so your plan could settle first; nothing here is an estimate.' }), h('p', { class: 'small muted', text: 'Same rows the biller sees, rendered in the patient voice: no reason codes, no poster names.' }))); }
       return row;
     })));
-    /* Where a statement is raised: every account that owes and has no open row, the Ledger's gate points here. The store
-       decides whether it can be raised (a claim still out holds it), and the gate stands on the row that asked. */
-    const owing = S.patients.filter((p) => Proto.store.balances(p.id).patientDue > 0 && !rows.some((s) => s.patientId === p.id && !s.sent)).map((p) => ({ p, due: Proto.store.balances(p.id).patientDue })).sort((a, b) => b.due - a.due);
+    /* Where a statement is raised: every account that owes and has no statement (open, or sent today), the Ledger's gate
+       points here. The store decides whether it can be raised (a claim still out holds it), and the gate stands on the row that asked. */
+    const owing = S.patients.filter((p) => Proto.store.balances(p.id).patientDue > 0 && !hasStatement(S, rows, p.id)).map((p) => ({ p, due: Proto.store.balances(p.id).patientDue })).sort((a, b) => b.due - a.due);
     if (owing.length) out.append(h('h3', { text: 'Balances with no statement · ' + owing.length }), h('div', { class: 'worklist' }, ...owing.map(({ p, due }) => {
       const k = 'raise:' + p.id; if (outageOver(st.stmtGate[k])) delete st.stmtGate[k]; const g = st.stmtGate[k];
       const pend = S.claims.find((c) => c.patientId === p.id && ['submitted', 'pended'].includes(c.status));
@@ -409,7 +414,7 @@
     // The sentence is built at read time (privacy hides the name on glass) and the decision keeps the one word
     // the chip, the phone and the write-off card all use — never the raw status beside it. The approver's line
     // rides with the decision: the card points here for it.
-    return section('Approvals', h('div', { class: 'worklist' }, ...S.approvals.map((a) => { const s = STATUS[a.status] || ['info', a.status]; return h('div', { class: 'wrow' }, chip(s[0], s[1]), h('span', { class: 'amt', text: money(a.amountCents) }), h('span', { class: 'why' }, Proto.store.approvalSentence(a) + (a.decidedBy ? ' · ' + s[1] + ' by ' + a.decidedBy : ''), a.decisionReason ? [': ', h('q', { class: 'md-line', text: a.decisionReason })] : null)); })));
+    return section('Approvals', h('div', { class: 'worklist' }, ...S.approvals.map((a) => { const s = STATUS[a.status] || ['info', a.status]; return h('div', { class: 'wrow' }, chip(s[0], s[1]), h('span', { class: 'amt', text: money(postedCents(a)) }), h('span', { class: 'why' }, Proto.store.approvalSentence(a) + (a.decidedBy ? ' · ' + s[1] + ' by ' + a.decidedBy : ''), a.decisionReason ? [': ', h('q', { class: 'md-line', text: a.decisionReason })] : null)); })));
   }
 
   /* ---- keys: active only while mounted ---- */

@@ -76,7 +76,8 @@
 
   /* ---- step-up: 'Confirm your PIN' (the store matches the digits against the approver's own PIN) ---- */
   function openStepup(r, a) {
-    const dots = h('div', { class: 'pindots', 'aria-live': 'polite', 'aria-label': 'PIN digits entered', text: '' });
+    // The display is where the keyboard lands and where Enter is Approve, as pin.display is Go on the author pad.
+    const dots = h('div', { class: 'pindots', testid: 'phone.stepup.display', tabindex: '0', role: 'textbox', 'aria-readonly': 'true', 'aria-live': 'polite', 'aria-label': 'PIN typed so far; Enter is Approve', text: '' });
     const hint = h('p', { class: 'hint ph-hint', text: 'Four to six digits.' });
     const state = { reqId: a.id, digits: '', dots, hint, close: null, store: S() };
     function paint() { dots.textContent = '•'.repeat(state.digits.length); }
@@ -93,8 +94,10 @@
       state.close();
       if (!res.ok) { s.refusal[a.id] = gate(r, a, res); if (res.code === 'pin_no_match') s.refusal[a.id].fresh = true; rerender(r, 'refusal.control'); return; }
       s.refusal[a.id] = null;
-      s.done[a.id] = { kind: 'approved', text: 'Approved · posted with your name as second approver · the biller’s write-off is on the ledger' };
-      say('Approved. Posted with your name as second approver.');
+      // What posted, not what was asked: the store settles min(amount, due), so a partial approval says its own figure.
+      const posted = money(res.postedCents != null ? res.postedCents : a.amountCents);
+      s.done[a.id] = { kind: 'approved', text: 'Approved ' + posted + ' · posted with your name as second approver · the biller’s write-off is on the ledger' };
+      say('Approved ' + posted + '. Posted with your name as second approver.');
       rerender(r, '.ph-done');
     };
     const keys = h('div', { class: 'pinpad', role: 'group', 'aria-label': 'PIN keypad' },
@@ -109,7 +112,7 @@
       hint, dots, keys,
       btn('Cancel', { testid: 'phone.stepup.cancel', kind: 'quiet', onClick: () => state.close() }));
     // A pad closed over a rebuilt store (reset) confirmed nothing: the next render says so where focus can land.
-    state.close = Proto.ui.dialog(body, { label: 'Confirm your PIN', focus: '[data-testid="phone.stepup.1"]', onClose: () => { if (pad === state) pad = null; if (!state.done && state.store !== S()) { const s = st(); s.notice = NOTICE(a.id); s.noticeFresh = true; } } });
+    state.close = Proto.ui.dialog(body, { label: 'Confirm your PIN', focus: '[data-testid="phone.stepup.display"]', onClose: () => { if (pad === state) pad = null; if (!state.done && state.store !== S()) { const s = st(); s.notice = NOTICE(a.id); s.noticeFresh = true; } } });
     pad = state;
   }
 
@@ -243,7 +246,7 @@
     const done = st().done[a.id]; const gated = st().refusal[a.id];
     const s = a.status === 'approved' ? ['clear', 'Approved'] : ['required', 'Sent back'];
     return h('article', { class: 'card flat ph-decided', 'aria-label': 'Decided request ' + a.id },
-      h('div', { class: 'ph-head' }, chip(s[0], s[1]), h('span', { class: 'ph-amount small', text: money(a.amountCents) }), h('span', { class: 'small muted grow', text: a.id })),
+      h('div', { class: 'ph-head' }, chip(s[0], s[1]), h('span', { class: 'ph-amount small', text: money(a.postedCents != null ? a.postedCents : a.amountCents) }), h('span', { class: 'small muted grow', text: a.id })),
       done ? h('p', { class: 'ph-done', role: 'status', tabindex: '-1', text: done.text }) : null,
       // A gate raised against a request that was decided under this approver's hands renders here, on the row it names.
       gated ? refusal(gated) : null,
@@ -307,10 +310,10 @@
     const t = ev.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
     if (/^[0-9]$/.test(ev.key)) { ev.preventDefault(); pad.add(ev.key); }
     else if (ev.key === 'Backspace') { ev.preventDefault(); pad.back(); }
-    /* Enter finishes the PIN wherever the keyboard happens to be sitting. The pad opens with focus on its
-       landing key, so excluding focused buttons meant Enter typed a fifth digit instead of submitting and
-       only the submit key would finish. Cancel keeps its own Enter, because it is a different verb. */
-    else if (ev.key === 'Enter' && !(t && t.getAttribute && t.getAttribute('data-testid') === 'phone.stepup.cancel')) { ev.preventDefault(); pad.submit(); }
+    /* One grammar with the author pad (shell.js onPadKey): Enter on a focused control is that control's own
+       activation (a digit key enters its digit, Backspace deletes one, Cancel cancels); only Enter off a control,
+       on the display the pad opens on, submits. Intercepting it ran Approve from a digit key. */
+    else if (ev.key === 'Enter' && !(t && t.closest && t.closest('button, summary, a, [role="button"]'))) { ev.preventDefault(); pad.submit(); }
   }
   function attachKeys() { if (!keysOn) { document.addEventListener('keydown', onKey); keysOn = true; } }
   function detachKeys() { if (keysOn) { document.removeEventListener('keydown', onKey); keysOn = false; } }

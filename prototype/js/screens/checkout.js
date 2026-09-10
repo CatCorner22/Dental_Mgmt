@@ -234,7 +234,8 @@
 
   function writeoffBlock(r, st, policy) {
     const S = Proto.store.get();
-    if (st.heldReq && st.heldReq.status === 'approved') return h('div', { class: 'row' }, chip('clear', 'Write-off ' + money(st.heldReq.amountCents) + ' approved by ' + st.heldReq.decidedBy), h('span', { class: 'small muted', text: 'Already on the ledger; Post writes the rest.' }));
+    // What posted, not what was asked: the store settles min(amount, due) when the approval lands.
+    if (st.heldReq && st.heldReq.status === 'approved') return h('div', { class: 'row' }, chip('clear', 'Write-off ' + money(st.heldReq.postedCents != null ? st.heldReq.postedCents : st.heldReq.amountCents) + ' approved by ' + st.heldReq.decidedBy), h('span', { class: 'small muted', text: 'Already on the ledger; Post writes the rest.' }));
     if (!st.writeoffOpen) return h('div', null, btn('Add write-off or adjustment', { kind: 'reversible', testid: 'checkout.writeoff.add', onClick: () => { st.writeoffOpen = true; st.refusalNode = null; rerender(r, 'checkout.writeoff.amount'); } }));
     policy.push('At or above ' + money(S.tenant.dualReleaseThresholdCents) + ' a second approver is needed; the posting is held, never silently allowed.');
     const amt = h('input', { class: 'input co-amount', type: 'text', inputmode: 'decimal', testid: 'checkout.writeoff.amount', value: st.writeoffStr, onInput: (ev) => { st.writeoffStr = ev.target.value; if (st.refusalNode) { st.refusalNode = null; rerender(r, 'checkout.writeoff.amount'); } } });
