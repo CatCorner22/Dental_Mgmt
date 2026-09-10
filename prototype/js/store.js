@@ -353,6 +353,7 @@
   function savePerio(encId, sites, extras) {
     const enc = encounter(encId); if (!enc) return notFound('encounter');
     const off = offline('Wait for the server — the exam cannot save'); if (off) return off;
+    const who = clinician('Ask the hygienist to chart this'); if (who) return who;
     const entries = Object.entries(sites);
     const probed = entries.filter(([, v]) => v && v.depth != null).length;
     const skipped = entries.filter(([, v]) => v && v.skipped).length;
@@ -813,5 +814,5 @@
   reset = function (seedNum) { const s = _reset(seedNum); for (const t of TABLES) if (!s[t]) s[t] = []; return s; };
 
   const LICENCE_WORDS = { implant: 'implant', crown_margin: 'crown margin', not_tolerated: 'patient could not tolerate probing', third_molar_absent: 'third molar absent' };
-  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, windowEstimate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, addTag, readyForExam, wholePatient, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, claimAction, disclose, sendStatement, raiseStatement, requirePin, verifyPin, pinLockout, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
+  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, windowEstimate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, clinician, addTag, readyForExam, wholePatient, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, claimAction, disclose, sendStatement, raiseStatement, requirePin, verifyPin, pinLockout, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
 })();

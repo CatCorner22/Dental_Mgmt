@@ -169,7 +169,14 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         await measure('close.closeday', '#/owner/close?outage=1', async () => [await click(p, 'close.closeday'), await click(p, 'close.closeday.confirm')]);
         await measure('encounter.file', '#/dentist/encounter/enc-9002?outage=1', async () => { const s = [await click(p, 'enc.tag.tag-1.chart'), await click(p, 'enc.surface.30.d'), await click(p, 'enc.proc.d2392'), await click(p, 'enc.note.starter.0')]; await p.waitForTimeout(120); s.push(await click(p, 'enc.file')); await p.waitForTimeout(150); s.push(await click(p, 'refusal.control')); await p.waitForTimeout(200); return s; });
         await measure('roles.daypass.save', '#/owner/roles?outage=1', async () => [await click(p, 'roles.daypass.add'), await fill(p, 'roles.daypass.name', 'Alex Rivera'), await click(p, 'roles.daypass.role.rdh'), await click(p, 'roles.daypass.save')]);
-        await measure('phone.approve', '#/owner/phone/approvals?outage=1', async () => { const s = [await click(p, 'phone.simulate')]; await p.waitForTimeout(150); const reqId = await p.evaluate(() => ((window.__proto.state().approvals.filter((a) => a.status === 'pending')[0]) || {}).id || null); s.push(reqId); s.push(await click(p, 'phone.request.' + reqId + '.approve')); for (const d of ['1', '2', '3', '4']) s.push(await click(p, 'phone.stepup.' + d)); s.push(await click(p, 'phone.stepup.submit')); await p.waitForTimeout(200); return s; });
+        // The request is raised before the outage (phone.simulate is itself refused offline, so raising it inside the
+        // range left no request and a vacuous leg); its write sits outside the measured range, and the step-up types the
+        // approver's own PIN so a live Approve would post.
+        await go(p, '#/owner/phone/approvals?outage=0');
+        const simulated = await click(p, 'phone.simulate'); await p.waitForTimeout(150);
+        const reqId = await p.evaluate(() => ((window.__proto.state().approvals.filter((a) => a.status === 'pending')[0]) || {}).id || null);
+        const approverPin = await p.evaluate(() => String((Proto.store.currentUser() || {}).pin || ''));
+        await measure('phone.approve', '#/owner/phone/approvals?outage=1', async () => { const s = [simulated, reqId, await click(p, 'phone.request.' + reqId + '.approve')]; for (const d of approverPin) s.push(await click(p, 'phone.stepup.' + d)); s.push(await click(p, 'phone.stepup.submit')); await p.waitForTimeout(200); return s; });
         const comparatorRefused = results['checkout.post'].outageRefusals.length > 0 && results['checkout.post'].writes.length === 0;
         const andonClaims = Object.values(results).every((r) => /reads only, no postings/.test(r.andon) && r.outageFlag.store === true);
         const verbsWritingUnderOutage = Object.entries(results).filter(([k, r]) => k !== 'checkout.post' && r.writes.length > 0 && r.outageRefusals.length === 0).map(([k]) => k);

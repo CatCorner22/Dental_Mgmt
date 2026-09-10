@@ -80,12 +80,14 @@
     if (focus) { const el = document.querySelector(focus[0] === '#' ? focus : '[data-testid="' + focus + '"]'); if (el) el.focus(); }
     if (announce) Proto.router.announce(announce);
   }
+  // "Open Roles" / "Add day pass" mean the seat that issues a pass, as on Checkout, Encounter, Perio and Chairs.
+  const openRoles = () => { location.hash = '#/owner/roles'; };
   /* Wrap a store refusal so its DOM node is built (and logged) once and reused across re-renders. The component
      logs and announces the gate; this screen never announces one itself. Every code has a control that acts:
      outage opens the support line, a missing pass opens Roles, anything else runs the caller's onControl. */
   function gateFor(res, r, onControl) {
     const g = { code: res.code, verb: res.verb, control: res.control, why: res.why };
-    g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, fresh: true, severity: g.code === 'outage' ? 'stop' : 'required', onControl: () => { if (g.code === 'outage') support(); else if (g.code === 'entitlement') Proto.router.go(r.persona, 'roles'); else if (onControl) onControl(g); } });
+    g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, fresh: true, severity: g.code === 'outage' ? 'stop' : 'required', onControl: () => { if (g.code === 'outage') support(); else if (g.code === 'entitlement') openRoles(); else if (onControl) onControl(g); } });
     return g;
   }
   const raise = (table, id, res, r, onControl) => { dropGates(res.code); table[id] = gateFor(res, r, onControl); };
@@ -159,7 +161,7 @@
     const stale = Proto.store.user(STALE_DEVICE.userId);
     if (stale && !ui.deviceReset) rows.push({ id: stale.id, time: '09:00', sev: 'required', word: 'Device', line: 'Shared tablet chair ' + STALE_DEVICE.op + ' still signed in as ' + initials(stale.name) + ' from yesterday', control: 'Sign out', testid: 'board.readiness.row.' + stale.id + '.reset', act: () => { ui.deviceReset = s.clock.time; after(r, 'Tablet chair ' + STALE_DEVICE.op + ' signed out — marked on your readiness strip; the next author enters a PIN.', 'board.readiness.toggle'); } });
     const fd = s.roleTemplates.find((t) => t.code === 'frontdesk');
-    if (fd && !frontDeskCover()) rows.push({ id: fd.code, time: '99:99', sev: 'info', word: 'Tomorrow', line: 'Tomorrow: front desk has no coordinator', control: 'Add day pass', testid: 'board.readiness.row.' + fd.code + '.add', act: () => Proto.router.go(r.persona, 'roles') });
+    if (fd && !frontDeskCover()) rows.push({ id: fd.code, time: '99:99', sev: 'info', word: 'Tomorrow', line: 'Tomorrow: front desk has no coordinator', control: 'Add day pass', testid: 'board.readiness.row.' + fd.code + '.add', act: openRoles });
     rows.sort((x, y) => (x.time < y.time ? -1 : 1));
     return rows;
   }

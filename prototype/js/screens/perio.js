@@ -201,18 +201,9 @@
   }
   // A gate names the next thing to do, so the keyboard lands on it rather than on the Held primary behind it.
   function focusGateControl() { const c = document.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); }
-  /* Who may author an exam: a clinical licence on the account, or a day pass that grants perio. The old test read
-     the device, so the same licence-less author was refused on shared glass and saved a clinical exam on a desk. */
-  const mayChart = (u) => !!u.licence || ((u.entitlements || []).indexOf('perio') >= 0);
   function doSave(st, r, licence) {
     // A second dispatch in the same tick lands on a saved exam: it is the amend path, not a second Save.
     if (st.saved) { openAmendGate(st, r); return; }
-    const u = Proto.store.currentUser();
-    // A pass-less temp is nobody to attribute the exam to: the store's own words for it (clinician()), and its control.
-    if (u.noPass) { mkGate(st, { code: 'entitlement', verb: 'Issue a day pass before charting', control: 'Open Roles', why: 'A temp works under their own day pass: it is the name every record is frozen onto. Until Roles issues one there is nobody to post as.' }); rerender(r); focusGateControl(); return; }
-    // The remedy here is "hand the chart to someone licensed", not "type your own PIN", so the code is the licence
-    // one and the control carries the one label this action has everywhere (Encounter, Phone, the pad's own dialog).
-    if (!mayChart(u)) { mkGate(st, { code: 'licence_scope', verb: 'Switch to a licensed author before Save', control: 'Switch author', why: 'The exam is attributed to the author who is signed in, and only a clinical licence or a day pass that grants perio can carry one. Switching author opens the PIN pad; nothing is written until then.' }, () => Proto.screens.shell.openPinPad(r)); rerender(r); focusGateControl(); return; }
     if (st.mode === 'screening' && st.sextants.some((c) => c === '')) { const n = st.sextants.filter((c) => c === '').length; mkGate(st, { code: 'screening_incomplete', verb: 'Code ' + n + ' more sextant' + (n > 1 ? 's' : '') + ' before Save', control: 'Go to the first empty sextant', why: 'Screening saves six codes (0 to 4, or * for furcation, mobility, or recession). An empty box would read as 0.' }, () => { st.gate = null; st.scur = st.sextants.indexOf(''); rerender(r); const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); }); rerender(r); focusGateControl(); return; }
     const res = Proto.store.savePerio(st.encId, buildSites(st), { mode: st.mode, licence: licence || undefined, amending: !!st.amending });
     if (!res.ok) {
@@ -441,8 +432,7 @@
     const st = stateFor(enc); const pt = Proto.store.patient(enc.patientId); const a = S().appointments.find((x) => x.encounterId === enc.id);
     // A gate answers a condition, and clears when the condition does: switching to a licensed author used to
     // leave Save reading Held with a refusal nothing could clear, and coding the last sextant left it too.
-    if (st.gate && st.gate.code === 'licence_scope' && mayChart(Proto.store.currentUser())) st.gate = null;
-    if (st.gate && st.gate.code === 'entitlement' && !Proto.store.currentUser().noPass) st.gate = null;    // the pass was issued
+    if (st.gate && ['licence_scope', 'entitlement'].includes(st.gate.code) && (Proto.store.clinician() || {}).code !== st.gate.code) st.gate = null;   // the author switched, or the pass was issued
     if (st.gate && st.gate.code === 'screening_incomplete' && !st.sextants.some((c) => c === '')) st.gate = null;
     if (st.gate && st.gate.code === 'depth_gt_15' && (st.cur !== st.gate.cur || siteDepth(st) != null)) st.gate = null;   // the next key answered it, or the site kept a valid depth
     if (st.gate && st.gate.code === 'omission_licence' && !skippedCount(st)) { st.gate = null; st.licenceOpen = false; }
