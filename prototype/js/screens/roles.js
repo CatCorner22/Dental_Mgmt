@@ -78,6 +78,10 @@
   /* A day pass is a grant like any other, so it sits in the People table with the seats it was issued beside;
      its SoD decision is the controlDecisions row the store wrote for it. */
   const passAsSeat = (dp) => ({ id: dp.id, name: dp.name, role: dp.role, licence: null, entitlements: dp.entitlements || [], dayPass: dp });
+  // Whether a pass is live is the store's word (passState): every live pass's PIN opens its holder's session, so the row
+  // says live, ended or revoked in the store's terms and never lists a credential the pad would refuse.
+  const PASS_STATE = { live: (dp) => chip('clear', 'Live until ' + clock12(dp.shiftEnd) + ' + 30 min'), ended: () => chip('required', 'Ended · grants lapsed'), revoked: (dp) => chip('required', 'Revoked' + (dp.revokedBy ? ' by ' + shortBy(dp.revokedBy) : '')) };
+  const passChip = (dp) => PASS_STATE[Proto.store.passState(dp)](dp);
   function decisionFor(uid) {
     const g = S().currentGrants.find((x) => x.userId === uid && x.accepted);
     const d = g ? null : S().controlDecisions.find((x) => x.dayPassId === uid && x.ruleId);
@@ -115,7 +119,7 @@
       rowBtn.setAttribute('aria-expanded', String(open));
       rows.push(h('tr', null,
         h('td', null, rowBtn),
-        h('td', { text: u.dayPass ? roleLabel(u.role) + ' · until ' + clock12(u.dayPass.shiftEnd) : ROLE_LABEL[u.role] || u.role }),
+        u.dayPass ? h('td', null, h('div', { class: 'rl-chips' }, h('span', { text: roleLabel(u.role) }), passChip(u.dayPass))) : h('td', { text: ROLE_LABEL[u.role] || u.role }),
         h('td', null, h('div', { class: 'rl-chips' }, ...(u.entitlements.length ? u.entitlements.map((e) => chip('info', entLabel(e))) : [h('span', { class: 'muted small', text: 'Role scope only' })]))),
         h('td', null, dec ? chip('review', dec.text) : h('span', { class: 'muted', text: '—' }))));
       if (open) rows.push(h('tr', { class: 'rl-expanded' }, h('td', { colspan: '4' }, grantsPanel(u))));

@@ -211,7 +211,8 @@
     Object.assign(eraLines[21], { cdt: 'd4341', expectedCents: 28500, paidCents: 21400, carc: '45', status: 'delta', note: 'Paid below contract: expected $285, ERA says $214' });
     Object.assign(eraLines[30], { cdt: 'd2392', tooth: 14, expectedCents: 26000, paidCents: 20800, carc: '131', status: 'delta', note: 'Downcoded to D2391: expected $260, ERA says $208' });
     Object.assign(eraLines[39], { id: 'el-40', patientId: 'p-321', claimId: 'c-88', cdt: 'd4341', expectedCents: 28500, paidCents: 0, carc: '16', rarc: 'N4', status: 'denied', note: 'Claim lacks information: missing perio chart' });
-    const eraBatches = [{ id: 'era-1', payer: 'Delta Dental', received: TODAY + 'T06:10', lines: 41, postedLines: 37, eftCents: 481233, trn: 'TRN 20260903-90112', status: 'review' }];
+    // The EFT is what the 835's lines pay: the header said $4,812.33 was matched to the bank while the lines posted $21,385.00.
+    const eraBatches = [{ id: 'era-1', payer: 'Delta Dental', received: TODAY + 'T06:10', lines: 41, postedLines: 37, eftCents: eraLines.reduce((s, l) => s + l.paidCents, 0), trn: 'TRN 20260903-90112', status: 'review' }];
 
     const claims = [
       { id: 'c-88', patientId: 'p-321', status: 'denied', cdt: 'd4341', tooth: null, amountCents: 28500, payer: 'Delta Dental', carc: '16', rarc: 'N4', plain: 'Delta says the claim is missing information: the perio chart was not attached.', nextAction: 'Appeal with the perio chart and the SRP narrative from the note', appealBy: '2026-11-02', submitted: '2026-08-20', hasPerioChart: true, hasNarrative: true },
@@ -219,6 +220,9 @@
       { id: 'c-65', patientId: 'p-318', status: 'submitted', cdt: 'd2392', tooth: 30, amountCents: 26000, payer: 'MetLife', submitted: '2026-08-01', age: 33, nextAction: 'Call payer: no 277 status in 33 days' },
       { id: 'c-51', patientId: 'p-322', status: 'submitted', cdt: 'd4341', tooth: null, amountCents: 28500, payer: 'Delta Dental', submitted: '2026-07-02', age: 63, nextAction: 'Timely filing at 90 days: escalate' },
     ];
+    /* An open claim bills a charge the ledger carries: Aging said $1,180 was out on Nico Iyer while his Ledger read $0.00
+       everywhere. Each charge waits on its claim for the full fee, so the three numbers that already read right do not move. */
+    for (const c of claims.filter((x) => x.status !== 'denied')) L({ kind: 'charge', patientId: c.patientId, amountCents: c.amountCents, effective: c.submitted, posted: c.submitted, actor: 'Sam Dawson', actorKind: 'user', locationId: 'loc-1', cdt: c.cdt, tooth: c.tooth, insuranceExpectedCents: c.amountCents, claimId: c.id });
 
     /* A statement bills what the account owes, so the amount is read off the ledger rather than asserted
        beside it. Both rows used to name a figure of their own: sd-1 billed $84.00 to an account with no

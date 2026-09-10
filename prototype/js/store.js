@@ -48,8 +48,11 @@
     if (!pin) return refuse('pin_required', 'Enter your PIN to post', 'Enter PIN', 'Shared desk: the PIN mints your own session, so the posting carries your name and not the last person\'s.');
     const lock = S.pinLock;
     if (lock.until > Date.now()) return lockedOut();
-    const who = S.users.find((x) => x.pin && x.pin === pin) || (S.tempUser && S.tempUser.pin === pin ? S.tempUser : null);
-    if (who && (!forUserId || who.id === forUserId)) { lock.misses = 0; return { ok: true, user: who }; }
+    // Every live pass is a credential, not only the newest: the second pass of the day used to retire the first one's PIN
+    // without saying so, and the first temp's 8001 then counted as a miss toward the device lock.
+    const pass = livePasses().find((d) => d.pin === pin);
+    const who = S.users.find((x) => x.pin && x.pin === pin) || (pass ? passUser(pass) : null);
+    if (who && (!forUserId || who.id === forUserId)) { lock.misses = 0; if (pass) S.tempUser = who; return { ok: true, user: who }; }
     lock.misses += 1;
     if (lock.misses >= 3) { lock.misses = 0; lock.until = Date.now() + PIN_LOCK_MS; pinLockout(); return lockedOut(); }
     return refuse('pin_no_match', 'Retype the PIN — no match', 'Enter PIN', PIN_WHY);
@@ -71,14 +74,26 @@
   const appt = (aid) => S.appointments.find((a) => a.id === aid);
   const encounter = (eid) => S.encounters.find((e) => e.id === eid);
   // The pass holder is an account too: the pad verified 8001 and then refused the session it names.
-  const user = (uid) => S.users.find((u) => u.id === uid) || (S.tempUser && S.tempUser.id === uid ? S.tempUser : null);
+  const user = (uid) => S.users.find((u) => u.id === uid) || (S.tempUser && S.tempUser.id === uid ? tempSeat() : null);
   const carrierName = (cid) => (S.carriers.find((c) => c.id === cid) || {}).name || '—';
   const NOT_FOUND = { appointment: 'Open a scheduled appointment', encounter: 'Open a chart from the Board', patient: 'Search for the patient', claim: 'Open a claim from Money Desk', request: 'Open a request from Approvals' };
   const notFound = (what) => refuse('notfound', 'Open ' + what + ' from a list', NOT_FOUND[what] || 'Go back', 'The id in the address does not name a row in this practice. Nothing was read and nothing was written.');
   /* A temp with no day pass is nobody: the pass is the identity, so until Roles issues one the persona carries no
      name and no entitlement, and every gate that needs one refuses instead of posting as a hard-coded "Alex Rivera". */
   const NO_PASS = { id: 'u-temp', name: 'No day pass issued', short: 'No day pass', role: 'temp', entitlements: [], noPass: true };
-  const currentUser = () => { const p = window.__proto && window.__proto.persona; if (p === 'temp') return S.tempUser || NO_PASS; return user(S.personaUser[p]) || S.users[0]; };
+  /* Which passes are live is the store's to say, once: a pass is live until it is revoked or its shift end plus the
+     30-minute grace has passed on the store clock. Roles prints this state on each pass row and verifyPin accepts every
+     live pass's PIN; the temp seat (u-temp, the one persona every pass holder shares) is whichever holder's PIN last
+     verified, the newest pass until one does. */
+  const GRACE_MIN = 30;
+  const passEnds = (dp) => { const [hh, mm] = String(dp.shiftEnd || '23:59').split(':').map(Number); const t = hh * 60 + mm + GRACE_MIN; return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); };
+  const passState = (dp) => (dp.revokedAt ? 'revoked' : passEnds(dp) <= S.clock.time ? 'ended' : 'live');
+  const passLive = (dp) => passState(dp) === 'live';
+  const livePasses = () => S.dayPasses.filter(passLive);
+  const passUser = (dp) => ({ id: 'u-temp', name: dp.name, short: dp.name.split(' ')[0], role: dp.role, entitlements: dp.entitlements, dayPass: dp.id, pin: dp.pin });
+  // A seat whose pass has ended is nobody again, so the gates that need a pass refuse as before it was issued.
+  const tempSeat = () => (S.tempUser && S.dayPasses.some((d) => d.id === S.tempUser.dayPass && passLive(d)) ? S.tempUser : null);
+  const currentUser = () => { const p = window.__proto && window.__proto.persona; if (p === 'temp') return tempSeat() || NO_PASS; return user(S.personaUser[p]) || S.users[0]; };
   const NO_PASS_WHY = 'A temp works under their own day pass: it is the name every record is frozen onto. Until Roles issues one there is nobody to post as.';
   const noPass = (verb) => (currentUser().noPass ? refuse('entitlement', verb, 'Open Roles', NO_PASS_WHY) : null);
   /* One entitlement rule: the seat carries one of the grants or the verb refuses and names a seat that does. */
@@ -121,8 +136,9 @@
     // Insurer money stays on the charge it was paid against: the charge its row or allocation rows name, else a charge
     // already rendered when the plan paid. Filing enc-9003 used to hand the SRP's 8/2 and 8/20 payments to today's
     // charges and re-open the paid SRP for $217.00; only money no charge can claim floats to the unapplied pool.
-    const pinned = (e) => (e.chargeId ? [e.chargeId] : S.allocations.filter((a) => a.paymentId === e.id).map((a) => a.chargeId));
-    const forIns = (e) => { const pin = pinned(e); return charges.filter((c) => (pin.length ? pin.includes(c.row.id) : String(c.row.effective) <= String(e.effective))); };
+    // chargeIds is the pin an 835 row is posted with (eraTargets); an empty list pins it to the pool, not to any later charge.
+    const pinned = (e) => { if (e.chargeId) return [e.chargeId]; if (Array.isArray(e.chargeIds)) return e.chargeIds; const al = S.allocations.filter((a) => a.paymentId === e.id).map((a) => a.chargeId); return al.length ? al : null; };
+    const forIns = (e) => { const pin = pinned(e); return charges.filter((c) => (pin ? pin.includes(c.row.id) : String(c.row.effective) <= String(e.effective))); };
     // A credit that finds no open charge is still money on the account: it lands on the latest charge as an
     // over-payment, or, with no charge at all, in the unapplied pool. Dropping it read a $44 window payment
     // and 16 ERA payments as Credit $0.00 while the rows netted negative.
@@ -315,11 +331,14 @@
   /* The frozen sentence is built at read time so privacy mode can hide the name on operatory glass; storing
      the finished string put "Lena Fischer" verbatim into the Andon, Daily Close and Money Desk under privacy. */
   // opts.redact: the minimum-necessary form the Andon and the phone card print before Show name (initials · MRN).
+  /* A decided request reads what POSTED: an approval settles to the live balance (decideApproval), so a $300 request
+     approved after the window took $300 posted $110, and every screen printing this sentence said $300 had. */
+  const settledCents = (req) => (Number.isFinite(req.postedCents) ? req.postedCents : req.amountCents);
   function approvalSentence(req, opts) {
     if (!req) return '';
     const who = patient(req.patientId);
     const name = !who ? 'this account' : opts && opts.redact ? Proto.ui.initials(who.name) + ' · ' + who.mrn : Proto.ui.displayName(who.name, !!(window.__proto && window.__proto.privacy));
-    return 'Write-off ' + Proto.ui.money(req.amountCents) + ' on ' + name + ' (' + (req.reason || 'courtesy') + ') requested by ' + req.requestedBy + ' at ' + Proto.ui.time(req.requestedAt || S.clock.time);
+    return 'Write-off ' + Proto.ui.money(settledCents(req)) + ' on ' + name + ' (' + (req.reason || 'courtesy') + ') requested by ' + req.requestedBy + ' at ' + Proto.ui.time(req.requestedAt || S.clock.time);
   }
 
   // Dual release evaluator (precog evaluateRelease, simplified)
@@ -484,12 +503,17 @@
       // The tag remembers which paint dispositioned it, so Undo of a later paint on the same tooth leaves it charted.
       for (const t of S.tags) if (t.encounterId === encId && t.tooth === tooth && !t.disposition) { t.disposition = 'charted'; t.chartEventId = ce.id; touch('tags', t.id); }
     }
-    S.notes[encId] = S.notes[encId] || {};
-    const line = what + (surfaces && surfaces.length ? ' ' + surfaces.join('') : '') + (temporality === 'existing' ? ' (existing, placed elsewhere)' : temporality === 'planned' ? ' (planned)' : '');
-    S.notes[encId].procedures = (S.notes[encId].procedures || []).concat([line]);
-    S.notes[encId].procedure = S.notes[encId].procedures.join('; ');
-    touch('notes', encId);
+    noteLines(encId);
     return { ok: true, chartEvent: ce, procedure: proc, plan };
+  }
+  /* The note's procedure lines are the live paints, one line each, rebuilt from the chart events after every paint and
+     every undo: the note used to keep its own list and Undo dropped the last line whatever paint it reversed. */
+  const noteLine = (ce) => (S.cdt[ce.cdt] || [ce.cdt])[0] + (ce.tooth ? ' #' + ce.tooth : '') + (ce.surfaces && ce.surfaces.length ? ' ' + ce.surfaces.join('') : '') + (ce.temporality === 'existing' ? ' (existing, placed elsewhere)' : ce.temporality === 'planned' ? ' (planned)' : '');
+  function noteLines(encId) {
+    const n = (S.notes[encId] = S.notes[encId] || {});
+    n.procedures = liveEvents(encId).map(noteLine);
+    n.procedure = n.procedures.join('; ');
+    touch('notes', encId);
   }
   /* Undo reverses the last paint; it never deletes. The screen used to splice the chart event, its procedure
      and its plan item out of their tables and log one write for an id no table held, which erased part of a
@@ -500,6 +524,9 @@
   function chartUndo(encId, chartEventId) {
     const enc = encounter(encId); if (!enc) return notFound('encounter');
     const off = offline('Wait for the server — charting is paused'); if (off) return off;
+    // A reversal is a chart event like the paint it supersedes, written under the same licence: the front desk and a
+    // pass-less temp used to reverse the dentist's paint with no gate.
+    const who = clinician('Ask the clinician to undo this'); if (who) return who;
     const live = liveEvents(encId);
     if (!live.length) return refuse('already_decided', 'Chart something before undoing it', 'Chart a tooth', 'Nothing has been painted on this visit yet, so there is nothing to reverse.');
     const ce = (chartEventId && live.find((c) => c.id === chartEventId)) || live[live.length - 1];
@@ -512,8 +539,7 @@
     // used to reverse the composite's plan line and reopen the tag the composite had charted.
     const plan = S.planItems.find((pl) => pl.chartEventId === ce.id && !pl.reversed) || null;
     if (plan) { plan.reversed = true; touch('planItems', plan.id); }
-    const n = S.notes[encId];
-    if (n && n.procedures && n.procedures.length) { n.procedures = n.procedures.slice(0, -1); n.procedure = n.procedures.join('; '); touch('notes', encId); }
+    noteLines(encId);
     for (const t of S.tags) if (t.encounterId === encId && t.chartEventId === ce.id && t.disposition === 'charted') { t.disposition = null; t.chartEventId = null; touch('tags', t.id); }
     return { ok: true, reversal: rev, supersedes: ce.id, procedure: proc || null, plan: plan || null };
   }
@@ -629,6 +655,11 @@
   }
 
   // Money Desk (flow 5)
+  /* An 835 pays claims already out, so its rows are pinned when they post: to the charges the line's claim bills, else to
+     this patient's charges rendered before the remit arrived. A row pinned to nothing floats to the unapplied pool. Unpinned,
+     the money fell on any charge effective by today, so filing an exam after Post matched handed it Delta's ERA money. */
+  const claimCharges = (claimId) => { const c = S.claims.find((x) => x.id === claimId); const ids = new Set(((c && c.lineItems) || []).map((li) => li.procedureId)); return ids.size ? S.ledger.filter((e) => e.kind === 'charge' && ids.has(e.procedureId)) : []; };
+  const eraTargets = (l, effective) => { const byClaim = claimCharges(l.claimId).filter((e) => e.patientId === l.patientId); return (byClaim.length ? byClaim : S.ledger.filter((e) => e.kind === 'charge' && e.patientId === l.patientId && String(e.effective) < String(effective))).map((e) => e.id); };
   /* Post matched now posts: it writes the ledger rows for the lines it claims are already posted, and logs the
      batch state change. Before, it flipped a status, said "37 posted", and left the ledger untouched. */
   function eraPostMatched(batchId, extras) {
@@ -638,7 +669,7 @@
     const pin = requirePin(extras); if (!pin.ok) return pin; const ent = bills(pin.user); if (ent) return ent; const u = poster(pin.user); let posted = 0;
     // A line is posted when its ledger row exists: the status flips here, with the row, never in the seed.
     for (const l of S.eraLines.filter((x) => x.batchId === batchId && x.status === 'matched')) {
-      if (!S.ledger.some((e) => e.eraLineId === l.id)) ledgerRow({ id: id('le'), kind: 'insurance_payment', patientId: l.patientId, amountCents: -l.paidCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: 'loc-1', payer: b.payer, eraLineId: l.id, gl: 'ins_ar_primary' });
+      if (!S.ledger.some((e) => e.eraLineId === l.id)) ledgerRow({ id: id('le'), kind: 'insurance_payment', patientId: l.patientId, amountCents: -l.paidCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: 'loc-1', payer: b.payer, eraLineId: l.id, gl: 'ins_ar_primary', chargeIds: eraTargets(l, S.tenant.today) });
       l.status = 'posted'; touch('eraLines', l.id);
       posted++;
     }
@@ -656,10 +687,10 @@
     // A contractual write-off is still a write-off: the after-hours hold applies to it as to any other.
     const gate = evaluateRelease('write_off', l.expectedCents - l.paidCents, pin.user, { contractual: true });
     if (!gate.ok) return refuse(gate.code, gate.verb, 'Set aside', gate.why);
-    const u = poster(pin.user);
+    const u = poster(pin.user); const chargeIds = eraTargets(l, S.tenant.today);
     l.status = 'posted'; touch('eraLines', l.id);
-    ledgerRow({ id: id('le'), kind: 'insurance_payment', patientId: l.patientId, amountCents: -l.paidCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: 'loc-1', payer: 'Delta Dental', eraLineId: lineId, gl: 'ins_ar_primary' });
-    ledgerRow({ id: id('le'), kind: 'write_off', patientId: l.patientId, amountCents: -(l.expectedCents - l.paidCents), effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: 'loc-1', reason: 'contractual_ppo', eraLineId: lineId });
+    ledgerRow({ id: id('le'), kind: 'insurance_payment', patientId: l.patientId, amountCents: -l.paidCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: 'loc-1', payer: 'Delta Dental', eraLineId: lineId, gl: 'ins_ar_primary', chargeIds });
+    ledgerRow({ id: id('le'), kind: 'write_off', patientId: l.patientId, amountCents: -(l.expectedCents - l.paidCents), effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: 'loc-1', reason: 'contractual_ppo', eraLineId: lineId, chargeIds });
     settleBatch(l.batchId);
     return { ok: true };
   }
@@ -712,9 +743,16 @@
     const due = balances(s.patientId).patientDue;
     if (due === 0) return refuse('zero_collect_refused', 'Nothing due — no statement to send', 'Open the ledger', 'The balance this row was raised for has since settled. A statement for $0 is noise to the patient and a disclosure row for nothing; a credit is refunded from Money Desk, never billed.');
     const u = poster(pin.user);
-    s.amountCents = due; s.sent = true; s.sentAt = S.clock.time; touch('statementsDue', s.id);
+    s.amountCents = due; s.sent = true; s.sentAt = S.clock.time; s.sentOn = S.tenant.today; touch('statementsDue', s.id);
     write('disclosures', { id: id('dis'), patientId: s.patientId, channel: 'mail', purpose: 'payment', recordIds: [sdId], actor: u.name });
     return { ok: true };
+  }
+  /* The row that stands for this account's balance: one still to send, else one mailed today for the balance as it still
+     is. Raising past either mails a second copy of the same balance; the Ledger and Money Desk read this rule, not a copy. */
+  function openStatement(pid) {
+    const open = S.statementsDue.find((s) => s.patientId === pid && !s.sent); if (open) return open;
+    const due = balances(pid).patientDue;
+    return S.statementsDue.find((s) => s.patientId === pid && s.sent && s.sentOn === S.tenant.today && s.amountCents === due) || null;
   }
   /* A statement is raised here, for the balance the ledger shows, and the Ledger sends the row. The Ledger held an account
      with $410 due and no row behind a gate whose only exit led to a tab with nothing to press; the hold reasons the Ledger
@@ -723,7 +761,10 @@
     if (!patient(pid)) return notFound('patient');
     const off = offline('Wait for the server — statements cannot raise'); if (off) return off;
     const pin = requirePin(extras); if (!pin.ok) return pin; const ent = bills(pin.user); if (ent) return ent;
-    const open = S.statementsDue.find((s) => s.patientId === pid && !s.sent); if (open) return { ok: true, statement: open, already: true };
+    const open = openStatement(pid);
+    if (open && !open.sent) return { ok: true, statement: open, already: true };
+    // Sent today for this same balance: the sent row is the store's to refuse, as the Ledger's Send already does.
+    if (open) return Object.assign(refuse('already_decided', 'Wait for this statement to land', 'Open the ledger', 'A statement for this balance was sent at ' + Proto.ui.time(open.sentAt || S.clock.time) + ' today. A second copy of the same balance confuses the patient and the phone call that follows; a changed balance raises a new one.'), { statement: open });
     const due = balances(pid).patientDue;
     if (due === 0) return refuse('zero_collect_refused', 'Nothing due — no statement to raise', 'Explain', 'A statement for $0 is noise to the patient and a disclosure row for nothing. Explain shows why the balance is zero; a credit is refunded from Money Desk, never billed.');
     // The verb carries a number, never a payer name: "Delta Dental" would push the line past eight words.
@@ -836,7 +877,8 @@
     const dp = write('dayPasses', { id: 'dp-' + nextId.dp++, name: form.name, role, requestedRole: form.role, locationId: form.location, shiftEnd: form.end, entitlements: ents, expiresAt: form.end + ' + 30 min grace', createdBy: currentUser().name, credentialId: pv.credential ? pv.credential.id : null, sodDecision: decision || null, pin });
     write('userEntitlements', { id: 'ue-' + nextId.ue++, userId: 'u-temp', entitlements: ents, expiresAt: dp.expiresAt, grantedBy: currentUser().name });
     if (decision) for (const c of (blocking.length ? blocking : pv.conflicts)) write('controlDecisions', { id: 'dec-' + nextId.dec++, kind: decision, ruleId: c.id, rulePair: c.pair, severity: c.severity, dayPassId: dp.id, reviewBy: '2026-10-03', by: currentUser().name });
-    S.tempUser = { id: 'u-temp', name: form.name, short: form.name.split(' ')[0], role, entitlements: ents, dayPass: dp.id, pin };
+    // The newest pass takes the temp seat; the earlier passes stay live and their PINs still name their holders.
+    S.tempUser = passUser(dp);
     return { ok: true, dayPass: dp, pin, downgraded: !!pv.licenceGate };
   }
 
@@ -870,5 +912,5 @@
   reset = function (seedNum) { const s = _reset(seedNum); for (const t of TABLES) if (!s[t]) s[t] = []; return s; };
 
   const LICENCE_WORDS = { implant: 'implant', crown_margin: 'crown margin', not_tolerated: 'patient could not tolerate probing', third_molar_absent: 'third molar absent' };
-  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, windowEstimate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, clinician, addTag, readyForExam, wholePatient, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, claimAction, disclose, sendStatement, raiseStatement, requirePin, verifyPin, pinLockout, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
+  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, windowEstimate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, clinician, addTag, readyForExam, wholePatient, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, claimAction, disclose, sendStatement, raiseStatement, openStatement, requirePin, verifyPin, pinLockout, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, passState, passLive, livePasses, railSteps, retireChip, search, refuse, notFound };
 })();
