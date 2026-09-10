@@ -5,22 +5,13 @@
    P and N open the grid and the note; R moves the keyboard to Ready for exam and writes nothing
    (an irreversible verb never executes from a bare key). Keys are live only while this route is mounted. */
 (function () {
-  const Proto = window.Proto; const { h, btn, chip, refusal, money, displayName, pageHead } = Proto.ui;
+  const Proto = window.Proto; const { h, btn, chip, refusal, money, displayName, pageHead, support, STATUS, TYPE, ELIG } = Proto.ui;
   Proto.screens = Proto.screens || {};
 
   const TODAY = (Proto.seed && Proto.seed.TODAY) || '2026-09-03';
-  const STATUS = {
-    scheduled: ['info', 'Scheduled'], confirmed: ['info', 'Confirmed'], arrived: ['review', 'Arrived'],
-    seated: ['info', 'Seated'], in_chart: ['info', 'In chart'], ready_for_exam: ['review', 'Exam requested'],
-    note_filed: ['clear', 'Note filed'], checked_out: ['clear', 'Done'], checked_out_unfiled: ['review', 'Filed later'],
-  };
-  const TYPE = { hygiene: ['clear', 'Hygiene'], restorative: ['style', 'Restorative'], exam: ['info', 'Exam'], surgery: ['stop', 'Surgery'], emergency: ['required', 'Emergency'] };
-  // The same eligibility words the Patient Rail and the Board print: one word per stored value.
-  const ELIG = { green: ['clear', 'Active'], amber: ['review', 'Re-verify'], red: ['required', 'Inactive'], none: ['info', 'Self-pay'] };
   const READY_FROM = ['seated', 'in_chart'];
   const DONE = ['note_filed', 'checked_out', 'checked_out_unfiled', 'ready_for_exam'];
   const MED_HX = /anticoagulant|premed|apixaban|warfarin|antibiotic/i;
-  const SUPPORT = 'Support: 615-555-0100, answered 7 am to 6 pm Central';
 
   // Per-screen UI state; cleared whenever the store is rebuilt (window.__proto.reset).
   let lastStore = null;
@@ -53,7 +44,8 @@
     const u = Proto.store.currentUser(); const hyg = isHygienist(u);
     return S().appointments.filter((a) => a.locationId === 'loc-1' && (a.providerId === u.id || (!hyg && a.type === 'hygiene'))).sort(byTime);
   }
-  const perioToday = (a) => S().perioExams.find((e) => e.encounterId === a.encounterId && e.date === TODAY);
+  // The latest row is the record: an addendum supersedes the exam it amends, and the strip reads the addendum.
+  const perioToday = (a) => S().perioExams.filter((e) => e.encounterId === a.encounterId && e.date === TODAY).pop();
   function lastPerio(a) {
     if (a.perioLast) return a.perioLast;
     const prior = S().perioExams.filter((e) => e.patientId === a.patientId && e.date < TODAY).map((e) => e.date).sort();
@@ -74,7 +66,12 @@
   function deltas(a, pt) {
     const out = [];
     const today = perioToday(a);
-    if (today) out.push({ sev: 'clear', word: 'Perio charted today', text: today.probed + ' sites probed, deepest ' + today.deepest + ' mm' });
+    if (today && today.mode === 'screening') {
+      // A screening records six codes, not sites; a 3 or 4 books the full chart (docs/13 feature 5).
+      const codes = today.sextantCodes || [];
+      out.push({ sev: 'clear', word: 'Perio charted today', text: 'screening, ' + codes.length + ' sextants coded' });
+      if (codes.some((x) => x === '3' || x === '4')) out.push({ sev: 'required', word: 'Full chart due', text: 'screening code 3 or 4' });
+    } else if (today) out.push({ sev: 'clear', word: 'Perio charted today', text: today.probed + ' sites probed, deepest ' + today.deepest + ' mm' });
     for (const alert of pt.alerts || []) if (MED_HX.test(alert)) out.push({ sev: 'stop', word: 'Med hx changed', text: alert });
     const lp = lastPerio(a);
     const lpm = lp ? monthsAgo(lp) : null;
@@ -96,11 +93,11 @@
   }
 
   // ---- Re-render after a mutation ----------------------------------------------------------
-  function after(r, announce, focusTestid) {
+  function after(r, announce, focus) {
     Proto.screens.shell.refreshAndon(r);
     if (Proto.screens.shell.refreshRail1) Proto.screens.shell.refreshRail1(r);
     render(r);
-    if (focusTestid) { const el = document.querySelector('[data-testid="' + focusTestid + '"]'); if (el) el.focus(); }
+    if (focus) { const el = document.getElementById(focus) || document.querySelector('[data-testid="' + focus + '"]'); if (el) el.focus(); }
     if (announce) Proto.router.announce(announce);
   }
   // The gate's one control does what its label says: the outage names the support line, every other gate
@@ -108,6 +105,17 @@
   function gateFor(res, id, r) {
     const g = { code: res.code, verb: res.verb, control: res.control, why: res.why };
     g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, severity: g.code === 'outage' ? 'stop' : 'required', slot: 'chairs.card.' + id, onControl: () => { if (g.code === 'outage') Proto.router.announce(SUPPORT); else goNote(id, r); } });
+  // The store's control words, each doing the thing it names; the gate remembers whose press raised it.
+  const BY_WORD = {
+    'Switch author': (r) => Proto.screens.shell.openPinPad(r),
+    'Open Roles': () => { location.hash = '#/owner/roles'; },   // the seat that issues a pass
+    'Support line': support,
+  };
+  function gateFor(res, id, r) {
+    const g = { code: res.code, verb: res.verb, control: res.control, why: res.why, userId: Proto.store.currentUser().id };
+    // An unnamed word drops the gate and returns the keyboard to the verb it held.
+    const act = g.code === 'outage' ? support : BY_WORD[g.control] || (() => { delete gates[id]; after(r, null, 'chairs.card.' + id + '.ready'); });
+    g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, severity: g.code === 'outage' ? 'stop' : 'required', onControl: () => act(r) });
     return g;
   }
 
@@ -124,8 +132,11 @@
     delete gates[id];
     Proto.store.retireChip('ready');
     const name = displayName(Proto.store.patient(a.patientId).name, P().privacy);
-    after(r, name + ' ready for exam, ' + ordinal(queuePosition(a)) + ' in queue', 'chairs.card.' + id + '.note');
+    // Focus lands on the queue chip that replaced the verb, not on Write note: a repeated Enter opens nothing.
+    after(r, name + ' ready for exam, ' + ordinal(queuePosition(a)) + ' in queue', 'chairs-queue-' + id);
   }
+  /* A press on a Held primary re-evaluates first: if its gate has fallen the press acts (FIX-ROUND2 stale-gate rule). */
+  function heldReady(id, r) { render(r); const c = document.querySelector('[data-testid="chairs.card.' + id + '"] [data-testid="refusal.control"]'); if (c) c.focus(); else doReady(id, r); }
   function toggleExpand(id, r) { expanded[id] = !expanded[id]; render(r); const el = document.querySelector('[data-testid="chairs.card.' + id + '.expand"]'); if (el) el.focus(); }
 
   // ---- Card --------------------------------------------------------------------------------
@@ -141,7 +152,7 @@
     el.append(h('div', { class: 'who' }, h('span', { text: fmtTime(a.time) + ' · ' + name }), chip(ssev, sword)));
     const meta = h('div', { class: 'meta' }, h('span', { text: 'Chair ' + a.op }), chip(tsev, tword));
     if (recallDue(a)) meta.append(chip('review', 'Recall due'));
-    if (pos) meta.append(chip('review', 'Exam: ' + ordinal(pos) + ' in queue'));
+    if (pos) { const q = chip('review', 'Exam: ' + ordinal(pos) + ' in queue'); q.id = 'chairs-queue-' + a.id; q.tabIndex = -1; meta.append(q); }
     el.append(meta);
 
     if (pt.alerts && pt.alerts.length) el.append(h('div', { class: 'row ch-alerts', role: 'group', 'aria-label': 'Alerts' }, ...pt.alerts.map((t) => chip('stop', t))));
@@ -162,7 +173,9 @@
     const [esev, eword] = ELIG[a.eligibility] || ['info', 'Unknown'];
     det.append(h('div', { class: 'row' }, h('span', { text: 'Coverage: ' + (pt.selfPay || !pt.primary ? 'Self-pay' : Proto.store.carrierName(pt.primary) + (pt.secondary ? ' · secondary ' + Proto.store.carrierName(pt.secondary) : '')) }), chip(esev, eword)));
     det.append(h('div', { class: 'row' }, h('span', { text: 'Forms: ' + (a.formsDone ? 'complete' : 'outstanding') }), a.formsDone ? chip('clear', 'Complete') : chip('review', 'Outstanding')));
-    det.append(h('span', { text: 'Balance before today: ' + money(a.balanceCents || 0) + ' · Provider ' + prov.short }));
+    // The balance is the ledger's, the same number the Board, Checkout and the Ledger print.
+    const bal = Proto.store.balances(a.patientId);
+    det.append(h('span', { text: 'Balance ' + money(bal.patientDue) + (bal.insurancePending ? ' · ' + money(bal.insurancePending) + ' waiting on insurance' : '') + (bal.credit ? ' · ' + money(bal.credit) + ' credit' : '') + ' · Provider ' + prov.short }));
     det.append(h('details', null, h('summary', { class: 'small', testid: 'chairs.card.' + a.id + '.why' }, 'Why this strip'), h('p', { class: 'small muted', text: 'Deltas come from stored rows only: the medical-history alert on the patient, the last perio exam date, the bitewing interval (the practice\'s rule), and the last filed what-helped field. Nothing here is an AI guess. Card order is seat order; no per-person metric appears.' })));
     el.append(det);
 
@@ -177,6 +190,7 @@
     if (ready) {
       // A Held press asks the store again: the gate it re-earns is the current one, not the one that stood.
       if (gates[a.id]) actions.append(btn('Ready for exam', { kind: 'held', testid: 'chairs.card.' + a.id + '.ready', onClick: () => doReady(a.id, r) }));
+      if (gates[a.id]) actions.append(btn('Ready for exam', { kind: 'held', testid: 'chairs.card.' + a.id + '.ready', ariaLabel: 'Ready for exam held: ' + gates[a.id].verb, onClick: () => heldReady(a.id, r) }));
       else actions.append(btn('Ready for exam', { kind: 'irreversible', testid: 'chairs.card.' + a.id + '.ready', ariaLabel: 'Ready for exam: ' + name + ' joins the dentist\'s queue', onClick: () => doReady(a.id, r) }));
     }
     el.append(actions);
@@ -217,6 +231,9 @@
       const a = Proto.store.appt(id);
       if ((gates[id].code === 'outage' && !s.outage) || (gates[id].code === 'wrong_status' && a && canReady(a))) delete gates[id];
     }
+    // A gate belongs to its cause: the outage (the server answers again), the author whose press raised it (another
+    // author's press asks the store afresh), the missing pass (issued since).
+    for (const id of Object.keys(gates)) { const g = gates[id]; if ((g.code === 'outage' && !s.outage) || (g.code !== 'outage' && g.userId !== u.id) || (g.code === 'entitlement' && !u.noPass)) delete gates[id]; }
     const sub = fmtTime(s.clock.time) + ' · ' + list.length + ' chair' + (list.length === 1 ? '' : 's') + (hyg ? ' · yours' : ' · all hygiene chairs at ' + s.locations[0].name + ' and yours') + (P().outage ? ' · read-only during the outage' : '') + ' · keys: P perio, N note, R focus Ready for exam';
     // The heading names the set below it: for a hygienist that is her own chairs, for anyone else
     // every hygiene chair at this location plus their own.

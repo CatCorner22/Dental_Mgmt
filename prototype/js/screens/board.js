@@ -2,24 +2,14 @@
    one column per chair, checkout queue with Note/Claim chips, the Filed later lane,
    read-only outage rendering, and the A / S / C keyboard accelerators while mounted. */
 (function () {
-  const Proto = window.Proto; const { h, btn, chip, refusal, money, displayName, initials, shortDate, pageHead } = Proto.ui;
+  const Proto = window.Proto; const { h, btn, chip, refusal, money, displayName, initials, shortDate, pageHead, support, STATUS, TYPE, ELIG } = Proto.ui;
   Proto.screens = Proto.screens || {};
 
-  /* One word per status code, the same word the Chairs screen and the Rail print: a seated patient is
-     Seated until the chart is open, and only then In chart. */
-  const STATUS = {
-    scheduled: ['info', 'Scheduled'], confirmed: ['info', 'Confirmed'], arrived: ['review', 'Arrived'],
-    seated: ['info', 'Seated'], in_chart: ['info', 'In chart'], ready_for_exam: ['review', 'Exam requested'],
-    note_filed: ['clear', 'Note filed'], checked_out: ['clear', 'Done'], checked_out_unfiled: ['review', 'Filed later'],
-  };
-  const TYPE = { hygiene: ['clear', 'Hygiene'], restorative: ['style', 'Restorative'], exam: ['info', 'Exam'], surgery: ['stop', 'Surgery'], emergency: ['required', 'Emergency'] };
-  const ELIG = { green: ['clear', 'Eligible'], amber: ['review', 'Verify'], none: ['info', 'Self-pay'] };
   const IN_CHAIR = ['seated', 'in_chart', 'ready_for_exam'];
   const ARRIVABLE = ['scheduled', 'confirmed'];
   const CHECKOUTABLE = ['in_chart', 'note_filed'];
 
   const CACHE_TIME = '07:58'; // last successful fetch shown by the Andon slot during an outage
-  const SUPPORT = 'Support: 615-555-0100, answered 7 am to 6 pm Central';
   const OUTAGE_WHY = 'Nothing posts while the server is unreachable: the controls that gate money and records cannot be enforced without it.';
   const WEEKDAY = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const STALE_DEVICE = { userId: 'u-da-1', op: 2 };  // the shared tablet left signed in overnight
@@ -47,6 +37,13 @@
   // Which codes want an attachment is the store's rule, not this screen's: the two lists had drifted, so one
   // filed surgical extraction read "Needs: attachment" here and "Ready" on Checkout for the same visit.
   const needsAttachment = (a) => S().procedures.some((p) => p.encounterId === a.encounterId && Proto.store.needsAttachment(p));
+  /* What the window decided, read from the decision row and the payment it left waiting: "Paid at the window"
+     only when a Collect actually took money (an allocation intent names the payment); a statement or a plan
+     says so, and Nothing due today says that. */
+  const WINDOW_WORD = { send_statement: 'Statement due', payment_plan: 'Payment plan set up', zero_due: 'Nothing due today' };
+  const windowDecision = (a) => S().collectionDecisions.find((d) => d.encounterId === a.encounterId) || null;
+  const paidAtWindow = (a) => { const d = windowDecision(a); return !!d && d.decision === 'collect' && S().allocationIntents.some((i) => i.encounterId === a.encounterId); };
+  const windowWord = (a) => (paidAtWindow(a) ? 'Paid at the window' : WINDOW_WORD[(windowDecision(a) || {}).decision] || 'Checked out');
   /* The strip is one person's working state, so it is keyed by the user reading it and never written to a
      store table: a mark the front desk makes on a shared desk is not the temp's mark and records nothing. */
   const uiState = () => { const uid = Proto.store.currentUser().id; return (boardUi[uid] = boardUi[uid] || { collapsed: false, labCalled: null, deviceReset: null, eligRerun: 0 }); };
@@ -56,22 +53,31 @@
   const outageRefusal = (what) => Proto.store.refuse('outage', 'Wait for the server — ' + what, 'Support line', OUTAGE_WHY);
 
   function syncStore() { const s = S(); if (s !== lastStore) { lastStore = s; gates = {}; rowGates = {}; stripGate = null; pings = {}; expanded = {}; chairOpen = {}; boardUi = {}; } }
-  /* A gate outlives its reason only if nobody clears it: once the connection is back the outage gates go and
-     every primary returns to its own identity, so a Held button is never a dead end after the outage ends. */
+  /* A gate outlives its reason only if nobody clears it: once the connection is back (or the pass is issued) the
+     gates that cause raised go and every primary returns to its own identity, so Held is never a dead end. */
+  const stale = (g) => (g.code === 'outage' && !P().outage) || (g.code === 'entitlement' && !Proto.store.currentUser().noPass);
   function pruneStaleGates() {
-    if (P().outage) return;
-    for (const k of Object.keys(gates)) if (gates[k].code === 'outage') delete gates[k];
-    for (const k of Object.keys(rowGates)) if (rowGates[k].code === 'outage') delete rowGates[k];
-    for (const k of Object.keys(pings)) if (pings[k].code === 'outage') delete pings[k];
-    if (stripGate && stripGate.code === 'outage') stripGate = null;
+    for (const k of Object.keys(gates)) if (stale(gates[k])) delete gates[k];
+    for (const k of Object.keys(rowGates)) if (stale(rowGates[k])) delete rowGates[k];
+    for (const k of Object.keys(pings)) if (pings[k].code && stale(pings[k])) delete pings[k];
+    if (stripGate && stale(stripGate)) stripGate = null;
+  }
+  /* One cause, one gate: a second refusal for the same outage or missing pass moves the gate to the card that
+     was pressed rather than standing a twin beside the first. */
+  function dropGates(code) {
+    if (!['outage', 'entitlement'].includes(code)) return;
+    for (const k of Object.keys(gates)) if (gates[k].code === code) delete gates[k];
+    for (const k of Object.keys(rowGates)) if (rowGates[k].code === code) delete rowGates[k];
+    for (const k of Object.keys(pings)) if (pings[k].code === code) delete pings[k];
+    if (stripGate && stripGate.code === code) stripGate = null;
   }
 
-  /* Re-render after a mutation: Andon, temp rail, then this screen; move focus to a named control. */
-  function after(r, announce, focusTestid) {
+  /* Re-render after a mutation: Andon, temp rail, then this screen; move focus to a named control or a #selector. */
+  function after(r, announce, focus) {
     Proto.screens.shell.refreshAndon(r);
     if (Proto.screens.shell.refreshRail1) Proto.screens.shell.refreshRail1(r);
     render(r);
-    if (focusTestid) { const el = document.querySelector('[data-testid="' + focusTestid + '"]'); if (el) el.focus(); }
+    if (focus) { const el = document.querySelector(focus[0] === '#' ? focus : '[data-testid="' + focus + '"]'); if (el) el.focus(); }
     if (announce) Proto.router.announce(announce);
   }
   /* Wrap a store refusal so its DOM node is built (and logged) once and reused across re-renders. The
@@ -80,22 +86,37 @@
   function gateFor(res, slot, onControl) {
     const g = { code: res.code, verb: res.verb, control: res.control, why: res.why };
     g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, severity: g.code === 'outage' ? 'stop' : 'required', slot, onControl: () => { if (g.code === 'outage') Proto.router.announce(SUPPORT); if (onControl) onControl(g); } });
+  // "Open Roles" / "Add day pass" mean the seat that issues a pass, as on Checkout, Encounter, Perio and Chairs.
+  const openRoles = () => { location.hash = '#/owner/roles'; };
+  /* Wrap a store refusal so its DOM node is built (and logged) once and reused across re-renders. The component
+     logs and announces the gate; this screen never announces one itself. Every code has a control that acts:
+     outage opens the support line, a missing pass opens Roles, anything else runs the caller's onControl. */
+  function gateFor(res, r, onControl) {
+    const g = { code: res.code, verb: res.verb, control: res.control, why: res.why };
+    g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, fresh: true, severity: g.code === 'outage' ? 'stop' : 'required', onControl: () => { if (g.code === 'outage') support(); else if (g.code === 'entitlement') openRoles(); else if (onControl) onControl(g); } });
     return g;
   }
-  const focusGate = () => { const c = document.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); };
+  const raise = (table, id, res, r, onControl) => { dropGates(res.code); table[id] = gateFor(res, r, onControl); };
+  const focusGate = (scope) => { const c = document.querySelector((scope ? '[data-testid="' + scope + '"] ' : '') + '[data-testid="refusal.control"]'); if (c) c.focus(); };
+  /* A press on a Held primary re-evaluates first: if its gate has fallen the press acts, otherwise it lands on the
+     gate's control (FIX-ROUND2 stale-gate rule). */
+  const heldPress = (r, table, id, scope, act) => { render(r); if (table[id]) focusGate(scope); else act(); };
 
   // ---- Actions -----------------------------------------------------------------------------
   function doArrive(id, r) {
     const a = Proto.store.appt(id); if (!a || !ARRIVABLE.includes(a.status)) return;
     const res = Proto.store.arrive(id);
     if (!res.ok) { gates[id] = gateFor(res, 'board.card.' + id); render(r); const b = document.querySelector('[data-testid="board.card.' + id + '.arrive"]'); if (b) b.focus(); return; }
+    if (!res.ok) { raise(gates, id, res, r); render(r); const b = document.querySelector('[data-testid="board.card.' + id + '.arrive"]'); if (b) b.focus(); return; }
     delete gates[id];
-    after(r, displayName(Proto.store.patient(a.patientId).name, P().privacy) + ' arrived. Seat is the next step on the same card.', 'board.card.' + id + '.seat');
+    // Focus lands on the arrived stamp, not on Seat: a repeated Enter must never seat in the same gesture.
+    after(r, displayName(Proto.store.patient(a.patientId).name, P().privacy) + ' arrived. Seat is the next step on the same card.', '#board-arrived-' + id);
   }
   function doSeat(id, r) {
     const a = Proto.store.appt(id); if (!a || a.status !== 'arrived') return;
     const res = Proto.store.seat(id);
     if (!res.ok) { gates[id] = gateFor(res, 'board.card.' + id); render(r); const b = document.querySelector('[data-testid="board.card.' + id + '.seat"]'); if (b) b.focus(); return; }
+    if (!res.ok) { raise(gates, id, res, r); render(r); const b = document.querySelector('[data-testid="board.card.' + id + '.seat"]'); if (b) b.focus(); return; }
     delete gates[id];
     // Focus stays on the card that was worked, not on the chair strip at the top of the page.
     after(r, 'Seated in chair ' + a.op + '. The chair strip now shows ' + provInitials(Proto.store.user(a.providerId)) + '.', 'board.card.' + id + '.expand');
@@ -104,6 +125,8 @@
     const a = Proto.store.appt(id); if (!a) return;
     const res = Proto.store.reverify(id);
     if (!res.ok) { gates[id] = gateFor(res, 'board.card.' + id); render(r); focusGate(); return; }
+    if (!res.ok) { raise(gates, id, res, r); render(r); const b = document.querySelector('[data-testid="board.card.' + id + '.reverify"]'); if (b) b.focus(); return; }
+    delete gates[id];
     after(r, 'Eligibility re-run: active, deductible met.', 'board.card.' + id + '.expand');
   }
   /* The read-only Board offers no live action: Checkout is held here rather than routing to a screen that
@@ -113,6 +136,9 @@
       const g = gateFor(outageRefusal('checkout is read-only'), (where === 'queue' ? 'board.queue.' : 'board.card.') + id);
       if (where === 'queue') rowGates[id] = g; else gates[id] = g;
       render(r); focusGate(); return;
+      const scope = where === 'queue' ? 'board.queue.row.' + id : 'board.card.' + id;
+      raise(where === 'queue' ? rowGates : gates, id, outageRefusal('checkout is read-only'), r);
+      render(r); focusGate(scope); return;
     }
     Proto.router.go(r.persona, 'checkout', id);
   }
@@ -123,24 +149,35 @@
       // The gate's one control opens the chart it names.
       pings[id] = { code: res.code, node: refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why || 'One ping per encounter per 15 minutes. The chair device saw the first one; a second would only add noise.', severity: res.code === 'outage' ? 'stop' : 'required', slot: 'board.ping.' + id, onControl: () => { if (res.code === 'outage') Proto.router.announce(SUPPORT); else Proto.router.go(r.persona, 'encounter', a.encounterId); } }) };
       render(r); focusGate(); return;
+      // The rate gate's one control opens the chart it names; outage and pass gates carry their own controls.
+      raise(pings, id, Object.assign({}, res, { why: res.why || 'One ping per encounter per 15 minutes. The chair device saw the first one; a second would only add noise.' }), r, () => Proto.router.go(r.persona, 'encounter', a.encounterId));
+      render(r); focusGate('board.queue.row.' + id); return;
     }
     pings[id] = { text: 'Pinged chair ' + a.op + ' · ' + clock12(S().clock.time) + ' · one-to-one, not broadcast' };
     after(r, 'Pinged chair ' + a.op, 'board.queue.row.' + id + '.ping');
   }
   function holdStrip(r) { stripGate = stripGate || gateFor(outageRefusal('readiness is read-only'), 'board.readiness'); render(r); focusGate(); }
+  function holdStrip(r, res, testid) { dropGates(res.code); stripGate = gateFor(res, r); stripGate.testid = testid; render(r); focusGate(); }
 
   // ---- Readiness strip ---------------------------------------------------------------------
   /* Every row's id segment is the seed id of the thing the row is about (CONTRACTS §4). */
   function readinessRows(r) {
     const s = S(); const ui = uiState(); const rows = [];
     const amber = todays().filter((a) => a.eligibility === 'amber' && !['checked_out', 'checked_out_unfiled'].includes(a.status)).sort(byTime);
-    if (amber.length) rows.push({ id: amber[0].id, time: amber[0].time, sev: 'review', word: 'Eligibility', line: amber.length + ' insured patient' + (amber.length > 1 ? 's' : '') + ' came back amber at 6 am — first at ' + fmtTime(amber[0].time), control: 'Re-verify all', testid: 'board.readiness.row.' + amber[0].id + '.reverify-all', act: () => { amber.forEach((a) => Proto.store.reverify(a.id)); ui.eligRerun += amber.length; after(r, 'Re-ran ' + amber.length + ' eligibility check' + (amber.length > 1 ? 's' : '') + ': all active.', 'board.readiness.toggle'); } });
+    const reverifyAll = (testid) => {
+      // Only the re-runs the store accepted are counted; when every one was refused the refusal is what shows.
+      const results = amber.map((a) => Proto.store.reverify(a.id)); const ok = results.filter((x) => x.ok).length;
+      if (!ok) { holdStrip(r, results[0], testid); return; }
+      ui.eligRerun += ok;
+      after(r, 'Re-ran ' + ok + ' eligibility check' + (ok > 1 ? 's' : '') + ': all active.', 'board.readiness.toggle');
+    };
+    if (amber.length) rows.push({ id: amber[0].id, time: amber[0].time, sev: 'review', word: 'Eligibility', line: amber.length + ' insured patient' + (amber.length > 1 ? 's' : '') + ' came back amber at 6 am — first at ' + fmtTime(amber[0].time), control: 'Re-verify all', testid: 'board.readiness.row.' + amber[0].id + '.reverify-all', act: () => reverifyAll('board.readiness.row.' + amber[0].id + '.reverify-all') });
     const lab = todays().find((a) => a.labCase && a.labCase.status === 'not_back');
     if (lab && !ui.labCalled) rows.push({ id: lab.labCase.id, time: lab.time, sev: 'review', word: 'Lab', line: 'Lab case for ' + fmtTime(lab.time) + ' chair ' + lab.op + ' not back — ' + lab.labCase.vendor + ', due ' + shortDate(lab.labCase.due), control: 'Call lab', testid: 'board.readiness.row.' + lab.labCase.id + '.call', act: () => { ui.labCalled = s.clock.time; after(r, 'Called ' + lab.labCase.vendor + ' at ' + clock12(s.clock.time) + ' — marked on your readiness strip.', 'board.readiness.toggle'); } });
     const stale = Proto.store.user(STALE_DEVICE.userId);
     if (stale && !ui.deviceReset) rows.push({ id: stale.id, time: '09:00', sev: 'required', word: 'Device', line: 'Shared tablet chair ' + STALE_DEVICE.op + ' still signed in as ' + initials(stale.name) + ' from yesterday', control: 'Sign out', testid: 'board.readiness.row.' + stale.id + '.reset', act: () => { ui.deviceReset = s.clock.time; after(r, 'Tablet chair ' + STALE_DEVICE.op + ' signed out — marked on your readiness strip; the next author enters a PIN.', 'board.readiness.toggle'); } });
     const fd = s.roleTemplates.find((t) => t.code === 'frontdesk');
-    if (fd && !frontDeskCover()) rows.push({ id: fd.code, time: '99:99', sev: 'info', word: 'Tomorrow', line: 'Tomorrow: front desk has no coordinator', control: 'Add day pass', testid: 'board.readiness.row.' + fd.code + '.add', act: () => Proto.router.go(r.persona, 'roles') });
+    if (fd && !frontDeskCover()) rows.push({ id: fd.code, time: '99:99', sev: 'info', word: 'Tomorrow', line: 'Tomorrow: front desk has no coordinator', control: 'Add day pass', testid: 'board.readiness.row.' + fd.code + '.add', act: openRoles });
     rows.sort((x, y) => (x.time < y.time ? -1 : 1));
     return rows;
   }
@@ -163,14 +200,14 @@
     if (ui.collapsed) body.hidden = true;
     else if (rows.length) {
       for (const row of rows) {
-        // Under the outage the control stays where it was and the gate says why it does nothing (CONTRACTS §6).
-        const held = outage && !!stripGate;
+        // Under the outage every control holds; a refusal of one row's own verb holds that row (CONTRACTS §6).
+        const held = !!stripGate && (stripGate.code === 'outage' || stripGate.testid === row.testid);
         const control = held
-          ? btn(row.control, { kind: 'held', testid: row.testid, onClick: focusGate })
-          : btn(row.control, { kind: 'reversible', testid: row.testid, onClick: () => (P().outage ? holdStrip(r) : row.act()) });
+          ? btn(row.control, { kind: 'held', testid: row.testid, ariaLabel: row.control + ' held: ' + stripGate.verb, onClick: () => { render(r); if (stripGate) focusGate(); else { const b = document.querySelector('[data-testid="' + row.testid + '"]'); if (b) b.click(); } } })
+          : btn(row.control, { kind: 'reversible', testid: row.testid, onClick: () => (P().outage ? holdStrip(r, outageRefusal('readiness is read-only'), row.testid) : row.act()) });
         body.append(h('div', { class: 'rdrow', role: 'group', 'aria-label': row.line }, chip(row.sev, row.word), h('span', { class: 'line', text: row.line }), control));
       }
-      if (outage && stripGate) body.append(h('div', { class: 'gate' }, stripGate.node));
+      if (stripGate) body.append(h('div', { class: 'gate' }, stripGate.node));
     } else {
       const done = handledLines();
       body.append(h('p', { class: 'small muted', text: 'Nothing blocks a chair today or tomorrow.' }));
@@ -217,20 +254,24 @@
     const el = h('article', { class: 'card appt ' + a.type, testid: 'board.card.' + a.id, 'aria-label': fmtTime(a.time) + ' ' + name + ', ' + tword + ', ' + sword });
     el.append(h('div', { class: 'who' }, h('span', { text: fmtTime(a.time) + ' · ' + name }), chip(ssev, sword)));
     const meta = h('div', { class: 'meta' }, chip(tsev, tword), chip(esev, eword));
-    // Under the outage this control keeps its place too: the store refuses it and the gate says why.
-    if (a.eligibility === 'amber') meta.append(btn('Re-verify', { kind: 'reversible', class: 'compact', testid: 'board.card.' + a.id + '.reverify', ariaLabel: 'Re-verify eligibility for ' + name, onClick: () => doReverify(a.id, r) }));
+    const g = gates[a.id]; const scope = 'board.card.' + a.id;
+    const held = (act) => () => heldPress(r, gates, a.id, scope, act);
+    // Under the outage this control keeps its place too: the store refuses it, the gate says why, and it
+    // switches to Held like every other control on the card (CONTRACTS §6).
+    if (a.eligibility === 'amber') meta.append(btn('Re-verify', { kind: g ? 'held' : 'reversible', class: 'compact', testid: scope + '.reverify', ariaLabel: g ? 'Re-verify held: ' + g.verb : 'Re-verify eligibility for ' + name, onClick: g ? held(() => doReverify(a.id, r)) : () => doReverify(a.id, r) }));
     if (pt.alerts.length) meta.append(chip('required', pt.alerts.length + ' alert' + (pt.alerts.length > 1 ? 's' : '')));
     if (a.labCase && a.labCase.status === 'not_back') meta.append(chip('review', 'Case not back'));
     if (a.referral) meta.append(chip('info', 'Referred in'));
     el.append(meta);
-    if (inLane) el.append(h('div', { class: 'stamp', text: 'Paid at the window · charges and claim release when ' + (Proto.store.user(a.providerId) || {}).short + ' files the note' }));
+    if (inLane) el.append(h('div', { class: 'stamp', text: windowWord(a) + ' · charges and claim release when ' + (Proto.store.user(a.providerId) || {}).short + ' files the note' }));
+    // The arrived stamp is where the keyboard lands after Arrive (focusable, not a control), so Seat is a choice.
+    if (a.status === 'arrived' && a.arrivedAt) el.append(h('div', { class: 'stamp', id: 'board-arrived-' + a.id, tabindex: '-1', text: 'Arrived ' + clock12(a.arrivedAt) + ' · Seat is the next step' }));
     if (outage) el.append(h('div', { class: 'stamp', text: 'As of ' + clock12(CACHE_TIME) + ' · ' + minutesBetween(CACHE_TIME, s.clock.time) + ' min old · read-only' }));
     // The primary keeps its place under the outage and switches to Held when the gate is raised (CONTRACTS §6).
     const actions = h('div', { class: 'actions' });
-    const g = gates[a.id];
-    if (ARRIVABLE.includes(a.status)) actions.append(btn('Arrive', { kind: g ? 'held' : 'reversible', testid: 'board.card.' + a.id + '.arrive', ariaLabel: g ? 'Arrive held: ' + g.verb : 'Arrive ' + name, onClick: () => (g ? focusGate() : doArrive(a.id, r)) }));
-    else if (a.status === 'arrived') actions.append(btn('Seat', { kind: g ? 'held' : 'reversible', testid: 'board.card.' + a.id + '.seat', ariaLabel: g ? 'Seat held: ' + g.verb : 'Seat ' + name + ' in chair ' + a.op, onClick: () => (g ? focusGate() : doSeat(a.id, r)) }));
-    else if (CHECKOUTABLE.includes(a.status)) actions.append(btn('Checkout', { kind: g ? 'held' : 'reversible', testid: 'board.card.' + a.id + '.checkout', ariaLabel: g ? 'Checkout held: ' + g.verb : 'Checkout ' + name, onClick: () => (g ? focusGate() : goCheckout(a.id, r, 'card')) }));
+    if (ARRIVABLE.includes(a.status)) actions.append(btn('Arrive', { kind: g ? 'held' : 'reversible', testid: scope + '.arrive', ariaLabel: g ? 'Arrive held: ' + g.verb : 'Arrive ' + name, onClick: g ? held(() => doArrive(a.id, r)) : () => doArrive(a.id, r) }));
+    else if (a.status === 'arrived') actions.append(btn('Seat', { kind: g ? 'held' : 'reversible', testid: scope + '.seat', ariaLabel: g ? 'Seat held: ' + g.verb : 'Seat ' + name + ' in chair ' + a.op, onClick: g ? held(() => doSeat(a.id, r)) : () => doSeat(a.id, r) }));
+    else if (CHECKOUTABLE.includes(a.status)) actions.append(btn('Checkout', { kind: g ? 'held' : 'reversible', testid: scope + '.checkout', ariaLabel: g ? 'Checkout held: ' + g.verb : 'Checkout ' + name, onClick: g ? held(() => goCheckout(a.id, r, 'card')) : () => goCheckout(a.id, r, 'card') }));
     const ex = btn(expanded[a.id] ? 'Less' : 'Details', { kind: 'quiet', class: 'compact', testid: 'board.card.' + a.id + '.expand', ariaLabel: (expanded[a.id] ? 'Hide' : 'Show') + ' forms and balance for ' + name, onClick: () => { expanded[a.id] = !expanded[a.id]; render(r); const b = document.querySelector('[data-testid="board.card.' + a.id + '.expand"]'); if (b) b.focus(); } });
     ex.setAttribute('aria-expanded', String(!!expanded[a.id])); ex.setAttribute('aria-controls', 'board-details-' + a.id);
     actions.append(ex);
@@ -255,8 +296,9 @@
   function renderLane(r) {
     const unfiled = todays().filter((a) => a.status === 'checked_out_unfiled').sort(byTime);
     if (!unfiled.length) return null;
+    const paid = unfiled.some(paidAtWindow);
     return h('section', { class: 'lane stack', 'aria-label': 'Filed later' },
-      h('div', { class: 'row' }, h('h2', { text: 'Filed later' }), chip('review', unfiled.length + ' waiting on a note'), h('span', { class: 'small muted', text: 'Checked out before the note filed; payment sits as unapplied credit with an allocation intent.' })),
+      h('div', { class: 'row' }, h('h2', { text: 'Filed later' }), chip('review', unfiled.length + ' waiting on a note'), h('span', { class: 'small muted', text: 'Checked out before the note filed; charges and the claim release when it does' + (paid ? ', and a window payment sits as unapplied credit with an allocation intent.' : '.') })),
       h('div', { class: 'board' }, ...unfiled.map((a) => card(a, r, true))));
   }
 
@@ -275,8 +317,8 @@
       const p = pings[a.id]; if (p) row.append(p.node || h('div', { class: 'stamp', text: p.text }));
     }
     const rg = rowGates[a.id];
-    const checkout = (ariaLabel) => btn('Checkout', { kind: rg ? 'held' : 'reversible', testid: 'board.queue.row.' + a.id + '.checkout', ariaLabel: rg ? 'Checkout held: ' + rg.verb : ariaLabel, onClick: () => (rg ? focusGate() : goCheckout(a.id, r, 'queue')) });
-    if (a.status === 'checked_out_unfiled') row.append(h('div', { class: 'row' }, checkout('Open checkout for ' + name + ' (already paid; charges post when the note files)'), h('span', { class: 'small muted', text: 'Paid at the window · in the Filed later lane until ' + prov.short + ' files' })));
+    const checkout = (ariaLabel) => btn('Checkout', { kind: rg ? 'held' : 'reversible', testid: 'board.queue.row.' + a.id + '.checkout', ariaLabel: rg ? 'Checkout held: ' + rg.verb : ariaLabel, onClick: rg ? () => heldPress(r, rowGates, a.id, 'board.queue.row.' + a.id, () => goCheckout(a.id, r, 'queue')) : () => goCheckout(a.id, r, 'queue') });
+    if (a.status === 'checked_out_unfiled') row.append(h('div', { class: 'row' }, checkout('Open checkout for ' + name + ' (' + (paidAtWindow(a) ? 'already paid; ' : 'decision typed; ') + 'charges post when the note files)'), h('span', { class: 'small muted', text: windowWord(a) + ' · in the Filed later lane until ' + prov.short + ' files' })));
     else row.append(h('div', { class: 'row' }, checkout('Checkout ' + name), filed ? null : h('span', { class: 'small muted', text: 'Checkout works now; charges post when the note files.' })));
     if (rg) row.append(h('div', { class: 'gate' }, rg.node));
     return row;
@@ -326,7 +368,7 @@
     const list = todays().sort(byTime);
     if (k === 'a') { const a = list.find((x) => ARRIVABLE.includes(x.status)); if (a) doArrive(a.id, r); else Proto.router.announce('No one left to arrive'); }
     if (k === 's') { const a = list.find((x) => x.status === 'arrived'); if (a) doSeat(a.id, r); else Proto.router.announce('No one is waiting to be seated'); }
-    if (k === 'c') { const a = list.find((x) => x.status === 'note_filed'); if (a) goCheckout(a.id, r, 'card'); else Proto.router.announce('Nothing to check out yet'); }
+    if (k === 'c') { const a = list.find((x) => CHECKOUTABLE.includes(x.status)); if (a) goCheckout(a.id, r, 'card'); else Proto.router.announce('Nothing to check out yet'); }
   }
 
   // ---- Screen ------------------------------------------------------------------------------

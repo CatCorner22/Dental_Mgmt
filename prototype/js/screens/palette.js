@@ -25,7 +25,13 @@
   function device() { return (window.__proto && window.__proto.device) || 'desk'; }
   function showRecents() { return device() !== 'operatory'; }
 
-  function rowLabel(row) { return row.kind === 'patient' ? displayName(row.label, privacy()) : row.label; }
+  // Under privacy two patients can share initials, so the row carries the MRN as its disambiguator — the same
+  // pair the phone card prints before Show name.
+  function rowLabel(row) {
+    if (row.kind !== 'patient') return row.label;
+    const p = privacy() && row.patientId ? Proto.store.patient(row.patientId) : null;
+    return displayName(row.label, privacy()) + (p && p.mrn ? ' · ' + p.mrn : '');
+  }
   function rowSyn(row) {
     // A patient row never prints the date of birth or the last-4: those are what the gate asks for,
     // and printing them here turns the second identifier into a formality (docs/13 feature 28).
@@ -67,6 +73,7 @@
   /* ---- open / close ---- */
   function open(r) {
     if (closeDialog) close();
+    if (Proto.ui.topDialog()) return;   // one dialog at a time: a pad already open keeps the keyboard
     st = { r, q: '', rows: [], sel: -1, step: 'search', patient: null, row: null, dob: '', dobTouched: false, refused: false };
     const body = h('div', { class: 'stack pal', onKeydown: onKey });
     st.body = body;
@@ -139,6 +146,8 @@
     else st.hint.textContent = rows.length + ' shown' + (capped ? ' — the list is capped, so add letters to narrow it' : '') + '. Arrow keys move, Enter opens.';
     st.status.textContent = q.length >= 3 ? (rows.length ? rows.length + ' shown' + (capped ? ', the list is capped' : '') : 'No results') : '';
     syncSelection();
+    // A search retires the temp's "find" step in the store; the rail says so now, not at the next route.
+    if (q.length >= 3 && Proto.screens.shell && Proto.screens.shell.refreshRail1) Proto.screens.shell.refreshRail1(st.r);
   }
 
   function renderRow(row, i) {
@@ -314,10 +323,10 @@
       Proto.router.announce('Chart open: ' + displayName(p.name, privacy()));
       return;
     }
-    // Mismatch: one verb line, one control; the primary switches to Held.
+    // Mismatch: one verb line, one control; the primary switches to Held. Each miss is its own refusal (fresh).
     st.refused = true;
     st.gate.replaceChildren(refusal({
-      code: 'second_identifier', verb: 'Check the date of birth', control: 'Try again',
+      code: 'second_identifier', verb: 'Check the date of birth', control: 'Try again', fresh: true,
       onControl: () => { st.refused = false; st.dob = ''; st.dobInput.value = ''; st.dobInput.classList.remove('invalid'); st.gate.replaceChildren(); swapGo(false); st.dobHint.textContent = 'Second identifier. Ask the patient, or read it from the appointment card.'; st.dobInput.focus(); },
       why: 'The date of birth entered does not match this patient. Two identifiers before a chart opens; patient search never widens to phonetic matches.',
     }));
