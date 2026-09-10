@@ -115,7 +115,9 @@
     // Prior perio exam for Marisol Vega (14 months ago), ghosted in the grid
     const priorPerio = {}; // key t<tooth>-s<site> -> depth
     for (let t = 1; t <= 32; t++) { if ([1, 16, 17, 32].includes(t)) continue; for (let s = 1; s <= 6; s++) priorPerio['t' + t + '-s' + s] = rnd() < 0.15 ? between(4, 5) : between(2, 3); }
-    const perioExams = [{ id: 'pe-1', patientId: 'p-301', encounterId: 'enc-old-1', date: '2025-07-01', sites: priorPerio, missing: [1, 16, 17, 32] }];
+    const perioExams = [{ id: 'pe-1', patientId: 'p-301', encounterId: 'enc-old-1', date: '2025-07-01', sites: priorPerio, missing: [1, 16, 17, 32] },
+      // The six-point exam the c-88 appeal packet cites (Cole Brandt): the record the disclosure row names.
+      { id: 'pe-c88', patientId: 'p-321', encounterId: 'enc-old-88', date: '2025-07-01', sites: {}, missing: [], probed: 168, skipped: 0, deepest: 6, mode: 'full', kind: 'exam', author: 'Bree Lawson' }];
 
     // Procedures and fee schedule
     const cdt = { d0120: ['Periodic exam', 6500], d0140: ['Limited exam', 9000], d0274: ['Bitewings, four', 7800], d1110: ['Prophylaxis, adult', 11800], d2392: ['Composite, 2 surf posterior', 26000], d2740: ['Crown, porcelain/ceramic', 118000], d4341: ['SRP, 4+ teeth per quadrant', 28500], d7210: ['Extraction, surgical', 36000], d9230: ['Nitrous oxide', 7500], d9243: ['IV sedation, each 15 min', 32000] };

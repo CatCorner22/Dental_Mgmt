@@ -36,7 +36,12 @@
      'scrubbed'): leaving that status out made the rail say "none open" for the claim the filing had just created. */
   const openClaims = (pid) => S().claims.filter((c) => c.patientId === pid && Object.keys(CLAIM_WORD).includes(c.status));
   /* View state is per user, never global: the As-of date one biller chose was what the next persona landed on. */
-  const ledState = (pid) => { const k = Proto.store.currentUser().id + '|' + pid; return (led[k] = led[k] || { explain: false, patientVoice: false, asof: null, asofOpen: false, sent: null, gate: null, hi: null, pin: '' }); };
+  let ledStore = null;
+  const ledState = (pid) => {
+    const now = S(); if (ledStore && ledStore !== now) for (const k of Object.keys(led)) delete led[k];   // store reset: every view is stale
+    ledStore = now;
+    const k = Proto.store.currentUser().id + '|' + pid; return (led[k] = led[k] || { explain: false, patientVoice: false, asof: null, asofOpen: false, sent: null, gate: null, hi: null, pin: '' });
+  };
   const shared = () => P().device === 'shared';
   const humanize = (s) => String(s || '').replace(/_/g, ' ');
   const pressed = (b) => (b ? 'true' : 'false'); // h() writes boolean true as an empty attribute; aria-pressed needs the word
@@ -220,7 +225,10 @@
   const focusPin = () => { const el = document.querySelector('[data-testid="ledger.pin"]'); if (el) el.focus(); };
   function storeGate(r, st, res) {
     if (res.code === 'outage') return Object.assign({}, res, { severity: 'stop', onControl: () => { const a = document.querySelector('[data-testid="andon.control"]'); if (a) a.focus(); else Proto.ui.support(); } });
-    if (/^pin_/.test(res.code)) return Object.assign({}, res, { onControl: focusPin });
+    // A second wrong PIN reads the same as the first and is still a second refusal (ui.js `fresh`, consumed by the first draw);
+    // Close on the lock empties the PIN and drops the gate, as Checkout's does.
+    if (res.code === 'pin_locked') return Object.assign({}, res, { fresh: true, onControl: () => { st.pin = ''; st.gate = null; rerender(r, 'ledger.pin'); } });
+    if (/^pin_/.test(res.code)) return Object.assign({}, res, { fresh: res.code === 'pin_no_match', onControl: focusPin });
     if (res.code === 'zero_collect_refused') return Object.assign({}, res, { control: 'Explain', onControl: () => { st.explain = true; st.gate = null; rerender(r, 'ledger.explain'); } });
     if (res.code === 'already_decided' || res.code === 'statement_held') return Object.assign({}, res, { control: 'Open Money Desk', onControl: () => openMoneyDesk(r, st) });
     return res;
@@ -234,7 +242,9 @@
     let sd = S().statementsDue.find((x) => x.patientId === pid && !x.sent) || S().statementsDue.find((x) => x.patientId === pid);
     if (!sd) { const raised = Proto.store.raiseStatement(pid, extras); if (!raised.ok) { st.gate = storeGate(r, st, raised); return rerender(r, 'ledger.statement.send'); } sd = raised.statement; }
     const res = Proto.store.sendStatement(sd.id, extras);
-    if (res.ok) { st.sent = { id: sd.id, channel: 'mail' }; st.gate = null; announce('Sent the statement by mail'); } else st.gate = storeGate(r, st, res);
+    // The PIN named the sender of this statement and is spent; the keyboard lands on the sent stamp, not back on Send.
+    if (res.ok) { st.sent = { id: sd.id, channel: 'mail' }; st.gate = null; st.pin = ''; announce('Sent the statement by mail'); return rerender(r, '#ledger-sent'); }
+    st.gate = storeGate(r, st, res);
     rerender(r, 'ledger.statement.send');
   }
   function previewStatement(pid, st) {
@@ -272,10 +282,14 @@
     if (!p) { const nf = Proto.store.notFound('patient'); Proto.screens.shell.mount(h('div', { class: 'stack' }, h('h1', { text: 'Nothing here' }), h('p', { class: 'muted', text: nf.why }), btn('Back to home', { kind: 'quiet', testid: 'notfound.home', onClick: () => Proto.router.go(r.persona, Proto.router.HOME[r.persona]) }))); return; }
     if (rail.pid !== pid) open(pid, r, { keepFocus: true }); else { rail.r = r; renderRail(); }
     const st = ledState(pid); const priv = !!P().privacy; const all = rowsFor(pid);
+    // A gate whose cause is gone falls on the next render: the outage ended, or the desk is no longer shared.
+    if (st.gate && ((st.gate.code === 'outage' && !S().outage) || (/^pin_/.test(st.gate.code) && !shared()))) st.gate = null;
+    if (!shared()) st.pin = '';
     const rows = st.asof ? all.filter((e) => e.posted <= st.asof) : all;
     // One allocation pass for the three numbers and Explain, as of today or as of the chosen day.
     const b = Proto.store.balances(pid, st.asof);
     const gateNode = st.gate ? refusal(Object.assign({ onControl: () => { st.gate = null; rerender(r, 'ledger.statement.send'); } }, st.gate)) : null;
+    if (st.gate) st.gate.fresh = false;                  // the first draw after the press logged it; a redraw does not
     const pinField = shared() ? h('div', { class: 'field' }, h('label', { for: 'ledger-pin', text: 'Your PIN' }), h('input', { class: 'input co-pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', id: 'ledger-pin', testid: 'ledger.pin', value: st.pin, onInput: (ev) => { st.pin = ev.target.value; if (st.gate && /^pin_/.test(st.gate.code)) { st.gate = null; rerender(r, 'ledger.pin'); const el = document.querySelector('[data-testid="ledger.pin"]'); if (el) el.setSelectionRange(el.value.length, el.value.length); } } }), h('p', { class: 'hint', text: 'Shared desk: the PIN makes you the frozen sender of this statement.' })) : null;
     const page = h('div', { class: 'stack ledger-page' },
       pageHead('Ledger', displayName(p.name, priv) + ' · ' + identLine(p, priv) + ' · ' + p.mrn,
@@ -289,7 +303,7 @@
       st.asofOpen ? section('As of', asOfBlock(pid, st, r, all)) : null,
       section('Rows', h('p', { class: 'small muted', text: 'Newest first by posted date. Reversals and reposts name the row they correct; nothing is edited in place.' }), ledgerTable(rows, st)),
       section('Statement',
-        st.sent ? h('div', { class: 'ledger-sent row' }, chip('clear', 'Statement sent'), h('span', { text: 'Frozen and sent by ' + st.sent.channel + ' on ' + longDate(today()) + '; disclosure row written' })) : null,
+        st.sent ? h('div', { class: 'ledger-sent row', id: 'ledger-sent', tabindex: '-1' }, chip('clear', 'Statement sent'), h('span', { text: 'Frozen and sent by ' + st.sent.channel + ' on ' + longDate(today()) + '; disclosure row written' })) : null,
         pinField,
         gateNode,
         h('div', { class: 'btnrow' },
@@ -299,13 +313,14 @@
         h('details', { class: 'ledger-details' }, h('summary', { testid: 'ledger.statement.why' }, 'Why this statement'), h('p', { class: 'muted', text: 'The patient-voice sentences under three numbers; pending claims listed under Waiting on insurance with no patient dollar figure; family members by first name. Send freezes the statement with an id and writes a disclosure row per channel. A balance still waiting on insurance holds for a stated reason.' }))));
     Proto.screens.shell.mount(page);
   }
-  function rerender(r, focusTestid) {
+  function rerender(r, focus) {
     renderLedger(r); Proto.screens.shell.refreshAndon(r);
-    if (focusTestid) { const el = document.querySelector('[data-testid="' + focusTestid + '"]'); if (el && el.focus) el.focus(); }
+    if (focus) { const el = document.querySelector(focus[0] === '#' ? focus : '[data-testid="' + focus + '"]'); if (el && el.focus) el.focus(); }
   }
 
-  /* The rail persists across routes: keep it current on navigation and when privacy mode flips. */
-  window.addEventListener('hashchange', () => { const r = Proto.router.current(); if (r.route === 'signin') { close(); return; } if (isOpen()) { rail.r = r; rail.msg = null; renderRail(); } });
+  /* The rail persists across routes: keep it current on navigation and when privacy mode flips. A PIN is typed for the
+     posting at hand, so leaving the route disarms it for every account. */
+  window.addEventListener('hashchange', () => { for (const v of Object.values(led)) v.pin = ''; const r = Proto.router.current(); if (r.route === 'signin') { close(); return; } if (isOpen()) { rail.r = r; rail.msg = null; renderRail(); } });
   if (window.MutationObserver) new MutationObserver(() => { if (isOpen()) renderRail(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-privacy'] });
   /* The rail shows the same facts as the work canvas, so it redraws when the canvas does. Waiting for the next
      hashchange left the open rail reading the balance from before a Post that the canvas beside it already showed. */

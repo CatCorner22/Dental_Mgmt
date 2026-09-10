@@ -51,12 +51,9 @@
   }
 
   const supportLine = Proto.ui.support;                 // one support line for every outage gate (ui.js)
-  // The Andon stands on every home, so it prints what the phone card prints before Show name: initials and MRN
-  // in place of the patient's name (docs/13 feature 24, minimum necessary). The sentence is still the store's.
-  function minimumSentence(req) {
-    const p = Proto.store.patient(req.patientId); const s = Proto.store.approvalSentence(req) || '';
-    return p && p.name && s.includes(p.name) ? s.split(p.name).join(Proto.ui.initials(p.name) + ' · ' + p.mrn) : s;
-  }
+  // The Andon stands on every home, so it prints what the phone card prints before Show name: the store's redacted
+  // sentence (initials and MRN in place of the name; docs/13 feature 24, minimum necessary).
+  const minimumSentence = (req) => Proto.store.approvalSentence(req, { redact: true });
 
   function renderAndon(r) {
     const a = document.getElementById('andon'); const P = window.__proto;

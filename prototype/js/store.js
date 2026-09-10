@@ -279,10 +279,11 @@
   }
   /* The frozen sentence is built at read time so privacy mode can hide the name on operatory glass; storing
      the finished string put "Lena Fischer" verbatim into the Andon, Daily Close and Money Desk under privacy. */
-  function approvalSentence(req) {
+  // opts.redact: the minimum-necessary form the Andon and the phone card print before Show name (initials · MRN).
+  function approvalSentence(req, opts) {
     if (!req) return '';
     const who = patient(req.patientId);
-    const name = who ? Proto.ui.displayName(who.name, !!(window.__proto && window.__proto.privacy)) : 'this account';
+    const name = !who ? 'this account' : opts && opts.redact ? Proto.ui.initials(who.name) + ' · ' + who.mrn : Proto.ui.displayName(who.name, !!(window.__proto && window.__proto.privacy));
     return 'Write-off ' + Proto.ui.money(req.amountCents) + ' on ' + name + ' (' + (req.reason || 'courtesy') + ') requested by ' + req.requestedBy + ' at ' + Proto.ui.time(req.requestedAt || S.clock.time);
   }
 
@@ -337,7 +338,8 @@
     if (!Number.isFinite(amountCents) || amountCents <= 0) return refuse('amount_required', 'Type an amount above zero', 'Go to amount', 'A write-off posts the number you type against the balance, so it cannot be blank, negative, or zero.');
     const cap = writeoffCap(amountCents, balances(accountPid).patientDue); if (cap) return cap;
     const gate = evaluateRelease('write_off', amountCents, u);
-    if (gate.code === 'after_hours') return refuse(gate.code, gate.verb, 'Set aside', gate.why);
+    // The hold takes the write-off off the card; nothing is requested after hours.
+    if (gate.code === 'after_hours') return refuse(gate.code, gate.verb, 'Remove the write-off', gate.why);
     if (!gate.ok) {
       const req = requestApproval({ kind: 'write_off', amountCents, reason, patientId: accountPid, eligible: gate.eligible, appointmentId: null }, poster(u));
       return Object.assign(refuse(gate.code, gate.verb, 'Request approval', gate.why), { requestId: req.requestId, held: true });
@@ -452,12 +454,13 @@
      clinical record and left the note line behind. A reversal is written the way every other correction is:
      a reversing chart event that names what it supersedes, the procedure and plan item marked reversed, the
      note line withdrawn, the tag put back to open, and one event per table it touched (A3, A5). */
-  function chartUndo(encId) {
+  // chartEventId names the paint to reverse (the duplicate's original from chartPaint's refusal); without it, the last one.
+  function chartUndo(encId, chartEventId) {
     const enc = encounter(encId); if (!enc) return notFound('encounter');
     const off = offline('Wait for the server — charting is paused'); if (off) return off;
     const live = liveEvents(encId);
     if (!live.length) return refuse('already_decided', 'Chart something before undoing it', 'Chart a tooth', 'Nothing has been painted on this visit yet, so there is nothing to reverse.');
-    const ce = live[live.length - 1];
+    const ce = (chartEventId && live.find((c) => c.id === chartEventId)) || live[live.length - 1];
     if (enc.noteFiled) return refuse('already_decided', 'Amend the filed note instead', 'Open the note', 'The note is filed, so the paint is sealed. A correction after filing is an addendum that supersedes it, not an undo.');
     ce.reversed = true; touch('chartEvents', ce.id);
     const rev = write('chartEvents', { id: 'ce-' + nextId.ce++, encounterId: encId, kind: 'reversal', supersedes: ce.id, tooth: ce.tooth, surfaces: ce.surfaces, cdt: ce.cdt, temporality: ce.temporality, author: currentUser().name });
@@ -592,8 +595,10 @@
     b.status = 'deltas'; touch('eraBatches', b.id);
     return { ok: true, readback: S.eraLines.filter((l) => l.batchId === batchId && l.status === 'delta'), posted };
   }
-  /* The word on screen and the status in the record agree: once no delta line is left the batch is posted. */
-  function settleBatch(batchId) { const b = S.eraBatches.find((x) => x.id === batchId); if (b && b.status === 'deltas' && !S.eraLines.some((l) => l.batchId === batchId && l.status === 'delta')) { b.status = 'posted'; touch('eraBatches', b.id); } }
+  /* The word on screen and the status in the record agree: once no line is left to decide the batch is posted. A line set
+     aside is still undecided (its money is off the ledger), so a batch with one held line used to read "Batch complete". */
+  const OPEN_LINE = ['delta', 'held'];
+  function settleBatch(batchId) { const b = S.eraBatches.find((x) => x.id === batchId); if (b && b.status === 'deltas' && !S.eraLines.some((l) => l.batchId === batchId && OPEN_LINE.includes(l.status))) { b.status = 'posted'; touch('eraBatches', b.id); } }
   function eraConfirm(lineId, extras) {
     const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — postings are paused'); if (off) return off;
     if (l.status === 'posted') return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'This line is posted. A correction is a reversal and a repost, both linked to the original.');
@@ -622,7 +627,11 @@
   }
   // One packet per claim: pressing Appeal four times wrote four packets and renamed the drawer each time.
   function buildAppeal(claimId) { const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim'); const existing = S.appealPackets.find((p) => p.claimId === claimId); if (existing) return { ok: true, packet: existing, already: true }; const pk = write('appealPackets', { id: id('ap'), claimId, slots: { perioChart: c.hasPerioChart, narrative: c.hasNarrative, radiograph: true, letter: true }, patientSentence: 'Delta asked for your gum chart; we are sending it. You owe nothing while they review.' }); return { ok: true, packet: pk }; }
-  function sendAppeal(claimId, extras) { const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim'); const off = offline('Wait for the server — the appeal cannot send'); if (off) return off; if (c.status === 'appealed') return refuse('already_decided', 'Wait for the payer to answer', 'Open the claim', 'This appeal was already sent. Sending it twice does not speed it up and starts a second review.'); const pin = requirePin(extras); if (!pin.ok) return pin; const u = poster(pin.user); c.status = 'appealed'; touch('claims', c.id); write('claimEvents', { id: id('cev'), claimId, kind: 'claim.appealed', actor: u.name }); write('disclosures', { id: id('dis'), patientId: c.patientId, channel: 'clearinghouse', purpose: 'payment', recordIds: ['pe-1', 'nf-old'], actor: u.name }); return { ok: true }; }
+  /* The records that go out with an appeal are this patient's: the perio exams on file and the notes filed on their visits.
+     A fixed list used to send p-301's exam and a row that did not exist under another patient's disclosure. */
+  const patientRecords = (pid) => S.perioExams.filter((e) => e.patientId === pid).map((e) => e.id).concat(S.filedNotes.filter((n) => { const e = encounter(n.encounterId); return e && e.patientId === pid; }).map((n) => n.id));
+  const IN_REVIEW = (c) => refuse('already_decided', 'Wait for the payer to answer', 'Open the claim', 'This appeal was already sent' + (c.payer ? ' to ' + c.payer : '') + '. A claim under appeal is not corrected or resubmitted underneath the review; a second send starts a second one.');
+  function sendAppeal(claimId, extras) { const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim'); const off = offline('Wait for the server — the appeal cannot send'); if (off) return off; if (c.status === 'appealed') return IN_REVIEW(c); const pin = requirePin(extras); if (!pin.ok) return pin; const u = poster(pin.user); c.status = 'appealed'; touch('claims', c.id); write('claimEvents', { id: id('cev'), claimId, kind: 'claim.appealed', actor: u.name }); write('disclosures', { id: id('dis'), patientId: c.patientId, channel: 'clearinghouse', purpose: 'payment', recordIds: patientRecords(c.patientId), actor: u.name }); return { ok: true }; }
   /* A row action on a claim is a claim event with a new next action, so Fix, Attach and resubmit, Call payer and Escalate
      write what they did; each used to announce and change nothing. A corrected or re-attached claim goes back to the payer. */
   const CLAIM_ACTION = { fix: ['Corrected and resubmitted; wait for the 277', 'submitted'], attach: ['Attachment sent with the resubmission; wait for the 277', 'submitted'], call: ['Called the payer; follow up in 7 days', null], escalate: ['Escalated to provider relations; timely-filing hold noted', null] };
@@ -630,6 +639,7 @@
     const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim');
     const step = CLAIM_ACTION[action]; if (!step) return notFound('claim');
     const off = offline('Wait for the server — claims are read-only'); if (off) return off;
+    if (step[1] && c.status === 'appealed') return IN_REVIEW(c);
     const pin = requirePin(extras); if (!pin.ok) return pin; const u = poster(pin.user);
     c.nextAction = step[0];
     if (step[1] && ['denied', 'pended', 'submitted'].includes(c.status)) { c.status = step[1]; c.age = 0; c.submitted = S.tenant.today; }
@@ -668,7 +678,8 @@
     if (due === 0) return refuse('zero_collect_refused', 'Nothing due — no statement to raise', 'Explain', 'A statement for $0 is noise to the patient and a disclosure row for nothing. Explain shows why the balance is zero; a credit is refunded from Money Desk, never billed.');
     // The verb carries a number, never a payer name: "Delta Dental" would push the line past eight words.
     const pend = S.claims.find((c) => c.patientId === pid && ['submitted', 'pended'].includes(c.status));
-    if (pend) return refuse('statement_held', 'Held: claim pending ' + (pend.age || 0) + ' days', 'Open Money Desk', pend.payer + ' is still reviewing ' + (S.cdt[pend.cdt] || [pend.cdt])[0] + '. A statement never goes out on a balance still waiting on insurance. The hold reason is shown on Money Desk → Statements due; after 45 days the row surfaces regardless of the pending claim.');
+    // The control names the worklist, not a screen: the Ledger opens Money Desk there, Money Desk is already on it.
+    if (pend) return refuse('statement_held', 'Held: claim pending ' + (pend.age || 0) + ' days', 'Open Statements due', pend.payer + ' is still reviewing ' + (S.cdt[pend.cdt] || [pend.cdt])[0] + '. A statement never goes out on a balance still waiting on insurance. The hold reason is shown on Money Desk → Statements due; after 45 days the row surfaces regardless of the pending claim.');
     const u = poster(pin.user);
     return { ok: true, statement: write('statementsDue', { id: id('sd'), patientId: pid, amountCents: due, reason: 'balance_due', createdBy: u.name, created: S.tenant.today }) };
   }
@@ -742,7 +753,7 @@
     let credential = null, licenceGate = null;
     if (tpl && tpl.clinical) {
       credential = S.credentials.find((c) => c.name.toLowerCase() === (form.name || '').trim().toLowerCase() && c.licenceType === tpl.licence && c.state === 'TN' && c.expiresAt > S.tenant.today && c.verifiedBy);
-      if (!credential) licenceGate = refuse('licence_not_on_file', 'Licence not on file — Front desk only', 'Add credential', 'Clinical entitlements issue only against an active, verified staff_credentials row (licence type and state match, expiry after shift end, verifier frozen).');
+      if (!credential) licenceGate = refuse('licence_not_on_file', 'Add a credential before granting clinical work', 'Add credential', 'Clinical entitlements issue only against an active, verified staff_credentials row (licence type and state match, expiry after shift end, verifier frozen).');
     }
     return { conflicts, credential, licenceGate, entitlements: [...ents] };
   }

@@ -58,8 +58,10 @@ export default ({ ctx, go, hop, click, txt, rec }) => {
 
     // shell.js renderAndon(): the strip read `pending[0].frozenSentence`, a field no approvals row carries (the
     // sentence is built at read time by store.approvalSentence so privacy mode can hide the name), so the
-    // owner saw "1 approval waiting" with an empty sentence beside it. Negative control: a compliant strip
-    // prints the same sentence the phone card prints, so `sentenceShown` is non-empty and equals `expected`.
+    // owner saw "1 approval waiting" with an empty sentence beside it. The Andon stands on every home, so the
+    // form it prints is the store's redacted one (initials · MRN; approvalSentence(req, {redact:true})), the same
+    // the phone card prints before Show name. Negative control: a compliant strip prints exactly that sentence,
+    // so `sentenceShown` is non-empty and equals `expected`.
     async 'A-misc-2-3'(b) {
       const { c, p } = await ctx(b);
       try {
@@ -70,7 +72,7 @@ export default ({ ctx, go, hop, click, txt, rec }) => {
           const a = document.getElementById('andon');
           const spans = [...a.querySelectorAll('span.grow')].map((s) => s.textContent.trim());
           const pending = Proto.store.pendingApprovalsFor();
-          return { chip: ((a.querySelector('.chip') || {}).textContent || '').trim(), sentenceShown: spans[0] || '', expected: pending.length ? Proto.store.approvalSentence(pending[0]) : null, pending: pending.length };
+          return { chip: ((a.querySelector('.chip') || {}).textContent || '').trim(), sentenceShown: spans[0] || '', expected: pending.length ? Proto.store.approvalSentence(pending[0], { redact: true }) : null, pending: pending.length };
         });
         rec('A-misc-2-3', 'With one approval waiting, the owner\'s Andon strip prints the count and an empty sentence: it reads a frozenSentence field that no approvals row has', 'C5 — one canonical sentence per request, built by the store; the Andon, the phone and Money Desk print the same one (shell.js renderAndon)',
           o.pending > 0 && (!o.sentenceShown || o.sentenceShown !== o.expected), o);

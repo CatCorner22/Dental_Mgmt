@@ -40,13 +40,8 @@
   /* ---- helpers ---- */
   function pat(pid) { return Proto.store.patient(pid) || { name: '—', mrn: '—' }; }
   function requestedAt(a) { return a.requestedAt || S().clock.time; }
-  /* The sentence is the store's (it is privacy-aware and built at read time); the card only redacts the
-     patient name it keeps behind Show name. */
-  function cardSentence(a) {
-    const p = pat(a.patientId);
-    const s = Proto.store.approvalSentence(a) || '';
-    return p.name && s.includes(p.name) ? s.split(p.name).join(initials(p.name) + ' · ' + p.mrn) : s;
-  }
+  // The store's redacted sentence (initials · MRN): the name stays behind Show name, a logged read.
+  const cardSentence = (a) => Proto.store.approvalSentence(a, { redact: true });
   function denialLine(a) {
     const s = S();
     const denied = (s.claims || []).filter((c) => c.patientId === a.patientId && c.status === 'denied');

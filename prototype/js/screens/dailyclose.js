@@ -274,7 +274,8 @@
     const me = Proto.store.currentUser();
     const mine = S.approvals.filter((a) => a.status === 'pending' && me.entitlements.includes('approve_second') && a.requestedById !== me.id);
     return section('Approvals only I can give' + (mine.length ? ': ' + mine.length : ''),
-      mine.length ? h('div', { class: 'worklist' }, ...mine.map((a) => h('div', { class: 'dc-row' }, chip('review', 'Waiting'), h('span', { class: 'text', text: Proto.store.approvalSentence(a) }), btn('Open approvals', { kind: 'reversible', testid: 'close.approval.' + a.id + '.open', onClick: () => { location.hash = '#/phone/approvals'; } })))) : h('p', { class: 'muted', text: 'None waiting. A posting that needs a second approver appears here, and on your phone, the moment someone asks.' }),
+      // The store's redacted sentence, as on the Andon and the phone card: the name is read on the card, a logged read.
+      mine.length ? h('div', { class: 'worklist' }, ...mine.map((a) => h('div', { class: 'dc-row' }, chip('review', 'Waiting'), h('span', { class: 'text', text: Proto.store.approvalSentence(a, { redact: true }) }), btn('Open approvals', { kind: 'reversible', testid: 'close.approval.' + a.id + '.open', onClick: () => { location.hash = '#/phone/approvals'; } })))) : h('p', { class: 'muted', text: 'None waiting. A posting that needs a second approver appears here, and on your phone, the moment someone asks.' }),
       // Policy is what a person reads when they ask why, not what stands between them and the work.
       h('details', null, h('summary', { class: 'small', testid: 'close.approvals.why' }, 'Why these need a second approver'),
         h('p', { class: 'small muted', text: 'After-hours hold is on: a refund, adjustment or write-off outside ' + S.tenant.businessHours.open + '–' + S.tenant.businessHours.close + ' needs a second approver regardless of amount.' })));
