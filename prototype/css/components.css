@@ -250,12 +250,10 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 /* ---- end module: perio ---- */
 
 /* ---- module: encounter (js/screens/encounter.js) — appended, never edits rules above ---- */
-/* The odontogram scrolls inside its own wrapper; the columns never grow to it, so the canvas never pans sideways. */
-.enc-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+/* Columns shrink (minmax 0), so the odontogram scrolls inside .enc-odont-wrap and the canvas never pans sideways.
+   A 856 px minimum on the chart column was what forced the page itself past the viewport at 1024/820/420. */
+.enc-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); grid-template-rows: auto 1fr; grid-template-areas: "chart note" "chart gate"; gap: var(--space-4); align-items: start; }
 .enc-layout > * { min-width: 0; }
-@media (max-width: 1279px) { .enc-layout { grid-template-columns: minmax(0, 1fr); } }
-.enc-odont-wrap { overflow-x: auto; max-width: 100%; padding-bottom: var(--space-1); display: flex; flex-direction: column; gap: var(--gap); }
-.enc-layout { display: grid; grid-template-columns: minmax(856px, 1.25fr) minmax(320px, 1fr); grid-template-rows: auto 1fr; grid-template-areas: "chart note" "chart gate"; gap: var(--space-4); align-items: start; }
 .enc-col-chart { grid-area: chart; min-width: 0; }
 .enc-col-note { grid-area: note; min-width: 0; }
 .enc-gate-col { grid-area: gate; min-width: 0; }
@@ -265,7 +263,7 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
   .enc-layout { grid-template-columns: 1fr; grid-template-rows: auto; grid-template-areas: "chart" "note" "gate"; }
   .enc-gate-col { position: sticky; bottom: 0; z-index: 3; background: var(--bg); border-top: 1px solid var(--line); padding-top: var(--space-2); max-height: 70vh; overflow: auto; }
 }
-.enc-odont-wrap { overflow-x: auto; padding-bottom: var(--space-1); display: flex; flex-direction: column; gap: var(--gap); }
+.enc-odont-wrap { overflow-x: auto; max-width: 100%; padding-bottom: var(--space-1); display: flex; flex-direction: column; gap: var(--gap); }
 .tooth.enc-tagged { border-style: dashed; border-color: var(--required-rail); }
 .tooth.enc-tagged[aria-pressed="true"] { border-style: solid; }
 .surfaces .btn[aria-pressed="mixed"] { border-style: dashed; border-color: var(--focus); background: var(--surface-2); color: var(--ink); }
