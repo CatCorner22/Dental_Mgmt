@@ -41,18 +41,25 @@
     return { ledger: S.ledger.slice(b.ledger), allocations: S.allocations.slice(b.allocations), intents: S.allocationIntents.slice(b.intents), decisions: S.collectionDecisions.slice(b.decisions), statements: S.statementsDue.slice(b.statements), plans: S.paymentPlans.slice(b.plans), events: S.domainEvents.slice(b.events).filter((e) => e.type === 'procedure.self_pay_restricted') };
   }
 
-  function rerender(r, focusTestid) {
+  function rerender(r, focus) {
     r = r || lastRoute || Proto.router.current();
     render(r);
     Proto.screens.shell.refreshAndon(r);
-    if (focusTestid) { const el = document.querySelector('[data-testid="' + focusTestid + '"]'); if (el && el.focus) el.focus(); }
+    if (focus) { const el = document.querySelector(focus[0] === '#' ? focus : '[data-testid="' + focus + '"]'); if (el && el.focus) el.focus(); }
   }
+  const focusPin = () => { const el = document.querySelector('[data-testid="checkout.pin"]'); if (el) el.focus(); };
+  const removeWriteoff = (r, st) => { st.writeoffOpen = false; st.writeoffStr = ''; st.writeoffReason = null; st.refusalNode = null; rerender(r, 'checkout.writeoff.add'); };
 
   /* Every gate has one control. The store leaves a few controls null; supply the obvious one. */
   function withControl(res, r, a, st) {
     const v = { code: res.code, verb: res.verb, control: res.control, why: res.why };
     if (res.code === 'zero_collect_refused') { v.control = res.control || 'Nothing due today'; v.onControl = () => { st.decision = 'zero_due'; st.refusalNode = null; rerender(r, 'checkout.collect.seg.zero-due'); }; }
-    else if (res.code === 'pin_required' || res.code === 'pin_no_match') { v.control = 'Enter PIN'; v.onControl = () => { const el = document.querySelector('[data-testid="checkout.pin"]'); if (el) el.focus(); }; }
+    // A second wrong PIN reads the same as the first and is still a second refusal (ui.js refusal `fresh`).
+    else if (res.code === 'pin_required' || res.code === 'pin_no_match') { v.control = 'Enter PIN'; v.fresh = res.code === 'pin_no_match'; v.onControl = focusPin; }
+    else if (res.code === 'pin_locked') { v.control = res.control || 'Close'; v.fresh = true; v.onControl = () => { st.pin = ''; st.refusalNode = null; rerender(r, 'checkout.pin'); }; }
+    // After hours the write-off waits for business hours; the payment need not. The control takes the write-off
+    // off this posting rather than requesting an approval the hours policy would still hold.
+    else if (res.code === 'after_hours') { v.control = 'Remove write-off'; v.onControl = () => removeWriteoff(r, st); }
     else if (res.code === 'tender_required') { v.control = 'Choose card'; v.onControl = () => { st.tender = 'card'; st.refusalNode = null; rerender(r, 'checkout.card.number'); }; }
     // The control that says "Open the ledger" opens the ledger. Every unnamed code used to fall through to the
     // Board, so the one gate whose label named a destination landed somewhere else.
@@ -103,10 +110,11 @@
     if (res.ok) {
       st.posted = diff(S, before); st.posted.form = form; st.refusalNode = null;
       Proto.router.announce('Posted');
-      rerender(r, 'checkout.back');
+      // The keyboard lands on the Posted card's heading, never on Back: a repeated Enter must not leave the read-back.
+      rerender(r, '#co-posted-head');
       return;
     }
-    if (res.held) {
+    if (res.held && res.code !== 'after_hours') {
       // The request row is written when this control is pressed, by the store verb that owns it. Post writes
       // nothing here, so a control labelled "Request approval" performs the request it names.
       st.refusalNode = refusal({ code: res.code, verb: res.verb, control: res.control || 'Request approval', why: res.why, onControl: () => {
@@ -219,7 +227,7 @@
     amt.addEventListener('blur', () => { const bad = st.writeoffStr.trim() !== '' && !(cents(st.writeoffStr) > 0); amt.classList.toggle('invalid', bad); if (bad) wf.hint.textContent = 'Enter a dollar amount, or remove the write-off.'; });
     const reasons = h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Reason code' }, ...REASONS.map(([code, label]) => btn(label, { testid: 'checkout.writeoff.reason.' + code, pressed: pressed(st.writeoffReason === code), onClick: () => { st.writeoffReason = code; st.refusalNode = null; rerender(r, 'checkout.writeoff.reason.' + code); } })));
     // One id, one verb: the control that removes the write-off is not the control that adds it.
-    const remove = btn('Remove write-off', { kind: 'quiet', class: 'compact', testid: 'checkout.writeoff.remove', onClick: () => { st.writeoffOpen = false; st.writeoffStr = ''; st.writeoffReason = null; st.refusalNode = null; rerender(r, 'checkout.writeoff.add'); } });
+    const remove = btn('Remove write-off', { kind: 'quiet', class: 'compact', testid: 'checkout.writeoff.remove', onClick: () => removeWriteoff(r, st) });
     return h('div', { class: 'stack co-writeoff', 'aria-label': 'Write-off or adjustment' }, h('div', { class: 'co-two' }, wf.node, h('div', { class: 'field' }, h('label', { text: 'Reason code' }), reasons)), remove);
   }
 
@@ -240,7 +248,8 @@
       row.append(btn('Post', { kind: 'held', testid: 'checkout.post', ariaLabel: 'Held: waiting on a second approver', onClick: () => Proto.router.announce('Waiting on ' + ((st.heldReq.eligible || []).slice(0, 2).join(' or ') || 'a second approver')) }));
       if (st.requested) row.append(h('span', { class: 'row' }, chip('review', 'Request ' + st.heldReq.id + ' waiting'), h('span', { class: 'small muted', text: 'Dana or Dr. Reagan will see it on their phone; this screen flips to Post when they approve.' })));
     } else if (gated) {
-      row.append(btn('Post', { kind: 'held', testid: 'checkout.post', ariaLabel: 'Held: Post', onClick: () => { const el = document.querySelector('[data-testid="refusal.control"]'); if (el && el.focus) el.focus(); } }));
+      // A press on Held re-evaluates first: a gate whose cause is gone has fallen on the render, and the press posts.
+      row.append(btn('Post', { kind: 'held', testid: 'checkout.post', ariaLabel: 'Held: Post', onClick: () => { render(r); const el = document.querySelector('[data-testid="refusal.control"]'); if (el) el.focus(); else if (!st.refusalNode) doPost(r, a, st); } }));
     } else {
       row.append(btn('Post', { kind: 'irreversible', testid: 'checkout.post', onClick: () => doPost(r, a, st) }));
       // Send back carries the approver's one line to the requester (docs/13 feature 24), not the chip alone.
@@ -249,17 +258,34 @@
     return h('div', { class: 'stack' }, st.refusalNode, row);
   }
 
+  /* The rows the card reads are the store's, live: the snapshot taken at Post names them, and a visit decided
+     before this screen opened (the seeded Filed-later visit) derives them from its procedures and intents. A
+     payment "held as credit until the note is filed" stops saying so once the note files. */
+  function postedRows(S, a, st) {
+    const byId = (table, rows) => S[table].filter((x) => rows.some((y) => y.id === x.id));
+    const p = st.posted;
+    if (p) return Object.assign({}, p, { ledger: byId('ledger', p.ledger), intents: byId('allocationIntents', p.intents), decisions: byId('collectionDecisions', p.decisions) });
+    const procIds = S.procedures.filter((x) => x.encounterId === a.encounterId).map((x) => x.id);
+    const intents = S.allocationIntents.filter((i) => i.encounterId === a.encounterId);
+    const charges = S.ledger.filter((e) => e.kind === 'charge' && procIds.includes(e.procedureId));
+    const payIds = new Set(intents.map((i) => i.paymentId));
+    const allocations = S.allocations.filter((x) => payIds.has(x.paymentId) || charges.some((c) => c.id === x.chargeId));
+    allocations.forEach((x) => payIds.add(x.paymentId));
+    return { ledger: S.ledger.filter((e) => payIds.has(e.id) || charges.includes(e)), allocations, intents, statements: [], plans: [], events: [], decisions: S.collectionDecisions.filter((d) => d.encounterId === a.encounterId) };
+  }
+
   function postedCard(r, a, st, pt) {
-    const S = Proto.store.get(); const p = st.posted;
+    const S = Proto.store.get(); const p = postedRows(S, a, st); const enc = Proto.store.encounter(a.encounterId);
     const li = (t) => h('li', { text: t });
     const items = [];
     // The card names what was written in the words a person reads: storage row ids stay out of it (C3).
     const procName = (pid) => { const x = S.procedures.find((y) => y.id === pid); return x ? (S.cdt[x.cdt] || [x.cdt])[0] + (x.tooth ? ' #' + x.tooth : '') : 'this procedure'; };
     const chargeName = (lid) => { const e = S.ledger.find((y) => y.id === lid); return e && e.cdt ? (S.cdt[e.cdt] || [e.cdt])[0] + (e.tooth ? ' #' + e.tooth : '') : 'the oldest open charge'; };
     const cadenceWord = (code) => ((CADENCES.find((c) => c[0] === code) || [null, code])[1] || '').toLowerCase();
-    p.ledger.forEach((e) => items.push(li((KIND_WORD[e.kind] || e.kind) + ' ' + money(Math.abs(e.amountCents)) + (e.tender ? ' by ' + e.tender : '') + (e.cdt ? ' · ' + (S.cdt[e.cdt] || [e.cdt])[0] : '') + (e.gl === 'unapplied_credit' ? ' · held as credit until the note is filed' : ''))));
+    const waiting = (e) => e.gl === 'unapplied_credit' && !(enc && enc.noteFiled);
+    p.ledger.forEach((e) => items.push(li((KIND_WORD[e.kind] || e.kind) + ' ' + money(Math.abs(e.amountCents)) + (e.tender ? ' by ' + e.tender : '') + (e.cdt ? ' · ' + (S.cdt[e.cdt] || [e.cdt])[0] : '') + (waiting(e) ? ' · held as credit until the note is filed' : ''))));
     p.allocations.forEach((x) => items.push(li('Applied ' + money(x.amountCents) + ' to ' + chargeName(x.chargeId))));
-    p.intents.forEach((x) => items.push(li('Allocation intent ' + money(x.amountCents) + ' waits for this visit\'s charges (Filed-later lane)')));
+    p.intents.forEach((x) => items.push(li('Allocation intent ' + money(x.amountCents) + (x.appliedTo ? ' applied to ' + procName(x.appliedTo) + ' when the note filed' : ' waits for this visit\'s charges (Filed-later lane)'))));
     p.statements.forEach((x) => items.push(li('Statement due ' + money(x.amountCents) + ' · goes out on the next statement run')));
     p.plans.forEach((x) => items.push(li('Payment plan ' + money(x.amountCents) + ', ' + cadenceWord(x.cadence))));
     p.events.forEach((x) => items.push(li('Self-pay restriction on ' + procName(x.procedureId) + ': claim assembly refuses it')));
@@ -269,7 +295,7 @@
       ...Proto.store.explain(a.patientId).map((s) => h('p', { class: 'sentence', text: s.patientVoice })),
       h('p', { class: 'small muted', text: 'Prototype: nothing prints and no disclosure row is written here; the product records a payment-purpose disclosure per print.' })) : null;
     return h('section', { class: 'card stack co-posted', 'aria-label': 'Posted' },
-      h('div', { class: 'row' }, chip('clear', 'Posted', { big: true }), h('h2', { text: 'Posted in one transaction' })),
+      h('div', { class: 'row' }, chip('clear', 'Posted', { big: true }), h('h2', { id: 'co-posted-head', tabindex: '-1', text: st.posted ? 'Posted in one transaction' : 'Posted at the window earlier' })),
       h('ul', { class: 'co-rows' }, ...items),
       h('div', { class: 'btnrow' }, btn('Print receipt (disclosure)', { kind: 'reversible', testid: 'checkout.receipt', pressed: pressed(st.receipt), onClick: () => { st.receipt = !st.receipt; Proto.router.announce(st.receipt ? 'Receipt shown in patient voice' : 'Receipt hidden'); rerender(r, 'checkout.receipt'); } })),
       receipt);
@@ -311,9 +337,13 @@
     const st = state[aid] || (state[aid] = fresh(est.patientCents));
     // A stale prefill outlives the state it was built from: re-read it when the ledger has moved under it.
     if (st.decision !== 'zero_due' && est.patientCents <= 0 && !st.posted) { st.decision = 'zero_due'; st.amountStr = dollars(0); st.tender = null; }
-    // An outage gate goes with the outage (the Board prunes its own the same way): Post is never Held for a
-    // reason the Andon no longer shows.
-    if (st.refusalNode && !P.outage && st.refusalNode.dataset.code === 'outage') st.refusalNode = null;
+    // A gate goes with its cause (the Board prunes its own the same way): Post is never Held for an outage the
+    // Andon no longer shows or a pass that has since been issued.
+    const code = st.refusalNode ? st.refusalNode.dataset.code : null;
+    if ((code === 'outage' && !P.outage) || (code === 'entitlement' && !Proto.store.currentUser().noPass)) st.refusalNode = null;
+    // The PIN authorises the person who typed it: a switch of author (the pad, a persona change) discards it.
+    const uid = Proto.store.currentUser().id;
+    if (st.pinOwner !== uid) { if (st.pinOwner) st.pin = ''; st.pinOwner = uid; }
     if (st.heldReq) st.heldReq = S.approvals.find((x) => x.id === st.heldReq.id) || st.heldReq;
     const procs = S.procedures.filter((p) => p.encounterId === a.encounterId);
     const bal = Proto.store.balances(a.patientId);
@@ -330,7 +360,8 @@
     // The decision and its finish control come before the line-by-line detail, so Post is on screen without
     // scrolling at 1280×900, 1024×768 and 420×860; the completed procedures read below it.
     const page = h('div', { class: 'stack co-page' }, head, threeNumbers(bal), status);
-    if (st.posted) page.append(postedCard(r, a, st, pt));
+    // One typed decision per visit: a visit already decided shows its record, not a form whose only outcome is a refusal.
+    if (st.posted || S.collectionDecisions.some((d) => d.encounterId === a.encounterId)) page.append(postedCard(r, a, st, pt));
     else page.append(paymentCard(r, a, st, est, procs, postRow(r, a, st)));
     page.append(proceduresCard(S, a, st, procs, est, covers), explainCard(r, a, st));
     Proto.screens.shell.mount(page);

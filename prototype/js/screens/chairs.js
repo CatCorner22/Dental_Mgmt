@@ -90,11 +90,11 @@
   }
 
   // ---- Re-render after a mutation ----------------------------------------------------------
-  function after(r, announce, focusTestid) {
+  function after(r, announce, focus) {
     Proto.screens.shell.refreshAndon(r);
     if (Proto.screens.shell.refreshRail1) Proto.screens.shell.refreshRail1(r);
     render(r);
-    if (focusTestid) { const el = document.querySelector('[data-testid="' + focusTestid + '"]'); if (el) el.focus(); }
+    if (focus) { const el = document.getElementById(focus) || document.querySelector('[data-testid="' + focus + '"]'); if (el) el.focus(); }
     if (announce) Proto.router.announce(announce);
   }
   function gateFor(res) {
@@ -116,8 +116,11 @@
     delete gates[id];
     Proto.store.retireChip('ready');
     const name = displayName(Proto.store.patient(a.patientId).name, P().privacy);
-    after(r, name + ' ready for exam, ' + ordinal(queuePosition(a)) + ' in queue', 'chairs.card.' + id + '.note');
+    // Focus lands on the queue chip that replaced the verb, not on Write note: a repeated Enter opens nothing.
+    after(r, name + ' ready for exam, ' + ordinal(queuePosition(a)) + ' in queue', 'chairs-queue-' + id);
   }
+  /* A press on a Held primary re-evaluates first: if its gate has fallen the press acts (FIX-ROUND2 stale-gate rule). */
+  function heldReady(id, r) { render(r); const c = document.querySelector('[data-testid="chairs.card.' + id + '"] [data-testid="refusal.control"]'); if (c) c.focus(); else doReady(id, r); }
   function toggleExpand(id, r) { expanded[id] = !expanded[id]; render(r); const el = document.querySelector('[data-testid="chairs.card.' + id + '.expand"]'); if (el) el.focus(); }
 
   // ---- Card --------------------------------------------------------------------------------
@@ -133,7 +136,7 @@
     el.append(h('div', { class: 'who' }, h('span', { text: fmtTime(a.time) + ' · ' + name }), chip(ssev, sword)));
     const meta = h('div', { class: 'meta' }, h('span', { text: 'Chair ' + a.op }), chip(tsev, tword));
     if (recallDue(a)) meta.append(chip('review', 'Recall due'));
-    if (pos) meta.append(chip('review', 'Exam: ' + ordinal(pos) + ' in queue'));
+    if (pos) { const q = chip('review', 'Exam: ' + ordinal(pos) + ' in queue'); q.id = 'chairs-queue-' + a.id; q.tabIndex = -1; meta.append(q); }
     el.append(meta);
 
     if (pt.alerts && pt.alerts.length) el.append(h('div', { class: 'row ch-alerts', role: 'group', 'aria-label': 'Alerts' }, ...pt.alerts.map((t) => chip('stop', t))));
@@ -154,7 +157,9 @@
     const [esev, eword] = ELIG[a.eligibility] || ['info', 'Unknown'];
     det.append(h('div', { class: 'row' }, h('span', { text: 'Coverage: ' + (pt.selfPay || !pt.primary ? 'Self-pay' : Proto.store.carrierName(pt.primary) + (pt.secondary ? ' · secondary ' + Proto.store.carrierName(pt.secondary) : '')) }), chip(esev, eword)));
     det.append(h('div', { class: 'row' }, h('span', { text: 'Forms: ' + (a.formsDone ? 'complete' : 'outstanding') }), a.formsDone ? chip('clear', 'Complete') : chip('review', 'Outstanding')));
-    det.append(h('span', { text: 'Balance before today: ' + money(a.balanceCents || 0) + ' · Provider ' + prov.short }));
+    // The balance is the ledger's, the same number the Board, Checkout and the Ledger print.
+    const bal = Proto.store.balances(a.patientId);
+    det.append(h('span', { text: 'Balance ' + money(bal.patientDue) + (bal.insurancePending ? ' · ' + money(bal.insurancePending) + ' waiting on insurance' : '') + (bal.credit ? ' · ' + money(bal.credit) + ' credit' : '') + ' · Provider ' + prov.short }));
     det.append(h('details', null, h('summary', { class: 'small', testid: 'chairs.card.' + a.id + '.why' }, 'Why this strip'), h('p', { class: 'small muted', text: 'Deltas come from stored rows only: the medical-history alert on the patient, the last perio exam date, the bitewing interval (the practice\'s rule), and the last filed what-helped field. Nothing here is an AI guess. Card order is seat order; no per-person metric appears.' })));
     el.append(det);
 
@@ -167,7 +172,7 @@
     actions.append(btn('Write note', { kind: 'quiet', testid: 'chairs.card.' + a.id + '.note', ariaLabel: 'Write the note for ' + name, onClick: () => goNote(a.id, r) }));
     if (Proto.screens.rail) actions.append(Proto.screens.rail.button(a.patientId, r, 'chairs.card.' + a.id + '.rail'));
     if (ready) {
-      if (gates[a.id]) actions.append(btn('Ready for exam', { kind: 'held', testid: 'chairs.card.' + a.id + '.ready', onClick: () => { const c = el.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); } }));
+      if (gates[a.id]) actions.append(btn('Ready for exam', { kind: 'held', testid: 'chairs.card.' + a.id + '.ready', ariaLabel: 'Ready for exam held: ' + gates[a.id].verb, onClick: () => heldReady(a.id, r) }));
       else actions.append(btn('Ready for exam', { kind: 'irreversible', testid: 'chairs.card.' + a.id + '.ready', ariaLabel: 'Ready for exam: ' + name + ' joins the dentist\'s queue', onClick: () => doReady(a.id, r) }));
     }
     el.append(actions);
