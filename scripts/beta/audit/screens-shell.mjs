@@ -286,7 +286,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
           const ev = await after(p, seq0);
           stepup.writes = writes(ev); stepup.seqRange = range(ev, seq0);
         } finally { await c.close(); } }
-      const authorOpened = author.focusOnOpen && author.focusOnOpen.testid === 'pin.key.1';
+      const authorOpened = author.focusOnOpen && author.focusOnOpen.testid === 'pin.display';
       const stepupOpened = stepup.focusOnOpen && stepup.focusOnOpen.testid === 'phone.stepup.1';
       const authorIgnoresTyping = authorOpened && author.keyEvents.length === 4 && (author.dotsAfterTyping || '').length === 0 && !!author.refusalAfterSubmit && author.refusalAfterSubmit.code === 'pin_no_match';
       const stepupAcceptsTyping = stepupOpened && (stepup.dotsAfterTyping || '').length === 4;

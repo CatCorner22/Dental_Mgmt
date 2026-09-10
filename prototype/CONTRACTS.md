@@ -53,7 +53,7 @@ Every element with a click or key handler carries `data-testid`, lowercase, dot-
 | Screen | Test ids |
 |---|---|
 | Top bar | `topbar.location`, `topbar.search`, `topbar.theme`, `topbar.privacy`, `topbar.author`, `topbar.signout`, `andon.control` |
-| Author PIN pad | `pin.key.<0-9>`, `pin.backspace`, `pin.submit`, `pin.cancel`, `pin.why` |
+| Author PIN pad | `pin.display` (the digit display; focus lands here on open and Enter here is Go), `pin.key.<0-9>`, `pin.backspace`, `pin.submit`, `pin.cancel`, `pin.why` |
 | Palette | `palette.input`, `palette.row.<n>`, `palette.confirm.dob` |
 | Patient Rail | `rail.tab.<chart|notes|perio|imaging|plan|ledger|claims|docs|profile>`, `rail.alert`, `rail.close` |
 | Sign-in | `signin.persona.<persona>`, `signin.theme.<light|dark>`, `signin.device.<desk|operatory|shared|phone>`, `signin.motion`, `signin.grayscale`, `signin.privacy`, `signin.outage`, `signin.go` |
@@ -64,8 +64,8 @@ Every element with a click or key handler carries `data-testid`, lowercase, dot-
 | Chairs | `chairs.card.<apptId>`, `chairs.card.<apptId>.perio`, `chairs.card.<apptId>.note`, `chairs.card.<apptId>.ready`, `chairs.card.<apptId>.expand` |
 | Perio | `perio.grid.cell.t<tooth>-s<1-6>`, `perio.pad.toggle`, `perio.pad.key.<0-9>`, `perio.pad.bleed`, `perio.pad.skip`, `perio.pad.undo`, `perio.pad.next`, `perio.screening`, `perio.save`, `perio.licence.<code>`, `perio.licence.cancel`, `perio.tag.add`, `perio.tag.tooth`, `perio.tag.text`, `perio.tag.save`, `perio.settings` |
 | Encounter | `exams.row.<encId>`, `exams.row.<encId>.open`, `enc.tag.<tagId>.chart`, `enc.tag.<tagId>.dismiss`, `enc.tooth.<1-32>`, `enc.surface.<tooth>.<m|o|d|b|l>`, `enc.proc.<cdt>`, `enc.temporality.<today|planned|existing>`, `enc.note.field.<id>`, `enc.note.starter.<n>`, `enc.killer.<n>.fix`, `enc.readback.switch`, `enc.file`, `enc.undo` |
-| Money Desk | `money.tab.<era|aging|denials|statements|credits|variances|approvals>`, `money.era.<batchId>.postmatched`, `money.era.line.<lineId>.confirm`, `money.era.line.<lineId>.hold`, `money.era.line.<lineId>.dispute`, `money.aging.row.<claimId>.<action>`, `money.denial.<claimId>.appeal`, `money.denial.<claimId>.fix`, `money.denial.<claimId>.bill`, `money.appeal.send`, `money.statement.<id>.send`, `money.statement.<id>.preview`, `money.credit.<id>.apply`, `money.writeoff.<accountId>`, `money.writeoff.amount`, `money.writeoff.reason.<code>`, `money.writeoff.post`, `money.pin` (shared device only), `money.statement.<patientId>.raise` |
-| Daily Close | `close.tied.tile`, `close.location.<locId>`, `close.tender.<cash|check|card>`, `close.variance.<id>.match`, `close.variance.<id>.investigate`, `close.variance.<id>.clear`, `close.changed`, `close.late`, `close.decision.<id>.<keep|tighten|retire>`, `close.closeday`, `close.closeday.confirm`, `close.closeday.cancel`, `close.approval.<reqId>.open`, `risk.row.<id>.<action>` |
+| Money Desk | `money.tab.<era|aging|denials|statements|credits|variances|approvals>`, `money.era.<batchId>.postmatched`, `money.era.line.<lineId>.confirm`, `money.era.line.<lineId>.hold`, `money.era.line.<lineId>.dispute`, `money.aging.row.<claimId>.<action>`, `money.denial.<claimId>.appeal`, `money.denial.<claimId>.fix`, `money.denial.<claimId>.bill`, `money.appeal.send`, `money.statement.<id>.send`, `money.statement.<id>.preview`, `money.statement.<id>.chart` (a statement waiting for the note), `money.credit.<id>.apply`, `money.writeoff.<accountId>`, `money.writeoff.amount`, `money.writeoff.reason.<code>`, `money.writeoff.post`, `money.pin` (shared device only), `money.statement.<patientId>.raise` |
+| Daily Close | `close.tied.tile`, `close.location.<locId>`, `close.tender.<cash|check|card>`, `close.variance.<id>.match`, `close.variance.<id>.investigate`, `close.variance.<id>.clear`, `close.changed`, `close.late`, `close.decision.<id>.<keep|tighten|retire>`, `close.closeday`, `close.closeday.confirm`, `close.closeday.cancel`, `close.approval.<reqId>.open`, `close.pin` (shared device only), `risk.row.<id>.<action>` |
 | Roles | `roles.daypass.add`, `roles.daypass.name`, `roles.daypass.role.<code>`, `roles.daypass.location.<locId>`, `roles.daypass.end`, `roles.daypass.entitlement.<code>`, `roles.daypass.save`, `roles.daypass.credential.add`, `roles.sod.<remediate|compensate|accept>`, `roles.row.<userId>`, `roles.row.<dayPassId>` (an issued pass, same row shape) |
 | Temp rail | `rail1.chip.<n>`, `rail1.toggle` |
 | Patient Rail openers (every card and row that opens the rail) | `board.card.<apptId>.rail`, `chairs.card.<apptId>.rail`, `checkout.rail`, `enc.rail`, `rail.open.<patientId>` (the default opener id) |
@@ -133,6 +133,7 @@ Tenant Riverbend Dental; locations `loc-1` Main Street, `loc-2` Riverbend East, 
 | `a-1046` / `p-305` | Samir Haddad, pays a $168 visit in full and asks that it stay off insurance (limited exam $90 plus four bitewings $78, from the fee schedule; this line said $180 and the fee schedule is what the screen adds up) |
 | `a-1047` / `p-306` | Lena Fischer, $410 balance, courtesy write-off (needs a second approver: Dana or Dr. Reagan) |
 | `a-1050` / `enc-9010` | Checked out with the note unfiled (Filed-later lane) |
+| `a-1073` / `enc-9033` | Bree's 11:00 hygiene visit with no exam yet (task hy-6 charts its screening) |
 | `a-1060` / `enc-9020` / `p-320` | Referred-in oral surgery consult for Dr. Okafor (sedation note) |
 | `era-1` | Delta Dental 835, 41 lines, 37 matched, 3 deltas (`el-14`, `el-22`, `el-31`), 1 denial (`el-40` → claim `c-88`, CARC 16) |
 | `c-88` | Denied claim, appeal built from the record |
