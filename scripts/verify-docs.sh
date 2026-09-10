@@ -153,7 +153,11 @@ if os.path.exists('docs/15-function-audit.md'):
     m = re.search(r'^\| \*\*Total\*\* \| \*\*(\d+)\*\* \|', d15, re.M)
     if not m or int(m.group(1)) != 497: probs.append(f'docs/15 registered inventory total {m.group(1) if m else "missing"}, expected the registered 497')
     results = d15.split('\n## Results', 1)[1] if '\n## Results' in d15 else ''
-    if 'Pending' not in results.split('\n## ', 1)[0]:
+    # Results are pending only while the registration-time marker line ("_Pending: the audit workflow is running. …_")
+    # still opens the section. Testing for the bare word matched a root-cause row that happened to contain "Pending"
+    # and silently skipped the reconciliation below for every run after the results landed.
+    pending = re.search(r'^_Pending: the audit workflow is running\.', results.split('\n## ', 1)[0], re.M)
+    if not pending:
         live = re.search(r'^\| Functions in `prototype/js` \(`scripts/audit/inventory\.mjs`\) \| (\d+) \|', results, re.M)
         if not live or int(live.group(1)) != total: probs.append(f'docs/15 Results coverage total {live.group(1) if live else "missing"} vs {total} functions in prototype/js')
         missing = [f'{f}:{fn["name"]}' for f, fns in inv.items() for fn in fns if not re.search(r'^\| `' + re.escape(fn['name']) + r'` \| `' + re.escape(f.replace('prototype/js/', '')) + r'`', results, re.M)]
