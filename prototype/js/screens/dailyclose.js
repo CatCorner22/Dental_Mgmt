@@ -23,8 +23,12 @@
   const WROTE = { ledger: 'appended a ledger row', approvals: 'created an approval request', approvalsLog: 'decided an approval request', dayCloses: 'closed a business day', deposits: 'prepared a deposit slip', reconciliationMatches: 'matched or cleared a variance', controlDecisions: 'reviewed a control decision', appointmentEvents: 'moved an appointment', eligibilityChecks: 're-ran eligibility', messages: 'pinged a chair', perioExams: 'saved a perio exam', tags: 'tagged a tooth for the dentist', chartEvents: 'painted the chart', planItems: 'added a plan item', notes: 'edited the note', filedNotes: 'filed a note', claims: 'changed a claim', claimEvents: 'recorded a claim event', appealPackets: 'built an appeal packet', disclosures: 'disclosed records (logged)', statementsDue: 'queued a statement', collectionDecisions: 'recorded a collection decision', allocations: 'allocated a payment', dayPasses: 'issued a day pass', userEntitlements: 'changed entitlements', firstRunState: 'retired a first-shift chip', sessions: 'switched author with a PIN' };
 
   let st = null, lastStore = null, lastRoute = null, keysOn = false;
-  const fresh = () => ({ tileOpen: false, locOpen: null, invOpen: {}, changedOpen: false, lateOpen: false, varRefusal: {}, closeStep: 'idle', closeRefusal: null, dayClose: null, decisionResult: {}, decisionRefusal: {}, riskDone: {}, logOpen: false });
+  const fresh = () => ({ tileOpen: false, locOpen: null, invOpen: {}, changedOpen: false, lateOpen: false, varRefusal: {}, closeStep: 'idle', closeRefusal: null, dayClose: null, decisionResult: {}, decisionRefusal: {}, riskDone: {}, logOpen: false, pin: '', device: null });
   const priv = () => !!(window.__proto && window.__proto.privacy);
+  const shared = () => !!(window.__proto && window.__proto.device === 'shared');
+  // Shared desk: every posting verb here carries the PIN the field holds; the store matches it and names the poster.
+  const extras = () => ({ pin: st.pin || null });
+  const posted = () => { st.pin = ''; };
   const bool = (b) => (b ? 'true' : 'false');
   const say = (t) => Proto.router.announce(t);
   const pname = (S, pid) => { const p = S.patients.find((x) => x.id === pid); return displayName(p ? p.name : pid, priv()); };
@@ -49,20 +53,26 @@
      (whichever its control names). The controls used to have no handler at all, so "Open the day" and "Support
      line" were dead ends. */
   function openDay(r) { st.tileOpen = true; st.locOpen = st.locOpen || 'loc-1'; rerender(r, 'close.location.' + st.locOpen); }
+  const focusPin = (r) => { rerender(r, 'close.pin'); const el = document.activeElement; if (el && el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length); };
+  /* Every press that raises a gate is its own refusal (`fresh`): Keep, Tighten and Retire share one wording, and the
+     shared component's dedupe would otherwise log three presses as one. */
   function gate(r, res, why, fallback) {
     const onControl = () => {
       if (res.code === 'outage') Proto.ui.support();
       else if (res.code === 'already_closed' || res.code === 'already_decided') openDay(r);
+      else if (/^pin_/.test(res.code)) { if (res.code === 'pin_locked') st.pin = ''; focusPin(r); }
       else if (fallback) fallback();
-      else if (res.code === 'entitlement') { if (/roles/i.test(res.control || '')) Proto.router.go(r.persona, 'roles'); else location.hash = '#/phone/approvals'; }
+      // The seat that can act is granted on Roles; Approvals is where the same seat reads "not an approver".
+      else if (res.code === 'entitlement') { if (/approvals/i.test(res.control || '')) location.hash = '#/phone/approvals'; else Proto.router.go(r.persona, 'roles'); }
     };
-    return refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why || why, severity: res.code === 'outage' ? 'stop' : 'required', onControl });
+    return refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why || why, severity: res.code === 'outage' ? 'stop' : 'required', onControl, fresh: true });
   }
   /* A gate whose cause is gone falls on the next render, and a press on the Held primary re-evaluates before it
      focuses the gate's control: if the gate has fallen the press acts. A held gate keeps its store refusal (`res`)
-     beside the node it rendered, so the check reads the code, never the DOM. */
-  const stale = (g) => !!g && !!g.res && ((g.res.code === 'outage' && !Proto.store.get().outage) || (g.res.code === 'entitlement' && g.who !== Proto.store.currentUser().id));
-  const heldGate = (by, res, node) => ({ by, res, node, who: Proto.store.currentUser().id });
+     beside the node it rendered, so the check reads the code, never the DOM. Causes: the outage, the author, the
+     device and, for a PIN gate, the PIN field being edited. */
+  const stale = (g) => !!g && !!g.res && ((g.res.code === 'outage' && !Proto.store.get().outage) || (g.res.code === 'entitlement' && g.who !== Proto.store.currentUser().id) || (/^pin_/.test(g.res.code) && (!shared() || g.pin !== st.pin)));
+  const heldGate = (by, res, node) => ({ by, res, node, who: Proto.store.currentUser().id, pin: st.pin });
   const live = (slot, key) => { if (stale(slot[key])) slot[key] = null; return slot[key] || {}; };
   const heldPress = (r, slot, key, act) => { if (stale(slot[key])) { slot[key] = null; act(); } else rerender(r, 'refusal.control'); };
   // A name shown on expansion is a logged read; the store owns the row, the screen only asks for it.
@@ -192,8 +202,8 @@
       h('p', { class: 'explain sentence', text: v.sentence }),
       h('p', null, h('b', { text: 'Proposed match: ' }), pm.bankLine + ' ↔ ' + plural(pm.ledgerEntries || 0, 'ledger entry').replace('entrys', 'entries')));
     const doMatch = () => {
-      const res = Proto.store.matchVariance(v.id);
-      if (res.ok) { st.varRefusal[v.id] = null; say('Matched ' + money(v.amountCents) + ' at ' + locOf(S, v.locationId).name); rerender(r, 'close.tied.tile'); return; }
+      const res = Proto.store.matchVariance(v.id, extras());
+      if (res.ok) { st.varRefusal[v.id] = null; posted(); say('Matched ' + money(v.amountCents) + ' at ' + locOf(S, v.locationId).name); rerender(r, 'close.tied.tile'); return; }
       refuse('match', res);
     };
     const controls = h('div', { class: 'btnrow' },
@@ -204,8 +214,8 @@
         rerender(r, 'close.variance.' + v.id + '.investigate');
       } }));
     const doClear = () => {
-      const res = Proto.store.clearVariance(v.id);
-      if (res.ok) { st.varRefusal[v.id] = null; say('Cleared with reason'); rerender(r, 'close.tied.tile'); return; }
+      const res = Proto.store.clearVariance(v.id, extras());
+      if (res.ok) { st.varRefusal[v.id] = null; posted(); say('Cleared with reason'); rerender(r, 'close.tied.tile'); return; }
       // The rows are what an independent seat would be handed, so the way out of a who-may-clear gate opens them.
       refuse('clear', res, () => { st.invOpen[v.id] = true; rerender(r, 'close.variance.' + v.id + '.investigate'); });
     };
@@ -241,9 +251,9 @@
       const late = days(d.reviewBy, S.tenant.today);
       const held = live(st.decisionRefusal, d.id);
       const review = (action) => {
-        const res = Proto.store.reviewDecision(d.id, action);
+        const res = Proto.store.reviewDecision(d.id, action, extras());
         if (!res.ok) { st.decisionRefusal[d.id] = heldGate(action, res, gate(r, res, 'A decision is reviewed on the server so the threshold it moves is the one every posting reads.')); rerender(r, 'refusal.control'); return; }
-        st.decisionRefusal[d.id] = null;
+        st.decisionRefusal[d.id] = null; posted();
         // The store sets the next review date when a decision is kept or tightened; printing a second
         // computation of it here is how the sentence and the row underneath it come to disagree.
         const next = shortDate(res.reviewBy);
@@ -293,13 +303,15 @@
     const loc = locOf(S, 'loc-1'); const today = S.tenant.today;
     const done = S.dayCloses.find((d) => d.locationId === 'loc-1' && d.date === today);
     const kids = [];
-    if (done) kids.push(h('p', { class: 'row' }, h('span', { class: 'dc-lock', 'aria-hidden': 'true', text: '🔒' }), chip('clear', 'Closed'), h('span', { text: 'Closed ' + shortDate(done.date) + ' at ' + done.closedAt + ' by ' + shortName(S, done.closedBy) + ' · chain head ' + done.chainHeadHash + ' · deposit slip prepared; day sheet frozen.' })));
+    if (done) kids.push(h('p', { class: 'row', id: 'dc-closed', tabindex: '-1' }, h('span', { class: 'dc-lock', 'aria-hidden': 'true', text: '🔒' }), chip('clear', 'Closed'), h('span', { text: 'Closed ' + shortDate(done.date) + ' at ' + done.closedAt + ' by ' + shortName(S, done.closedBy) + ' · chain head ' + done.chainHeadHash + ' · deposit slip prepared; day sheet frozen.' })));
     const closeGate = live(st, 'closeRefusal');
     // One label for the control; the held identity supplies the word Held and keeps "Close day" as its name.
     const primary = btn('Close day', { kind: closeGate.node || done ? 'held' : 'irreversible', testid: 'close.closeday', onClick: () => {
-      if (done) { const res = Proto.store.closeDay('loc-1'); if (!res.ok) { st.closeRefusal = heldGate('close', res, gate(r, res, 'A closed day is sealed; corrections post into today as a reversal-and-repost pair.')); } rerender(r, 'close.closeday'); return; }
+      if (done) { const res = Proto.store.closeDay('loc-1', extras()); if (!res.ok) { st.closeRefusal = heldGate('close', res, gate(r, res, 'A closed day is sealed; corrections post into today as a reversal-and-repost pair.')); } rerender(r, 'refusal.control'); return; }
+      const confirm = () => { st.closeStep = 'confirm'; rerender(r, '#dc-close-confirm'); };
+      if (closeGate.node) { heldPress(r, st, 'closeRefusal', confirm); return; }
       // The confirm group opens with focus on its question, not on the irreversible control: a repeated Enter must not close the day.
-      st.closeStep = 'confirm'; rerender(r, '#dc-close-confirm');
+      confirm();
     } });
     kids.push(h('div', { class: 'btnrow' }, primary, h('span', { class: 'small muted', text: loc.name + ' · ' + shortDate(today) + ' · totals by tender, deposit slip, day sheet frozen atomically' })));
     if (closeGate.node) kids.push(closeGate.node);
@@ -316,12 +328,13 @@
           h('p', { class: 'small muted', text: 'Later postings dated today go into tomorrow as a reversal-and-repost pair or a marked late posting; nothing here changes in place.' })),
         h('div', { class: 'btnrow' },
           btn('Close day', { kind: 'irreversible', testid: 'close.closeday.confirm', onClick: () => {
-            const res = Proto.store.closeDay('loc-1');
-            if (res.ok) { st.closeStep = 'done'; st.closeRefusal = null; say('Day closed — deposit slip prepared'); rerender(r, 'close.closeday'); return; }
+            const res = Proto.store.closeDay('loc-1', extras());
+            // Focus lands on the Closed stamp, never back on the (now held) primary: a repeated Enter raises no second gate.
+            if (res.ok) { st.closeStep = 'done'; st.closeRefusal = null; posted(); say('Day closed — deposit slip prepared'); rerender(r, '#dc-closed'); return; }
             st.closeStep = 'idle';
             // The gate's own words, and its control goes where the control says: the screen adds neither.
             st.closeRefusal = heldGate('close', res, gate(r, res, 'Closing freezes totals and prepares the deposit, so only the seats that carry it can close.'));
-            rerender(r, 'close.closeday');
+            rerender(r, 'refusal.control');
           } }),
           btn('Cancel', { kind: 'quiet', testid: 'close.closeday.cancel', onClick: () => { st.closeStep = 'idle'; rerender(r, 'close.closeday'); } }))));
     }
@@ -356,15 +369,27 @@
   function attachKeys() { if (!keysOn) { document.addEventListener('keydown', onKey); keysOn = true; } }
   function detachKeys() { if (keysOn) { document.removeEventListener('keydown', onKey); keysOn = false; } }
 
+  /* ---- shared desk: the PIN that names the poster, once per screen, beside the controls every posting verb lives in ---- */
+  const pinGates = () => [st.closeRefusal, ...Object.values(st.varRefusal), ...Object.values(st.decisionRefusal)].some((g) => g && g.res && /^pin_/.test(g.res.code));
+  function pinField(r) {
+    if (!shared()) return null;
+    // Editing the PIN drops a PIN gate (stale()); the field is redrawn only then, so the caret survives ordinary typing.
+    const pin = h('input', { class: 'input co-pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', id: 'dc-pin', testid: 'close.pin', value: st.pin, onInput: (ev) => { st.pin = ev.target.value; if (pinGates()) focusPin(r); } });
+    return h('div', { class: 'field' }, h('label', { for: 'dc-pin', text: 'Your PIN' }), pin, h('p', { class: 'hint', text: 'Shared desk: the PIN makes you the frozen poster for every posting here.' }));
+  }
+
   /* ---- render: close ---- */
   function renderClose(r) {
     const S = Proto.store.get();
     if (lastStore !== S) { lastStore = S; st = fresh(); }
+    // A PIN typed for one device never carries to another: the field empties when the device flips.
+    const device = window.__proto && window.__proto.device; if (st.device !== device) { st.device = device; st.pin = ''; }
     lastRoute = r; attachKeys();
     const page = h('div', { class: 'stack dc-page' },
       tile(r, S),
       st.tileOpen ? h('div', { class: 'stack', id: 'dc-tile-detail' }, h('div', { class: 'dc-locs' }, ...S.reconciliation.map((rr) => locationRow(r, S, rr))), practiceLines(r, S)) : h('div', { id: 'dc-tile-detail', hidden: true }),
       pageHead('Daily Close and Controls', 'Home: is yesterday’s money in the bank? Tap the tile or press T. Controls live below; nothing here ranks people.'),
+      pinField(r),
       decisions(r, S), approvals(r, S), exceptions(r, S), closeDaySection(r, S), health(S));
     Proto.screens.shell.mount(page);
   }
@@ -442,8 +467,8 @@
     Proto.screens.shell.mount(page);
   }
 
-  // The confirm step belongs to the press that opened it: leaving the screen closes it (docs/01 principle 9).
-  window.addEventListener('hashchange', () => { if (Proto.router.current().route !== 'close') { detachKeys(); if (st && st.closeStep === 'confirm') st.closeStep = 'idle'; } });
+  // The confirm step and the typed PIN belong to the visit that made them: a hash change ends both (docs/01 principle 9).
+  window.addEventListener('hashchange', () => { if (st) st.pin = ''; if (Proto.router.current().route !== 'close') { detachKeys(); if (st && st.closeStep === 'confirm') st.closeStep = 'idle'; } });
 
   Proto.screens.dailyclose = { render: renderClose, renderRisk, grade, overall, changedPairs, lateRows };
   Proto.screens.risk = { render: renderRisk };

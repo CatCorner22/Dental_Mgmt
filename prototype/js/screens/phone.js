@@ -33,8 +33,8 @@
     const uid = Proto.store.currentUser().id;
     return (byUser[uid] = byUser[uid] || { refusal: {}, declineOpen: {}, declineReason: {}, declineHint: {}, done: {}, simNote: null, notice: null });
   }
-  // A gate whose cause is gone falls: on the next render, and on a press of the Held primary before it focuses anything.
-  const stale = (g) => !!g && g.code === 'outage' && !S().outage;
+  // A gate whose cause is gone (outage over, hours resumed) falls: on the next render, and on a press of the Held primary before it focuses anything.
+  const stale = (g) => !!g && ((g.code === 'outage' && !S().outage) || (g.code === 'after_hours' && !S().clock.afterHours));
   const nameDisclosed = (a) => S().disclosures.some((d) => d.purpose === 'approval' && d.patientId === a.patientId && d.actor === me().name && (d.recordIds || []).includes(a.id));
 
   /* ---- helpers ---- */
@@ -164,15 +164,18 @@
     say('Sent back: ' + reason);
     rerender(r, '.ph-done');
   }
+  /* The sim plays the biller's side all the way: on a shared device it types the biller's own PIN, so the store's
+     PIN rule is met the way the biller would meet it. A refusal left over (outage, a locked pad, nothing to write off)
+     renders through the gate component beside the control that raised it, never as bare text. */
   function simulate(r) {
-    const s = st(); const x = nextSim(); s.notice = null;
+    const s = st(); const x = nextSim(); s.notice = null; s.simGate = null;
     const p = P(); const prev = p.persona;
     let res;
-    try { p.persona = 'biller'; res = Proto.store.requestWriteoff(x.pid, x.cents, x.reason); }
+    try { p.persona = 'biller'; res = Proto.store.requestWriteoff(x.pid, x.cents, x.reason, { pin: me().pin || null }); }
     finally { p.persona = prev; }
     if (res && res.held) { s.simNote = 'Sam (biller) tapped Post on the ' + simWords(x) + '; it is waiting on you as request ' + res.requestId + '.'; say('Request ' + res.requestId + ' is waiting for you'); }
     else if (res && res.ok) { s.simNote = 'Below the threshold: the write-off posted without a second approver.'; say(s.simNote); }
-    else { s.simNote = (res && res.verb) || 'Nothing was requested.'; say(s.simNote); }
+    else { s.simNote = null; s.simGate = Object.assign({ fresh: true }, res, { onControl: res.code === 'outage' ? () => Proto.ui.support() : () => { st().simGate = null; rerender(r, 'phone.simulate'); } }); rerender(r, 'refusal.control'); return; }
     rerender(r, 'phone.simulate');
   }
 
@@ -196,11 +199,12 @@
       chip('review', 'Waiting')));
     const nameRow = h('div', { class: 'ph-kv' }, h('span', { class: 'ph-k', text: 'Patient' }),
       nameDisclosed(a)
-        ? h('span', { class: 'ph-v', text: p.name + ' · ' + p.mrn })
+        ? h('span', { class: 'ph-v', id: 'ph-name-' + a.id, tabindex: '-1', text: p.name + ' · ' + p.mrn })
         : h('span', { class: 'ph-v' }, initials(p.name) + ' · ' + p.mrn + ' ', btn('Show name', { testid: 'phone.request.' + a.id + '.name', kind: 'quiet', class: 'compact', ariaLabel: 'Show the patient’s full name (this tap is logged)', onClick: () => {
           // The tap is the logged read the label promises; the store owns the disclosures row, and the card reads it back.
           if (Proto.store.disclose) Proto.store.disclose({ patientId: a.patientId, purpose: 'approval', recordIds: [a.id] });
-          rerender(r, 'phone.request.' + a.id + '.approve');
+          // Focus lands on the name the tap revealed, never on Approve: a repeated Enter must not open the step-up.
+          rerender(r, '#ph-name-' + a.id);
         } })));
     card.append(h('div', { class: 'ph-grid' },
       nameRow,
@@ -286,8 +290,11 @@
     root.append(h('section', { class: 'card flat stack ph-sim', 'aria-label': 'Simulate a request' },
       h('h2', { class: 'ph-h2', text: 'Test the flow alone' }),
       h('p', { class: 'small muted', text: 'Plays the biller’s side of the request so you can approve from here.' }),
-      btn('Simulate: the biller requests the ' + simWords(sim), { testid: 'phone.simulate', kind: 'reversible', class: 'ph-wrap', onClick: () => simulate(r) }),
+      // While the sim's gate stands the control carries the Held identity; its press re-runs the sim, which re-evaluates the gate.
+      btn('Simulate: the biller requests the ' + simWords(sim), { testid: 'phone.simulate', kind: cards.simGate ? 'held' : 'reversible', class: 'ph-wrap', onClick: () => simulate(r) }),
+      cards.simGate ? refusal(cards.simGate) : null,
       cards.simNote ? h('p', { class: 'small', role: 'status', text: cards.simNote }) : null));
+    if (cards.simGate) cards.simGate.fresh = false;
     Proto.screens.shell.mount(root);
     attachKeys();
     if (cards.noticeFresh) { cards.noticeFresh = false; say(cards.notice); focusOn('.ph-notice'); }
