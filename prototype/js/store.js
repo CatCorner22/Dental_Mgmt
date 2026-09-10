@@ -27,6 +27,20 @@
      checked, so Confirm, Send statement, Save exam, Close day, File and Issue day pass all wrote during an outage. */
   const OFFLINE_WHY = 'Nothing posts while the server is unreachable: the controls that gate money and records cannot be enforced without it.';
   const offline = (verb) => (S.outage ? refuse('outage', verb, 'Support line', OFFLINE_WHY) : null);
+  /* Shared desk: the PIN on the posting control names the poster. Checkout alone carried the rule, so Money Desk posted
+     37 ERA rows, write-offs and statements frozen to whoever the persona was while Checkout beside it refused. One rule
+     for every posting verb: the PIN is matched against the accounts (a guess never posts) and poster() opens that
+     person's session when the rows are written. */
+  const shared = () => !!(window.__proto && window.__proto.device === 'shared');
+  function requirePin(extras) {
+    if (!shared()) return { ok: true, user: currentUser() };
+    const pin = extras && extras.pin;
+    if (!pin) return refuse('pin_required', 'Enter your PIN to post', 'Enter PIN', 'Shared desk: the PIN mints your own session, so the posting carries your name and not the last person\'s.');
+    const who = S.users.find((x) => x.pin && x.pin === String(pin));
+    if (!who) return refuse('pin_no_match', 'Retype the PIN — no match', 'Enter PIN', 'No account carries that PIN. The posting freezes the poster the PIN names, so it cannot post under a guess.');
+    return { ok: true, user: who };
+  }
+  const poster = (u) => { if (shared()) { const live = S.sessions.filter((x) => !x.endedAt).pop(); if (!live || live.userId !== u.id) openSession(u.id); } return u; };
 
   // Lookups
   const patient = (pid) => S.patients.find((p) => p.id === pid);
@@ -49,8 +63,9 @@
      Before, balances() called every charge patient-due (a visit awaiting insurance read $183.00 when the
      patient owed nothing) and explain() subtracted every later payment from every earlier charge, so 14 of
      40 patients had an Explain total that disagreed with the Patient due above it. */
-  function allocate(pid) {
-    const rows = S.ledger.filter((e) => e.patientId === pid).slice().sort((a, b) => String(a.effective).localeCompare(String(b.effective)) || String(a.id).localeCompare(String(b.id)));
+  // asOf: the account as it stood at the end of that day (rows posted on or before it), for the Ledger's As-of view.
+  function allocate(pid, asOf) {
+    const rows = S.ledger.filter((e) => e.patientId === pid && (!asOf || e.posted <= asOf)).slice().sort((a, b) => String(a.effective).localeCompare(String(b.effective)) || String(a.id).localeCompare(String(b.id)));
     const charges = rows.filter((e) => e.kind === 'charge').map((ch) => ({ row: ch, open: ch.amountCents, applied: [], pending: 0, due: 0 }));
     const claimFor = (ch) => S.claims.find((c) => c.patientId === pid && c.cdt === ch.cdt && ['scrubbed', 'submitted', 'pended'].includes(c.status));
     const expected = (ch) => (Number.isFinite(ch.insuranceExpectedCents) ? ch.insuranceExpectedCents : null);
@@ -88,12 +103,12 @@
     for (const cr of S.credits) if (cr.patientId === pid && !cr.fromLedger) credit += -cr.amountCents;
     return { charges, patientDue: Math.max(0, patientDue), insurancePending, credit };
   }
-  function balances(pid) { const a = allocate(pid); return { patientDue: a.patientDue, insurancePending: a.insurancePending, credit: a.credit }; }
+  function balances(pid, asOf) { const a = allocate(pid, asOf); return { patientDue: a.patientDue, insurancePending: a.insurancePending, credit: a.credit }; }
   /* A procedure is charged when the ledger says so, whatever its flag claims. */
   const charged = (p) => !!p.charged || S.ledger.some((e) => e.kind === 'charge' && e.procedureId === p.id);
-  function explain(pid) {
+  function explain(pid, asOf) {
     const out = [];
-    for (const c of allocate(pid).charges) {
+    for (const c of allocate(pid, asOf).charges) {
       const ch = c.row;
       const ins = c.applied.filter((e) => e.kind === 'insurance_payment');
       const wo = c.applied.filter((e) => e.kind === 'write_off');
@@ -157,9 +172,7 @@
     let u = currentUser();
     const off = offline('Wait for the server — postings are paused'); if (off) return off;
     if (u.noPass) return refuse('entitlement', 'Issue a day pass before posting', 'Open Roles', 'A temp posts under their own day pass. Until Roles issues one there is no identity to freeze onto the posting.');
-    if (window.__proto.device === 'shared' && !form.pin) return refuse('pin_required', 'Enter your PIN to post', 'Enter PIN', 'Shared desk: the PIN mints your own session, so the posting carries your name and not the last person\'s.');
-    // The PIN names the poster: any non-empty value used to post, frozen to whoever the persona happened to be.
-    if (window.__proto.device === 'shared') { const who = S.users.find((x) => x.pin && x.pin === String(form.pin)); if (!who) return refuse('pin_no_match', 'Retype the PIN — no match', 'Enter PIN', 'No account carries that PIN. The posting freezes the poster the PIN names, so it cannot post under a guess.'); u = who; }
+    const pin = requirePin(form); if (!pin.ok) return pin; u = pin.user;
     if (form.decision !== 'zero_due' && est.patientCents === 0) return refuse('zero_collect_refused', 'Choose Nothing due today', 'Nothing due today', 'Nothing is due, so a payment, a statement or a plan would post money for nothing; the typed decision keeps the window honest.');
     if (form.decision === 'collect' && !form.tender) return refuse('tender_required', 'Choose a tender', 'Choose card', 'The tender is what the day sheet reconciles against the bank, so a payment cannot post without one.');
     if (S.collectionDecisions.some((d) => d.encounterId === a.encounterId)) return refuse('already_decided', 'Correct this visit from the ledger', 'Open the ledger', 'One typed decision per visit. To change what was collected, post a correction from the ledger: a reversal and a repost, both linked to the original.');
@@ -174,7 +187,7 @@
     }
     // Post: charges (if note filed), payment, allocations, decision, self-pay flags in one transaction
     const noteFiled = enc && enc.noteFiled;
-    if (window.__proto.device === 'shared') { const live = S.sessions.filter((x) => !x.endedAt).pop(); if (!live || live.userId !== u.id) openSession(u.id); }
+    poster(u);
     const rows = [];
     // charged() is the ledger, not a flag: the seed marks a crown "completed" without setting charged, so the
     // old test re-charged it and a patient who paid $410 in full walked out owing $1,180.
@@ -202,10 +215,10 @@
     return { ok: true, taps: 0 };
   }
   /* Written when the biller presses Request approval, so the control does the thing its label promises. */
-  function requestApproval(pending) {
+  function requestApproval(pending, who) {
     if (!pending) return notFound('request');
     const off = offline('Wait for the server — approvals are paused'); if (off) return off;
-    const u = currentUser();
+    const u = who || currentUser();
     const open = S.approvals.find((x) => x.status === 'pending' && x.kind === pending.kind && x.patientId === pending.patientId && x.amountCents === pending.amountCents);
     if (open) return { ok: true, requestId: open.id, already: true };
     const req = write('approvals', Object.assign({ id: 'ar-' + nextId.ar++, requestedBy: u.name, requestedById: u.id, status: 'pending', requestedAt: S.clock.time }, pending));
@@ -258,19 +271,20 @@
     }
     return { ok: true };
   }
-  function requestWriteoff(accountPid, amountCents, reason) {
-    const u = currentUser();
+  function requestWriteoff(accountPid, amountCents, reason, extras) {
     if (!patient(accountPid)) return notFound('patient');
     const off = offline('Wait for the server — postings are paused'); if (off) return off;
+    const pin = requirePin(extras); if (!pin.ok) return pin; const u = pin.user;
     if (!Number.isFinite(amountCents) || amountCents <= 0) return refuse('amount_required', 'Type an amount above zero', 'Go to amount', 'A write-off posts the number you type against the balance, so it cannot be blank, negative, or zero.');
     // A write-off retires what the patient owes and no more: $1,000 against a $410 balance posted and hid a −$590 net.
     const due = balances(accountPid).patientDue;
     if (amountCents > due) return refuse('amount_required', 'Type an amount up to ' + Proto.ui.money(due), 'Go to amount', 'The patient owes ' + Proto.ui.money(due) + ' on this account. A write-off above the balance would post a credit nobody paid; a refund or a correction is a different posting.');
     const gate = evaluateRelease('write_off', amountCents, u);
     if (!gate.ok) {
-      const req = requestApproval({ kind: 'write_off', amountCents, reason, patientId: accountPid, eligible: gate.eligible, appointmentId: null });
+      const req = requestApproval({ kind: 'write_off', amountCents, reason, patientId: accountPid, eligible: gate.eligible, appointmentId: null }, poster(u));
       return Object.assign(refuse(gate.code, gate.verb, 'Request approval', gate.why), { requestId: req.requestId, held: true });
     }
+    poster(u);
     write('ledger', { id: id('le'), kind: 'write_off', patientId: accountPid, amountCents: -amountCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: 'loc-1', reason });
     return { ok: true };
   }
@@ -480,14 +494,15 @@
   // Money Desk (flow 5)
   /* Post matched now posts: it writes the ledger rows for the lines it claims are already posted, and logs the
      batch state change. Before, it flipped a status, said "37 posted", and left the ledger untouched. */
-  function eraPostMatched(batchId) {
+  function eraPostMatched(batchId, extras) {
     const b = S.eraBatches.find((x) => x.id === batchId); if (!b) return notFound('claim');
     const off = offline('Wait for the server — postings are paused'); if (off) return off;
     if (b.status === 'deltas' || b.status === 'posted') return refuse('already_decided', 'Confirm the delta lines below', 'Go to the deltas', 'The matched lines of this batch are already posted. What is left is the lines where the payer differs from the claim.');
-    const u = currentUser(); let posted = 0;
-    for (const l of S.eraLines.filter((x) => x.batchId === batchId && x.status === 'posted')) {
-      if (S.ledger.some((e) => e.eraLineId === l.id)) continue;
-      write('ledger', { id: id('le'), kind: 'insurance_payment', patientId: l.patientId, amountCents: -l.paidCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: 'loc-1', payer: b.payer, eraLineId: l.id, gl: 'ins_ar_primary' });
+    const pin = requirePin(extras); if (!pin.ok) return pin; const u = poster(pin.user); let posted = 0;
+    // A line is posted when its ledger row exists: the status flips here, with the row, never in the seed.
+    for (const l of S.eraLines.filter((x) => x.batchId === batchId && x.status === 'matched')) {
+      if (!S.ledger.some((e) => e.eraLineId === l.id)) write('ledger', { id: id('le'), kind: 'insurance_payment', patientId: l.patientId, amountCents: -l.paidCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: 'loc-1', payer: b.payer, eraLineId: l.id, gl: 'ins_ar_primary' });
+      l.status = 'posted'; touch('eraLines', l.id);
       posted++;
     }
     b.status = 'deltas'; touch('eraBatches', b.id);
@@ -495,39 +510,83 @@
   }
   /* The word on screen and the status in the record agree: once no delta line is left the batch is posted. */
   function settleBatch(batchId) { const b = S.eraBatches.find((x) => x.id === batchId); if (b && b.status === 'deltas' && !S.eraLines.some((l) => l.batchId === batchId && l.status === 'delta')) { b.status = 'posted'; touch('eraBatches', b.id); } }
-  function eraConfirm(lineId) {
+  function eraConfirm(lineId, extras) {
     const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — postings are paused'); if (off) return off;
     if (l.status === 'posted') return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'This line is posted. A correction is a reversal and a repost, both linked to the original.');
+    const pin = requirePin(extras); if (!pin.ok) return pin;
     // A contractual write-off is still a write-off: the after-hours hold applies to it as to any other.
-    const gate = evaluateRelease('write_off', l.expectedCents - l.paidCents, currentUser(), { contractual: true });
+    const gate = evaluateRelease('write_off', l.expectedCents - l.paidCents, pin.user, { contractual: true });
     if (!gate.ok) return refuse(gate.code, gate.verb, 'Set aside', gate.why);
+    const u = poster(pin.user);
     l.status = 'posted'; touch('eraLines', l.id);
-    write('ledger', { id: id('le'), kind: 'insurance_payment', patientId: l.patientId, amountCents: -l.paidCents, effective: S.tenant.today, posted: S.tenant.today, actor: currentUser().name, actorKind: 'user', locationId: 'loc-1', payer: 'Delta Dental', eraLineId: lineId, gl: 'ins_ar_primary' });
-    write('ledger', { id: id('le'), kind: 'write_off', patientId: l.patientId, amountCents: -(l.expectedCents - l.paidCents), effective: S.tenant.today, posted: S.tenant.today, actor: currentUser().name, actorKind: 'user', locationId: 'loc-1', reason: 'contractual_ppo', eraLineId: lineId });
+    write('ledger', { id: id('le'), kind: 'insurance_payment', patientId: l.patientId, amountCents: -l.paidCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: 'loc-1', payer: 'Delta Dental', eraLineId: lineId, gl: 'ins_ar_primary' });
+    write('ledger', { id: id('le'), kind: 'write_off', patientId: l.patientId, amountCents: -(l.expectedCents - l.paidCents), effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: 'loc-1', reason: 'contractual_ppo', eraLineId: lineId });
     settleBatch(l.batchId);
     return { ok: true };
   }
-  function eraHold(lineId) { const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — the line cannot be held'); if (off) return off; l.status = 'held'; touch('eraLines', l.id); write('claimEvents', { id: id('cev'), claimId: l.claimId, kind: 'era.line_held', actor: currentUser().name }); settleBatch(l.batchId); return { ok: true }; }
-  function eraDispute(lineId) { const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — the dispute cannot send'); if (off) return off; l.status = 'disputed'; touch('eraLines', l.id); write('claimEvents', { id: id('cev'), claimId: l.claimId, kind: 'era.contract_variance_disputed', actor: currentUser().name }); settleBatch(l.batchId); return { ok: true }; }
+  function eraHold(lineId, extras) { const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — the line cannot be held'); if (off) return off; const pin = requirePin(extras); if (!pin.ok) return pin; const u = poster(pin.user); l.status = 'held'; touch('eraLines', l.id); write('claimEvents', { id: id('cev'), claimId: l.claimId, kind: 'era.line_held', actor: u.name }); settleBatch(l.batchId); return { ok: true }; }
+  /* Dispute writes the appeal row its Why promises: one packet per line, citing the fee-schedule line the payer paid under.
+     It used to write the claim event alone, so the decided row said "An appeal row cites the fee-schedule line" over none. */
+  function eraDispute(lineId, extras) {
+    const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — the dispute cannot send'); if (off) return off;
+    const pin = requirePin(extras); if (!pin.ok) return pin; const u = poster(pin.user);
+    l.status = 'disputed'; touch('eraLines', l.id);
+    write('claimEvents', { id: id('cev'), claimId: l.claimId, kind: 'era.contract_variance_disputed', actor: u.name });
+    const packet = S.appealPackets.find((p) => p.eraLineId === lineId) || write('appealPackets', { id: id('ap'), claimId: l.claimId, eraLineId: lineId, kind: 'contract_variance', slots: { feeSchedule: true, eraSegment: true, letter: true }, citation: 'Fee schedule allows ' + Proto.ui.money(l.expectedCents) + ' for ' + l.cdt.toUpperCase() + '; ERA paid ' + Proto.ui.money(l.paidCents) + ' (CARC ' + l.carc + ')', patientSentence: 'We are asking your plan about the amount it paid. You owe nothing while they review.' });
+    settleBatch(l.batchId);
+    return { ok: true, packet };
+  }
   // One packet per claim: pressing Appeal four times wrote four packets and renamed the drawer each time.
   function buildAppeal(claimId) { const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim'); const existing = S.appealPackets.find((p) => p.claimId === claimId); if (existing) return { ok: true, packet: existing, already: true }; const pk = write('appealPackets', { id: id('ap'), claimId, slots: { perioChart: c.hasPerioChart, narrative: c.hasNarrative, radiograph: true, letter: true }, patientSentence: 'Delta asked for your gum chart; we are sending it. You owe nothing while they review.' }); return { ok: true, packet: pk }; }
-  function sendAppeal(claimId) { const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim'); const off = offline('Wait for the server — the appeal cannot send'); if (off) return off; if (c.status === 'appealed') return refuse('already_decided', 'Wait for the payer to answer', 'Open the claim', 'This appeal was already sent. Sending it twice does not speed it up and starts a second review.'); c.status = 'appealed'; touch('claims', c.id); write('claimEvents', { id: id('cev'), claimId, kind: 'claim.appealed', actor: currentUser().name }); write('disclosures', { id: id('dis'), patientId: c.patientId, channel: 'clearinghouse', purpose: 'payment', recordIds: ['pe-1', 'nf-old'], actor: currentUser().name }); return { ok: true }; }
+  function sendAppeal(claimId, extras) { const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim'); const off = offline('Wait for the server — the appeal cannot send'); if (off) return off; if (c.status === 'appealed') return refuse('already_decided', 'Wait for the payer to answer', 'Open the claim', 'This appeal was already sent. Sending it twice does not speed it up and starts a second review.'); const pin = requirePin(extras); if (!pin.ok) return pin; const u = poster(pin.user); c.status = 'appealed'; touch('claims', c.id); write('claimEvents', { id: id('cev'), claimId, kind: 'claim.appealed', actor: u.name }); write('disclosures', { id: id('dis'), patientId: c.patientId, channel: 'clearinghouse', purpose: 'payment', recordIds: ['pe-1', 'nf-old'], actor: u.name }); return { ok: true }; }
+  /* A row action on a claim is a claim event with a new next action, so Fix, Attach and resubmit, Call payer and Escalate
+     write what they did; each used to announce and change nothing. A corrected or re-attached claim goes back to the payer. */
+  const CLAIM_ACTION = { fix: ['Corrected and resubmitted; wait for the 277', 'submitted'], attach: ['Attachment sent with the resubmission; wait for the 277', 'submitted'], call: ['Called the payer; follow up in 7 days', null], escalate: ['Escalated to provider relations; timely-filing hold noted', null] };
+  function claimAction(claimId, action, extras) {
+    const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim');
+    const step = CLAIM_ACTION[action]; if (!step) return notFound('claim');
+    const off = offline('Wait for the server — claims are read-only'); if (off) return off;
+    const pin = requirePin(extras); if (!pin.ok) return pin; const u = poster(pin.user);
+    c.nextAction = step[0];
+    if (step[1] && ['denied', 'pended', 'submitted'].includes(c.status)) { c.status = step[1]; c.age = 0; c.submitted = S.tenant.today; }
+    touch('claims', c.id);
+    write('claimEvents', { id: id('cev'), claimId, kind: 'claim.' + action, actor: u.name, at: S.tenant.today + ' ' + S.clock.time });
+    return { ok: true };
+  }
   /* A name shown after a "logged read" is logged here: the phone card and Daily Close call this when they reveal
      a patient, so the disclosures table is the record the label promises. */
   function disclose({ patientId, purpose, recordIds } = {}) {
     const row = write('disclosures', { id: id('dis'), patientId: patientId || null, channel: 'screen', purpose: purpose || 'treatment', recordIds: recordIds || [], actor: currentUser().name });
     return { ok: true, id: row.id };
   }
-  function sendStatement(sdId) {
+  function sendStatement(sdId, extras) {
     const s = S.statementsDue.find((x) => x.id === sdId); if (!s) return notFound('patient'); const off = offline('Wait for the server — statements cannot send'); if (off) return off;
     if (s.sent) return refuse('already_decided', 'Wait for this statement to land', 'Open the ledger', 'This statement was sent at ' + (s.sentAt || S.clock.time) + '. A second copy of the same balance confuses the patient and the phone call that follows.');
+    const pin = requirePin(extras); if (!pin.ok) return pin;
     // The statement bills the live balance, not the figure frozen when the row was raised: an 835 that settled
     // the account in between used to leave an $84.00 statement sendable on a $0.00 balance.
     const due = balances(s.patientId).patientDue;
     if (due === 0) return refuse('zero_collect_refused', 'Nothing due — no statement to send', 'Open the ledger', 'The balance this row was raised for has since settled. A statement for $0 is noise to the patient and a disclosure row for nothing; a credit is refunded from Money Desk, never billed.');
+    const u = poster(pin.user);
     s.amountCents = due; s.sent = true; s.sentAt = S.clock.time; touch('statementsDue', s.id);
-    write('disclosures', { id: id('dis'), patientId: s.patientId, channel: 'mail', purpose: 'payment', recordIds: [sdId], actor: currentUser().name });
+    write('disclosures', { id: id('dis'), patientId: s.patientId, channel: 'mail', purpose: 'payment', recordIds: [sdId], actor: u.name });
     return { ok: true };
+  }
+  /* A statement is raised here, for the balance the ledger shows, and the Ledger sends the row. The Ledger held an account
+     with $410 due and no row behind a gate whose only exit led to a tab with nothing to press; the hold reasons the Ledger
+     used to word itself (a claim still out, nothing due) are the store's, once. */
+  function raiseStatement(pid, extras) {
+    if (!patient(pid)) return notFound('patient');
+    const off = offline('Wait for the server — statements cannot raise'); if (off) return off;
+    const pin = requirePin(extras); if (!pin.ok) return pin;
+    const open = S.statementsDue.find((s) => s.patientId === pid && !s.sent); if (open) return { ok: true, statement: open, already: true };
+    const due = balances(pid).patientDue;
+    if (due === 0) return refuse('zero_collect_refused', 'Nothing due — no statement to raise', 'Explain', 'A statement for $0 is noise to the patient and a disclosure row for nothing. Explain shows why the balance is zero; a credit is refunded from Money Desk, never billed.');
+    // The verb carries a number, never a payer name: "Delta Dental" would push the line past eight words.
+    const pend = S.claims.find((c) => c.patientId === pid && ['submitted', 'pended'].includes(c.status));
+    if (pend) return refuse('statement_held', 'Held: claim pending ' + (pend.age || 0) + ' days', 'Open Money Desk', pend.payer + ' is still reviewing ' + (S.cdt[pend.cdt] || [pend.cdt])[0] + '. A statement never goes out on a balance still waiting on insurance. The hold reason is shown on Money Desk → Statements due; after 45 days the row surfaces regardless of the pending claim.');
+    const u = poster(pin.user);
+    return { ok: true, statement: write('statementsDue', { id: id('sd'), patientId: pid, amountCents: due, reason: 'balance_due', createdBy: u.name, created: S.tenant.today }) };
   }
 
   // Daily Close
@@ -653,5 +712,5 @@
   reset = function (seedNum) { const s = _reset(seedNum); for (const t of TABLES) if (!s[t]) s[t] = []; return s; };
 
   const LICENCE_WORDS = { implant: 'implant', crown_margin: 'crown margin', not_tolerated: 'patient could not tolerate probing', third_molar_absent: 'third molar absent' };
-  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, windowEstimate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, addTag, readyForExam, wholePatient, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, disclose, sendStatement, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
+  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, windowEstimate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, addTag, readyForExam, wholePatient, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, claimAction, disclose, sendStatement, raiseStatement, requirePin, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
 })();

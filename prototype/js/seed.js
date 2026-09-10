@@ -129,6 +129,8 @@
       { id: 'pr-421', encounterId: 'enc-9005', patientId: 'p-305', cdt: 'd0140', tooth: null, feeCents: 9000, status: 'completed', selfPayRestricted: false },
       { id: 'pr-422', encounterId: 'enc-9005', patientId: 'p-305', cdt: 'd0274', tooth: null, feeCents: 7800, status: 'completed', selfPayRestricted: false },
       { id: 'pr-431', encounterId: 'enc-9006', patientId: 'p-306', cdt: 'd2740', tooth: 19, feeCents: 118000, status: 'completed', selfPayRestricted: false },
+      // The Filed-later hygiene visit: the prophy the $95 window payment (intent ai-0) waits on; filing releases it.
+      { id: 'pr-441', encounterId: 'enc-9010', patientId: 'p-307', cdt: 'd1110', tooth: null, feeCents: 11800, status: 'completed', selfPayRestricted: false },
     ];
     // Patient portion estimates per checkout appointment (estimate column, never in the ledger)
     const estimates = {
@@ -136,6 +138,7 @@
       'a-1045': { patientCents: 0, insuranceCents: 18300, writeoffCents: 0, note: 'Delta covers prophy and exam at 100%' },
       'a-1046': { patientCents: 16800, insuranceCents: 0, writeoffCents: 0, note: 'Patient asked to pay in full; no claim' },
       'a-1047': { patientCents: 41000, insuranceCents: 59000, writeoffCents: 18000, note: 'Crown #19: MetLife est. $590; PPO write-off est. $180' },
+      'a-1050': { patientCents: 9500, insuranceCents: 2300, writeoffCents: 0, note: 'Prophy $118: Delta est. $23 after the deductible; $95 collected at the window' },
     };
 
     // Ledger entries (append-only). Kinds: charge, patient_payment, insurance_payment, adjustment, write_off, refund, reversal.
@@ -198,7 +201,8 @@
     for (let i = 1; i <= 41; i++) {
       const p = patients[between(8, 39)];
       const expected = between(60, 900) * 100;
-      const row = { id: 'el-' + i, batchId: 'era-1', patientId: p.id, claimId: 'c-' + (40 + i), cdt: pick(['d1110', 'd0120', 'd2392', 'd2740', 'd4341', 'd0274']), tooth: null, expectedCents: expected, paidCents: expected, carc: null, status: 'posted' };
+      // Matched to its claim and fee-schedule row by the worker; posted only when Post matched writes the ledger row.
+      const row = { id: 'el-' + i, batchId: 'era-1', patientId: p.id, claimId: 'c-' + (40 + i), cdt: pick(['d1110', 'd0120', 'd2392', 'd2740', 'd4341', 'd0274']), tooth: null, expectedCents: expected, paidCents: expected, carc: null, status: 'matched' };
       eraLines.push(row);
     }
     Object.assign(eraLines[13], { patientId: 'p-330', cdt: 'd2740', tooth: 19, expectedCents: 59000, paidCents: 54000, carc: '45', status: 'delta', note: 'Paid below contract: expected $590, ERA says $540' });

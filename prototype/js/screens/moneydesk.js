@@ -19,7 +19,7 @@
   const views = {};
   let lastRoute = null; let lastStore = null; let keysOn = false;
   let st = null; // the current user's view, set by render()
-  const fresh = () => ({ tab: 'era', writeoffOpen: false, writeoffStr: '', writeoffReason: null, woRefusal: null, woHeldReq: null, woPosted: false, appealFor: null, appealPacket: null, appealSent: null, denialRefusal: {}, sendGate: null, eraGate: null, lineGate: {}, stmtGate: {}, previewFor: null, announced: '' });
+  const fresh = () => ({ tab: 'era', pin: '', writeoffOpen: false, writeoffStr: '', writeoffReason: null, woRefusal: null, woHeldReq: null, woPosted: false, appealFor: null, appealPacket: null, appealSent: null, denialRefusal: {}, sendGate: null, eraGate: null, lineGate: {}, stmtGate: {}, previewFor: null, announced: '' });
   const viewFor = () => { const k = Proto.store.currentUser().id; return (views[k] = views[k] || fresh()); }
 
   const priv = () => !!(window.__proto && window.__proto.privacy);
@@ -33,18 +33,38 @@
   const pressed = (b) => (b ? 'true' : 'false');
   const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
   const say = (text) => { st.announced = text; Proto.router.announce(text); };
+  const shared = () => !!(window.__proto && window.__proto.device === 'shared');
+  // Every posting verb carries the PIN the shared desk asks for; the store decides whether it is needed.
+  const extras = () => ({ pin: st.pin || null });
+  const focusPin = () => { const el = document.querySelector('[data-testid="money.pin"]'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } };
   /* A store refusal is rendered as the shared gate beside the control that raised it (verb, one control, Why), and the
-     store's control word is given something to do: the Andon's support line for an outage, the account's ledger for a
-     correction, the ERA tab otherwise. Announcing res.verb alone left no gate, no event and a live irreversible primary. */
+     store's control word is given something to do: the Andon's support line for an outage, the PIN field for a PIN, the
+     account's ledger for a correction, the ERA tab otherwise. Announcing res.verb alone left no gate, no event and a live
+     irreversible primary. */
   function gate(r, res, pid) {
     const onControl = res.code === 'outage'
-      ? () => { const a = document.querySelector('[data-testid="andon.control"]'); if (a) a.focus(); else Proto.router.announce('Call support: 615-555-0100, 7 am to 6 pm'); }
+      ? () => { const a = document.querySelector('[data-testid="andon.control"]'); if (a) a.focus(); else Proto.ui.support(); }
+      : /^pin_/.test(res.code) ? focusPin
       : pid && /ledger/i.test(res.control || '') ? () => Proto.router.go(r.persona, 'ledger', pid)
       : () => { st.tab = 'era'; rerender(r, 'money.tab.era'); };
     return refusal({ code: res.code, verb: res.verb, control: res.control || 'Back to ERA', why: res.why, severity: res.code === 'outage' ? 'stop' : undefined, onControl });
   }
   // An outage gate stands only while the outage does; the pressed control retries and the store decides again.
   const outageOver = (g) => g && g.code === 'outage' && !Proto.store.get().outage;
+  // Typing a PIN dissolves the gates that asked for one, as typing an amount does; the primaries are live again.
+  const isPinGate = (g) => !!g && /^pin_/.test((g.dataset || g).code || '');
+  function dropPinGates() {
+    let n = 0;
+    for (const k of ['eraGate', 'sendGate', 'woRefusal']) if (isPinGate(st[k])) { st[k] = null; n++; }
+    for (const k of ['lineGate', 'stmtGate', 'denialRefusal']) for (const id of Object.keys(st[k])) if (isPinGate(st[k][id])) { delete st[k][id]; n++; }
+    return n;
+  }
+  /* Shared desk: the PIN that names the poster, once per desk, beside the worklists every posting verb lives in. */
+  function pinField(r) {
+    if (!shared()) return null;
+    const pin = h('input', { class: 'input co-pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', id: 'md-pin', testid: 'money.pin', value: st.pin, onInput: (ev) => { st.pin = ev.target.value; if (dropPinGates()) { rerender(r); focusPin(); } } });
+    return h('div', { class: 'field md-pin' }, h('label', { for: 'md-pin', text: 'Your PIN' }), pin, h('p', { class: 'hint', text: 'Shared desk: the PIN makes you the frozen poster for every posting here.' }));
+  }
 
   function rerender(r, focusTestid) {
     r = r || lastRoute || Proto.router.current();
@@ -57,12 +77,10 @@
   function eraView(S) {
     const b = S.eraBatches[0]; const lines = S.eraLines.filter((l) => l.batchId === b.id);
     const by = (s) => lines.filter((l) => l.status === s);
-    /* "Posted" is a ledger fact: a matched line counts as posted once a ledger row carries its id, which Post matched
-       writes. The card used to say "37 posted" over a ledger with no era-1 row. The read-back is every line the payer
-       paid differently (a CARC), decided or not, so a decided row keeps its place below the ones still waiting. */
-    const onLedger = new Set(S.ledger.filter((e) => e.eraLineId).map((e) => e.eraLineId));
-    const posted = by('posted');
-    return { b, lines, deltas: by('delta'), matched: posted, posted: posted.filter((l) => onLedger.has(l.id)), held: by('held'), disputed: by('disputed'), denied: by('denied'), readback: lines.filter((l) => l.carc && l.status !== 'denied') };
+    /* A line is matched until Post matched writes its ledger row and the store flips it to posted, so the status is the
+       fact. The read-back is every line the payer paid differently (a CARC), decided or not, so a decided row keeps its
+       place below the ones still waiting. */
+    return { b, lines, deltas: by('delta'), matched: by('matched'), posted: by('posted'), held: by('held'), disputed: by('disputed'), denied: by('denied'), readback: lines.filter((l) => l.carc && l.status !== 'denied') };
   }
   const denials = (S) => S.claims.filter((c) => c.status === 'denied' || c.status === 'appealed');
   const aging = (S) => S.claims.filter((c) => c.status === 'submitted' || c.status === 'pended');
@@ -88,14 +106,14 @@
 
   /* ---- ERA tab ---- */
   function postMatched(r) {
-    const res = Proto.store.eraPostMatched('era-1');
+    const res = Proto.store.eraPostMatched('era-1', extras());
     // One verb line, no storage id: an announcement is read aloud, not skimmed.
     if (res.ok) { st.eraGate = null; say(res.readback.length ? 'Read back ' + plural(res.readback.length, 'line') + ' that differ' : 'Posted the batch'); }
     else { st.eraGate = res; rerender(r, 'refusal.control'); return; }
     rerender(r, res.readback && res.readback.length ? 'money.era.line.' + res.readback[0].id + '.confirm' : 'money.tab.era');
   }
   function handleLine(r, fn, lineId, word) {
-    const res = fn(lineId);
+    const res = fn(lineId, extras());
     if (!res.ok) { st.lineGate[lineId] = res; rerender(r, 'refusal.control'); return; }
     delete st.lineGate[lineId];
     const S = Proto.store.get(); const left = eraView(S).deltas;
@@ -130,11 +148,13 @@
     const isVariance = l.carc === '45'; const n = l.id.replace('el-', '');
     if (outageOver(st.lineGate[l.id])) delete st.lineGate[l.id];
     const g = st.lineGate[l.id]; const done = DECIDED[l.status];
+    // The disputed row reads the appeal row the store wrote, not a promise of one.
+    const packet = l.status === 'disputed' ? S.appealPackets.find((p) => p.eraLineId === l.id) : null;
     return h('div', { class: 'md-row' + (done ? ' decided' : ''), role: 'group', 'aria-label': 'Line ' + n },
       h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, l.patientId) }), h('span', { class: 'muted', text: 'Line ' + n + ' · ' + cdtLine(S, l.cdt, l.tooth) }), chip(isVariance ? 'review' : 'style', isVariance ? 'Contract variance' : 'Downcoded')),
       h('p', { class: 'md-delta', text: 'expected ' + money(l.expectedCents) + ', ERA says ' + money(l.paidCents) + ' · CARC ' + l.carc + ' (' + carc + ')' }),
       done
-        ? h('div', { class: 'btnrow' }, chip(done[0], done[1]), h('span', { class: 'small muted', text: l.status === 'posted' ? 'Posted ' + money(l.paidCents) + ' and a contractual write-off of ' + money(l.expectedCents - l.paidCents) + '; on the ledger.' : l.status === 'held' ? 'Out of the ledger until you look at the note.' : 'An appeal row cites the fee-schedule line.' }))
+        ? h('div', { class: 'btnrow' }, chip(done[0], done[1]), h('span', { class: 'small muted', text: l.status === 'posted' ? 'Posted ' + money(l.paidCents) + ' and a contractual write-off of ' + money(l.expectedCents - l.paidCents) + '; on the ledger.' : l.status === 'held' ? 'Out of the ledger until you look at the note.' : packet ? 'Appeal row written: ' + packet.citation + '.' : 'Disputed; no appeal row on record.' }))
         : h('div', { class: 'btnrow' },
           btn('Confirm · post ' + money(l.paidCents) + ', write-off ' + money(l.expectedCents - l.paidCents), { kind: g ? 'held' : 'irreversible', testid: 'money.era.line.' + l.id + '.confirm', ariaLabel: g ? 'Confirm line ' + n + ' is held: ' + g.verb : 'Confirm line ' + n + ': post ' + money(l.paidCents) + ' and a contractual write-off of ' + money(l.expectedCents - l.paidCents), onClick: () => handleLine(r, Proto.store.eraConfirm, l.id, 'Confirmed') }),
           // "Held" is the gated primary's identity (CONTRACTS §6); an ERA line that waits for a look is set aside.
@@ -192,7 +212,7 @@
     const amountCents = cents(st.writeoffStr);
     if (!(amountCents > 0)) { st.woRefusal = refusal({ code: 'amount_required', verb: 'Enter an amount above zero', control: 'Fix amount', why: 'A write-off needs a dollar amount; the balance is prefilled.', onControl: () => { st.woRefusal = null; rerender(r, 'money.writeoff.amount'); } }); rerender(r, 'refusal.control'); return; }
     if (!st.writeoffReason) { st.woRefusal = refusal({ code: 'reason_required', verb: 'Choose a reason code', control: 'Courtesy', why: 'Every write-off carries a reason code so the ledger sentence and the reason digest can explain it.', onControl: () => { st.writeoffReason = 'courtesy'; st.woRefusal = null; rerender(r, 'money.writeoff.post'); } }); rerender(r, 'refusal.control'); return; }
-    const res = Proto.store.requestWriteoff(WRITEOFF_PID, amountCents, st.writeoffReason);
+    const res = Proto.store.requestWriteoff(WRITEOFF_PID, amountCents, st.writeoffReason, extras());
     if (res.ok) { st.woPosted = true; st.woRefusal = null; say('Posted the ' + money(amountCents) + ' write-off'); rerender(r, 'money.tab.' + st.tab); return; }
     if (res.held) {
       const S = Proto.store.get(); st.woHeldReq = S.approvals.find((x) => x.id === res.requestId) || null;
@@ -208,11 +228,11 @@
 
   /* ---- Denials tab ---- */
   /* A row action that changes a claim (a claimEvents row, a new next action) is a store verb; the screen renders the
-     store's answer. Until the store carries claimAction, the control can only say what it would do. */
-  function claimAct(r, S, c, action, fallback) {
-    if (!Proto.store.claimAction) { say(fallback); return; }
-    const res = Proto.store.claimAction(c.id, action);
+     store's answer and the row redraws with the claim's new state. */
+  function claimAct(r, S, c, action) {
+    const res = Proto.store.claimAction(c.id, action, extras());
     if (!res.ok) { st.denialRefusal[c.id] = gate(r, res, c.patientId); rerender(r, 'refusal.control'); return; }
+    delete st.denialRefusal[c.id];
     say('Recorded on claim ' + c.id.replace('c-', '')); rerender(r, 'money.tab.' + st.tab);
   }
   function openAppeal(r, claimId) {
@@ -230,13 +250,14 @@
   // The done-word names its object once, the way a sent statement does.
   const sentLine = () => h('div', { class: 'row' }, chip('clear', 'Appeal sent'), h('span', { text: 'Disclosure recorded (clearinghouse, payment purpose, artifact hashes).' }));
   function denialRow(r, S, c) {
+    if (outageOver(st.denialRefusal[c.id] && st.denialRefusal[c.id].dataset)) delete st.denialRefusal[c.id];
     const row = h('div', { class: 'md-row', role: 'group', 'aria-label': 'Denied claim ' + c.id },
       h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, c.patientId) }), h('span', { class: 'amt', text: money(c.amountCents) }), h('span', { class: 'muted', text: c.id + ' · ' + cdtLine(S, c.cdt, c.tooth) + ' · ' + c.payer }), chip('review', 'Appeal by ' + shortDate(c.appealBy))),
       h('p', { class: 'md-plain', text: c.plain }),
       h('p', { class: 'md-next' }, h('b', { text: 'Next: ' }), c.nextAction),
       h('div', { class: 'btnrow' },
         btn('Appeal', { kind: 'reversible', testid: 'money.denial.' + c.id + '.appeal', ariaLabel: 'Appeal claim ' + c.id + ' with a packet built from the record (A)', onClick: () => openAppeal(r, c.id) }),
-        btn('Fix', { kind: 'quiet', testid: 'money.denial.' + c.id + '.fix', onClick: () => claimAct(r, S, c, 'fix', 'Fix for ' + pname(S, c.patientId)) }),
+        btn('Fix', { kind: 'quiet', testid: 'money.denial.' + c.id + '.fix', ariaLabel: 'Fix claim ' + c.id + ': correct and resubmit it', onClick: () => claimAct(r, S, c, 'fix') }),
         btn('Bill patient', { kind: 'quiet', testid: 'money.denial.' + c.id + '.bill', onClick: () => {
           // The gate names the record's state: "no appeal" is false once the appeal has gone.
           st.denialRefusal[c.id] = c.status === 'appealed'
@@ -263,7 +284,7 @@
     const g = st.sendGate;
     drawer.append(...[g, h('div', { class: 'btnrow' }, btn('Send', { kind: g ? 'held' : 'irreversible', testid: 'money.appeal.send', ariaLabel: g ? 'Send is held: ' + g.querySelector('.verb').textContent : 'Send appeal for claim ' + c.id, onClick: () => {
       if (missing) { st.sendGate = refusal({ code: 'packet_incomplete', verb: 'Add the required slot before sending', control: 'Show slots', why: 'An appeal that cites prose loses; every slot is a frozen record artifact.', onControl: () => { st.sendGate = null; rerender(r, 'money.appeal.send'); } }); rerender(r, 'refusal.control'); return; }
-      const res = Proto.store.sendAppeal(c.id);
+      const res = Proto.store.sendAppeal(c.id, extras());
       if (!res.ok) { st.sendGate = gate(r, res, c.patientId); rerender(r, 'refusal.control'); return; }
       st.sendGate = null;
       // The packet is gone; its confirmation stays on the row, the way a sent statement keeps its own.
@@ -280,26 +301,41 @@
     const out = section('Claims aging', h('p', { class: 'small muted', text: 'Submitted and pended claims by age with one next action each. Counts are by payer, never by person.' }));
     for (const [, label, f] of groups) {
       const g = rows.filter(f); if (!g.length) continue;
-      out.append(h('h3', { text: label + ' · ' + g.length }), h('div', { class: 'worklist' }, ...g.map((c) => { const act = agingAction(c); return h('div', { class: 'wrow' }, h('span', { class: 'obj', text: pname(S, c.patientId) }), h('span', { class: 'amt', text: money(c.amountCents) }), h('span', { class: 'why', text: c.id + ' · ' + cdtLine(S, c.cdt, c.tooth) + ' · ' + c.payer + ' · ' + c.age + ' days · ' + c.nextAction }), btn(AGING_ACTION[act], { kind: 'reversible', testid: 'money.aging.row.' + c.id + '.' + act, onClick: () => claimAct(r, S, c, act, AGING_ACTION[act] + ' for ' + pname(S, c.patientId)) })); })));
+      // The row carries the claim's current next action and the gate its last press raised, so a refused action is not silent.
+      out.append(h('h3', { text: label + ' · ' + g.length }), h('div', { class: 'worklist' }, ...g.map((c) => { const act = agingAction(c); if (outageOver(st.denialRefusal[c.id] && st.denialRefusal[c.id].dataset)) delete st.denialRefusal[c.id]; return h('div', { class: 'stack' }, h('div', { class: 'wrow' }, h('span', { class: 'obj', text: pname(S, c.patientId) }), h('span', { class: 'amt', text: money(c.amountCents) }), h('span', { class: 'why', text: c.id + ' · ' + cdtLine(S, c.cdt, c.tooth) + ' · ' + c.payer + ' · ' + c.age + ' days · ' + c.nextAction }), btn(AGING_ACTION[act], { kind: 'reversible', testid: 'money.aging.row.' + c.id + '.' + act, onClick: () => claimAct(r, S, c, act) })), st.denialRefusal[c.id] || null); })));
     }
     return out;
   }
 
   /* ---- Statements, credits, variances, approvals ---- */
+  // A row raised from a balance is worded as what it is; only the window's rows were deferred.
+  const RAISED = { window_deferred: (s) => 'deferred at the window ' + shortDate(s.created) + ' so insurance could settle first', balance_due: (s) => 'raised on the balance ' + shortDate(s.created) };
   function statementsTab(r, S) {
     const rows = statements(S);
-    if (!rows.length) return section('Statements due', h('div', { class: 'row' }, chip('clear', 'Nothing due'), h('span', { class: 'muted', text: 'Statements sent today are disclosure rows on the ledger.' })));
-    return section('Statements due', h('div', { class: 'worklist' }, ...rows.map((s) => {
+    const out = section('Statements due');
+    if (!rows.length) out.append(h('div', { class: 'row' }, chip('clear', 'Nothing due'), h('span', { class: 'muted', text: 'Statements sent today are disclosure rows on the ledger.' })));
+    else out.append(h('div', { class: 'worklist' }, ...rows.map((s) => {
       if (outageOver(st.stmtGate[s.id])) delete st.stmtGate[s.id];
       const g = st.stmtGate[s.id];
-      const row = h('div', { class: 'md-row' + (s.sent ? ' sent' : '') }, h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, s.patientId) }), h('span', { class: 'amt', text: money(s.amountCents) }), chip('info', 'Deferred'), h('span', { class: 'muted', text: 'deferred at the window ' + shortDate(s.created) + ' so insurance could settle first' })),
+      const row = h('div', { class: 'md-row' + (s.sent ? ' sent' : '') }, h('div', { class: 'md-rowhead' }, h('span', { class: 'obj', text: pname(S, s.patientId) }), h('span', { class: 'amt', text: money(s.amountCents) }), chip('info', s.reason === 'balance_due' ? 'Raised' : 'Deferred'), h('span', { class: 'muted', text: (RAISED[s.reason] || RAISED.window_deferred)(s) })),
         s.sent
           ? h('div', { class: 'row' }, chip('clear', 'Statement sent'), h('span', { class: 'small muted', text: 'Sent to ' + pname(S, s.patientId) + ' · disclosure recorded · ' + shortDate(S.tenant.today) }))
-          : h('div', { class: 'btnrow' }, btn('Send statement', { kind: g ? 'held' : 'irreversible', testid: 'money.statement.' + s.id + '.send', ariaLabel: g ? 'Send statement is held: ' + g.verb : null, onClick: () => { const res = Proto.store.sendStatement(s.id); if (!res.ok) { st.stmtGate[s.id] = res; rerender(r, 'refusal.control'); return; } delete st.stmtGate[s.id]; say('Sent the statement — disclosure recorded'); rerender(r, 'money.tab.statements'); } }), btn('Preview', { kind: 'reversible', testid: 'money.statement.' + s.id + '.preview', pressed: pressed(st.previewFor === s.id), onClick: () => { st.previewFor = st.previewFor === s.id ? null : s.id; rerender(r, 'money.statement.' + s.id + '.preview'); } })),
+          : h('div', { class: 'btnrow' }, btn('Send statement', { kind: g ? 'held' : 'irreversible', testid: 'money.statement.' + s.id + '.send', ariaLabel: g ? 'Send statement is held: ' + g.verb : null, onClick: () => { const res = Proto.store.sendStatement(s.id, extras()); if (!res.ok) { st.stmtGate[s.id] = res; rerender(r, 'refusal.control'); return; } delete st.stmtGate[s.id]; say('Sent the statement — disclosure recorded'); rerender(r, 'money.tab.statements'); } }), btn('Preview', { kind: 'reversible', testid: 'money.statement.' + s.id + '.preview', pressed: pressed(st.previewFor === s.id), onClick: () => { st.previewFor = st.previewFor === s.id ? null : s.id; rerender(r, 'money.statement.' + s.id + '.preview'); } })),
         g && !s.sent ? gate(r, g, s.patientId) : null);
       if (st.previewFor === s.id) { const ex = Proto.store.explain(s.patientId); row.append(h('div', { class: 'explain', 'aria-label': 'Patient-voice preview' }, h('p', { class: 'sentence', text: ex.length ? ex.map((x) => x.patientVoice).join(' ') : 'Your share is ' + money(s.amountCents) + ' after insurance. We held this statement so your plan could settle first; nothing here is an estimate.' }), h('p', { class: 'small muted', text: 'Same rows the biller sees, rendered in the patient voice: no reason codes, no poster names.' }))); }
       return row;
     })));
+    /* Where a statement is raised: every account that owes and has no open row, the Ledger's gate points here. The store
+       decides whether it can be raised (a claim still out holds it), and the gate stands on the row that asked. */
+    const owing = S.patients.filter((p) => Proto.store.balances(p.id).patientDue > 0 && !rows.some((s) => s.patientId === p.id && !s.sent)).map((p) => ({ p, due: Proto.store.balances(p.id).patientDue })).sort((a, b) => b.due - a.due);
+    if (owing.length) out.append(h('h3', { text: 'Balances with no statement · ' + owing.length }), h('div', { class: 'worklist' }, ...owing.map(({ p, due }) => {
+      const k = 'raise:' + p.id; if (outageOver(st.stmtGate[k])) delete st.stmtGate[k]; const g = st.stmtGate[k];
+      const pend = S.claims.find((c) => c.patientId === p.id && ['submitted', 'pended'].includes(c.status));
+      return h('div', { class: 'stack' }, h('div', { class: 'wrow' }, h('span', { class: 'obj', text: pname(S, p.id) }), h('span', { class: 'amt', text: money(due) }), h('span', { class: 'why', text: pend ? pend.payer + ' still reviewing ' + cdtName(S, pend.cdt) + ' · ' + pend.age + ' days' : 'nothing waiting on insurance' }),
+        btn('Raise statement', { kind: g ? 'held' : 'reversible', testid: 'money.statement.' + p.id + '.raise', ariaLabel: (g ? 'Raise statement is held: ' + g.verb + '. ' : '') + 'Raise a statement for ' + pname(S, p.id), onClick: () => { const res = Proto.store.raiseStatement(p.id, extras()); if (!res.ok) { st.stmtGate[k] = res; rerender(r, 'refusal.control'); return; } delete st.stmtGate[k]; say('Raised the statement — send it above'); rerender(r, 'money.statement.' + res.statement.id + '.send'); } })),
+        g ? gate(r, g, p.id) : null);
+    })));
+    return out;
   }
   function creditsTab(r, S) {
     if (!S.credits.length) return section('Unallocated credits', h('div', { class: 'row' }, chip('clear', 'None'), h('span', { class: 'muted', text: 'Credits appear when a payment lands before its charges.' })));
@@ -356,6 +392,7 @@
     const body = { era: eraTab, aging: agingTab, denials: denialsTab, statements: statementsTab, credits: creditsTab, variances: variancesTab, approvals: approvalsTab }[st.tab](r, S);
     const page = h('div', { class: 'stack md-page' },
       pageHead('Money Desk', 'Every row is patient, amount, one-line reason, one primary action. Keys: P post matched · W write-off · A appeal'),
+      pinField(r),
       tabs(r, S),
       h('div', { class: 'stack', role: 'tabpanel', 'aria-label': (TABS.find((t) => t[0] === st.tab) || [])[1] }, body, writeoffCard(r, S)),
       h('p', { class: 'sr-only', 'aria-live': 'polite', text: st.announced }));
