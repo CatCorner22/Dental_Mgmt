@@ -297,12 +297,14 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const reqId = await p.evaluate(() => ((window.__proto.state().approvals.filter((a) => a.status === 'pending')[0]) || {}).id || null);
         const rows = () => p.evaluate((id) => { const S = window.__proto.state(); return { status: (S.approvals.find((a) => a.id === id) || {}).status, approvalsLog: S.approvalsLog.filter((l) => l.requestId === id).map((l) => l.id + ':' + l.decision), writeoffs: S.ledger.filter((e) => e.kind === 'write_off' && e.approvalRequestId === id).map((e) => e.id + ':' + e.amountCents), balances: Proto.store.balances('p-306') }; }, reqId);
         const seq0 = await lastSeq(p);
-        await click(p, 'phone.request.' + reqId + '.approve'); for (const d of ['1', '2', '3', '4']) await click(p, 'phone.stepup.' + d); await click(p, 'phone.stepup.submit'); await p.waitForTimeout(200);
+        // The step-up verifies the approver's own PIN (store.js verifyPin(pin, approver.id)), read from state so the check stays right for any persona.
+        const approverPin = await p.evaluate(() => String((Proto.store.currentUser() || {}).pin || ''));
+        await click(p, 'phone.request.' + reqId + '.approve'); for (const d of approverPin) await click(p, 'phone.stepup.' + d); await click(p, 'phone.stepup.submit'); await p.waitForTimeout(200);
         const afterFirst = await rows();
         const ev1 = await after(p, seq0);
         const uiControlLeft = !!(await p.$('[data-testid="phone.request.' + reqId + '.approve"]'));
         const seq1 = await lastSeq(p);
-        const second = await p.evaluate((id) => { const r = Proto.store.decideApproval(id, 'u-dr-1', 'approved', true); return { ok: r.ok, code: r.code || null, verb: r.verb || null }; }, reqId);
+        const second = await p.evaluate((id) => { const pin = (window.__proto.state().users.find((u) => u.id === 'u-dr-1') || {}).pin; const r = Proto.store.decideApproval(id, 'u-dr-1', 'approved', { pin }); return { ok: r.ok, code: r.code || null, verb: r.verb || null, pinFromState: !!pin }; }, reqId);
         await p.waitForTimeout(100);
         const afterSecond = await rows();
         const ev2 = await after(p, seq1);

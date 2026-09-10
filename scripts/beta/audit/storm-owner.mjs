@@ -46,7 +46,8 @@ export default ({ ctx, go, hop, click, txt, state, events, rec }) => {
       try {
         await go(p, '#/owner/phone/approvals'); await click(p, 'phone.simulate'); await click(p, 'phone.request.ar-1.approve');
         await p.keyboard.type('2468'); await p.waitForTimeout(60);
-        const raced = await p.evaluate(() => Proto.store.decideApproval('ar-1', 'u-om-1', 'approved', true));
+        // Dana's own PIN, read from state: the step-up verifies the approver's PIN (store.js verifyPin(pin, approver.id)).
+        const raced = await p.evaluate(() => Proto.store.decideApproval('ar-1', 'u-om-1', 'approved', { pin: (window.__proto.state().users.find((u) => u.id === 'u-om-1') || {}).pin }));
         const seq = await lastSeq(p);
         await p.keyboard.press('Enter'); await p.waitForTimeout(250);
         const o = { raced, decidedBy: (await state(p)).approvals[0].decidedBy, refusals: await refusals(p), refusalEvents: await since(p, seq, 'refusal'), focused: await focused(p) };
