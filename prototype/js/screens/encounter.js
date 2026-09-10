@@ -27,7 +27,8 @@
   const S = () => Proto.store.get();
   const P = () => window.__proto;
   function syncStore() { const s = S(); if (s !== lastStore) { lastStore = s; st = {}; } }
-  function state(encId) { syncStore(); if (!st[encId]) st[encId] = { tooth: null, surfaces: [], temporality: 'today', note: { assessment: '', plan: '' }, checked: false, killers: [], readback: false, filed: null, dismissing: {}, quoted: null }; return st[encId]; }
+  // A draft belongs to its author: the PIN switch on a shared device wipes local drafts, so the next author starts clean.
+  function state(encId) { syncStore(); const k = encId + '|' + Proto.store.currentUser().id; if (!st[k]) st[k] = { tooth: null, surfaces: [], temporality: 'today', note: { assessment: '', plan: '' }, checked: false, killers: [], readback: false, filed: null, dismissing: {}, quoted: null }; return st[k]; }
 
   // ---- lookups ------------------------------------------------------------------------------
   const isSurgeon = () => P().persona === 'surgeon';
@@ -77,6 +78,16 @@
   function focusFirst(...tids) {
     for (const t of tids) { if (!t) continue; const el = document.querySelector('[data-testid="' + t + '"]'); if (el && el.focus) { el.focus({ preventScroll: true }); return true; } }
     return false;
+  }
+  // A gate that has just been raised lands the keyboard on its verb, one Tab from its control: focusing the control
+  // let the Enter that raised the read-back confirm it (invariants-r2-8).
+  function focusGateVerb() { const v = document.querySelector('#enc-gate .refusal .verb'); if (!v) return false; v.setAttribute('tabindex', '-1'); v.focus({ preventScroll: true }); return true; }
+  // Below 1280 px the gate column is pinned over the bottom of the page, so a field it points at is scrolled above it.
+  function reveal(el) {
+    el.scrollIntoView({ block: 'center' });
+    const gate = document.getElementById('enc-gate-area'); if (!gate) return;
+    const g = gate.getBoundingClientRect(); const b = el.getBoundingClientRect();
+    if (b.left < g.right && b.right > g.left && b.bottom > g.top) { const sc = document.getElementById('canvas') || document.scrollingElement; sc.scrollTop += b.bottom - g.top + 8; }
   }
 
   // =========================================================================================
@@ -179,7 +190,7 @@
      label says (the support line, the undo, the procedure strip, the dentist's queue), never only a re-render. */
   function gateNode(r, enc, x, res, fallback) {
     const act = res.code === 'outage' ? () => (Proto.ui.support ? Proto.ui.support() : Proto.router.announce('Call support: 615-555-0100, 7 am to 6 pm'))
-      : res.code === 'duplicate_paint' ? (res.undoable ? () => { x.gateNode = null; undo(r, enc, x); } : () => focusFirst('enc.proc.' + PROCS[0][0]))
+      : res.code === 'duplicate_paint' ? (res.undoable ? () => { x.gateNode = null; undo(r, enc, x, res.chartEventId); } : () => focusFirst('enc.proc.' + PROCS[0][0]))
       : res.code === 'licence_scope' ? () => { x.gateNode = null; fixKiller(r, enc, x, { fix: 'licence' }); }
       : res.code === 'entitlement' ? () => Proto.router.go(r.persona, 'roles')
       : fallback || (() => focusFirst('enc.tooth.' + (openTags(enc.id)[0] || { tooth: 30 }).tooth, 'enc.tooth.30', 'enc.back'));
@@ -236,6 +247,9 @@
   // ---- odontogram, surfaces, procedures, temporality ----------------------------------------
   function renderOdontogram(r, enc, x) {
     const ces = eventsOf(enc.id); const tagged = openTags(enc.id).map((t) => t.tooth);
+    // The gate belongs to its cause and falls with it: a tooth picked, the server back (stale-gate rule).
+    const gc = x.gateNode && x.gateNode.dataset.code;
+    if ((gc === 'tooth_required' && x.tooth) || (gc === 'outage' && !S().outage)) x.gateNode = null;
     const toothBtn = (n) => {
       const has = ces.some((c) => c.tooth === n); const isTag = tagged.includes(n); const sel = x.tooth === n;
       // Charted is never colour alone: the tooth carries a mark and a fill as well as its rail (B5).
@@ -339,9 +353,10 @@
       refusal(Object.assign({}, x.undoGate, { onControl: () => { focusFirst('enc.note.field.assessment'); } })),
       btn('Undo last paint', { kind: 'held', testid: 'enc.undo', ariaLabel: 'Held: ' + x.undoGate.verb, onClick: () => focusFirst('refusal.control', 'enc.note.field.assessment') }));
   }
-  function undo(r, enc, x) {
+  // `ceId` names the paint to reverse (the duplicate's original from chartPaint's refusal); without it, the last one.
+  function undo(r, enc, x, ceId) {
     x.gateNode = null; x.fileGate = null;               // one live gate per screen
-    const res = Proto.store.chartUndo(enc.id);
+    const res = Proto.store.chartUndo(enc.id, ceId);
     // With no standing paint there is no card to carry the gate, so it stands in the Chart section instead.
     if (!res.ok) { if (eventsOf(enc.id).length) x.undoGate = res; else x.gateNode = gateNode(r, enc, x, res); rerender(r); focusFirst('enc.undo', 'refusal.control'); return; }
     x.undoGate = null;
@@ -349,7 +364,7 @@
     if (x.checked) x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3);
     rerender(r);
     focusFirst('enc.undo', 'enc.note.field.assessment');
-    Proto.router.announce('Reversed the last paint');
+    Proto.router.announce('Reversed ' + (res.reversal ? scaffoldLine(res.reversal) : 'the last paint'));
   }
 
   // ---- note ---------------------------------------------------------------------------------
@@ -403,13 +418,16 @@
     // A File the store refused outright (outage, sealed note) stands here, beside the primary it held (§6),
     // and clears with the condition that raised it so the primary comes back when the server does.
     if (x.fileGate && x.fileGate.code === 'outage' && !S().outage) x.fileGate = null;
+    if (x.sendGate && x.sendGate.code === 'outage' && !S().outage) x.sendGate = null;
     if (x.fileGate) {
       wrap.append(gateNode(r, enc, x, x.fileGate, () => focusFirst('enc.back')));
-      area.append(btn('File', { kind: 'held', testid: 'enc.file', ariaLabel: 'Held: ' + x.fileGate.verb, onClick: () => focusFirst('refusal.control') }));
+      // A Held press re-evaluates first: if the gate has fallen (the outage ended), the press files.
+      area.append(btn('File', { kind: 'held', testid: 'enc.file', ariaLabel: 'Held: ' + x.fileGate.verb, onClick: () => { rerender(r); if (x.fileGate) focusFirst('refusal.control'); else doFile(r, enc, x, false); } }));
       return area;
     }
     const total = x.checked ? Proto.store.noteKillers(enc.id, x.note).length : 0;
-    if (x.sendGate) wrap.append(refusal(x.sendGate));
+    // A store refusal from Send to Exams to sign renders here with its own control; the screen's own gates carry theirs.
+    if (x.sendGate) wrap.append(x.sendGate.onControl ? refusal(x.sendGate) : gateNode(r, enc, x, x.sendGate, () => focusFirst('enc.back')));
     if (x.checked && x.killers.length) {
       wrap.append(h('div', { class: 'row between' }, h('h2', { text: 'Before File' }),
         h('span', { class: 'row' }, chip('required', x.killers.length + ' to fix'), total > 3 ? h('span', { class: 'small muted', text: 'of ' + total }) : null)),
@@ -467,7 +485,7 @@
       x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3); rerender(r);
       focusFirst('enc.killer.0.fix', 'enc.file'); Proto.router.announce('Note now says #' + chartTooth + ', matching the chart'); return;
     }
-    if (k.fix === 'assessment') { const ta = document.getElementById('note-assessment'); if (ta) { ta.scrollIntoView({ block: 'center' }); ta.focus({ preventScroll: true }); } return; }
+    if (k.fix === 'assessment') { const ta = document.getElementById('note-assessment'); if (ta) { reveal(ta); ta.focus({ preventScroll: true }); } return; }
     if (k.fix === 'licence') {
       // A repeated press does not write a second request (A4): the chair is already in the queue.
       const a = apptOf(enc);
@@ -477,7 +495,8 @@
         rerender(r); focusFirst('refusal.control'); return;
       }
       const res = Proto.store.readyForExam(enc.appointmentId);
-      if (res.ok) { rerender(r); focusFirst('enc.killer.0.fix', 'enc.file'); Proto.router.announce('Sent to Exams to sign'); }
+      if (res.ok) { rerender(r); focusFirst('enc.killer.0.fix', 'enc.file'); Proto.router.announce('Sent to Exams to sign'); return; }
+      x.sendGate = res; rerender(r); focusGateVerb();   // the store's verdict renders; a silent refusal is a dead control
       return;
     }
   }
@@ -490,7 +509,7 @@
     else if (res.code === 'readback') { x.killers = []; x.readback = true; }
     else { x.fileGate = res; x.readback = false; }
     rerender(r);
-    if (res.code === 'readback' || x.fileGate) { const c = document.querySelector('#enc-gate [data-testid="refusal.control"]'); if (c) c.focus({ preventScroll: true }); }
+    if (res.code === 'readback' || x.fileGate) focusGateVerb();
     else if (res.killers) focusFirst('enc.killer.0.fix', 'enc.file');
   }
   function renderFiledCard(enc, filed, x) {

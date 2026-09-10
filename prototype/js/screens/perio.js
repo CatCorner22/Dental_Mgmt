@@ -41,13 +41,15 @@
 
   function stateFor(enc) {
     syncStore();
-    if (states[enc.id]) return states[enc.id];
+    // A draft belongs to its author: the PIN switch on a shared device wipes local drafts, so the next author starts clean.
+    const k = enc.id + '|' + Proto.store.currentUser().id;
+    if (states[k]) return states[k];
     const prior = priorExam(enc.patientId);
     const missing = (prior && prior.missing) || [];
     const st = { encId: enc.id, prior: (prior && prior.sites) || {}, priorDate: prior ? prior.date : null, missing, path: buildPath(missing, pathPref), cur: 0, sites: {}, history: [], last: null, pendingZero: false,
       mode: 'full', sextants: ['', '', '', '', '', ''], scur: 0, padOpen: false, settingsOpen: false, lastKey: null, keystrokes: 0, flash: null, stamp: null, gate: null, licenceOpen: false, saved: null, savedAt: null, amending: false,
       tagOpen: false, tagTooth: '', tagText: '', tagToothTouched: false, tagTextTouched: false, tagged: [] };
-    states[enc.id] = st; return st;
+    states[k] = st; return st;
   }
   const curKey = (st) => st.path[st.cur] || null;
   const siteLabel = (key) => 'tooth ' + toothOf(key) + ' site ' + siteOf(key);
@@ -95,14 +97,19 @@
     let i = Math.min(st.cur, st.path.length) - 1; if (i < 0) return 'Already at the first site';
     const t = toothOf(st.path[i]); while (i > 0 && toothOf(st.path[i - 1]) === t) i--; st.cur = i; return 'Previous tooth: tooth ' + t;
   }
-  function flash(st, r, text) {
-    st.flash = text; Proto.router.announce(text); clearTimeout(flashTimer);
+  function flash(st, r, text, quiet) {
+    st.flash = text; if (!quiet) Proto.router.announce(text); clearTimeout(flashTimer);
     flashTimer = setTimeout(() => { st.flash = null; const c = Proto.router.current(); if (c.route === 'perio' && c.id === st.encId) rerender(c); }, 4500);
   }
-  function depthGate(st, depth) {
+  function depthGate(st, depth, r) {
     // Verb-first and eight words at most: the measured depth stays in the Why, where it cannot push the line over.
-    st.gate = { code: 'depth_gt_15', cur: st.cur, node: refusal({ code: 'depth_gt_15', verb: 'Type a depth of 15 mm or less', control: 'Re-enter the depth', why: 'Probing depths above 15 mm are not recordable; ' + depth + ' mm was refused, the site keeps its previous value and the cursor stays here. Type 0 then a digit for 10 to 15.', onControl: () => { st.gate = null; const c = Proto.router.current(); rerender(c); focusCell(st); } }) };
+    const verb = 'Type a depth of 15 mm or less';
+    st.gate = { code: 'depth_gt_15', cur: st.cur, node: refusal({ code: 'depth_gt_15', verb, control: 'Re-enter the depth', why: 'Probing depths above 15 mm are not recordable; ' + depth + ' mm was refused, the site keeps its previous value and the cursor stays here. Type 0 then a digit for 10 to 15.', onControl: () => { st.gate = null; const c = Proto.router.current(); rerender(c); focusCell(st); } }) };
+    // Over a filled site the refused key left no trace in the record, so nothing holds Save: the refusal is announced
+    // once (above) and shown in the flash, and renderInner drops the gate with the render.
+    const kept = siteDepth(st); if (kept != null) flash(st, r, verb + ' — ' + depth + ' mm refused, site keeps ' + kept + ' mm', true);
   }
+  const siteDepth = (st) => { const v = curKey(st) && st.sites[curKey(st)]; return v && v.depth != null ? v.depth : null; };
   /* One sealed-exam gate for every way of reaching it: a grammar key, the Amend control, a lane segment. */
   function openAmendGate(st, r) {
     if (!st.amendGate) st.amendGate = refusal({ code: 'exam_sealed', verb: 'Amend the saved exam with an addendum', control: 'Start an addendum', onControl: () => { st.saved = null; st.savedAt = null; st.amendGate = null; st.amending = true; rerender(Proto.router.current()); }, why: 'A saved exam is the record. Keys no longer change it; an amendment is a new dated entry by you that links to the original, and the original is never overwritten.', severity: 'info' });
@@ -114,7 +121,7 @@
     if (st.mode === 'screening') { const out = applyScreening(st, k); setTimeout(() => focusSextant(st), 0); return out; }
     if (/^[0-9]$/.test(k)) {
       const d = Number(k);
-      if (st.pendingZero) { st.pendingZero = false; const depth = 10 + d; if (depth > 15) { depthGate(st, depth); return 'Depth ' + depth + ' mm refused (above 15)'; } return record(st, depth); }
+      if (st.pendingZero) { st.pendingZero = false; const depth = 10 + d; if (depth > 15) { depthGate(st, depth, r); return 'Depth ' + depth + ' mm refused (above 15)'; } return record(st, depth); }
       if (d === 0) { st.pendingZero = true; return 'Waiting for the second digit (10 or more)'; }
       return record(st, d);
     }
@@ -180,13 +187,16 @@
     return out;
   }
   const support = Proto.ui.support;                     // one support line for every outage gate (ui.js)
-  function mkGate(st, res, onControl) { st.gate = { code: res.code, node: refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, severity: res.code === 'outage' ? 'stop' : 'required', onControl: onControl || (res.code === 'outage' ? support : () => {}) }) }; }
+  // Every control acts: the support line under outage, otherwise the gate falls and the keyboard returns to the cursor.
+  function mkGate(st, res, onControl) { st.gate = { code: res.code, node: refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, severity: res.code === 'outage' ? 'stop' : 'required', onControl: onControl || (res.code === 'outage' ? support : () => { st.gate = null; rerender(Proto.router.current()); }) }) }; }
   // A gate names the next thing to do, so the keyboard lands on it rather than on the Held primary behind it.
   function focusGateControl() { const c = document.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); }
   /* Who may author an exam: a clinical licence on the account, or a day pass that grants perio. The old test read
      the device, so the same licence-less author was refused on shared glass and saved a clinical exam on a desk. */
   const mayChart = (u) => !!u.licence || ((u.entitlements || []).indexOf('perio') >= 0);
   function doSave(st, r, licence) {
+    // A second dispatch in the same tick lands on a saved exam: it is the amend path, not a second Save.
+    if (st.saved) { openAmendGate(st, r); return; }
     const u = Proto.store.currentUser();
     // The remedy here is "hand the chart to someone licensed", not "type your own PIN", so the code is the licence
     // one and the control carries the one label this action has everywhere (Encounter, Phone, the pad's own dialog).
@@ -196,6 +206,8 @@
     if (!res.ok) {
       // The reasons open with the gate: the chart is finished, so the remaining decision is one tap, not three.
       if (res.code === 'omission_licence') { st.licenceOpen = true; mkGate(st, res, () => { const b = document.querySelector('[data-testid="perio.licence.' + LICENCES[0][0] + '"]'); if (b) b.focus(); }); }
+      // The store says the exam is already saved (a draft started after the save): the one gate for that is the amend gate.
+      else if (res.code === 'exam_sealed') { st.gate = null; openAmendGate(st, r); focusGateControl(); return; }
       else mkGate(st, res);
       rerender(r); focusGateControl(); return;
     }
@@ -419,7 +431,7 @@
     // leave Save reading Held with a refusal nothing could clear, and coding the last sextant left it too.
     if (st.gate && st.gate.code === 'licence_scope' && mayChart(Proto.store.currentUser())) st.gate = null;
     if (st.gate && st.gate.code === 'screening_incomplete' && !st.sextants.some((c) => c === '')) st.gate = null;
-    if (st.gate && st.gate.code === 'depth_gt_15' && st.cur !== st.gate.cur) st.gate = null;                 // the next key answered it
+    if (st.gate && st.gate.code === 'depth_gt_15' && (st.cur !== st.gate.cur || siteDepth(st) != null)) st.gate = null;   // the next key answered it, or the site kept a valid depth
     if (st.gate && st.gate.code === 'omission_licence' && !skippedCount(st)) { st.gate = null; st.licenceOpen = false; }
     if (st.gate && st.gate.code === 'outage' && !S().outage) st.gate = null;                                  // the gate belongs to the outage
     const name = displayName(pt.name, P().privacy); const key = curKey(st);
