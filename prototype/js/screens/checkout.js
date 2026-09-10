@@ -52,11 +52,12 @@
   function withControl(res, r, a, st) {
     const v = { code: res.code, verb: res.verb, control: res.control, why: res.why };
     if (res.code === 'zero_collect_refused') { v.control = res.control || 'Nothing due today'; v.onControl = () => { st.decision = 'zero_due'; st.refusalNode = null; rerender(r, 'checkout.collect.seg.zero-due'); }; }
-    else if (res.code === 'pin_required') { v.control = 'Enter PIN'; v.onControl = () => { const el = document.querySelector('[data-testid="checkout.pin"]'); if (el) el.focus(); }; }
+    else if (res.code === 'pin_required' || res.code === 'pin_no_match') { v.control = 'Enter PIN'; v.onControl = () => { const el = document.querySelector('[data-testid="checkout.pin"]'); if (el) el.focus(); }; }
     else if (res.code === 'tender_required') { v.control = 'Choose card'; v.onControl = () => { st.tender = 'card'; st.refusalNode = null; rerender(r, 'checkout.card.number'); }; }
     // The control that says "Open the ledger" opens the ledger. Every unnamed code used to fall through to the
     // Board, so the one gate whose label named a destination landed somewhere else.
     else if (res.code === 'already_decided') { v.control = res.control || 'Open the ledger'; v.onControl = () => Proto.router.go(r.persona, 'ledger', a.patientId); }
+    else if (res.code === 'entitlement') { v.control = res.control || 'Open Roles'; v.onControl = () => Proto.router.go(r.persona, 'roles'); }
     else if (res.code === 'outage') { v.control = res.control || 'Support line'; v.severity = 'stop'; v.onControl = () => Proto.router.announce('Support: 615-555-0100, answered 7 am to 6 pm Central'); }
     else { v.control = res.control || 'Back to Board'; v.onControl = () => Proto.router.go(r.persona, 'board'); }
     return v;
@@ -66,6 +67,12 @@
   function gate(r, st, v, focusTestid) {
     st.refusalNode = refusal(Object.assign({}, v, { onControl: () => { const el = document.querySelector('[data-testid="' + focusTestid + '"]'); if (el && el.focus) el.focus(); } }));
     rerender(r, 'refusal.control');
+  }
+  /* A restriction posts only with the payment that covers its fee (docs/13 feature 1). The toggle hides when the
+     tender stops covering it, but st.selfPay kept the id, so Send statement posted a restriction with no payment. */
+  function selfPayFor(S, a, st, payCents) {
+    if (st.decision !== 'collect') return [];
+    return [...st.selfPay].filter((pid) => { const p = S.procedures.find((x) => x.id === pid && x.encounterId === a.encounterId); return p && !p.selfPayRestricted && payCents >= p.feeCents; });
   }
   const AMOUNT_WHY = 'A payment posts the number in the field against the balance, so it cannot be blank, negative, or a value that is not a number. To take nothing at the window, choose Nothing due today.';
   const WRITEOFF_WHY = 'A write-off posts the number in the field against the balance, so it cannot be blank, negative, or a value that is not a number. Remove the write-off to post without one.';
@@ -85,7 +92,7 @@
       decision: st.decision,
       tender: st.decision === 'collect' ? st.tender : null,
       amountCents: st.decision === 'collect' ? payCents : 0,
-      selfPay: [...st.selfPay],
+      selfPay: selfPayFor(S, a, st, payCents),
       writeoffCents: woCents,
       writeoffReason: st.writeoffReason || 'courtesy',
       cadence: st.cadence,
@@ -165,7 +172,8 @@
     const S = Proto.store.get();
     const policy = [];   // policy sentences live behind Why, never on the finish path (C6)
     const zero = est.patientCents <= 0;
-    const segs = (zero ? [['zero-due', 'Nothing due today']] : [['collect', 'Collect']]).concat([['send-statement', 'Send statement'], ['payment-plan', 'Set up payment plan']]);
+    // At $0 the decision is Nothing due today: a statement or a plan is a money object, and there is no money.
+    const segs = zero ? [['zero-due', 'Nothing due today']] : [['collect', 'Collect'], ['send-statement', 'Send statement'], ['payment-plan', 'Set up payment plan']];
     const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Collection decision' }, ...segs.map(([code, label]) => btn(label, { testid: 'checkout.collect.seg.' + code, pressed: pressed(st.decision === SEG[code]), onClick: () => { st.decision = SEG[code]; st.refusalNode = null; rerender(r, 'checkout.collect.seg.' + code); } })));
     const body = h('div', { class: 'stack' });
     if (st.decision === 'collect') {
@@ -223,7 +231,8 @@
     const gated = !held && !!st.refusalNode;
     const row = h('div', { class: 'co-postrow' });
     if (P.device === 'shared') {
-      const pin = h('input', { class: 'input co-pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', testid: 'checkout.pin', value: st.pin, onInput: (ev) => { st.pin = ev.target.value; } });
+      // Typing the PIN dissolves the gate that asked for it, as typing an amount does; Post is live again.
+      const pin = h('input', { class: 'input co-pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', testid: 'checkout.pin', value: st.pin, onInput: (ev) => { st.pin = ev.target.value; if (st.refusalNode) { st.refusalNode = null; rerender(r, 'checkout.pin'); const el = document.querySelector('[data-testid="checkout.pin"]'); if (el) el.setSelectionRange(el.value.length, el.value.length); } } });
       pin.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); const b = document.querySelector('[data-testid="checkout.post"]'); if (b) b.click(); } });
       row.append(field('Your PIN', pin, 'Shared desk: the PIN makes you the frozen poster for this posting.').node);
     }
@@ -234,7 +243,8 @@
       row.append(btn('Post', { kind: 'held', testid: 'checkout.post', ariaLabel: 'Held: Post', onClick: () => { const el = document.querySelector('[data-testid="refusal.control"]'); if (el && el.focus) el.focus(); } }));
     } else {
       row.append(btn('Post', { kind: 'irreversible', testid: 'checkout.post', onClick: () => doPost(r, a, st) }));
-      if (st.heldReq && st.heldReq.status !== 'approved') row.append(chip('info', 'Write-off ' + st.heldReq.status.replace(/_/g, ' ') + ' by ' + (st.heldReq.decidedBy || 'approver')));
+      // Send back carries the approver's one line to the requester (docs/13 feature 24), not the chip alone.
+      if (st.heldReq && st.heldReq.status !== 'approved') row.append(h('span', { class: 'row' }, chip('info', 'Write-off ' + st.heldReq.status.replace(/_/g, ' ') + ' by ' + (st.heldReq.decidedBy || 'approver')), st.heldReq.decisionReason ? h('span', { class: 'small muted', text: '“' + st.heldReq.decisionReason + '”' }) : null));
     }
     return h('div', { class: 'stack' }, st.refusalNode, row);
   }
@@ -284,9 +294,9 @@
     const S = Proto.store.get(); const P = window.__proto; const aid = r.id;
     if (stateOwner !== S) { for (const k of Object.keys(state)) delete state[k]; stateOwner = S; }
     const a = Proto.store.appt(aid);
-    // An id in the address that names no visit lands on the shell's Nothing-here screen, not on a fifth
-    // private heading that reads the raw id back to whoever typed it (A6).
-    if (!a) { Proto.router.go(r.persona, 'notfound'); return; }
+    // An id in the address that names no visit reads Nothing here in place, the shell's words with the store's
+    // sentence under them: the address keeps the bad id, so Back returns to the screen before it (A6, docs/04).
+    if (!a) { const nf = Proto.store.notFound('appointment'); Proto.screens.shell.mount(h('div', { class: 'stack' }, h('h1', { text: 'Nothing here' }), h('p', { class: 'muted', text: nf.why }), btn('Back to home', { kind: 'quiet', testid: 'notfound.home', onClick: () => Proto.router.go(r.persona, Proto.router.HOME[r.persona]) }))); return; }
     const pt = Proto.store.patient(a.patientId); const enc = Proto.store.encounter(a.encounterId);
     const seedEst = S.estimates[aid] || { patientCents: a.balanceCents || 0, insuranceCents: 0, writeoffCents: 0, note: 'No plan estimate on file; the patient portion shown is the appointment balance.' };
     /* What the window collects is what the ledger still says is open, never a stored estimate on its own.
@@ -300,13 +310,18 @@
     const est = Object.assign({}, seedEst, { patientCents: Math.min(seedEst.patientCents, collectible) });
     const st = state[aid] || (state[aid] = fresh(est.patientCents));
     // A stale prefill outlives the state it was built from: re-read it when the ledger has moved under it.
-    if (st.decision === 'collect' && est.patientCents <= 0 && !st.posted) { st.decision = 'zero_due'; st.amountStr = dollars(0); st.tender = null; }
+    if (st.decision !== 'zero_due' && est.patientCents <= 0 && !st.posted) { st.decision = 'zero_due'; st.amountStr = dollars(0); st.tender = null; }
+    // An outage gate goes with the outage (the Board prunes its own the same way): Post is never Held for a
+    // reason the Andon no longer shows.
+    if (st.refusalNode && !P.outage && st.refusalNode.dataset.code === 'outage') st.refusalNode = null;
     if (st.heldReq) st.heldReq = S.approvals.find((x) => x.id === st.heldReq.id) || st.heldReq;
     const procs = S.procedures.filter((p) => p.encounterId === a.encounterId);
     const bal = Proto.store.balances(a.patientId);
     const covers = (fee) => st.decision === 'collect' && cents(st.amountStr) >= fee;
     const name = displayName(pt.name, P.privacy);
-    const sub = a.time + ' · ' + a.type + ' · ' + (S.users.find((u) => u.id === a.providerId) || {}).short + ' · ' + (pt.primary ? Proto.store.carrierName(pt.primary) + (pt.secondary ? ' + ' + Proto.store.carrierName(pt.secondary) : '') : 'Self-pay');
+    // The same clock and the same type word as the Board card for this visit (ui.js time; board.js typeWord).
+    const typeWord = Proto.screens.board && Proto.screens.board.typeWord ? Proto.screens.board.typeWord : (t) => String(t || '').replace(/^./, (ch) => ch.toUpperCase());
+    const sub = Proto.ui.time(a.time) + ' · ' + typeWord(a.type) + ' · ' + (S.users.find((u) => u.id === a.providerId) || {}).short + ' · ' + (pt.primary ? Proto.store.carrierName(pt.primary) + (pt.secondary ? ' + ' + Proto.store.carrierName(pt.secondary) : '') : 'Self-pay');
     const railBtn = Proto.screens.rail ? Proto.screens.rail.button(a.patientId, r, 'checkout.rail') : null;
     const head = pageHead('Checkout · ' + name, sub, railBtn, btn('Back to Board', { kind: 'reversible', testid: 'checkout.back', onClick: () => Proto.router.go(r.persona, 'board') }));
     const status = h('div', { class: 'row' },

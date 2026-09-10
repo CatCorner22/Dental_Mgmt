@@ -102,7 +102,8 @@
   function doReverify(id, r) {
     const a = Proto.store.appt(id); if (!a) return;
     const res = Proto.store.reverify(id);
-    if (!res.ok) { gates[id] = gateFor(res); render(r); return; }
+    if (!res.ok) { gates[id] = gateFor(res); render(r); const b = document.querySelector('[data-testid="board.card.' + id + '.reverify"]'); if (b) b.focus(); return; }
+    delete gates[id];
     after(r, 'Eligibility re-run: active, deductible met.', 'board.card.' + id + '.expand');
   }
   /* The read-only Board offers no live action: Checkout is held here rather than routing to a screen that
@@ -216,8 +217,10 @@
     const el = h('article', { class: 'card appt ' + a.type, testid: 'board.card.' + a.id, 'aria-label': fmtTime(a.time) + ' ' + name + ', ' + tword + ', ' + sword });
     el.append(h('div', { class: 'who' }, h('span', { text: fmtTime(a.time) + ' · ' + name }), chip(ssev, sword)));
     const meta = h('div', { class: 'meta' }, chip(tsev, tword), chip(esev, eword));
-    // Under the outage this control keeps its place too: the store refuses it and the gate says why.
-    if (a.eligibility === 'amber') meta.append(btn('Re-verify', { kind: 'reversible', class: 'compact', testid: 'board.card.' + a.id + '.reverify', ariaLabel: 'Re-verify eligibility for ' + name, onClick: () => doReverify(a.id, r) }));
+    const g = gates[a.id];
+    // Under the outage this control keeps its place too: the store refuses it, the gate says why, and it
+    // switches to Held like every other control on the card (CONTRACTS §6).
+    if (a.eligibility === 'amber') meta.append(btn('Re-verify', { kind: g ? 'held' : 'reversible', class: 'compact', testid: 'board.card.' + a.id + '.reverify', ariaLabel: g ? 'Re-verify held: ' + g.verb : 'Re-verify eligibility for ' + name, onClick: () => (g ? focusGate() : doReverify(a.id, r)) }));
     if (pt.alerts.length) meta.append(chip('required', pt.alerts.length + ' alert' + (pt.alerts.length > 1 ? 's' : '')));
     if (a.labCase && a.labCase.status === 'not_back') meta.append(chip('review', 'Case not back'));
     if (a.referral) meta.append(chip('info', 'Referred in'));
@@ -226,9 +229,10 @@
     if (outage) el.append(h('div', { class: 'stamp', text: 'As of ' + clock12(CACHE_TIME) + ' · ' + minutesBetween(CACHE_TIME, s.clock.time) + ' min old · read-only' }));
     // The primary keeps its place under the outage and switches to Held when the gate is raised (CONTRACTS §6).
     const actions = h('div', { class: 'actions' });
-    const g = gates[a.id];
     if (ARRIVABLE.includes(a.status)) actions.append(btn('Arrive', { kind: g ? 'held' : 'reversible', testid: 'board.card.' + a.id + '.arrive', ariaLabel: g ? 'Arrive held: ' + g.verb : 'Arrive ' + name, onClick: () => (g ? focusGate() : doArrive(a.id, r)) }));
-    else if (a.status === 'arrived') actions.append(btn('Seat', { kind: g ? 'held' : 'reversible', testid: 'board.card.' + a.id + '.seat', ariaLabel: g ? 'Seat held: ' + g.verb : 'Seat ' + name + ' in chair ' + a.op, onClick: () => (g ? focusGate() : doSeat(a.id, r)) }));
+    // Seat renders in the slot Arrive just left, so the second click of a double-click (detail 2) is the tail of
+    // the Arrive gesture, not a decision to seat: one gesture, one step (docs/01 principle 9).
+    else if (a.status === 'arrived') actions.append(btn('Seat', { kind: g ? 'held' : 'reversible', testid: 'board.card.' + a.id + '.seat', ariaLabel: g ? 'Seat held: ' + g.verb : 'Seat ' + name + ' in chair ' + a.op, onClick: (ev) => (g ? focusGate() : ev.detail > 1 ? ev.currentTarget.focus() : doSeat(a.id, r)) }));
     else if (CHECKOUTABLE.includes(a.status)) actions.append(btn('Checkout', { kind: g ? 'held' : 'reversible', testid: 'board.card.' + a.id + '.checkout', ariaLabel: g ? 'Checkout held: ' + g.verb : 'Checkout ' + name, onClick: () => (g ? focusGate() : goCheckout(a.id, r, 'card')) }));
     const ex = btn(expanded[a.id] ? 'Less' : 'Details', { kind: 'quiet', class: 'compact', testid: 'board.card.' + a.id + '.expand', ariaLabel: (expanded[a.id] ? 'Hide' : 'Show') + ' forms and balance for ' + name, onClick: () => { expanded[a.id] = !expanded[a.id]; render(r); const b = document.querySelector('[data-testid="board.card.' + a.id + '.expand"]'); if (b) b.focus(); } });
     ex.setAttribute('aria-expanded', String(!!expanded[a.id])); ex.setAttribute('aria-controls', 'board-details-' + a.id);
@@ -325,7 +329,7 @@
     const list = todays().sort(byTime);
     if (k === 'a') { const a = list.find((x) => ARRIVABLE.includes(x.status)); if (a) doArrive(a.id, r); else Proto.router.announce('No one left to arrive'); }
     if (k === 's') { const a = list.find((x) => x.status === 'arrived'); if (a) doSeat(a.id, r); else Proto.router.announce('No one is waiting to be seated'); }
-    if (k === 'c') { const a = list.find((x) => x.status === 'note_filed'); if (a) goCheckout(a.id, r, 'card'); else Proto.router.announce('Nothing to check out yet'); }
+    if (k === 'c') { const a = list.find((x) => CHECKOUTABLE.includes(x.status)); if (a) goCheckout(a.id, r, 'card'); else Proto.router.announce('Nothing to check out yet'); }
   }
 
   // ---- Screen ------------------------------------------------------------------------------
@@ -350,6 +354,8 @@
 
   window.addEventListener('hashchange', () => { if (keysOn && Proto.router.current().route !== 'board') { document.removeEventListener('keydown', onKey); keysOn = false; } });
 
-  Proto.screens.board = { render, arrive: doArrive, seat: doSeat, reverify: doReverify, ping: doPing };
+  // One word per appointment type, shared with Checkout's subtitle so the same visit never reads two ways.
+  const typeWord = (t) => (TYPE[t] || ['info', String(t || '').replace(/^./, (ch) => ch.toUpperCase())])[1];
+  Proto.screens.board = { render, arrive: doArrive, seat: doSeat, reverify: doReverify, ping: doPing, typeWord };
   Proto.router.on('board', (r) => Proto.screens.board.render(r));
 })();

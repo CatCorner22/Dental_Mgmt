@@ -191,7 +191,11 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 
 /* ---- board.js (Board screen) additions: begin. Appended by the Board module; existing rules above are untouched. ---- */
 .board-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: var(--space-4); align-items: start; }
-@media (max-width: 1279px) { .board-layout { grid-template-columns: 1fr; } }
+/* The breakpoint reads the Board's own width, not the viewport: with the 320 px Patient Rail open at 1280 px
+   the chair columns (3 × 220 px) overflowed a 552 px track into the queue column. Below 1040 px of page width
+   (three chairs, the gap and the 300 px side column) the two stacks go one under the other. */
+.boardpage { container-type: inline-size; }
+@container (max-width: 1040px) { .board-layout { grid-template-columns: 1fr; } }
 .rdrow { display: flex; align-items: center; gap: var(--gap); flex-wrap: wrap; min-height: var(--target); padding: var(--space-2) var(--space-3); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
 .rdrow .line { flex: 1; min-width: 200px; }
 .chairwrap { display: flex; flex-direction: column; gap: 4px; }
@@ -416,7 +420,7 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 /* ---- end module: phone ---- */
 
 /* ---- integration: shared disclosure floor (every <summary> is a 44 px focusable target) ---- */
-.canvas summary, .rail summary, .dialog summary { min-height: var(--target); display: inline-flex; align-items: center; cursor: pointer; color: var(--link); padding: 0 var(--space-2); }
+.canvas summary, .rail summary, .dialog summary { min-height: var(--target); min-width: var(--target); display: inline-flex; align-items: center; cursor: pointer; color: var(--link); padding: 0 var(--space-2); }
 .rail-sum summary, .ph-why summary { display: flex; }
 
 /* --- Beta round 1 fixes (2026-09-04) --- */
