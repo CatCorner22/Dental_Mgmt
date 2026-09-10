@@ -450,13 +450,25 @@
     const enc = encounter(encId); if (!enc) return notFound('encounter');
     const off = offline('Wait for the server — the exam cannot save'); if (off) return off;
     const who = clinician('Ask the hygienist to chart this'); if (who) return who;
-    const entries = Object.entries(sites);
+    // A filed note seals the chart: a perio exam after filing has no dentist in the Exams queue to read it.
+    if (enc.noteFiled) return refuse('exam_sealed', 'Add an addendum to the filed note', 'Open the note', 'This visit\'s note is filed, so its chart is sealed. A finding raised after filing goes on the record as an addendum to that note; an open perio exam here would never reach the dentist\'s exam.');
+    const entries = Object.entries(sites || {});
+    if (!entries.length) return refuse('invalid_input', 'Record at least one site', 'Open the perio chart', 'An empty chart is not an exam. Save after sites are probed or sextants are scored.');
+    const mode = (extras && extras.mode) || 'full';
+    if (mode !== 'full' && mode !== 'screening') return refuse('invalid_input', 'Choose screening or a full chart', 'Open the perio chart', 'A perio exam is a screening of six sextants or a full six-point chart. An unknown mode would write a row the note and the Exams queue cannot read.');
+    let depthOk = true;
+    for (let i = 0; i < entries.length; i++) {
+      const v = entries[i][1];
+      if (!v || v.depth == null) continue;
+      const n = v.depth;
+      if (typeof n !== 'number' || !isFinite(n) || n < 0 || n > 15) { depthOk = false; break; }
+    }
+    if (!depthOk) return refuse('depth_gt_15', 'Re-enter the depth, 0 to 15 mm', 'Stay on this site', 'Pocket depths are millimetres from 0 to 15. A number outside that range, or a value that is not a number, is not a measurement and is not written.');
     const probed = entries.filter(([, v]) => v && v.depth != null).length;
     const skipped = entries.filter(([, v]) => v && v.skipped).length;
     const bleeding = entries.filter(([, v]) => v && v.bleed).length;
     const deepest = Math.max(0, ...entries.map(([, v]) => (v && v.depth) || 0));
     if (skipped > 0 && !(extras && extras.licence && Object.prototype.hasOwnProperty.call(LICENCE_WORDS, extras.licence))) return refuse('omission_licence', 'Name why ' + skipped + (skipped === 1 ? ' site was' : ' sites were') + ' not probed', 'Choose a reason', 'A blank is never forced into a fabrication: pick implant, crown margin, patient could not tolerate, or third molar absent.');
-    const mode = (extras && extras.mode) || 'full';
     const codes = entries.filter(([, v]) => v && v.code != null).map(([, v]) => v.code);
     const prior = S.perioExams.filter((e) => e.encounterId === encId).pop();
     // Save is once only: a second Save on a saved chart is an addendum or nothing. The screen swapped the button
@@ -468,15 +480,17 @@
     const exam = write('perioExams', { id: 'pe-' + nextId.pe++, patientId: enc.patientId, encounterId: encId, date: S.tenant.today, sites, probed, skipped, bleeding, deepest, sextantCodes: codes, licence, mode, author: currentUser().name, amendsExamId: amends, kind: amends ? 'addendum' : 'exam' });
     S.notes[encId] = S.notes[encId] || {};
     if (mode === 'screening') {
-      const worst = codes.length ? Math.max(...codes.map((x) => Number(x) || 0)) : null;
+      const nums = codes.map((x) => Number(x)).filter((n) => Number.isFinite(n));
+      const worst = nums.length ? Math.max.apply(null, nums) : null;
       const MEAN = { 0: 'healthy', 1: 'bleeding on probing', 2: 'calculus or defective margin', 3: 'pocket 4 to 5 mm', 4: 'pocket 6 mm or deeper' };
       S.notes[encId].perioSummary = 'Perio screening: ' + codes.length + ' sextants scored (' + codes.join(', ') + ')' + (worst != null ? ', highest ' + worst + ' — ' + (MEAN[worst] || 'see chart') : '') + '.';
-      if (worst != null && worst >= 3) S.notes[encId].srpEvidence = 'Screening code ' + worst + ' indicates a full six-point chart before periodontal therapy.';
+      S.notes[encId].srpEvidence = (worst != null && worst >= 3) ? 'Screening code ' + worst + ' indicates a full six-point chart before periodontal therapy.' : null;
     } else {
       // The prior exam is named by its date and author, never by its row id: the note is a clinical record.
       S.notes[encId].perioSummary = (amends ? 'Perio addendum to the ' + Proto.ui.longDate(prior.date) + ' exam (' + currentUser().name + ', ' + Proto.ui.longDate(S.tenant.today) + '): ' : 'Perio: ') + probed + ' sites probed, deepest ' + deepest + ' mm, bleeding at ' + bleeding + (bleeding === 1 ? ' site' : ' sites') + (skipped ? ', ' + skipped + (skipped === 1 ? ' site' : ' sites') + ' not probed (' + LICENCE_WORDS[licence] + ')' : '') + '.';
+      if (deepest >= 5) { const deep = entries.filter(([, v]) => v && v.depth >= 5).length; S.notes[encId].srpEvidence = 'SRP evidence: ' + deep + (deep === 1 ? ' site' : ' sites') + ' at or above 5 mm.'; }
+      else S.notes[encId].srpEvidence = null;
     }
-    if (deepest >= 5) { const deep = entries.filter(([, v]) => v && v.depth >= 5).length; S.notes[encId].srpEvidence = 'SRP evidence: ' + deep + (deep === 1 ? ' site' : ' sites') + ' at or above 5 mm.'; }
     touch('notes', encId);
     retireChip('perio'); retireChip('save');
     return { ok: true, exam };
@@ -498,7 +512,15 @@
     if (enc.noteFiled) return refuse('exam_sealed', 'Add an addendum to the filed note', 'Open the note', 'This visit\'s note is filed, so its chart is sealed. A finding raised after filing goes on the record as an addendum to that note; an open tag here would never reach the dentist\'s exam.');
     const t = write('tags', { id: 'tag-' + nextId.tag++, encounterId: encId, tooth, surfaces, text, author: currentUser().name, disposition: null }); retireChip('tag'); return { ok: true, tag: t };
   }
-  function readyForExam(aid) { const a = appt(aid); if (!a) return notFound('appointment'); const off = offline('Wait for the server — the exam queue is read-only'); if (off) return off; const who = clinician('Ask the hygienist to send this'); if (who) return who; a.status = 'ready_for_exam'; touch('appointments', aid); write('appointmentEvents', { id: id('ae'), appointmentId: aid, kind: 'encounter.exam_requested', actor: currentUser().name }); retireChip('ready'); return { ok: true }; }
+  function readyForExam(aid) {
+    const a = appt(aid); if (!a) return notFound('appointment');
+    const off = offline('Wait for the server — the exam queue is read-only'); if (off) return off;
+    const who = clinician('Ask the hygienist to send this'); if (who) return who;
+    if (a.status === 'ready_for_exam') return refuse('already_decided', 'Wait for the dentist to open it', 'Open Exams', 'This chair is already in the dentist\'s queue. Asking twice does not move it up; it would show as two chairs waiting for the same note.');
+    if (['note_filed', 'checked_out', 'checked_out_unfiled', 'no_show'].includes(a.status)) return refuse('already_decided', 'Open the filed visit', 'Open the visit', 'This visit is already ' + a.status.replace(/_/g, ' ') + '. Sending it to Exams would pull a decided chair back into the queue and offer Checkout again.');
+    if (!['arrived', 'seated', 'in_chart'].includes(a.status)) return refuse('wrong_status', 'Open the visit — it is ' + a.status.replace(/_/g, ' '), 'Open the visit', 'A chair is sent to Exams from the chair, after it has arrived. This one is ' + a.status.replace(/_/g, ' ') + ', so nothing was written.');
+    a.status = 'ready_for_exam'; touch('appointments', aid); write('appointmentEvents', { id: id('ae'), appointmentId: aid, kind: 'encounter.exam_requested', actor: currentUser().name }); retireChip('ready'); return { ok: true };
+  }
 
   // Encounter (flow 3)
   // Services that belong to the visit, not to a tooth.
@@ -750,7 +772,7 @@
     return { ok: true, packet };
   }
   // One packet per claim: pressing Appeal four times wrote four packets and renamed the drawer each time.
-  function buildAppeal(claimId) { const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim'); const existing = S.appealPackets.find((p) => p.claimId === claimId); if (existing) return { ok: true, packet: existing, already: true }; const pk = write('appealPackets', { id: id('ap'), claimId, slots: { perioChart: c.hasPerioChart, narrative: c.hasNarrative, radiograph: true, letter: true }, patientSentence: 'Delta asked for your gum chart; we are sending it. You owe nothing while they review.' }); return { ok: true, packet: pk }; }
+  function buildAppeal(claimId) { const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim'); const off = offline('Wait for the server — the appeal cannot be built'); if (off) return off; const existing = S.appealPackets.find((p) => p.claimId === claimId); if (existing) return { ok: true, packet: existing, already: true }; const pk = write('appealPackets', { id: id('ap'), claimId, slots: { perioChart: c.hasPerioChart, narrative: c.hasNarrative, radiograph: true, letter: true }, patientSentence: 'Delta asked for your gum chart; we are sending it. You owe nothing while they review.' }); return { ok: true, packet: pk }; }
   /* The records that go out with an appeal are this patient's: the perio exams on file and the notes filed on their visits.
      A fixed list used to send p-301's exam and a row that did not exist under another patient's disclosure. */
   const patientRecords = (pid) => S.perioExams.filter((e) => e.patientId === pid).map((e) => e.id).concat(S.filedNotes.filter((n) => { const e = encounter(n.encounterId); return e && e.patientId === pid; }).map((n) => n.id));
@@ -858,7 +880,7 @@
     write('reconciliationMatches', { id: id('rm'), varianceId: vid, basis: 'cleared_with_reason', tender: v.tender, amountCents: v.amountCents, actor: u.name });
     return { ok: true };
   }
-  function reviewDecision(did, action, extras) { const d = S.decisions.find((x) => x.id === did); if (!d) return notFound('request'); const off = offline('Wait for the server — decisions are read-only'); if (off) return off; const pin = requirePin(extras); if (!pin.ok) return pin; const u = pin.user; const ent = reconciles(u); if (ent) return ent; poster(u); d.status = action; touch('decisions', d.id); write('controlDecisions', { id: 'dec-' + nextId.dec++, supersedes: did, action, by: u.name, at: S.tenant.today });
+  function reviewDecision(did, action, extras) { const d = S.decisions.find((x) => x.id === did); if (!d) return notFound('request'); const off = offline('Wait for the server — decisions are read-only'); if (off) return off; const pin = requirePin(extras); if (!pin.ok) return pin; const u = pin.user; const ent = reconciles(u); if (ent) return ent; if (d.status === 'keep' || d.status === 'tighten' || d.status === 'retire') return refuse('already_decided', 'Open the day to see the review', 'Open the day', 'This decision was already ' + d.status + '. A second review would write another control row and could flip the threshold after it has already moved.'); poster(u); d.status = action; touch('decisions', d.id); write('controlDecisions', { id: 'dec-' + nextId.dec++, supersedes: did, action, by: u.name, at: S.tenant.today });
     // Retire ends the exception, so the threshold returns to what the decision raised it from; Retire used to
     // leave the raised value in force. The tenant row moved, so the log says so.
     if (action === 'retire' || action === 'tighten') { S.tenant.dualReleaseThresholdCents = d.fromCents || 10000; touch('tenant', S.tenant.id); }
@@ -881,7 +903,7 @@
       tot[e.tender || 'card'] += -e.amountCents;
     }
     poster(u);
-    const dc = write('dayCloses', { id: 'dc-' + locId + '-0903', locationId: locId, date: S.tenant.today, closedBy: u.name, closedAt: S.clock.time, chainHeadHash: 'a1c9…' + (S.ledger.length * 7 + 4096).toString(16), totals: tot });
+    const dc = write('dayCloses', { id: 'dc-' + locId + '-0903', locationId: locId, date: S.tenant.today, closedBy: u.name, closedAt: S.clock.time, chainHeadHash: 'a1c9…' + locId + '-' + (S.ledger.length * 7 + 4096).toString(16), totals: tot });
     write('deposits', { id: id('dep'), dayCloseId: dc.id, lines: tot, preparedBy: u.name });
     return { ok: true, dayClose: dc };
   }
