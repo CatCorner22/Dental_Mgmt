@@ -224,7 +224,11 @@
       return { id: sid, patientId: pid, amountCents: owed, reason: 'window_deferred', createdBy: 'Priya Raman', created: YESTERDAY };
     };
     const statementsDue = [statementFor('sd-1', 'p-316', 8400), statementFor('sd-2', 'p-319', 21200)];
-    const credits = [{ id: 'cr-1', patientId: 'p-307', amountCents: -9500, reason: 'Checked out unfiled: payment waiting for charges (a-1050)', intents: 'pending charges on enc-9010' }];
+    /* The Filed-later lane holds a payment: the $95 the window took on a-1050 is a ledger row (the one the intent
+       ai-0 names), and the credits row describes it. The credit used to stand alone, so the Board, Checkout and
+       the Ledger showed $95.00 on an account with no rows. */
+    ledger.push({ id: 'le-window-9010', kind: 'patient_payment', patientId: 'p-307', amountCents: -9500, effective: TODAY, posted: TODAY, actor: 'Priya Raman', actorKind: 'user', locationId: 'loc-1', tender: 'card', gl: 'unapplied_credit' });
+    const credits = [{ id: 'cr-1', patientId: 'p-307', amountCents: -9500, reason: 'Checked out unfiled: payment waiting for charges (a-1050)', intents: 'pending charges on enc-9010', fromLedger: true }];
 
     // Roles and SoD rules
     const roleTemplates = [

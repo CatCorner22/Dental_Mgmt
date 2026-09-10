@@ -40,6 +40,8 @@
      name and no entitlement, and every gate that needs one refuses instead of posting as a hard-coded "Alex Rivera". */
   const NO_PASS = { id: 'u-temp', name: 'No day pass issued', short: 'No day pass', role: 'temp', entitlements: [], noPass: true };
   const currentUser = () => { const p = window.__proto && window.__proto.persona; if (p === 'temp') return S.tempUser || NO_PASS; return user(S.personaUser[p]) || S.users[0]; };
+  const NO_PASS_WHY = 'A temp works under their own day pass: it is the name every record is frozen onto. Until Roles issues one there is nobody to post as.';
+  const noPass = (verb) => (currentUser().noPass ? refuse('entitlement', verb, 'Open Roles', NO_PASS_WHY) : null);
 
   // Balances: three numbers from ledger rows; estimates never join.
   /* One allocation pass serves both the three numbers and Explain, so they cannot disagree: every payment,
@@ -49,14 +51,24 @@
      40 patients had an Explain total that disagreed with the Patient due above it. */
   function allocate(pid) {
     const rows = S.ledger.filter((e) => e.patientId === pid).slice().sort((a, b) => String(a.effective).localeCompare(String(b.effective)) || String(a.id).localeCompare(String(b.id)));
-    const charges = rows.filter((e) => e.kind === 'charge').map((ch) => ({ row: ch, open: ch.amountCents, applied: [] }));
+    const charges = rows.filter((e) => e.kind === 'charge').map((ch) => ({ row: ch, open: ch.amountCents, applied: [], pending: 0, due: 0 }));
     const claimFor = (ch) => S.claims.find((c) => c.patientId === pid && c.cdt === ch.cdt && ['submitted', 'pended'].includes(c.status));
     const expected = (ch) => (Number.isFinite(ch.insuranceExpectedCents) ? ch.insuranceExpectedCents : null);
+    // A credit that finds no open charge is still money on the account: it lands on the latest charge as an
+    // over-payment, or, with no charge at all, in the unapplied pool. Dropping it read a $44 window payment
+    // and 16 ERA payments as Credit $0.00 while the rows netted negative.
+    let unapplied = 0;
     for (const e of rows) {
       if (e.kind === 'charge') continue;
       let rem = -e.amountCents;                       // credits are stored negative; a reversal is positive and re-opens
-      if (e.amountCents > 0) { const back = charges.find((c) => c.applied.length); if (back) { back.open += e.amountCents; back.applied.push(e); } continue; }
+      if (e.amountCents > 0) {
+        const take = Math.min(unapplied, e.amountCents); unapplied -= take;
+        const back = charges.find((c) => c.applied.some((x) => x.id === e.reversesEntryId)) || charges.slice().reverse().find((c) => c.applied.length);
+        if (back && e.amountCents - take > 0) { back.open += e.amountCents - take; back.applied.push(e); }
+        continue;
+      }
       for (const c of charges) { if (rem <= 0) break; if (c.open <= 0) continue; const take = Math.min(rem, c.open); c.open -= take; rem -= take; c.applied.push(e); }
+      if (rem > 0) { const last = charges[charges.length - 1]; if (last) { last.open -= rem; last.applied.push(e); } else unapplied += rem; }
     }
     let patientDue = 0, insurancePending = 0;
     for (const c of charges) {
@@ -66,10 +78,11 @@
       // the fallback. A covered prophy read "$183.00 Patient due" when the patient owed nothing.
       const exp = expected(c.row);
       const claim = exp == null ? claimFor(c.row) : null;
-      const share = exp != null ? Math.min(c.open, exp) : claim ? Math.min(c.open, Math.round(c.row.amountCents * 0.5)) : 0;
-      insurancePending += share; patientDue += c.open - share;
+      c.pending = exp != null ? Math.min(c.open, exp) : claim ? Math.min(c.open, Math.round(c.row.amountCents * 0.5)) : 0;
+      c.due = c.open - c.pending;
+      insurancePending += c.pending; patientDue += c.due;
     }
-    let credit = 0;
+    let credit = unapplied;
     const over = charges.reduce((s, c) => s + Math.min(0, c.open), 0);
     if (over < 0) { credit += -over; }
     for (const cr of S.credits) if (cr.patientId === pid && !cr.fromLedger) credit += -cr.amountCents;
@@ -89,30 +102,36 @@
       // One date shape per sentence: the charge and every payment in it read the same way.
       const parts = [name + ' on ' + Proto.ui.longDate(ch.effective) + ': charge ' + Proto.ui.money(ch.amountCents)];
       ins.forEach((e) => parts.push(e.payer + ' paid ' + Proto.ui.money(-e.amountCents) + ' on ' + Proto.ui.longDate(e.effective)));
-      wo.forEach((e) => parts.push('contractual write-off ' + Proto.ui.money(-e.amountCents) + ' (' + (e.reason || 'PPO fee').replace(/_/g, ' ') + ')'));
+      // One template per reason code: a computed PPO write-off and a discretionary one are different things.
+      wo.forEach((e) => parts.push((WRITEOFF_WORDS[e.reason] || 'write-off') + ' ' + Proto.ui.money(-e.amountCents) + ' (' + (e.reason || 'contractual_ppo').replace(/_/g, ' ') + ')'));
       pp.forEach((e) => parts.push('you paid ' + Proto.ui.money(-e.amountCents) + ' on ' + Proto.ui.longDate(e.effective)));
-      const owe = c.open;
-      parts.push(owe > 0 ? 'you owe ' + Proto.ui.money(owe) : owe < 0 ? 'credit ' + Proto.ui.money(-owe) : 'paid in full');
-      out.push({ chargeId: ch.id, sentence: parts.join('; ') + '.', patientVoice: name + ': ' + (owe > 0 ? 'Your share is ' + Proto.ui.money(owe) + ' after insurance.' : 'Nothing left to pay.') });
+      // The same split balances() makes: what waits on the plan is never called owed by the patient.
+      const owe = c.open < 0 ? c.open : c.due;
+      if (c.pending > 0) parts.push('waiting on insurance ' + Proto.ui.money(c.pending));
+      parts.push(owe > 0 ? 'you owe ' + Proto.ui.money(owe) : owe < 0 ? 'credit ' + Proto.ui.money(-owe) : c.pending > 0 ? 'nothing due from you yet' : 'paid in full');
+      out.push({ chargeId: ch.id, sentence: parts.join('; ') + '.', patientVoice: name + ': ' + (owe > 0 ? 'Your share is ' + Proto.ui.money(owe) + ' after insurance.' : c.pending > 0 ? 'Nothing for you until your plan responds.' : 'Nothing left to pay.') });
     }
     return out;
   }
+  const WRITEOFF_WORDS = { contractual_ppo: 'contractual write-off', courtesy: 'courtesy write-off', hardship: 'hardship write-off', prior_period: 'prior-period write-off' };
 
   // Board
   function arrive(aid) {
     const a = appt(aid); if (!a) return notFound('appointment');
     const off = offline('Wait for the server — the Board is read-only'); if (off) return off;
+    const np = noPass('Issue a day pass before arriving'); if (np) return np;
     a.status = 'arrived'; a.arrivedAt = S.clock.time; touch('appointments', aid);
     write('appointmentEvents', { id: id('ae'), appointmentId: aid, kind: 'appointment.arrived', actor: currentUser().name });
     if (a.eligibility === 'amber') a.eligibilityRerun = 'running';
     retireChip('arrive');
     return { ok: true };
   }
-  function seat(aid) { const a = appt(aid); if (!a) return notFound('appointment'); const off = offline('Wait for the server — the Board is read-only'); if (off) return off; a.status = 'seated'; touch('appointments', aid); write('appointmentEvents', { id: id('ae'), appointmentId: aid, kind: 'appointment.seated', actor: currentUser().name }); retireChip('seat'); return { ok: true }; }
-  function reverify(aid) { const a = appt(aid); if (!a) return notFound('appointment'); const off = offline('Wait for the server — eligibility cannot re-run'); if (off) return off; a.eligibility = 'green'; a.eligibilityNote = '270/271 re-run at ' + S.clock.time + ': active, deductible met'; touch('appointments', aid); write('eligibilityChecks', { id: id('el'), appointmentId: aid, result: 'active' }); return { ok: true }; }
+  function seat(aid) { const a = appt(aid); if (!a) return notFound('appointment'); const off = offline('Wait for the server — the Board is read-only'); if (off) return off; const np = noPass('Issue a day pass before seating'); if (np) return np; a.status = 'seated'; touch('appointments', aid); write('appointmentEvents', { id: id('ae'), appointmentId: aid, kind: 'appointment.seated', actor: currentUser().name }); retireChip('seat'); return { ok: true }; }
+  function reverify(aid) { const a = appt(aid); if (!a) return notFound('appointment'); const off = offline('Wait for the server — eligibility cannot re-run'); if (off) return off; const np = noPass('Issue a day pass before re-verifying'); if (np) return np; a.eligibility = 'green'; a.eligibilityNote = '270/271 re-run at ' + S.clock.time + ': active, deductible met'; touch('appointments', aid); write('eligibilityChecks', { id: id('el'), appointmentId: aid, result: 'active' }); return { ok: true }; }
   function pingChair(aid) {
     const a = appt(aid); if (!a) return notFound('appointment');
     const off = offline('Wait for the server — messages are paused'); if (off) return off;
+    const np = noPass('Issue a day pass before pinging'); if (np) return np;
     // Rate-limit this chair, not the message list: the old check looked at the last two messages overall,
     // so pinging a second chair in between let the same chair be pinged again inside the window.
     const mine = S.messages.filter((m) => m.appointmentId === aid && m.kind === 'board.ping_chair');
@@ -123,14 +142,25 @@
   }
 
   // Checkout (flow 4). decision: collect | send_statement | payment_plan | zero_due
+  /* What the window decides on: the plan estimate, capped by what the ledger still leaves open plus the visit's
+     uncharged fees. The decision row used to freeze the seed estimate ($410) after a write-off had already taken
+     the balance to zero, so the Posted card read "Nothing due today, patient portion $410.00". */
+  function windowEstimate(aid) {
+    const a = appt(aid); if (!a) return null;
+    const seed = S.estimates[aid] || { patientCents: a.balanceCents || 0, insuranceCents: 0, writeoffCents: 0 };
+    const open = balances(a.patientId).patientDue + S.procedures.filter((p) => p.encounterId === a.encounterId && !charged(p)).reduce((s, p) => s + p.feeCents, 0);
+    return Object.assign({}, seed, { patientCents: Math.min(seed.patientCents, open) });
+  }
   function postCheckout(aid, form) {
     const a = appt(aid); if (!a) return notFound('appointment');
-    const est = S.estimates[aid] || { patientCents: a.balanceCents || 0 };
-    const u = currentUser();
+    const est = windowEstimate(aid);
+    let u = currentUser();
     const off = offline('Wait for the server — postings are paused'); if (off) return off;
     if (u.noPass) return refuse('entitlement', 'Issue a day pass before posting', 'Open Roles', 'A temp posts under their own day pass. Until Roles issues one there is no identity to freeze onto the posting.');
     if (window.__proto.device === 'shared' && !form.pin) return refuse('pin_required', 'Enter your PIN to post', 'Enter PIN', 'Shared desk: the PIN mints your own session, so the posting carries your name and not the last person\'s.');
-    if (form.decision === 'collect' && est.patientCents === 0) return refuse('zero_collect_refused', 'Choose Nothing due today', 'Nothing due today', 'Collect with $0 writes nothing; the typed decision keeps the window honest.');
+    // The PIN names the poster: any non-empty value used to post, frozen to whoever the persona happened to be.
+    if (window.__proto.device === 'shared') { const who = S.users.find((x) => x.pin && x.pin === String(form.pin)); if (!who) return refuse('pin_no_match', 'Retype the PIN — no match', 'Enter PIN', 'No account carries that PIN. The posting freezes the poster the PIN names, so it cannot post under a guess.'); u = who; }
+    if (form.decision !== 'zero_due' && est.patientCents === 0) return refuse('zero_collect_refused', 'Choose Nothing due today', 'Nothing due today', 'Nothing is due, so a payment, a statement or a plan would post money for nothing; the typed decision keeps the window honest.');
     if (form.decision === 'collect' && !form.tender) return refuse('tender_required', 'Choose a tender', 'Choose card', 'The tender is what the day sheet reconciles against the bank, so a payment cannot post without one.');
     if (S.collectionDecisions.some((d) => d.encounterId === a.encounterId)) return refuse('already_decided', 'Correct this visit from the ledger', 'Open the ledger', 'One typed decision per visit. To change what was collected, post a correction from the ledger: a reversal and a repost, both linked to the original.');
     const encId = a.encounterId; const enc = encounter(encId);
@@ -144,6 +174,7 @@
     }
     // Post: charges (if note filed), payment, allocations, decision, self-pay flags in one transaction
     const noteFiled = enc && enc.noteFiled;
+    if (window.__proto.device === 'shared') { const live = S.sessions.filter((x) => !x.endedAt).pop(); if (!live || live.userId !== u.id) openSession(u.id); }
     const rows = [];
     // charged() is the ledger, not a flag: the seed marks a crown "completed" without setting charged, so the
     // old test re-charged it and a patient who paid $410 in full walked out owing $1,180.
@@ -152,8 +183,11 @@
     for (const p of toCharge) { p.charged = true; touch('procedures', p.id); rows.push(write('ledger', { id: id('le'), kind: 'charge', patientId: a.patientId, amountCents: p.feeCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: a.locationId, procedureId: p.id, cdt: p.cdt, tooth: p.tooth, insuranceExpectedCents: feeTotal ? Math.round((est.insuranceCents || 0) * p.feeCents / feeTotal) : 0 })); }
     if (form.decision === 'collect') {
       const amt = form.amountCents || est.patientCents;
+      // Allocation defaults oldest-open across the account, not only the charges this Post released: a $410
+      // payment on a crown already on the ledger used to post with no allocation row at all.
+      const open = noteFiled ? allocate(a.patientId).charges.filter((c) => c.open > 0) : [];
       const pay = write('ledger', { id: id('le'), kind: 'patient_payment', patientId: a.patientId, amountCents: -amt, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: a.locationId, tender: form.tender, gl: noteFiled ? 'patient_ar' : 'unapplied_credit' });
-      if (noteFiled) { let rem = amt; for (const r of rows) { if (rem <= 0) break; const alloc = Math.min(rem, r.amountCents); write('allocations', { id: id('al'), paymentId: pay.id, chargeId: r.id, amountCents: alloc }); rem -= alloc; } }
+      if (noteFiled) { let rem = amt; for (const c of open) { if (rem <= 0) break; const alloc = Math.min(rem, c.open); write('allocations', { id: id('al'), paymentId: pay.id, chargeId: c.row.id, amountCents: alloc }); rem -= alloc; } }
       else write('allocationIntents', { id: id('ai'), paymentId: pay.id, encounterId: encId, amountCents: amt });
     }
     if (form.decision === 'send_statement') write('statementsDue', { id: id('sd'), patientId: a.patientId, amountCents: est.patientCents, reason: 'window_deferred', createdBy: u.name, created: S.tenant.today });
@@ -162,7 +196,8 @@
     if (form.writeoffCents > 0) write('ledger', { id: id('le'), kind: 'write_off', patientId: a.patientId, amountCents: -form.writeoffCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: a.locationId, reason: form.writeoffReason || 'courtesy', approvalRequestId: form.approvalRequestId || null });
     write('collectionDecisions', { id: 'cd-' + nextId.cd++, encounterId: encId, decision: form.decision, patientPortionCents: est.patientCents, decidedBy: u.name, decidedAt: S.tenant.today + ' ' + S.clock.time, statementDueId: null, paymentPlanId: null });
     a.status = noteFiled ? 'checked_out' : 'checked_out_unfiled'; touch('appointments', aid);
-    if (!noteFiled && !S.credits.find((c) => c.patientId === a.patientId && c.reason.includes(aid))) write('credits', { id: id('cr'), patientId: a.patientId, amountCents: -(form.amountCents || est.patientCents || 0), reason: 'Checked out unfiled: payment waiting for charges (' + aid + ')', intents: 'pending charges on ' + encId, fromLedger: true });
+    // The credit row exists only when money moved: a statement or plan on an unfiled visit takes no payment.
+    if (!noteFiled && form.decision === 'collect' && !S.credits.find((c) => c.patientId === a.patientId && c.reason.includes(aid))) write('credits', { id: id('cr'), patientId: a.patientId, amountCents: -(form.amountCents || est.patientCents || 0), reason: 'Checked out unfiled: payment waiting for charges (' + aid + ')', intents: 'pending charges on ' + encId, fromLedger: true });
     retireChip('checkout'); if (form.decision === 'collect') retireChip('payment');
     return { ok: true, taps: 0 };
   }
@@ -186,14 +221,18 @@
   }
 
   // Dual release evaluator (precog evaluateRelease, simplified)
-  function evaluateRelease(channel, amountCents, actor) {
+  /* opts.contractual: the amount is computed from the fee schedule (an ERA delta), so the threshold does not
+     apply; the after-hours hold still does. `eligible` is the two seats the biller is told to ask, ranked
+     office manager first: one list feeds the verb, the Held chip and the phone card, so they cannot disagree. */
+  function evaluateRelease(channel, amountCents, actor, opts) {
     const threshold = S.tenant.dualReleaseThresholdCents;
     const RANK = { office_manager: 0, owner: 1, dentist: 2, surgeon: 3 };
     const eligible = S.users.filter((x) => x.entitlements.includes('approve_second') && x.id !== actor.id)
       .sort((a, b) => (RANK[a.role] == null ? 9 : RANK[a.role]) - (RANK[b.role] == null ? 9 : RANK[b.role]))
-      .map((x) => x.short);
+      .map((x) => x.short).slice(0, 2);
     if (S.clock.afterHours && ['write_off', 'refund', 'adjustment'].includes(channel)) return { ok: false, code: 'after_hours', verb: 'Held until 7:30 am — after hours', why: 'Refunds, adjustments, and write-offs outside business hours are held regardless of amount. Policy set by Dr. Reagan, reviewed 8/4.', eligible };
-    if (amountCents >= threshold) return { ok: false, code: 'needs_second', verb: 'Needs a second approver — ' + eligible.slice(0, 2).join(' or '), why: 'Write-offs at or above ' + Proto.ui.money(threshold) + ' need a distinct second approver (control policy v3, set by Dr. Reagan on 8/4, review due 9/1). Approvals here usually take about 4 minutes.', eligible };
+    // Two short names at most, so the verb never runs past eight words.
+    if (amountCents >= threshold && !(opts && opts.contractual)) return { ok: false, code: 'needs_second', verb: 'Ask ' + eligible.join(' or ') + ' to approve', why: 'Write-offs at or above ' + Proto.ui.money(threshold) + ' need a distinct second approver (control policy v3, set by Dr. Reagan on 8/4, review due 9/1). Approvals here usually take about 4 minutes.', eligible };
     return { ok: true, code: 'below_threshold', eligible };
   }
   /* An approver who sends a request back says why: the biller reads the reason on the write-off card, and
@@ -224,6 +263,9 @@
     if (!patient(accountPid)) return notFound('patient');
     const off = offline('Wait for the server — postings are paused'); if (off) return off;
     if (!Number.isFinite(amountCents) || amountCents <= 0) return refuse('amount_required', 'Type an amount above zero', 'Go to amount', 'A write-off posts the number you type against the balance, so it cannot be blank, negative, or zero.');
+    // A write-off retires what the patient owes and no more: $1,000 against a $410 balance posted and hid a −$590 net.
+    const due = balances(accountPid).patientDue;
+    if (amountCents > due) return refuse('amount_required', 'Type an amount up to ' + Proto.ui.money(due), 'Go to amount', 'The patient owes ' + Proto.ui.money(due) + ' on this account. A write-off above the balance would post a credit nobody paid; a refund or a correction is a different posting.');
     const gate = evaluateRelease('write_off', amountCents, u);
     if (!gate.ok) {
       const req = requestApproval({ kind: 'write_off', amountCents, reason, patientId: accountPid, eligible: gate.eligible, appointmentId: null });
@@ -417,13 +459,36 @@
     b.status = 'deltas'; touch('eraBatches', b.id);
     return { ok: true, readback: S.eraLines.filter((l) => l.batchId === batchId && l.status === 'delta'), posted };
   }
-  function eraConfirm(lineId) { const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — postings are paused'); if (off) return off; if (l.status === 'posted') return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'This line is posted. A correction is a reversal and a repost, both linked to the original.'); l.status = 'posted'; touch('eraLines', l.id); write('ledger', { id: id('le'), kind: 'insurance_payment', patientId: l.patientId, amountCents: -l.paidCents, effective: S.tenant.today, posted: S.tenant.today, actor: currentUser().name, actorKind: 'user', locationId: 'loc-1', payer: 'Delta Dental', eraLineId: lineId, gl: 'ins_ar_primary' }); write('ledger', { id: id('le'), kind: 'write_off', patientId: l.patientId, amountCents: -(l.expectedCents - l.paidCents), effective: S.tenant.today, posted: S.tenant.today, actor: currentUser().name, actorKind: 'user', locationId: 'loc-1', reason: 'contractual_ppo', eraLineId: lineId }); return { ok: true }; }
-  function eraHold(lineId) { const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — the line cannot be held'); if (off) return off; l.status = 'held'; touch('eraLines', l.id); write('claimEvents', { id: id('cev'), claimId: l.claimId, kind: 'era.line_held', actor: currentUser().name }); return { ok: true }; }
-  function eraDispute(lineId) { const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — the dispute cannot send'); if (off) return off; l.status = 'disputed'; touch('eraLines', l.id); write('claimEvents', { id: id('cev'), claimId: l.claimId, kind: 'era.contract_variance_disputed', actor: currentUser().name }); return { ok: true }; }
+  /* The word on screen and the status in the record agree: once no delta line is left the batch is posted. */
+  function settleBatch(batchId) { const b = S.eraBatches.find((x) => x.id === batchId); if (b && b.status === 'deltas' && !S.eraLines.some((l) => l.batchId === batchId && l.status === 'delta')) { b.status = 'posted'; touch('eraBatches', b.id); } }
+  function eraConfirm(lineId) {
+    const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — postings are paused'); if (off) return off;
+    if (l.status === 'posted') return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'This line is posted. A correction is a reversal and a repost, both linked to the original.');
+    // A contractual write-off is still a write-off: the after-hours hold applies to it as to any other.
+    const gate = evaluateRelease('write_off', l.expectedCents - l.paidCents, currentUser(), { contractual: true });
+    if (!gate.ok) return refuse(gate.code, gate.verb, 'Set aside', gate.why);
+    l.status = 'posted'; touch('eraLines', l.id);
+    write('ledger', { id: id('le'), kind: 'insurance_payment', patientId: l.patientId, amountCents: -l.paidCents, effective: S.tenant.today, posted: S.tenant.today, actor: currentUser().name, actorKind: 'user', locationId: 'loc-1', payer: 'Delta Dental', eraLineId: lineId, gl: 'ins_ar_primary' });
+    write('ledger', { id: id('le'), kind: 'write_off', patientId: l.patientId, amountCents: -(l.expectedCents - l.paidCents), effective: S.tenant.today, posted: S.tenant.today, actor: currentUser().name, actorKind: 'user', locationId: 'loc-1', reason: 'contractual_ppo', eraLineId: lineId });
+    settleBatch(l.batchId);
+    return { ok: true };
+  }
+  function eraHold(lineId) { const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — the line cannot be held'); if (off) return off; l.status = 'held'; touch('eraLines', l.id); write('claimEvents', { id: id('cev'), claimId: l.claimId, kind: 'era.line_held', actor: currentUser().name }); settleBatch(l.batchId); return { ok: true }; }
+  function eraDispute(lineId) { const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — the dispute cannot send'); if (off) return off; l.status = 'disputed'; touch('eraLines', l.id); write('claimEvents', { id: id('cev'), claimId: l.claimId, kind: 'era.contract_variance_disputed', actor: currentUser().name }); settleBatch(l.batchId); return { ok: true }; }
   // One packet per claim: pressing Appeal four times wrote four packets and renamed the drawer each time.
   function buildAppeal(claimId) { const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim'); const existing = S.appealPackets.find((p) => p.claimId === claimId); if (existing) return { ok: true, packet: existing, already: true }; const pk = write('appealPackets', { id: id('ap'), claimId, slots: { perioChart: c.hasPerioChart, narrative: c.hasNarrative, radiograph: true, letter: true }, patientSentence: 'Delta asked for your gum chart; we are sending it. You owe nothing while they review.' }); return { ok: true, packet: pk }; }
   function sendAppeal(claimId) { const c = S.claims.find((x) => x.id === claimId); if (!c) return notFound('claim'); const off = offline('Wait for the server — the appeal cannot send'); if (off) return off; if (c.status === 'appealed') return refuse('already_decided', 'Wait for the payer to answer', 'Open the claim', 'This appeal was already sent. Sending it twice does not speed it up and starts a second review.'); c.status = 'appealed'; touch('claims', c.id); write('claimEvents', { id: id('cev'), claimId, kind: 'claim.appealed', actor: currentUser().name }); write('disclosures', { id: id('dis'), patientId: c.patientId, channel: 'clearinghouse', purpose: 'payment', recordIds: ['pe-1', 'nf-old'], actor: currentUser().name }); return { ok: true }; }
-  function sendStatement(sdId) { const s = S.statementsDue.find((x) => x.id === sdId); if (!s) return notFound('patient'); const off = offline('Wait for the server — statements cannot send'); if (off) return off; if (s.sent) return refuse('already_decided', 'Wait for this statement to land', 'Open the ledger', 'This statement was sent at ' + (s.sentAt || S.clock.time) + '. A second copy of the same balance confuses the patient and the phone call that follows.'); s.sent = true; s.sentAt = S.clock.time; touch('statementsDue', s.id); write('disclosures', { id: id('dis'), patientId: s.patientId, channel: 'mail', purpose: 'payment', recordIds: [sdId], actor: currentUser().name }); return { ok: true }; }
+  function sendStatement(sdId) {
+    const s = S.statementsDue.find((x) => x.id === sdId); if (!s) return notFound('patient'); const off = offline('Wait for the server — statements cannot send'); if (off) return off;
+    if (s.sent) return refuse('already_decided', 'Wait for this statement to land', 'Open the ledger', 'This statement was sent at ' + (s.sentAt || S.clock.time) + '. A second copy of the same balance confuses the patient and the phone call that follows.');
+    // The statement bills the live balance, not the figure frozen when the row was raised: an 835 that settled
+    // the account in between used to leave an $84.00 statement sendable on a $0.00 balance.
+    const due = balances(s.patientId).patientDue;
+    if (due === 0) return refuse('zero_collect_refused', 'Nothing due — no statement to send', 'Open the ledger', 'The balance this row was raised for has since settled. A statement for $0 is noise to the patient and a disclosure row for nothing; a credit is refunded from Money Desk, never billed.');
+    s.amountCents = due; s.sent = true; s.sentAt = S.clock.time; touch('statementsDue', s.id);
+    write('disclosures', { id: id('dis'), patientId: s.patientId, channel: 'mail', purpose: 'payment', recordIds: [sdId], actor: currentUser().name });
+    return { ok: true };
+  }
 
   // Daily Close
   /* Matching a variance settles it against the bank line, so the tender row and the location grade agree.
@@ -451,11 +516,16 @@
     if (!u.entitlements.includes('bank_reconcile') && !u.entitlements.includes('close_day')) return refuse('entitlement', 'Ask a seat that reconciles the bank', 'Send to Dana or the CPA', 'Clearing a variance signs off on the day\'s money. The seats that carry bank reconciliation or day close can do it; yours does not.');
     if (v.status !== 'open') return refuse('already_decided', 'Open the day to see the match', 'Open the day', 'This variance was already ' + v.status + '.');
     v.status = 'cleared'; touch('variances', v.id);
-    rr.state = 'tied'; rr.clearedBy = u.name; touch('reconciliation', rr.id);
-    write('reconciliationMatches', { id: id('rm'), varianceId: vid, basis: 'cleared_with_reason', actor: u.name });
+    // A cleared gap is explained, not matched: the bank line never moved, so the day is not tied. It goes to
+    // second look with the gap on record; "Tied · independent" is earned only when every line met a bank row.
+    rr.state = 'second_look'; rr.clearedBy = u.name; rr.clearedGap = { tender: v.tender, amountCents: v.amountCents }; touch('reconciliation', rr.id);
+    write('reconciliationMatches', { id: id('rm'), varianceId: vid, basis: 'cleared_with_reason', tender: v.tender, amountCents: v.amountCents, actor: u.name });
     return { ok: true };
   }
-  function reviewDecision(did, action) { const d = S.decisions.find((x) => x.id === did); if (!d) return notFound('request'); const off = offline('Wait for the server — decisions are read-only'); if (off) return off; d.status = action; touch('decisions', d.id); write('controlDecisions', { id: 'dec-' + nextId.dec++, supersedes: did, action, by: currentUser().name, at: S.tenant.today }); if (action === 'retire') S.tenant.dualReleaseThresholdCents = 15000; if (action === 'tighten') S.tenant.dualReleaseThresholdCents = 10000;
+  function reviewDecision(did, action) { const d = S.decisions.find((x) => x.id === did); if (!d) return notFound('request'); const off = offline('Wait for the server — decisions are read-only'); if (off) return off; d.status = action; touch('decisions', d.id); write('controlDecisions', { id: 'dec-' + nextId.dec++, supersedes: did, action, by: currentUser().name, at: S.tenant.today });
+    // Retire ends the exception, so the threshold returns to what the decision raised it from; Retire used to
+    // leave the raised value in force. The tenant row moved, so the log says so.
+    if (action === 'retire' || action === 'tighten') { S.tenant.dualReleaseThresholdCents = d.fromCents || 10000; touch('tenant', S.tenant.id); }
     /* A decision that is kept or tightened comes back for review; the store sets the date so the sentence on
        screen and the row underneath it cannot disagree. The screen used to compute today + 90 itself. */
     let reviewBy = d.reviewBy || null;
@@ -493,6 +563,10 @@
   }
   function addDayPass(form, decision) {
     const off = offline('Wait for the server — day passes cannot issue'); if (off) return off;
+    // Issuing a pass grants entitlements, so it is held to the seats that carry Grant roles; a temp with no
+    // pass, the biller and the front desk used to issue one to anybody, Refund included.
+    const me = currentUser();
+    if (me.noPass || !me.entitlements.includes('grant_roles')) return refuse('entitlement', 'Ask a seat that grants roles', 'Dismiss', 'A day pass grants entitlements, so only a seat with Grant roles issues one: ' + S.users.filter((x) => x.entitlements.includes('grant_roles')).map((x) => x.short).join(' or ') + '. Yours does not carry it.');
     form = form || {};
     if (!String(form.name || '').trim()) return refuse('name_required', 'Name the temp before issuing', 'Go to name', 'The pass freezes a name onto every posting the temp makes, so it cannot issue without one.');
     if (!form.end) return refuse('shift_end_required', 'Set a shift end later than now', 'Go to shift end', 'The pass expires at the shift end plus a grace period; without one the grant would never lapse.');
@@ -514,7 +588,7 @@
   const RAIL_STEPS = { frontdesk: [['arrive', 'Arrive'], ['seat', 'Seat'], ['checkout', 'Checkout'], ['payment', 'Take payment'], ['find', 'Find a patient']], rdh: [['perio', 'Perio grammar'], ['save', 'Save exam'], ['tag', 'Tag for dentist'], ['ready', 'Ready for exam'], ['find', 'Find a patient']] };
   function railSteps() { const u = currentUser(); return RAIL_STEPS[u.role === 'hygienist' || u.role === 'rdh' ? 'rdh' : 'frontdesk']; }
   function retireChip(step) {
-    if (!S.railState) return;
+    if (!S.railState || currentUser().noPass) return;   // nobody's first shift: a pass-less temp retires nothing
     const uid = currentUser().id;                       // one bucket per user; a tablet is not a person
     const bucket = (S.railState[uid] = S.railState[uid] || {});
     if (!bucket[step]) { bucket[step] = { retiredAt: S.clock.time, byEvent: Proto.events.all().length }; write('firstRunState', { id: 'frs-' + uid + '-' + step, userId: uid, step, retiredAt: S.clock.time }); }
@@ -539,5 +613,5 @@
   reset = function (seedNum) { const s = _reset(seedNum); for (const t of TABLES) if (!s[t]) s[t] = []; return s; };
 
   const LICENCE_WORDS = { implant: 'implant', crown_margin: 'crown margin', not_tolerated: 'patient could not tolerate probing', third_molar_absent: 'third molar absent' };
-  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, addTag, readyForExam, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, sendStatement, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
+  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, windowEstimate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, addTag, readyForExam, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, sendStatement, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, railSteps, retireChip, search, refuse, notFound };
 })();
