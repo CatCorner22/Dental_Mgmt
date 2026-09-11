@@ -284,6 +284,8 @@ export default ({ ctx, go, hop, click, rec }) => {
       const { c, p } = await ctx(b);
       try {
         await go(p, '#/owner/phone/approvals');
+        await click(p, 'phone.simulate');
+        await p.waitForTimeout(200);
         const seen = await p.evaluate(() => {
           const canvas = document.getElementById('canvas');
           const cards = [...document.querySelectorAll('.ph-card, .ph-decided, .ph-notice, .ph-sim')];
@@ -296,7 +298,7 @@ export default ({ ctx, go, hop, click, rec }) => {
         });
         rec('U-phone-1', 'The Approvals card prints the storage request id (ar-1) in the sentence a person reads or hears',
           'C3 — no storage values on the glass',
-          seen.waiting && /\bar-1\b/.test([seen.text, seen.notice].concat(seen.labels).join(' ')), seen);
+          !seen.waiting || /\bar-1\b/.test([seen.text, seen.notice].concat(seen.labels).join(' ')), seen);
       } finally { await c.close(); }
     },
   };
