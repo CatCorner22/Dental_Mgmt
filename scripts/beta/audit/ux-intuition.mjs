@@ -301,5 +301,53 @@ export default ({ ctx, go, hop, click, rec }) => {
           !seen.waiting || /\bar-1\b/.test([seen.text, seen.notice].concat(seen.labels).join(' ')), seen);
       } finally { await c.close(); }
     },
+
+    async 'U-palette-2'(b) {
+      const { c, p } = await ctx(b);
+      try {
+        await go(p, '#/biller/money');
+        await click(p, 'topbar.search');
+        await fill(p, 'palette.input', 'c-65');
+        await p.waitForTimeout(200);
+        const row = await p.evaluate(() => {
+          const el = document.querySelector('[data-testid="palette.row.0"]');
+          return el ? { label: ((el.querySelector('.lbl') || el).textContent || '').trim(), store: (Proto.store.search('c-65')[0] || null) } : null;
+        });
+        await click(p, 'palette.row.0');
+        await p.waitForTimeout(250);
+        const after = await p.evaluate(() => ({
+          hash: location.hash,
+          tab: ([...document.querySelectorAll('[data-testid^="money.tab."]')]
+            .find((e) => e.getAttribute('aria-selected') === 'true') || {}).getAttribute('data-testid') || null,
+          status: ((window.__proto.state().claims.find((x) => x.id === 'c-65') || {}).status) || null,
+        }));
+        rec('U-palette-2', 'Search on a submitted claim either prints c-65 on the row or opens Money Desk on Denials, where that claim is not listed',
+          'A2 — the control does what its label promises; C3 — the claim id stays off the glass',
+          !row || /c-65/.test(row.label) || after.tab !== 'money.tab.aging', { row, after });
+      } finally { await c.close(); }
+    },
+
+    async 'U-perio-4'(b) {
+      const { c, p } = await ctx(b);
+      try {
+        await go(p, '#/hygienist/perio/enc-9001');
+        const before = await p.evaluate(() => {
+          const st = Proto.screens.perio.stateFor(Proto.store.encounter('enc-9001'));
+          st.cur = st.path.length;
+          return { cur: st.cur, len: st.path.length };
+        });
+        await hop(p, '#/hygienist/perio/enc-9002');
+        await click(p, 'perio.settings');
+        await click(p, 'perio.path.quadrant');
+        await hop(p, '#/hygienist/perio/enc-9001');
+        const after = await p.evaluate(() => {
+          const st = Proto.screens.perio.stateFor(Proto.store.encounter('enc-9001'));
+          return { cur: st.cur, len: st.path.length, pref: st.pathPref, first: st.path[0] };
+        });
+        rec('U-perio-4', 'Changing the probing path on a later exam walks a finished draft back to site 0, so the next depth overwrites the first recorded value',
+          'docs/13 feature 5 — a finished path stays at Save exam when the preference updates',
+          before.cur === before.len && after.cur !== after.len, { before, after });
+      } finally { await c.close(); }
+    },
   };
 };
