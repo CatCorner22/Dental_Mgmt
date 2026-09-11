@@ -18,7 +18,7 @@
     fractured: { label: 'Fractured cusp', a: (t) => 'Fractured cusp #' + t + ', no pulpal exposure; asymptomatic to percussion.', p: (t) => 'Crown #' + t + '; core build-up as needed; temporized today.' },
     sedation: { label: 'Sedation: ASA II, IV midazolam, monitored per protocol', a: (t) => 'Referred for surgical extraction #' + t + '; ASA II; airway and medical history reviewed; sedation consented.', p: (t) => 'Surgical extraction #' + t + ' under IV sedation (midazolam), monitored per protocol; postoperative instructions given to patient and escort.' },
   };
-  const MONEY_CUE = /\$\s?\d|\b(fee|cost|price|estimate|copay)\b/i;
+  const MONEY_CUE = /\$\s?\d|\b(fees?|costs?|prices?|estimates?|copay(?:ment)?s?|dollars?)\b/i;
   const MONEY_REPLACEMENT = 'See plan card for the quoted amount.';
 
   // ---- per-screen state, cleared whenever the store is rebuilt -----------------------------
@@ -392,8 +392,8 @@
   }
 
   // ---- note ---------------------------------------------------------------------------------
-  function starterTooth(enc, x) { const ces = eventsOf(enc.id); if (x.tooth) return x.tooth; if (ces.length) return ces[ces.length - 1].tooth; const t = openTags(enc.id)[0]; return t ? t.tooth : '[tooth]'; }
-  function starterSurfaces(enc, x) { if (x.surfaces.length) return x.surfaces.map((o) => o.s).join(''); const ces = eventsOf(enc.id); if (ces.length && ces[ces.length - 1].surfaces.length) return ces[ces.length - 1].surfaces.join(''); const t = openTags(enc.id)[0]; return t && t.surfaces ? t.surfaces.join('') : 'DO'; }
+  function starterTooth(enc, x) { if (x.tooth) return x.tooth; const ces = eventsOf(enc.id).filter((c) => c.tooth != null); if (ces.length) return ces[ces.length - 1].tooth; const t = openTags(enc.id)[0]; return t ? t.tooth : '[tooth]'; }
+  function starterSurfaces(enc, x) { if (x.surfaces.length) return x.surfaces.map((o) => o.s).join(''); const ces = eventsOf(enc.id).filter((c) => c.tooth != null); if (ces.length && ces[ces.length - 1].surfaces && ces[ces.length - 1].surfaces.length) return ces[ces.length - 1].surfaces.join(''); const t = openTags(enc.id)[0]; return t && t.surfaces ? t.surfaces.join('') : 'DO'; }
   function starters() { return isSurgeon() ? ['sedation', 'caries', 'recurrent', 'fractured'] : ['caries', 'recurrent', 'fractured']; }
   function renderNote(r, enc, x) {
     const s = S(); const notes = s.notes[enc.id] || {}; const locked = !dentistLike();
@@ -512,7 +512,8 @@
       // verb was rewritten, and the fix silently did nothing.
       const m = String(k.verb || '').match(/#(\d{1,2})/);
       const chartTooth = k.chartTooth != null ? String(k.chartTooth) : m ? m[1] : null; if (!chartTooth) return;
-      const fix = (txt) => (txt || '').replace(/#(\d{1,2})\b/g, (all, n) => (n === chartTooth ? all : '#' + chartTooth));
+      const bad = (k.badTeeth && k.badTeeth.length ? k.badTeeth : (k.noteTooth != null ? [k.noteTooth] : [])).map(Number);
+      const fix = (txt) => (txt || '').replace(/#(\d{1,2})\b/g, (all, n) => (bad.length ? (bad.indexOf(Number(n)) >= 0 ? '#' + chartTooth : all) : (n === chartTooth ? all : '#' + chartTooth))).replace(/\btooth\s+(\d{1,2})\b/gi, (all, n) => (bad.indexOf(Number(n)) >= 0 ? 'tooth ' + chartTooth : all));
       x.note.assessment = fix(x.note.assessment); x.note.plan = fix(x.note.plan);
       x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3); rerender(r);
       focusGateVerb() || focusFirst('enc.file'); Proto.router.announce('Note now says #' + chartTooth + ', matching the chart'); return;

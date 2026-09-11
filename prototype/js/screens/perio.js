@@ -118,7 +118,7 @@
   }
   function apply(st, k, r) {
     if (st.saved) return openAmendGate(st, r);
-    if (st.mode === 'screening') { const out = applyScreening(st, k); setTimeout(() => focusSextant(st), 0); return out; }
+    if (st.mode === 'screening') { st.pendingZero = false; const out = applyScreening(st, k); setTimeout(() => focusSextant(st), 0); return out; }
     if (/^[0-9]$/.test(k)) {
       const d = Number(k);
       if (st.pendingZero) { st.pendingZero = false; const depth = 10 + d; if (depth > 15) { depthGate(st, depth, r); return 'Depth ' + depth + ' mm refused (above 15)'; } return record(st, depth); }
@@ -155,7 +155,7 @@
     const st = stateFor(enc); const k = ev.key;
     // Escape dismisses the inline sub-forms as it dismisses a dialog, from inside their fields too, and hands
     // focus back to the control that opened them.
-    if (k === 'Escape' && (st.licenceOpen || st.tagOpen)) { ev.preventDefault(); closeInline(st, r); return; }
+    if (k === 'Escape' && (st.licenceOpen || st.tagOpen)) { ev.preventDefault(); const inTag = t && t.closest && t.closest('.pe-tag'); closeInline(st, r, inTag && st.tagOpen ? 'tag' : (st.licenceOpen ? 'reason' : 'tag')); return; }
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
     const onCell = t && t.classList && t.classList.contains('psite');
     const onControl = t && !onCell && ['BUTTON', 'SUMMARY', 'A'].includes(t.tagName);
@@ -370,7 +370,7 @@
     // The row id is how the store finds the exam, never how a person names it: the card says what was saved,
     // by whom and when, and the note reads the same three facts.
     const card = h('section', { class: 'card stack pe-saved', 'aria-label': 'Exam saved' },
-      h('div', { class: 'row' }, chip('clear', 'Saved'), h('h2', { text: (st.mode === 'screening' ? 'Screening' : 'Full chart') + ' saved' })),
+      h('div', { class: 'row' }, chip('clear', 'Saved'), h('h2', { text: (st.saved.kind === 'addendum' ? 'Addendum · ' : '') + (st.mode === 'screening' ? 'Screening' : 'Full chart') + ' saved' })),
       h('p', { class: 'small muted', text: 'Derived into the hygiene note at ' + clock12(st.savedAt) + ' · author ' + st.saved.author + '. Read-only there; the exam is the source.' }));
     if (st.mode === 'screening') card.append(h('p', { text: 'Screening codes: ' + SEXTANTS.map(([lab], i) => lab + ' ' + st.sextants[i]).join(' · ') + (st.sextants.some((c) => c === '3' || c === '4') ? ' · Full chart due' : '') }));
     else { card.append(h('p', { class: 'pe-note', text: note.perioSummary || '' })); if (note.srpEvidence) card.append(h('p', { class: 'pe-note', text: note.srpEvidence })); }
@@ -436,6 +436,12 @@
     if (st.gate && st.gate.code === 'screening_incomplete' && !st.sextants.some((c) => c === '')) st.gate = null;
     if (st.gate && st.gate.code === 'depth_gt_15' && (st.cur !== st.gate.cur || siteDepth(st) != null)) st.gate = null;   // the next key answered it, or the site kept a valid depth
     if (st.gate && st.gate.code === 'omission_licence' && !skippedCount(st)) { st.gate = null; st.licenceOpen = false; }
+    if (st.gate && st.gate.code === 'omission_licence' && skippedCount(st)) {
+      const n = skippedCount(st);
+      const verbEl = st.gate.node && st.gate.node.querySelector('.verb');
+      const nextVerb = 'Name why ' + n + (n === 1 ? ' site was' : ' sites were') + ' not probed';
+      if (verbEl && verbEl.textContent !== nextVerb) verbEl.textContent = nextVerb;
+    }
     if (st.gate && st.gate.code === 'outage' && !S().outage) st.gate = null;                                  // the gate belongs to the outage
     const name = displayName(pt.name, P().privacy); const key = curKey(st);
     // The lane the operator is in is the lane the instructions describe.
@@ -445,8 +451,8 @@
     const sub = (a ? 'Chair ' + a.op + ' · ' : '') + (st.priorDate ? 'Prior exam ' + longDate(st.priorDate) + ' ghosted' : 'No prior exam on file') + ' · ' + (32 - st.missing.length) + ' teeth' + (st.missing.length ? ' (x = missing: ' + st.missing.join(', ') + ')' : '') + keyHints;
 
     // Selection carries its ✓ press mark, not fill alone: opts.pressed is the only way to get both.
-    const segFull = btn('Full chart', { kind: 'quiet', testid: 'perio.full', pressed: st.mode === 'full', onClick: () => { if (st.saved) { openAmendGate(st, r); return; } st.mode = 'full'; st.gate = null; rerender(r); } });
-    const segScr = btn('Screening', { kind: 'quiet', testid: 'perio.screening', pressed: st.mode === 'screening', ariaLabel: 'Screening lane: six sextant codes in at most 12 keystrokes', onClick: () => { if (st.saved) { openAmendGate(st, r); return; } st.mode = 'screening'; st.gate = null; st.padOpen = false; rerender(r); const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); } });
+    const segFull = btn('Full chart', { kind: 'quiet', testid: 'perio.full', pressed: st.mode === 'full', onClick: () => { if (st.saved) { openAmendGate(st, r); return; } st.mode = 'full'; st.pendingZero = false; st.gate = null; rerender(r); } });
+    const segScr = btn('Screening', { kind: 'quiet', testid: 'perio.screening', pressed: st.mode === 'screening', ariaLabel: 'Screening lane: six sextant codes in at most 12 keystrokes', onClick: () => { if (st.saved) { openAmendGate(st, r); return; } st.mode = 'screening'; st.pendingZero = false; st.gate = null; st.padOpen = false; rerender(r); const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); } });
     // The pad carries the full-chart grammar, so it is offered in the lane that has one, and not on a sealed chart.
     const padT = st.mode === 'full' && !st.saved ? btn(st.padOpen ? 'Hide glove pad' : 'Glove pad', { kind: 'quiet', testid: 'perio.pad.toggle', pressed: st.padOpen, ariaLabel: 'Glove pad: 44 px keys for gloved fingers', onClick: () => { st.padOpen = !st.padOpen; rerender(r); } }) : null;
     const setT = btn('Settings', { kind: 'quiet', testid: 'perio.settings', pressed: st.settingsOpen, ariaLabel: 'Perio settings: last key pressed and probing path', onClick: () => { st.settingsOpen = !st.settingsOpen; rerender(r); if (st.settingsOpen) { const sec = document.getElementById('perio-settings'); if (sec) { sec.scrollIntoView({ block: 'nearest', behavior: 'auto' }); sec.focus(); } } } }); setT.setAttribute('aria-expanded', String(st.settingsOpen)); setT.setAttribute('aria-controls', 'perio-settings');
@@ -464,7 +470,7 @@
       page.append(h('div', { class: 'activesite', 'aria-live': 'polite' }, h('span', { text: st.saved ? 'Exam saved · grid is read-only' : key ? 'Tooth ' + toothOf(key) + ' · site ' + siteOf(key) + ' · prior ' + (priorV != null ? priorV : '—') + (st.pendingZero ? ' · 10+…' : '') : 'All ' + total(st) + ' sites entered · Save exam' }),
         h('span', { class: 'pe-count small', text: 'Sites recorded: ' + probedCount(st) + '/' + total(st) + (skippedCount(st) ? ' · ' + skippedCount(st) + ' not probed' : '') })));
     } else {
-      page.append(h('div', { class: 'activesite', 'aria-live': 'polite' }, h('span', { text: st.saved ? 'Screening saved' : st.scur <= 5 ? 'Sextant ' + SEXTANTS[st.scur][0] + ' (teeth ' + SEXTANTS[st.scur][1] + ') · keys 0–4 or *' : 'All six sextants coded · Save exam' }),
+      page.append(h('div', { class: 'activesite', 'aria-live': 'polite' }, h('span', { text: st.saved ? 'Screening saved' : st.sextants.filter(Boolean).length === 6 ? 'All six sextants coded · Save exam' : 'Sextant ' + SEXTANTS[st.sextants.indexOf('') >= 0 ? st.sextants.indexOf('') : Math.min(st.scur, 5)][0] + ' (teeth ' + SEXTANTS[st.sextants.indexOf('') >= 0 ? st.sextants.indexOf('') : Math.min(st.scur, 5)][1] + ') · keys 0–4 or *' }),
         h('span', { class: 'pe-count small', text: 'Codes: ' + st.sextants.filter(Boolean).length + '/6' + (st.sextants.some((c) => c === '3' || c === '4') ? ' · Full chart due' : '') })));
     }
     page.append(h('p', { class: 'pe-flash', 'aria-live': 'polite', 'aria-atomic': 'true', role: 'status', text: st.flash || '' }));

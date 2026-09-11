@@ -483,7 +483,8 @@
       const nums = codes.map((x) => Number(x)).filter((n) => Number.isFinite(n));
       const worst = nums.length ? Math.max.apply(null, nums) : null;
       const MEAN = { 0: 'healthy', 1: 'bleeding on probing', 2: 'calculus or defective margin', 3: 'pocket 4 to 5 mm', 4: 'pocket 6 mm or deeper' };
-      S.notes[encId].perioSummary = 'Perio screening: ' + codes.length + ' sextants scored (' + codes.join(', ') + ')' + (worst != null ? ', highest ' + worst + ' — ' + (MEAN[worst] || 'see chart') : '') + '.';
+      const scrHead = amends ? 'Perio addendum to the ' + Proto.ui.longDate(prior.date) + ' exam (' + currentUser().name + ', ' + Proto.ui.longDate(S.tenant.today) + '): screening, ' : 'Perio screening: ';
+      S.notes[encId].perioSummary = scrHead + codes.length + ' sextants scored (' + codes.join(', ') + ')' + (worst != null ? ', highest ' + worst + ' — ' + (MEAN[worst] || 'see chart') : '') + '.';
       S.notes[encId].srpEvidence = (worst != null && worst >= 3) ? 'Screening code ' + worst + ' indicates a full six-point chart before periodontal therapy.' : null;
     } else {
       // The prior exam is named by its date and author, never by its row id: the note is a clinical record.
@@ -655,13 +656,23 @@
     // or a gerund, which reads as a description of the problem rather than the thing to do next.
     for (const t of S.tags) if (t.encounterId === encId && !t.disposition) killers.push({ code: 'tag_undispositioned', verb: 'Chart or dismiss tag #' + t.tooth, control: 'Chart it or dismiss', fix: 'tag' });
     const text = ((note && note.assessment) || '') + ' ' + ((note && note.plan) || '');
-    if (/\$\s?\d/.test(text) || /\b(fee|cost|price|estimate|copay)\b/i.test(text)) killers.push({ code: 'money_in_note', verb: 'Move the fee to the plan card', control: 'Move to plan card', fix: 'money' });
-    // Standing paints only: a reversed paint is not a tooth the chart names.
+    if (/\$\s?\d/.test(text) || /\b(fees?|costs?|prices?|estimates?|copay(?:ment)?s?|dollars?)\b/i.test(text)) killers.push({ code: 'money_in_note', verb: 'Move the fee to the plan card', control: 'Move to plan card', fix: 'money' });
+    // Standing paints only: a reversed paint is not a tooth the chart names. Every #NN and "tooth NN" is
+    // compared, so a second mention or a hash-less "tooth 14" cannot file over a different chart.
     const toothed = liveEvents(encId).filter((c) => c.tooth != null);
-    const m = text.match(/#(\d{1,2})/);
-    if (m && toothed.length && !toothed.some((c) => c.tooth === Number(m[1]))) {
-      const c = toothed[0];
-      killers.push({ code: 'contradiction', verb: 'Use the chart tooth #' + c.tooth, control: 'Use chart tooth', fix: 'contradiction', why: 'The note says #' + m[1] + ' and the chart says #' + c.tooth + '. A wrong-tooth claim is denied or paid wrongly, so the two must agree before filing.', noteTooth: Number(m[1]), chartTooth: c.tooth });
+    const liveTeeth = [];
+    for (let i = 0; i < toothed.length; i++) if (liveTeeth.indexOf(toothed[i].tooth) < 0) liveTeeth.push(toothed[i].tooth);
+    const mentioned = [];
+    const mentionRe = /#(\d{1,2})\b|(?:^|[^\w])tooth\s+(\d{1,2})\b/gi;
+    let mm;
+    while ((mm = mentionRe.exec(text))) {
+      const n = Number(mm[1] || mm[2]);
+      if (Number.isInteger(n) && n >= 1 && n <= 32 && mentioned.indexOf(n) < 0) mentioned.push(n);
+    }
+    const badTeeth = mentioned.filter((n) => liveTeeth.length && liveTeeth.indexOf(n) < 0);
+    if (badTeeth.length && liveTeeth.length) {
+      const c = liveTeeth[0];
+      killers.push({ code: 'contradiction', verb: liveTeeth.length === 1 ? 'Use the chart tooth #' + c : 'Drop the uncharted tooth #' + badTeeth[0], control: 'Use chart tooth', fix: 'contradiction', why: 'The note names #' + badTeeth.join(', #') + ' and the chart names #' + liveTeeth.join(', #') + '. A wrong-tooth claim is denied or paid wrongly, so the two must agree before filing.', noteTooth: badTeeth[0], chartTooth: c, badTeeth: badTeeth });
     }
     // The assessment is the dentist's to write, so a hygienist is not handed a control that lands on a readonly field: her
     // row is Send, and once sent it says so instead of offering the send again.
