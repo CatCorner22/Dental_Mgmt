@@ -235,5 +235,119 @@ export default ({ ctx, go, hop, click, rec }) => {
           bree === 'true' && after.quadrant === 'true', { bree, opened, after });
       } finally { await c.close(); }
     },
+
+    async 'U-perio-3'(b) {
+      const { c, p } = await ctx(b);
+      try {
+        await go(p, '#/hygienist/perio/enc-9001');
+        await click(p, 'perio.settings');
+        await click(p, 'perio.path.quadrant');
+        const first = await p.evaluate(() => (document.querySelector('[data-testid="perio.path.quadrant"]') || {}).getAttribute('aria-pressed'));
+        await hop(p, '#/hygienist/perio/enc-9002');
+        await click(p, 'perio.settings');
+        const second = await p.evaluate(() => ({
+          hash: location.hash,
+          user: Proto.store.currentUser().name,
+          quadrant: (document.querySelector('[data-testid="perio.path.quadrant"]') || {}).getAttribute('aria-pressed'),
+          facial: (document.querySelector('[data-testid="perio.path.facial_lingual"]') || {}).getAttribute('aria-pressed'),
+        }));
+        rec('U-perio-3', 'Choosing Quadrant on one perio exam resets to Facial around on the next exam for the same author',
+          'docs/13 feature 5 — probing path is a per-user preference chosen once',
+          first === 'true' && second.quadrant !== 'true', { first, second });
+      } finally { await c.close(); }
+    },
+
+    async 'U-rail-1'(b) {
+      const { c, p } = await ctx(b);
+      try {
+        await go(p, '#/frontdesk/board?device=shared');
+        await click(p, 'board.card.a-1042.rail');
+        await click(p, 'rail.explain');
+        const before = await p.evaluate(() => ({
+          pressed: (document.querySelector('[data-testid="rail.explain"]') || {}).getAttribute('aria-pressed'),
+          body: !!document.querySelector('#rail .explain'),
+        }));
+        await pinSwitch(p, '6666');
+        const after = await p.evaluate(() => ({
+          user: Proto.store.currentUser().name,
+          hash: location.hash,
+          pressed: (document.querySelector('[data-testid="rail.explain"]') || {}).getAttribute('aria-pressed'),
+          body: !!document.querySelector('#rail .explain'),
+        }));
+        rec('U-rail-1', 'Switching author on the shared desk leaves the previous author\'s Patient Rail Explain open',
+          'B9 — the rail\'s expanders belong to the author, not the workstation',
+          before.pressed === 'true' && after.user === 'Sam Dawson' && (after.pressed === 'true' || after.body), { before, after });
+      } finally { await c.close(); }
+    },
+
+    async 'U-phone-1'(b) {
+      const { c, p } = await ctx(b);
+      try {
+        await go(p, '#/owner/phone/approvals');
+        await click(p, 'phone.simulate');
+        await p.waitForTimeout(200);
+        const seen = await p.evaluate(() => {
+          const canvas = document.getElementById('canvas');
+          const cards = [...document.querySelectorAll('.ph-card, .ph-decided, .ph-notice, .ph-sim')];
+          return {
+            text: ((canvas && canvas.innerText) || '').replace(/\s+/g, ' ').trim(),
+            labels: cards.map((el) => el.getAttribute('aria-label') || ''),
+            notice: ((document.querySelector('.ph-notice') || {}).textContent || '').trim(),
+            waiting: !!document.querySelector('.ph-card'),
+          };
+        });
+        rec('U-phone-1', 'The Approvals card prints the storage request id (ar-1) in the sentence a person reads or hears',
+          'C3 — no storage values on the glass',
+          !seen.waiting || /\bar-1\b/.test([seen.text, seen.notice].concat(seen.labels).join(' ')), seen);
+      } finally { await c.close(); }
+    },
+
+    async 'U-palette-2'(b) {
+      const { c, p } = await ctx(b);
+      try {
+        await go(p, '#/biller/money');
+        await click(p, 'topbar.search');
+        await fill(p, 'palette.input', 'c-65');
+        await p.waitForTimeout(200);
+        const row = await p.evaluate(() => {
+          const el = document.querySelector('[data-testid="palette.row.0"]');
+          return el ? { label: ((el.querySelector('.lbl') || el).textContent || '').trim(), store: (Proto.store.search('c-65')[0] || null) } : null;
+        });
+        await click(p, 'palette.row.0');
+        await p.waitForTimeout(250);
+        const after = await p.evaluate(() => ({
+          hash: location.hash,
+          tab: ([...document.querySelectorAll('[data-testid^="money.tab."]')]
+            .find((e) => e.getAttribute('aria-selected') === 'true') || {}).getAttribute('data-testid') || null,
+          status: ((window.__proto.state().claims.find((x) => x.id === 'c-65') || {}).status) || null,
+        }));
+        rec('U-palette-2', 'Search on a submitted claim either prints c-65 on the row or opens Money Desk on Denials, where that claim is not listed',
+          'A2 — the control does what its label promises; C3 — the claim id stays off the glass',
+          !row || /c-65/.test(row.label) || after.tab !== 'money.tab.aging', { row, after });
+      } finally { await c.close(); }
+    },
+
+    async 'U-perio-4'(b) {
+      const { c, p } = await ctx(b);
+      try {
+        await go(p, '#/hygienist/perio/enc-9001');
+        const before = await p.evaluate(() => {
+          const st = Proto.screens.perio.stateFor(Proto.store.encounter('enc-9001'));
+          st.cur = st.path.length;
+          return { cur: st.cur, len: st.path.length };
+        });
+        await hop(p, '#/hygienist/perio/enc-9002');
+        await click(p, 'perio.settings');
+        await click(p, 'perio.path.quadrant');
+        await hop(p, '#/hygienist/perio/enc-9001');
+        const after = await p.evaluate(() => {
+          const st = Proto.screens.perio.stateFor(Proto.store.encounter('enc-9001'));
+          return { cur: st.cur, len: st.path.length, pref: st.pathPref, first: st.path[0] };
+        });
+        rec('U-perio-4', 'Changing the probing path on a later exam walks a finished draft back to site 0, so the next depth overwrites the first recorded value',
+          'docs/13 feature 5 — a finished path stays at Save exam when the preference updates',
+          before.cur === before.len && after.cur !== after.len, { before, after });
+      } finally { await c.close(); }
+    },
   };
 };

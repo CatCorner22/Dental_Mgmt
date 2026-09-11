@@ -136,7 +136,7 @@
     return Object.assign({}, res, { control, onControl: () => out(r, a) });
   }
   // The request the pad was confirming is gone (store rebuilt, or decided elsewhere): say so where focus can land.
-  const NOTICE = (reqId) => 'Request ' + reqId + ' is no longer waiting here; nothing was approved.';
+  const NOTICE = () => 'This request is no longer waiting here; nothing was approved.';
   function notice(r, reqId) { const s = st(); s.notice = NOTICE(reqId); say(s.notice); rerender(r, '.ph-notice'); }
   function onApprove(r, a) {
     const s = st();
@@ -176,7 +176,7 @@
     let res;
     try { p.persona = 'biller'; res = Proto.store.requestWriteoff(x.pid, x.cents, x.reason, { pin: me().pin || null }); }
     finally { p.persona = prev; }
-    if (res && res.held) { s.simNote = 'Sam (biller) tapped Post on the ' + simWords(x) + '; it is waiting on you as request ' + res.requestId + '.'; say('Request ' + res.requestId + ' is waiting for you'); }
+    if (res && res.held) { s.simNote = 'Sam (biller) tapped Post on the ' + simWords(x) + '; it is waiting on you.'; say('A held write-off is waiting for you'); }
     else if (res && res.ok) { s.simNote = 'Below the threshold: the write-off posted without a second approver.'; say(s.simNote); }
     else { s.simNote = null; s.simGate = Object.assign({ fresh: true }, res, { onControl: res.code === 'outage' ? () => Proto.ui.support() : () => { st().simGate = null; rerender(r, 'phone.simulate'); } }); rerender(r, 'refusal.control'); return; }
     rerender(r, 'phone.simulate');
@@ -193,12 +193,12 @@
     const at = requestedAt(a);
     if (stale(s.refusal[a.id])) s.refusal[a.id] = null;
     const gated = !!s.refusal[a.id];
-    const card = h('article', { class: 'card ph-card', 'aria-label': 'Approval request ' + a.id, dataset: { req: a.id } });
+    const card = h('article', { class: 'card ph-card', 'aria-label': 'Waiting write-off', dataset: { req: a.id } });
     card.append(h('div', { class: 'ph-head' },
       h('span', { class: 'ph-initials', 'aria-label': 'Requested by ' + a.requestedBy, title: 'Requester', text: initials(a.requestedBy) }),
       h('div', { class: 'grow' },
         h('div', { class: 'ph-amount', text: money(a.amountCents) }),
-        h('div', { class: 'small muted', text: (REASON_LABEL[a.reason] || a.reason) + ' write-off · ' + a.id })),
+        h('div', { class: 'small muted', text: (REASON_LABEL[a.reason] || a.reason) + ' write-off' })),
       chip('review', 'Waiting')));
     const privOn = !!(window.__proto && window.__proto.privacy);
     const nameRow = h('div', { class: 'ph-kv' }, h('span', { class: 'ph-k', text: 'Patient' }),
@@ -246,8 +246,8 @@
   function decidedCard(r, a) {
     const done = st().done[a.id]; const gated = st().refusal[a.id];
     const s = a.status === 'approved' ? ['clear', 'Approved'] : ['required', 'Sent back'];
-    return h('article', { class: 'card flat ph-decided', 'aria-label': 'Decided request ' + a.id },
-      h('div', { class: 'ph-head' }, chip(s[0], s[1]), h('span', { class: 'ph-amount small', text: money(a.postedCents != null ? a.postedCents : a.amountCents) }), h('span', { class: 'small muted grow', text: a.id })),
+    return h('article', { class: 'card flat ph-decided', 'aria-label': 'Decided write-off' },
+      h('div', { class: 'ph-head' }, chip(s[0], s[1]), h('span', { class: 'ph-amount small', text: money(a.postedCents != null ? a.postedCents : a.amountCents) })),
       done ? h('p', { class: 'ph-done', role: 'status', tabindex: '-1', text: done.text }) : null,
       // A gate raised against a request that was decided under this approver's hands renders here, on the row it names.
       gated ? refusal(gated) : null,
@@ -275,7 +275,8 @@
     const pending = Proto.store.pendingApprovalsFor();
     const decided = s.approvals.filter((a) => a.status !== 'pending');
     const root = h('div', { class: 'phone ph-page' });
-    root.append(pageHead('Approvals', 'Signed in as ' + who.name + (iAmEligible() ? ' · eligible second approver' : ' · not an approver')));
+    const hideWho = !!(P() && (P().privacy || P().device === 'shared' || P().device === 'operatory'));
+    root.append(pageHead('Approvals', 'Signed in as ' + (hideWho ? initials(who.name) : who.name) + (iAmEligible() ? ' · eligible second approver' : ' · not an approver')));
     if (cards.notice) root.append(h('p', { class: 'small ph-notice', role: 'status', tabindex: '-1', text: cards.notice }));
     if (pending.length) {
       root.append(h('p', { class: 'small muted', text: pending.length + ' waiting. One decision per card; there is no Approve all.' }));

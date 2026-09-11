@@ -215,7 +215,7 @@
   function render(r) {
     syncStore();
     const s = S(); const u = Proto.store.currentUser();
-    if (lastAuthor && lastAuthor !== u.id) expanded = {};
+    if (lastAuthor && lastAuthor !== u.id) { expanded = {}; gates = {}; }
     lastAuthor = u.id;
     const list = mine(); const hyg = isHygienist(u);
     // A gate belongs to its cause: the outage (the server answers again), the author whose press raised it (another

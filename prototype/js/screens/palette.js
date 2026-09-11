@@ -214,7 +214,7 @@
   const TAB_WORD = { era: 'ERA', aging: 'Aging', denials: 'Denials', statements: 'Statements' };
   function moneyTab(row) {
     if (row.kind === 'claim') {
-      const cid = (String(row.label).match(/c-\d+/) || [])[0];
+      const cid = row.claimId || (String(row.label).match(/c-\d+/) || [])[0];
       const claim = cid ? (Proto.store.get().claims || []).find((x) => x.id === cid) : null;
       return claim && (claim.status === 'submitted' || claim.status === 'pended') ? 'aging' : 'denials';
     }

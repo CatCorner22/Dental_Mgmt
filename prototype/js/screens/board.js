@@ -362,7 +362,7 @@
   function render(r) {
     syncStore(); pruneStaleGates();
     const uid = Proto.store.currentUser().id;
-    if (lastAuthor && lastAuthor !== uid) { expanded = {}; chairOpen = {}; }
+    if (lastAuthor && lastAuthor !== uid) { expanded = {}; chairOpen = {}; gates = {}; rowGates = {}; pings = {}; stripGate = null; }
     lastAuthor = uid;
     const s = S(); const loc = s.locations[0]; const outage = P().outage;
     const day = weekday(s.tenant.today);
