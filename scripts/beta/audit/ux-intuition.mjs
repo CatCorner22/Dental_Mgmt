@@ -235,5 +235,69 @@ export default ({ ctx, go, hop, click, rec }) => {
           bree === 'true' && after.quadrant === 'true', { bree, opened, after });
       } finally { await c.close(); }
     },
+
+    async 'U-perio-3'(b) {
+      const { c, p } = await ctx(b);
+      try {
+        await go(p, '#/hygienist/perio/enc-9001');
+        await click(p, 'perio.settings');
+        await click(p, 'perio.path.quadrant');
+        const first = await p.evaluate(() => (document.querySelector('[data-testid="perio.path.quadrant"]') || {}).getAttribute('aria-pressed'));
+        await hop(p, '#/hygienist/perio/enc-9002');
+        await click(p, 'perio.settings');
+        const second = await p.evaluate(() => ({
+          hash: location.hash,
+          user: Proto.store.currentUser().name,
+          quadrant: (document.querySelector('[data-testid="perio.path.quadrant"]') || {}).getAttribute('aria-pressed'),
+          facial: (document.querySelector('[data-testid="perio.path.facial_lingual"]') || {}).getAttribute('aria-pressed'),
+        }));
+        rec('U-perio-3', 'Choosing Quadrant on one perio exam resets to Facial around on the next exam for the same author',
+          'docs/13 feature 5 — probing path is a per-user preference chosen once',
+          first === 'true' && second.quadrant !== 'true', { first, second });
+      } finally { await c.close(); }
+    },
+
+    async 'U-rail-1'(b) {
+      const { c, p } = await ctx(b);
+      try {
+        await go(p, '#/frontdesk/board?device=shared');
+        await click(p, 'board.card.a-1042.rail');
+        await click(p, 'rail.explain');
+        const before = await p.evaluate(() => ({
+          pressed: (document.querySelector('[data-testid="rail.explain"]') || {}).getAttribute('aria-pressed'),
+          body: !!document.querySelector('#rail .explain'),
+        }));
+        await pinSwitch(p, '6666');
+        const after = await p.evaluate(() => ({
+          user: Proto.store.currentUser().name,
+          hash: location.hash,
+          pressed: (document.querySelector('[data-testid="rail.explain"]') || {}).getAttribute('aria-pressed'),
+          body: !!document.querySelector('#rail .explain'),
+        }));
+        rec('U-rail-1', 'Switching author on the shared desk leaves the previous author\'s Patient Rail Explain open',
+          'B9 — the rail\'s expanders belong to the author, not the workstation',
+          before.pressed === 'true' && after.user === 'Sam Dawson' && (after.pressed === 'true' || after.body), { before, after });
+      } finally { await c.close(); }
+    },
+
+    async 'U-phone-1'(b) {
+      const { c, p } = await ctx(b);
+      try {
+        await go(p, '#/owner/phone/approvals');
+        const seen = await p.evaluate(() => {
+          const canvas = document.getElementById('canvas');
+          const cards = [...document.querySelectorAll('.ph-card, .ph-decided, .ph-notice, .ph-sim')];
+          return {
+            text: ((canvas && canvas.innerText) || '').replace(/\s+/g, ' ').trim(),
+            labels: cards.map((el) => el.getAttribute('aria-label') || ''),
+            notice: ((document.querySelector('.ph-notice') || {}).textContent || '').trim(),
+            waiting: !!document.querySelector('.ph-card'),
+          };
+        });
+        rec('U-phone-1', 'The Approvals card prints the storage request id (ar-1) in the sentence a person reads or hears',
+          'C3 — no storage values on the glass',
+          seen.waiting && /\bar-1\b/.test([seen.text, seen.notice].concat(seen.labels).join(' ')), seen);
+      } finally { await c.close(); }
+    },
   };
 };

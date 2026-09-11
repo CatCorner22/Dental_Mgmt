@@ -20,6 +20,8 @@
 
   const rail = { pid: null, r: null, open: { balance: true }, explain: false, msg: null };
   const led = {}; // per user id and patient id: ledger view state (explain, patientVoice, asof, asofOpen, sent, gate, hi)
+  const railViews = {}; // userId -> { open, explain }; the rail's expanders belong to the author, not the workstation
+  let lastRailAuthor = null;
 
   const P = () => window.__proto || {};
   const S = () => Proto.store.get();
@@ -38,7 +40,7 @@
   /* View state is per user, never global: the As-of date one biller chose was what the next persona landed on. */
   let ledStore = null;
   const ledState = (pid) => {
-    const now = S(); if (ledStore && ledStore !== now) for (const k of Object.keys(led)) delete led[k];   // store reset: every view is stale
+    const now = S(); if (ledStore && ledStore !== now) { for (const k of Object.keys(led)) delete led[k]; for (const k of Object.keys(railViews)) delete railViews[k]; lastRailAuthor = null; }   // store reset: every view is stale
     ledStore = now;
     const k = Proto.store.currentUser().id + '|' + pid; return (led[k] = led[k] || { explain: false, patientVoice: false, asof: null, asofOpen: false, sent: null, gate: null, hi: null, pin: '' });
   };
@@ -142,6 +144,13 @@
   }
 
   function renderRail() {
+    const now = S(); if (ledStore && ledStore !== now) { for (const k of Object.keys(led)) delete led[k]; for (const k of Object.keys(railViews)) delete railViews[k]; lastRailAuthor = null; ledStore = now; }
+    const uid = Proto.store.currentUser().id;
+    if (lastRailAuthor !== uid) {
+      if (lastRailAuthor) railViews[lastRailAuthor] = { open: rail.open, explain: rail.explain };
+      const next = railViews[uid] || (railViews[uid] = { open: { balance: true }, explain: false });
+      rail.open = next.open; rail.explain = next.explain; lastRailAuthor = uid;
+    }
     const box = document.getElementById('rail'); if (!box) return;
     const p = Proto.store.patient(rail.pid); if (!p) { close(); return; }
     const priv = !!P().privacy; const r = route(); const b = Proto.store.balances(rail.pid);
@@ -273,7 +282,7 @@
     input.addEventListener('change', () => { const v = input.value; if (!v || v > today()) { input.classList.add('invalid'); hint.textContent = 'Pick a date up to today (' + longDate(today()) + ').'; return; } input.classList.remove('invalid'); st.asof = v; st.hi = null; const n = allRows.filter((e) => e.posted <= v).length; announce('As of ' + shortDate(v) + ': ' + n + (n === 1 ? ' row' : ' rows') + ' by posted date'); rerender(r, 'ledger.asof.back'); });
     return h('div', { class: 'ledger-asof stack' },
       h('div', { class: 'ledger-asof-row' }, h('div', { class: 'field' }, h('label', { for: 'ledger-asof-date', text: 'Show the ledger as it stood at the end of' }), input),
-        stmts.length ? h('div', { class: 'field' }, h('span', { class: 'small muted', text: 'or the statement the patient is holding' }), h('div', { class: 'btnrow' }, stmts.map((s) => btn('Statement ' + s.id + ' · ' + shortDate(s.created), { kind: 'quiet', testid: 'ledger.asof.statement.' + s.id, onClick: () => { st.asof = s.created; st.hi = null; rerender(r, 'ledger.asof.back'); } })))) : null,
+        stmts.length ? h('div', { class: 'field' }, h('span', { class: 'small muted', text: 'or the statement the patient is holding' }), h('div', { class: 'btnrow' }, stmts.map((s) => btn('Statement · ' + shortDate(s.created), { kind: 'quiet', testid: 'ledger.asof.statement.' + s.id, onClick: () => { st.asof = s.created; st.hi = null; rerender(r, 'ledger.asof.back'); } })))) : null,
         st.asof ? btn('Back to today', { kind: 'reversible', testid: 'ledger.asof.back', onClick: () => { st.asof = null; st.hi = null; announce('Back to today'); rerender(r, 'ledger.asof'); } }) : null),
       hint,
       st.asof ? h('div', { class: 'ledger-changed' }, h('h3', { text: 'What changed since ' + shortDate(st.asof) }), later.length ? h('ul', { class: 'ledger-list' }, later.map((e) => h('li', null, shortDate(e.posted) + ' ', KIND_WORD[e.kind] || humanize(e.kind), ' ', h('b', { text: money(e.amountCents) }), ' · ' + reasonText(e, false) + ' · ' + actorText(e)))) : h('p', { class: 'muted', text: 'Nothing posted after this date' })) : null);

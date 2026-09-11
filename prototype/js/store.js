@@ -978,7 +978,7 @@
     for (const s of S.synonyms) if (s.term.includes(q) || s.target.toLowerCase().includes(q)) out.push({ kind: 'action', label: s.target, syn: s.term + ' — called that in ' + s.source, route: s.route, irreversible: false });
     for (const a of S.actions) if (a.label.toLowerCase().includes(q)) out.push({ kind: 'action', label: a.label, route: a.route, irreversible: !!a.irreversible });
     for (const p of S.patients) if (p.name.toLowerCase().includes(q) || p.phone.endsWith(q) || p.mrn.toLowerCase().includes(q)) out.push({ kind: 'patient', label: p.name, syn: 'DOB ' + Proto.ui.longDate(p.dob) + ' · …' + p.phone.slice(-4), patientId: p.id });
-    for (const c of S.claims) if (c.id.includes(q) || (c.payer || '').toLowerCase().includes(q)) out.push({ kind: 'claim', label: 'Claim ' + c.id + ' · ' + c.payer, route: 'money' });
+    for (const c of S.claims) if (c.id.includes(q) || (c.payer || '').toLowerCase().includes(q)) out.push({ kind: 'claim', label: (c.payer || 'Payer') + ' claim' + (c.cdt ? ' · ' + (S.cdt[c.cdt] || [c.cdt])[0] : ''), route: 'money' });
     return out.slice(0, 8);
   }
 

@@ -21,11 +21,12 @@
   const S = () => Proto.store.get();
   const P = () => window.__proto;
   let lastStore = null; let states = {}; let keysOn = false; let flashTimer = null;
+  const pathPrefs = {}; // userId -> probing path; chosen once per author, not per encounter (docs/13 feature 5)
   const toothOf = (key) => Number(key.slice(1, key.indexOf('-')));
   const siteOf = (key) => Number(key.slice(key.indexOf('-s') + 2));
   const clock12 = Proto.ui.time;                       // one clock for every screen (ui.js)
 
-  function syncStore() { const s = S(); if (s !== lastStore) { lastStore = s; states = {}; } }
+  function syncStore() { const s = S(); if (s !== lastStore) { lastStore = s; states = {}; for (const k of Object.keys(pathPrefs)) delete pathPrefs[k]; } }
   function priorExam(pid) { return S().perioExams.filter((e) => e.patientId === pid && e.date < TODAY).sort((a, b) => (a.date < b.date ? 1 : -1))[0] || null; }
 
   /* Probing path: an ordered array of cell keys over present teeth. */
@@ -42,11 +43,13 @@
   function stateFor(enc) {
     syncStore();
     // A draft belongs to its author: drafts are keyed per author, so the PIN switch on a shared device shows the next author their own.
-    const k = enc.id + '|' + Proto.store.currentUser().id;
+    const uid = Proto.store.currentUser().id;
+    const k = enc.id + '|' + uid;
     if (states[k]) return states[k];
     const prior = priorExam(enc.patientId);
     const missing = (prior && prior.missing) || [];
-    const st = { encId: enc.id, prior: (prior && prior.sites) || {}, priorDate: prior ? prior.date : null, missing, pathPref: 'facial_lingual', path: buildPath(missing, 'facial_lingual'), cur: 0, sites: {}, history: [], last: null, pendingZero: false,
+    const pref = pathPrefs[uid] || 'facial_lingual';
+    const st = { encId: enc.id, prior: (prior && prior.sites) || {}, priorDate: prior ? prior.date : null, missing, pathPref: pref, path: buildPath(missing, pref), cur: 0, sites: {}, history: [], last: null, pendingZero: false,
       mode: 'full', sextants: ['', '', '', '', '', ''], scur: 0, padOpen: false, settingsOpen: false, lastKey: null, keystrokes: 0, flash: null, stamp: null, gate: null, licenceOpen: false, saved: null, savedAt: null, amending: false,
       tagOpen: false, tagTooth: '', tagText: '', tagToothTouched: false, tagTextTouched: false, tagged: [] };
     states[k] = st; return st;
@@ -323,7 +326,7 @@
       h('p', { class: 'pe-lastkey', 'aria-live': 'polite', text: 'Last key pressed: ' + (lk ? lk.key + ' → ' + lk.meaning : 'none yet. Press any key on a clicker or pedal to see how it maps.') }),
       h('p', { class: 'small muted', text: 'Any HID device that emits keystrokes works without a driver. Keystrokes this exam: ' + st.keystrokes + ' (counted, never scored per person).' }),
       h('div', { class: 'field' }, h('span', { class: 'small muted', id: 'pe-pathlab', text: 'Probing path (your preference, chosen once)' }),
-        h('div', { class: 'seg', role: 'group', 'aria-labelledby': 'pe-pathlab' }, ...PATHS.map(([code, label]) => btn(label, { kind: 'quiet', testid: 'perio.path.' + code, pressed: st.pathPref === code, onClick: () => { st.pathPref = code; const key = curKey(st); st.path = buildPath(st.missing, code); st.cur = key ? Math.max(0, st.path.indexOf(key)) : 0; rerender(r); } })))),
+        h('div', { class: 'seg', role: 'group', 'aria-labelledby': 'pe-pathlab' }, ...PATHS.map(([code, label]) => btn(label, { kind: 'quiet', testid: 'perio.path.' + code, pressed: st.pathPref === code, onClick: () => { const uid = Proto.store.currentUser().id; pathPrefs[uid] = code; const suffix = '|' + uid; for (const k of Object.keys(states)) { if (k.slice(-suffix.length) !== suffix) continue; const o = states[k]; const keep = o.path[o.cur] || null; o.pathPref = code; o.path = buildPath(o.missing, code); o.cur = keep ? Math.max(0, o.path.indexOf(keep)) : 0; } rerender(r); } })))),
       h('details', null, h('summary', { class: 'pe-summary', testid: 'perio.settings.grammar' }, 'The five-key grammar'), h('ul', { class: 'pe-list small' },
         h('li', { text: '1–9 record the depth and advance; 0 then a digit records 10 to 15; above 15 is refused.' }),
         h('li', { text: 'Space toggles bleeding and S suppuration on the last recorded site.' }),
