@@ -200,10 +200,11 @@
         h('div', { class: 'ph-amount', text: money(a.amountCents) }),
         h('div', { class: 'small muted', text: (REASON_LABEL[a.reason] || a.reason) + ' write-off · ' + a.id })),
       chip('review', 'Waiting')));
+    const privOn = !!(window.__proto && window.__proto.privacy);
     const nameRow = h('div', { class: 'ph-kv' }, h('span', { class: 'ph-k', text: 'Patient' }),
-      nameDisclosed(a)
+      nameDisclosed(a) && !privOn
         ? h('span', { class: 'ph-v', id: 'ph-name-' + a.id, tabindex: '-1', text: p.name + ' · ' + p.mrn })
-        : h('span', { class: 'ph-v' }, initials(p.name) + ' · ' + p.mrn + ' ', btn('Show name', { testid: 'phone.request.' + a.id + '.name', kind: 'quiet', class: 'compact', ariaLabel: 'Show the patient’s full name (this tap is logged)', onClick: () => {
+        : h('span', { class: 'ph-v' }, initials(p.name) + ' · ' + p.mrn + (privOn ? '' : ' '), privOn ? null : btn('Show name', { testid: 'phone.request.' + a.id + '.name', kind: 'quiet', class: 'compact', ariaLabel: 'Show the patient’s full name (this tap is logged)', onClick: () => {
           // The tap is the logged read the label promises; the store owns the disclosures row, and the card reads it back.
           if (Proto.store.disclose) Proto.store.disclose({ patientId: a.patientId, purpose: 'approval', recordIds: [a.id] });
           // Focus lands on the name the tap revealed, never on Approve: a repeated Enter must not open the step-up.

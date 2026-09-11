@@ -55,21 +55,21 @@
 
   /* Refusal: one verb line, one control, a Why disclosure, an aria-live announcement of the verb alone. */
   let refusalSeq = 0;
-  let lastGate = null;                                  // the gate this screen has already logged and announced
-  function resetGates() { lastGate = null; }
+  let lastGates = Object.create(null);                  // each standing gate is logged once; a singleton slot re-logged the canvas after the palette
+  function resetGates() { lastGates = Object.create(null); }
   function refusal(v) {
     // v: {code, verb, control, onControl, why, severity}
     const id = 'ref-' + (++refusalSeq);
     const sev = v.severity || 'required';
     // A screen that re-renders rebuilds the gate it is already showing. Logging and announcing on every
     // construction turned one visible gate into six refusal events and read the verb aloud again each time,
-    // so the event log counted gates that were never raised. The same gate is logged once until it changes —
+    // so the event log counted gates that were never raised. Each gate key is logged once until it changes —
     // unless the caller says the press raised it again (`fresh`): a second wrong PIN or date of birth reads
     // the same as the first and is still a second refusal — and `scope` (the pressing control's test id) tells the
     // same words raised by another control apart, so Keep, Tighten and Retire on one card each log their gate.
     const key = v.code + '|' + v.verb + '|' + (v.control || '') + '|' + (v.scope || '');
-    if (lastGate !== key || v.fresh) {
-      lastGate = key;
+    if (!lastGates[key] || v.fresh) {
+      lastGates[key] = true;
       Proto.events.refusal(v.code, v.verb, v.control);
       Proto.router.announce(v.verb);                    // one verb line: the control label is not read as a second sentence
     }
@@ -163,7 +163,12 @@
     overlay._close = close;                        // closeDialogs() reaches every open dialog through its overlay
     window.addEventListener('hashchange', close); // a dialog never outlives the route it opened on
     function onKey(ev) {
-      if (ev.key === 'Escape') { ev.stopPropagation(); close(); }
+      if (ev.key === 'Escape') {
+        if (topDialog() !== box) return;
+        ev.stopPropagation();
+        ev.stopImmediatePropagation();
+        close();
+      }
       if (ev.key === 'Tab') {
         const f = [...box.querySelectorAll('button:not([disabled]), input, select, textarea, [tabindex]:not([tabindex="-1"]), summary')];
         if (!f.length) return;

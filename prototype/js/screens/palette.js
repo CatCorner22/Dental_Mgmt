@@ -73,7 +73,10 @@
   /* ---- open / close ---- */
   function open(r) {
     if (closeDialog) close();
-    if (Proto.ui.topDialog()) return;   // one dialog at a time: a pad already open keeps the keyboard
+    // A PIN pad owns every key until it closes (A-storm2-shell-3). A preview or Why dialog does not
+    // block Search: the first-shift gesture is Ctrl+K / the Search chip, and Escape then closes only Search.
+    const top = Proto.ui.topDialog();
+    if (top && (top.querySelector('[data-testid="pin.display"]') || top.querySelector('[data-testid="phone.stepup.display"]'))) return;
     st = { r, q: '', rows: [], sel: -1, step: 'search', patient: null, row: null, dob: '', dobTouched: false, refused: false };
     const body = h('div', { class: 'stack pal', onKeydown: onKey });
     st.body = body;
@@ -139,11 +142,11 @@
     st.list.replaceChildren(...nodes);
     // The count names what is on screen: the number of recents rendered, and the number of rows the search
     // returned — which is a capped list, not the number of rows that matched.
-    if (q.length === 0) st.hint.textContent = isRecents ? 'Your last ' + (COUNT_WORD[rows.length] || rows.length) + '. Type three letters to search.' : 'Type three letters of a name, phone, claim, or the word you know from your old system.';
-    else if (q.length < 3) st.hint.textContent = 'Type ' + (3 - q.length) + ' more letter' + (3 - q.length === 1 ? '' : 's') + '.';
-    else if (!rows.length) st.hint.textContent = 'Nothing matches "' + q + '". Patient search does not widen to phonetic matches; try the last four digits of the phone or the MRN.';
-    else st.hint.textContent = rows.length + ' shown — the list is capped, so add letters to narrow it. Arrow keys move, Enter opens.';
-    st.status.textContent = q.length >= 3 ? (rows.length ? rows.length + ' shown, the list is capped' : 'No results') : '';
+    if (q.length === 0) { st.hint.textContent = isRecents ? 'Your last ' + (COUNT_WORD[rows.length] || rows.length) + '. Type three letters to search.' : 'Type three letters of a name, phone, claim, or the word you know from your old system.'; st.status.textContent = ''; }
+    else if (q.length < 3) { st.hint.textContent = 'Type ' + (3 - q.length) + ' more letter' + (3 - q.length === 1 ? '' : 's') + '.'; st.status.textContent = ''; }
+    else if (!rows.length) { st.hint.textContent = 'Nothing matches "' + q + '". Patient search does not widen to phonetic matches; try the last four digits of the phone or the MRN.'; st.status.textContent = 'No results'; }
+    else if (rows.length >= 8) { st.hint.textContent = rows.length + ' shown — the list is capped, so add letters to narrow it. Arrow keys move, Enter opens.'; st.status.textContent = rows.length + ' shown, the list is capped'; }
+    else { st.hint.textContent = rows.length + (rows.length === 1 ? ' match' : ' matches') + '. Arrow keys move, Enter opens.'; st.status.textContent = rows.length + (rows.length === 1 ? ' match' : ' matches'); }
     syncSelection();
     // A search retires the temp's "find" step in the store; the rail says so now, not at the next route.
     if (q.length >= 3 && Proto.screens.shell && Proto.screens.shell.refreshRail1) Proto.screens.shell.refreshRail1(st.r);
@@ -325,7 +328,7 @@
     // Mismatch: one verb line, one control; the primary switches to Held. Each miss is its own refusal (fresh).
     st.refused = true;
     st.gate.replaceChildren(refusal({
-      code: 'second_identifier', verb: 'Check the date of birth', control: 'Try again', fresh: true,
+      code: 'second_identifier', verb: 'Check the date of birth', control: 'Try again', fresh: true, scope: 'palette.dob.' + p.id,
       onControl: () => { st.refused = false; st.dob = ''; st.dobInput.value = ''; st.dobInput.classList.remove('invalid'); st.gate.replaceChildren(); swapGo(false); st.dobHint.textContent = 'Second identifier. Ask the patient, or read it from the appointment card.'; st.dobInput.focus(); },
       why: 'The date of birth entered does not match this patient. Two identifiers before a chart opens; patient search never widens to phonetic matches.',
     }));
