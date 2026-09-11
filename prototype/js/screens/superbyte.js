@@ -16,8 +16,10 @@
   // ---- standard wording: APPLIED (fixed, language-only, no clinical claim) vs FLAGGED (hides a fact) ----------
   const APPLIED = [
     ['abbreviation', /\bx-?rays?\b/gi, (m) => (/s$/i.test(m) ? 'radiographs' : 'radiograph'), 'ADA record-keeping: radiograph is the record word'],
-    ['abbreviation', /\b[Pp]ts\b\.?/g, (m) => (/^P/.test(m) ? 'Patients' : 'patients'), 'Shared abbreviation key'],
-    ['abbreviation', /\b[Pp]t\b\.?(?=\s)/g, (m) => (/^P/.test(m) ? 'Patient' : 'patient'), 'Shared abbreviation key'],
+    // The abbreviation's own dot goes only when a lowercase word follows ("Pt. reports"); a sentence-ending
+    // dot after "Pt." belongs to the sentence and stays. Case follows position, not the abbreviation's capital.
+    ['abbreviation', /\b[Pp]ts\b(?:\.(?=\s+[a-z]))?/g, () => 'patients', 'Shared abbreviation key'],
+    ['abbreviation', /\b[Pp]t\b(?:\.(?=\s+[a-z]))?(?=[\s.,;:)]|$)/g, () => 'patient', 'Shared abbreviation key'],
     ['abbreviation', /\bw\/o\b/gi, () => 'without', 'Shared abbreviation key'],
     ['abbreviation', /\bw\/(?=\s)/gi, () => 'with', 'Shared abbreviation key'],
     ['abbreviation', /\bBWX\b/g, () => 'bitewing radiographs', 'Imaging add-on: modality in words'],
@@ -36,7 +38,7 @@
     ['abbreviation', /\bBID\b/g, () => 'twice daily', 'ISMP: write the frequency in words'],
     ['abbreviation', /\bTID\b/g, () => 'three times daily', 'ISMP: write the frequency in words'],
     ['abbreviation', /\bQID\b/g, () => 'four times daily', 'ISMP: write the frequency in words'],
-    ['abbreviation', /\bq\.?d\.?(?=[\s,.;]|$)/gi, () => 'daily', 'ISMP do-not-use list: QD reads as QID'],
+    ['abbreviation', /\bq\.?d\b(?!\w)/gi, () => 'daily', 'ISMP do-not-use list: QD reads as QID'],
     ['abbreviation', /\bpost-?op\b/gi, () => 'postoperative', 'Shared abbreviation key'],
     ['abbreviation', /\bpre-?op\b/gi, () => 'preoperative', 'Shared abbreviation key'],
     ['spelling', /\babcess(es)?\b/gi, (m, s) => 'abscess' + (s ? 'es' : ''), 'Spelling'],
@@ -60,11 +62,21 @@
     ['do-not-use', /\b\d+\s*u\b(?!\w)|\bIU\b|\bMSO4\b|\bMgSO4\b|\bqod\b/g, 'do-not-use designation', 'Joint Commission do-not-use list: write unit, international unit, the drug name, every other day.'],
     ['kilogram-rule', /\blbs?\b[\s\S]{0,80}\bmg\s*\/\s*kg\b|\bmg\s*\/\s*kg\b[\s\S]{0,80}\blbs?\b/gi, 'pounds beside mg/kg', 'Weight-based dosing is reconstructible only in kilograms (a pound read as a kilogram is a 2.2× dose).'],
   ];
-  function standardize(text) {
+  // standardize(text, only?): `only` is the set of matched strings the author did not keep as typed; without it
+  // every APPLIED rule runs. Apply and the preview share this one engine so what the row shows is what lands.
+  function standardize(text, only) {
     const applied = []; let out = String(text || '');
+    // A rewrite that opens a sentence keeps the sentence's capital ("BWX taken." -> "Bitewing radiographs taken.").
+    const atSentenceStart = (s, at) => /(^|[.!?]\s+|\n\s*)$/.test(s.slice(0, at));
     for (const [kind, re, to, why] of APPLIED) {
       const seen = {};
-      out = out.replace(re, (...args) => { const m = args[0]; const r = to(...args); if (r !== m) { seen[m] = seen[m] || { kind, from: m, to: r, count: 0, why }; seen[m].count++; } return r; });
+      out = out.replace(re, (...args) => {
+        const m = args[0]; const at = args[args.length - 2]; const whole = args[args.length - 1];
+        if (only && !only.has(m)) return m;
+        let r = to(...args); if (r !== m && /^[a-z]/.test(r) && atSentenceStart(whole, at)) r = r[0].toUpperCase() + r.slice(1);
+        if (r !== m) { seen[m] = seen[m] || { kind, from: m, to: r, count: 0, why }; seen[m].count++; }
+        return r;
+      });
       for (const k of Object.keys(seen)) applied.push(seen[k]);
     }
     const flags = [];
@@ -301,8 +313,7 @@
   }
   function applyWording(r, enc, pending) {
     const note = draftOf(enc); const set = new Set(pending.map((a) => a.from));
-    const apply = (txt) => { let out = String(txt || ''); for (const [, re, to] of APPLIED) out = out.replace(re, (...args) => (set.has(args[0]) ? to(...args) : args[0])); return out; };
-    note.assessment = apply(note.assessment); note.plan = apply(note.plan);
+    note.assessment = standardize(note.assessment, set).text; note.plan = standardize(note.plan, set).text;
     const x = Proto.screens.encounter.state(enc.id); if (x.checked) x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3);
     rerender(r); focusTid('superbyte.note.field.assessment');
     Proto.router.announce('Applied ' + pending.length + ' standard rewrite' + (pending.length === 1 ? '' : 's'));
