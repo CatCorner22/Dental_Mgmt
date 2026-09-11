@@ -491,3 +491,101 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 
 /* A drawer's way out stays reachable however the drawer is scrolled (bp-09, round 2). */
 .drawer-head { position: sticky; top: 0; z-index: 3; background: var(--surface); padding: var(--space-2) 0; }
+
+/* ---- module: superbyte (js/screens/superbyte.js) — appended, never edits rules above ----
+   The glass is sized to the canvas, not to its content: the page takes the canvas height, the three columns
+   split it, and every panel inside is capped (three readings, three rows, three questions, four wording rows)
+   so nothing on a 1024×700 operatory tablet or a desk sits under the fold. Below 1024 px the columns stack
+   and the page scrolls like any other. */
+.sb-page { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.sb-head { margin-bottom: var(--space-2); flex: 0 0 auto; }
+.sb-head h1 { font-size: var(--fs-4); }
+.sb-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .95fr) minmax(0, 1.25fr); gap: var(--space-3); }
+.sb-col { min-height: 0; min-width: 0; display: flex; flex-direction: column; gap: var(--space-2); overflow: auto; }
+.sb-col .card { padding: var(--space-2) var(--space-3); gap: var(--space-2); box-shadow: none; flex: 0 0 auto; }
+.sb-col .card h2 { font-size: var(--fs-2); }
+.sb-col .chip { min-height: 24px; font-size: 12px; }
+.sb-col-note { display: flex; flex-direction: column; }
+.sb-note { flex: 1 1 auto !important; min-height: 0; display: flex; flex-direction: column; }
+.sb-fieldwrap { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+textarea.input.sb-field { flex: 1 1 auto; min-height: 64px; resize: none; font-size: var(--fs-1); line-height: 1.4; }
+.sb-frozen { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.sb-fromchart { flex: 0 0 auto; }
+.sb-core { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 2px var(--space-2); }
+.sb-core li { display: flex; align-items: center; gap: 6px; min-height: 20px; font-size: var(--fs-1); }
+.sb-core li .glyph { font-size: 10px; width: 12px; text-align: center; }
+.sb-core li.present .glyph { color: var(--clear-fill); }
+.sb-core li.open .glyph { color: var(--ink-3); }
+.sb-core li .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-asks { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.sb-asks li { font-size: var(--fs-1); line-height: 1.35; padding-left: var(--space-2); border-left: 3px solid var(--review-rail); }
+.sb-asks li b { display: block; }
+.sb-gate .killer .refusal { padding: 4px var(--space-2); }
+.sb-gate .killer .refusal .verb { min-width: 100px; font-size: var(--fs-1); }
+.sb-wording { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.sb-wordrow, .sb-flagrow { font-size: var(--fs-1); min-height: 28px; }
+.sb-wordrow .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-from { font-family: var(--mono); background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.sb-wordrow .btn.compact { min-height: 32px; font-size: 12px; padding: 0 var(--space-2); }
+.sb-flagrow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.sb-wording-card .btn.reversible { min-height: 36px; padding: 0 var(--space-3); font-size: var(--fs-1); }
+/* SuperByte itself: observe-only glass. Nothing inside it takes text; selection and copy are refused. */
+.sb-byte { user-select: none; -webkit-user-select: none; gap: 6px !important; background: linear-gradient(135deg, rgba(242, 206, 75, .12), var(--surface) 45%, rgba(15, 118, 110, .06)); border-color: rgba(201, 162, 39, .55); }
+.sb-bytehead { display: flex; gap: var(--space-2); align-items: flex-start; }
+.sb-facewrap { position: relative; flex: 0 0 auto; }
+.sb-face { display: block; image-rendering: pixelated; border-radius: 4px; }
+.sb-observe { position: absolute; right: -4px; bottom: -4px; background: #3D2E14; color: #F7E7B5; font-size: 9px; font-weight: 700; border-radius: 3px; padding: 1px 4px; letter-spacing: .04em; }
+.sb-titles { gap: 2px; min-width: 0; }
+.sb-titles h2 { font-size: var(--fs-3) !important; }
+.sb-status { font-weight: 600; color: var(--ink); }
+.sb-oneway { color: var(--ink-2); line-height: 1.35; font-size: 12px; }
+.sb-compass-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 0 0 auto; }
+.sb-pct { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* The six stages read as one wrapping line of small tiles: stage name, then its one-clause state. Nothing
+   truncates; a long PHI list simply takes a wider tile. */
+.sb-pipe { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 3px 4px; counter-reset: stage; }
+.sb-pipe li { display: inline-flex; align-items: baseline; gap: 4px; padding: 1px 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); font-size: 11px; line-height: 1.3; color: var(--ink-2); min-height: 20px; max-width: 100%; }
+.sb-pipe li b { color: var(--ink); font-size: 11px; white-space: nowrap; }
+.sb-pipe li b::before { counter-increment: stage; content: counter(stage) " "; color: var(--ink-3); }
+.sb-pipe li span { overflow-wrap: anywhere; min-width: 0; }
+.sb-reading { padding: var(--space-2) var(--space-3); border: 1px solid rgba(201, 162, 39, .5); border-top: 3px solid #C9A227; border-radius: var(--radius); background: var(--surface); display: flex; flex-direction: column; gap: 3px; }
+.sb-kind { font-size: 12px; font-weight: 700; color: #7A5A0F; }
+:root[data-theme="dark"] .sb-kind { color: #F2CE4B; }
+.sb-say { font-weight: 600; line-height: 1.3; font-size: var(--fs-2); }
+.sb-whyline { line-height: 1.35; color: var(--ink-2); }
+.sb-q { font-weight: 600; font-size: var(--fs-1); color: var(--brand); }
+.sb-src { font-size: 12px; line-height: 1.3; border-top: 1px solid var(--line); padding-top: 3px; }
+.sb-readhead { gap: 6px; flex-wrap: nowrap; }
+.sb-pager { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.sb-pager .count { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sb-pager .btn.compact { min-height: 32px; font-size: 12px; padding: 0 var(--space-2); }
+.sb-titlerow { gap: 6px; flex-wrap: wrap; }
+.sb-wordfoot { line-height: 1.3; }
+.sb-rails { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+.sb-rail { display: flex; flex-direction: column; gap: 0; }
+.sb-railline { display: flex; align-items: center; gap: 6px; font-size: var(--fs-1); min-height: 18px; line-height: 1.2; }
+.sb-railline .lbl { flex: 0 0 40%; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-railline .sb-bar { flex: 1 1 auto; }
+.sb-railline .dir { flex: 0 0 auto; font-weight: 600; white-space: nowrap; font-size: 12px; color: var(--ink-2); }
+.sb-rail.on-target .dir { color: var(--clear-ink); }
+.sb-rail.toward .dir { color: var(--link); }
+.sb-bar { position: relative; height: 6px; border-radius: 999px; background: var(--slate-200); overflow: hidden; }
+:root[data-theme="dark"] .sb-bar { background: var(--slate-700); }
+.sb-bar .fill { height: 100%; border-radius: 999px; background: var(--slate-400); transition: width var(--motion); }
+.sb-rail.on-target .sb-bar .fill { background: var(--accent); }
+.sb-rail.toward .sb-bar .fill { background: var(--blue); }
+.sb-bar .tick { position: absolute; top: -1px; width: 2px; height: 8px; background: var(--ink); border-radius: 1px; }
+.sb-railnote { font-size: 12px; line-height: 1.3; }
+.sb-picker .wrow { grid-template-columns: minmax(140px, 1.2fr) auto minmax(160px, 2fr) auto; }
+/* Tablet glass (641–1100 px): the dentist's bar carries one more word now (SuperByte), so its buttons give
+   up 4 px of side padding each and the bar keeps one row. Targets stay 44 px; the canvas keeps ~50 px. */
+@media (min-width: 641px) and (max-width: 1100px) {
+  .topbar .btn { padding: 0 var(--space-3); }
+}
+@media (max-width: 1023px) {
+  .sb-page { height: auto; }
+  .sb-grid { grid-template-columns: 1fr; }
+  .sb-col { overflow: visible; }
+  textarea.input.sb-field { min-height: 120px; }
+}
+/* ---- end module: superbyte ---- */

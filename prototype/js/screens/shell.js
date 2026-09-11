@@ -9,9 +9,9 @@
     frontdesk: [['board', 'Board'], ['money', 'Money Desk'], ['roles', 'Roles']],
     temp: [['board', 'Board']],
     biller: [['money', 'Money Desk'], ['board', 'Board'], ['close', 'Daily Close'], ['roles', 'Roles']],
-    hygienist: [['chairs', 'Chairs'], ['board', 'Board']],
-    dentist: [['exams', 'Exams to sign'], ['chairs', 'Chairs'], ['board', 'Board']],
-    surgeon: [['exams', 'Exams to sign'], ['board', 'Board']],
+    hygienist: [['chairs', 'Chairs'], ['board', 'Board'], ['superbyte', 'SuperByte']],
+    dentist: [['exams', 'Exams to sign'], ['chairs', 'Chairs'], ['board', 'Board'], ['superbyte', 'SuperByte']],
+    surgeon: [['exams', 'Exams to sign'], ['board', 'Board'], ['superbyte', 'SuperByte']],
     owner: [['close', 'Daily Close'], ['money', 'Money Desk'], ['board', 'Board'], ['roles', 'Roles'], ['risk', 'Practice risk']],
     compliance: [['risk', 'Practice risk'], ['roles', 'Roles'], ['close', 'Daily Close']],
   };
