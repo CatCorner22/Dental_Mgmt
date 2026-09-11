@@ -361,7 +361,7 @@
     // The PIN authorises the person who typed it: a switch of author (the pad, a persona change) discards it.
     if (st.pinOwner !== uid) { if (st.pinOwner) st.pin = ''; st.pinOwner = uid; }
     if (st.heldReq) st.heldReq = S.approvals.find((x) => x.id === st.heldReq.id) || st.heldReq;
-    const procs = S.procedures.filter((p) => p.encounterId === a.encounterId);
+    const procs = S.procedures.filter((p) => p.encounterId === a.encounterId && !p.reversed);
     const bal = Proto.store.balances(a.patientId);
     const covers = (fee) => st.decision === 'collect' && cents(st.amountStr) >= fee;
     const name = displayName(pt.name, P.privacy);

@@ -20,8 +20,9 @@
   let rowGates = {};  // apptId -> gate rendered at the checkout-queue row
   let stripGate = null; // the readiness strip's own gate
   let pings = {};     // apptId -> {node} refusal or {text} stamp
-  let expanded = {};  // apptId -> boolean
-  let chairOpen = {}; // op -> boolean
+  let expanded = {};  // apptId -> boolean; cleared when the author changes
+  let chairOpen = {}; // op -> boolean; cleared when the author changes
+  let lastAuthor = null;
   let boardUi = {};   // userId -> {collapsed, labCalled, deviceReset, eligRerun}; a shared desk is not a person
   let keysOn = false;
 
@@ -55,7 +56,7 @@
   function syncStore() { const s = S(); if (s !== lastStore) { lastStore = s; gates = {}; rowGates = {}; stripGate = null; pings = {}; expanded = {}; chairOpen = {}; boardUi = {}; } }
   /* A gate outlives its reason only if nobody clears it: once the connection is back (or the pass is issued) the
      gates that cause raised go and every primary returns to its own identity, so Held is never a dead end. */
-  const stale = (g) => (g.code === 'outage' && !P().outage) || (g.code === 'entitlement' && !Proto.store.currentUser().noPass);
+  const stale = (g) => (g.code === 'outage' && !P().outage) || (g.code === 'entitlement' && !Proto.store.currentUser().noPass) || (g.userId && g.userId !== Proto.store.currentUser().id);
   function pruneStaleGates() {
     for (const k of Object.keys(gates)) if (stale(gates[k])) delete gates[k];
     for (const k of Object.keys(rowGates)) if (stale(rowGates[k])) delete rowGates[k];
@@ -86,7 +87,7 @@
      logs and announces the gate; this screen never announces one itself. Every code has a control that acts:
      outage opens the support line, a missing pass opens Roles, anything else runs the caller's onControl. */
   function gateFor(res, r, onControl) {
-    const g = { code: res.code, verb: res.verb, control: res.control, why: res.why };
+    const g = { code: res.code, verb: res.verb, control: res.control, why: res.why, userId: Proto.store.currentUser().id };
     g.node = refusal({ code: g.code, verb: g.verb, control: g.control, why: g.why, fresh: true, severity: g.code === 'outage' ? 'stop' : 'required', onControl: () => { if (g.code === 'outage') support(); else if (g.code === 'entitlement') openRoles(); else if (onControl) onControl(g); } });
     return g;
   }
@@ -206,11 +207,13 @@
     for (let n = 1; n <= loc.operatories; n++) {
       const seated = todays().find((a) => a.op === n && IN_CHAIR.includes(a.status));
       const prov = seated ? Proto.store.user(seated.providerId) : null;
-      const b = h('button', { type: 'button', class: 'chair', testid: 'board.chair.' + n, 'aria-expanded': String(!!chairOpen[n]), 'aria-label': 'Chair ' + n + (prov ? ', author ' + prov.name + (prov.licence ? ', ' + prov.licence : '') : ', empty') + '. Show device author', onClick: () => { chairOpen[n] = !chairOpen[n]; render(r); const el = document.querySelector('[data-testid="board.chair.' + n + '"]'); if (el) el.focus(); } },
+      const hideAuthor = P().privacy || P().device === 'shared' || P().device === 'operatory';
+      const authorShown = prov ? displayName(prov.name, hideAuthor) + (prov.licence ? ', ' + prov.licence : '') : null;
+      const b = h('button', { type: 'button', class: 'chair', testid: 'board.chair.' + n, 'aria-expanded': String(!!chairOpen[n]), 'aria-label': 'Chair ' + n + (authorShown ? ', author ' + authorShown : ', empty') + '. Show device author', onClick: () => { chairOpen[n] = !chairOpen[n]; render(r); const el = document.querySelector('[data-testid="board.chair.' + n + '"]'); if (el) el.focus(); } },
         h('span', { text: 'Chair ' + n + ' · ' + provInitials(prov) }),
         prov && prov.licence ? h('span', { class: 'small muted', text: prov.licence }) : null,
         seated && seated.status === 'ready_for_exam' ? chip('review', 'Exam requested') : null);
-      const detail = chairOpen[n] ? h('div', { class: 'stamp', text: prov ? prov.name + (prov.licence ? ', ' + prov.licence : '') + ' is the author on the chair ' + n + ' device' : 'No author on the chair ' + n + ' device; the next PIN opens a session' }) : null;
+      const detail = chairOpen[n] ? h('div', { class: 'stamp', text: authorShown ? authorShown + ' is the author on the chair ' + n + ' device' : 'No author on the chair ' + n + ' device; the next PIN opens a session' }) : null;
       strip.append(h('div', { class: 'chairwrap', role: 'listitem' }, b, detail));
     }
     return strip;
@@ -358,6 +361,9 @@
   // ---- Screen ------------------------------------------------------------------------------
   function render(r) {
     syncStore(); pruneStaleGates();
+    const uid = Proto.store.currentUser().id;
+    if (lastAuthor && lastAuthor !== uid) { expanded = {}; chairOpen = {}; }
+    lastAuthor = uid;
     const s = S(); const loc = s.locations[0]; const outage = P().outage;
     const day = weekday(s.tenant.today);
     const sub = clock12(s.clock.time) + ' · ' + loc.operatories + ' chairs · ' + todays().length + ' appointments' + (outage ? ' · read-only from the ' + clock12(CACHE_TIME) + ' cache' : '') + ' · keys: A arrive, S seat, C checkout';

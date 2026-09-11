@@ -20,7 +20,7 @@
 
   const S = () => Proto.store.get();
   const P = () => window.__proto;
-  let lastStore = null; let states = {}; let keysOn = false; let pathPref = 'facial_lingual'; let flashTimer = null;
+  let lastStore = null; let states = {}; let keysOn = false; let flashTimer = null;
   const toothOf = (key) => Number(key.slice(1, key.indexOf('-')));
   const siteOf = (key) => Number(key.slice(key.indexOf('-s') + 2));
   const clock12 = Proto.ui.time;                       // one clock for every screen (ui.js)
@@ -46,7 +46,7 @@
     if (states[k]) return states[k];
     const prior = priorExam(enc.patientId);
     const missing = (prior && prior.missing) || [];
-    const st = { encId: enc.id, prior: (prior && prior.sites) || {}, priorDate: prior ? prior.date : null, missing, path: buildPath(missing, pathPref), cur: 0, sites: {}, history: [], last: null, pendingZero: false,
+    const st = { encId: enc.id, prior: (prior && prior.sites) || {}, priorDate: prior ? prior.date : null, missing, pathPref: 'facial_lingual', path: buildPath(missing, 'facial_lingual'), cur: 0, sites: {}, history: [], last: null, pendingZero: false,
       mode: 'full', sextants: ['', '', '', '', '', ''], scur: 0, padOpen: false, settingsOpen: false, lastKey: null, keystrokes: 0, flash: null, stamp: null, gate: null, licenceOpen: false, saved: null, savedAt: null, amending: false,
       tagOpen: false, tagTooth: '', tagText: '', tagToothTouched: false, tagTextTouched: false, tagged: [] };
     states[k] = st; return st;
@@ -323,7 +323,7 @@
       h('p', { class: 'pe-lastkey', 'aria-live': 'polite', text: 'Last key pressed: ' + (lk ? lk.key + ' → ' + lk.meaning : 'none yet. Press any key on a clicker or pedal to see how it maps.') }),
       h('p', { class: 'small muted', text: 'Any HID device that emits keystrokes works without a driver. Keystrokes this exam: ' + st.keystrokes + ' (counted, never scored per person).' }),
       h('div', { class: 'field' }, h('span', { class: 'small muted', id: 'pe-pathlab', text: 'Probing path (your preference, chosen once)' }),
-        h('div', { class: 'seg', role: 'group', 'aria-labelledby': 'pe-pathlab' }, ...PATHS.map(([code, label]) => btn(label, { kind: 'quiet', testid: 'perio.path.' + code, pressed: pathPref === code, onClick: () => { pathPref = code; const key = curKey(st); st.path = buildPath(st.missing, code); st.cur = key ? Math.max(0, st.path.indexOf(key)) : 0; rerender(r); } })))),
+        h('div', { class: 'seg', role: 'group', 'aria-labelledby': 'pe-pathlab' }, ...PATHS.map(([code, label]) => btn(label, { kind: 'quiet', testid: 'perio.path.' + code, pressed: st.pathPref === code, onClick: () => { st.pathPref = code; const key = curKey(st); st.path = buildPath(st.missing, code); st.cur = key ? Math.max(0, st.path.indexOf(key)) : 0; rerender(r); } })))),
       h('details', null, h('summary', { class: 'pe-summary', testid: 'perio.settings.grammar' }, 'The five-key grammar'), h('ul', { class: 'pe-list small' },
         h('li', { text: '1–9 record the depth and advance; 0 then a digit records 10 to 15; above 15 is refused.' }),
         h('li', { text: 'Space toggles bleeding and S suppuration on the last recorded site.' }),

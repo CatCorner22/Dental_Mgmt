@@ -43,11 +43,18 @@
   const EXTRA_OPTIONS = ['refund', 'write_off', 'prepare_deposit'];
 
   // Per-screen UI state; cleared whenever the store is rebuilt (window.__proto.reset).
+  // A day-pass draft belongs to its author: the PIN switch on a shared desk used to hand the open form to the next seat.
+  const views = {};
   let lastStore = null; let st = null;
   function freshState() {
     return { formOpen: false, expanded: {}, form: { name: '', role: 'frontdesk', location: 'loc-1', end: '17:30', extra: [] }, touched: {}, previewOn: false, decision: null, saveGate: null, issued: null, credentialNote: false, credentialRequested: false, previewKey: null, previewNode: null };
   }
-  function state() { const s = S(); if (s !== lastStore) { lastStore = s; st = freshState(); } return st; }
+  function state() {
+    const s = S();
+    if (s !== lastStore) { lastStore = s; for (const k of Object.keys(views)) delete views[k]; }
+    const uid = Proto.store.currentUser().id;
+    return (st = views[uid] || (views[uid] = freshState()));
+  }
   const clock12 = Proto.ui.time;                       // one clock for every screen (ui.js)
   const template = (code) => S().roleTemplates.find((t) => t.code === code);
   const roleLabel = (code) => TEMPLATE_LABEL[code] || ROLE_LABEL[code] || (template(code) || {}).label || code;
