@@ -16,7 +16,8 @@
   // Per-screen UI state; cleared whenever the store is rebuilt (window.__proto.reset).
   let lastStore = null;
   let gates = {};    // apptId -> {code, verb, control, why, node}
-  let expanded = {}; // apptId -> boolean
+  let expanded = {}; // apptId -> boolean; cleared when the author changes
+  let lastAuthor = null;
   let keysOn = false;
 
   const S = () => Proto.store.get();
@@ -213,7 +214,10 @@
   // ---- Screen ------------------------------------------------------------------------------
   function render(r) {
     syncStore();
-    const s = S(); const u = Proto.store.currentUser(); const list = mine(); const hyg = isHygienist(u);
+    const s = S(); const u = Proto.store.currentUser();
+    if (lastAuthor && lastAuthor !== u.id) expanded = {};
+    lastAuthor = u.id;
+    const list = mine(); const hyg = isHygienist(u);
     // A gate belongs to its cause: the outage (the server answers again), the author whose press raised it (another
     // author's press asks the store afresh), the missing pass (issued since).
     for (const id of Object.keys(gates)) { const g = gates[id]; if ((g.code === 'outage' && !s.outage) || (g.code !== 'outage' && g.userId !== u.id) || (g.code === 'entitlement' && !u.noPass)) delete gates[id]; }

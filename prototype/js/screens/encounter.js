@@ -147,7 +147,7 @@
     return parts.join(' · ');
   }
   function practiceLine() {
-    const n = S().filedNotes.length;
+    const n = S().filedNotes.filter((f) => f.filedOn === S().tenant.today).length;
     return 'Practice today: ' + (n === 1 ? '1 note filed' : n + ' notes filed') + ' (practice level, nobody ranked)';
   }
   function renderExams(r) {
@@ -392,7 +392,7 @@
   }
 
   // ---- note ---------------------------------------------------------------------------------
-  function starterTooth(enc, x) { if (x.tooth) return x.tooth; const ces = eventsOf(enc.id).filter((c) => c.tooth != null); if (ces.length) return ces[ces.length - 1].tooth; const t = openTags(enc.id)[0]; return t ? t.tooth : '[tooth]'; }
+  function starterTooth(enc, x) { if (x.tooth) return x.tooth; const ces = eventsOf(enc.id).filter((c) => c.tooth != null); if (ces.length) return ces[ces.length - 1].tooth; const t = openTags(enc.id)[0]; return t ? t.tooth : null; }
   function starterSurfaces(enc, x) { if (x.surfaces.length) return x.surfaces.map((o) => o.s).join(''); const ces = eventsOf(enc.id).filter((c) => c.tooth != null); if (ces.length && ces[ces.length - 1].surfaces && ces[ces.length - 1].surfaces.length) return ces[ces.length - 1].surfaces.join(''); const t = openTags(enc.id)[0]; return t && t.surfaces ? t.surfaces.join('') : 'DO'; }
   function starters() { return isSurgeon() ? ['sedation', 'caries', 'recurrent', 'fractured'] : ['caries', 'recurrent', 'fractured']; }
   function renderNote(r, enc, x) {
@@ -415,6 +415,10 @@
   function applyStarter(r, enc, x, k) {
     if (!dentistLike()) { Proto.router.announce('Only a dentist writes Assessment and Plan'); return; }
     const t = starterTooth(enc, x); const sf = starterSurfaces(enc, x);
+    if (t == null) {
+      x.gateNode = refusal({ code: 'tooth_required', verb: 'Pick a tooth first', control: 'Go to teeth', onControl: () => focusFirst('enc.tooth.' + (openTags(enc.id)[0] || { tooth: 30 }).tooth, 'enc.tooth.30'), why: 'A starter names the tooth the chart holds. With no tooth painted or tagged, it would write a placeholder into the note.' });
+      rerender(r); focusFirst('refusal.control'); Proto.router.announce('Pick a tooth first'); return;
+    }
     x.note.assessment = STARTERS[k].a(t, sf); x.note.plan = STARTERS[k].p(t, sf);
     if (x.checked) x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3);
     rerender(r); const ta = document.getElementById('note-assessment'); if (ta) { ta.focus({ preventScroll: true }); ta.setSelectionRange(ta.value.length, ta.value.length); }

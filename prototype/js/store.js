@@ -331,7 +331,7 @@
     const rows = [];
     // charged() is the ledger, not a flag: the seed marks a crown "completed" without setting charged, so the
     // old test re-charged it and a patient who paid $410 in full walked out owing $1,180.
-    const toCharge = noteFiled ? procs.filter((p) => !charged(p)) : [];
+    const toCharge = noteFiled ? procs.filter((p) => !p.reversed && !charged(p)) : [];
     const feeTotal = toCharge.reduce((s, p) => s + p.feeCents, 0);
     for (const p of toCharge) { p.charged = true; touch('procedures', p.id); rows.push(ledgerRow({ id: id('le'), kind: 'charge', patientId: a.patientId, amountCents: p.feeCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: a.locationId, procedureId: p.id, cdt: p.cdt, tooth: p.tooth, insuranceExpectedCents: feeTotal ? Math.round((est.insuranceCents || 0) * p.feeCents / feeTotal) : 0 })); }
     if (form.decision === 'collect') {

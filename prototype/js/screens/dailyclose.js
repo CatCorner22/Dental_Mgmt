@@ -22,6 +22,9 @@
   const CLEAR_ENTS = ['bank_reconcile', 'close_day'];
   const WROTE = { ledger: 'appended a ledger row', approvals: 'created an approval request', approvalsLog: 'decided an approval request', dayCloses: 'closed a business day', deposits: 'prepared a deposit slip', reconciliationMatches: 'matched or cleared a variance', controlDecisions: 'reviewed a control decision', appointmentEvents: 'moved an appointment', eligibilityChecks: 're-ran eligibility', messages: 'pinged a chair', perioExams: 'saved a perio exam', tags: 'tagged a tooth for the dentist', chartEvents: 'painted the chart', planItems: 'added a plan item', notes: 'edited the note', filedNotes: 'filed a note', claims: 'changed a claim', claimEvents: 'recorded a claim event', appealPackets: 'built an appeal packet', disclosures: 'disclosed records (logged)', statementsDue: 'queued a statement', collectionDecisions: 'recorded a collection decision', allocations: 'allocated a payment', dayPasses: 'issued a day pass', userEntitlements: 'changed entitlements', firstRunState: 'retired a first-shift chip', sessions: 'switched author with a PIN' };
 
+  /* View state is the person's, not the workstation's: the Confirm close group, an open Investigate and the
+     typed PIN used to follow the next author onto Daily Close after a PIN switch. Keyed by user id, like Money Desk. */
+  const views = {};
   let st = null, lastStore = null, lastRoute = null, keysOn = false;
   const fresh = () => ({ tileOpen: false, locOpen: null, invOpen: {}, changedOpen: false, lateOpen: false, varRefusal: {}, closeStep: 'idle', closeRefusal: null, dayClose: null, decisionResult: {}, decisionRefusal: {}, riskDone: {}, logOpen: false, pin: '', device: null });
   const priv = () => !!(window.__proto && window.__proto.privacy);
@@ -226,7 +229,7 @@
     if (st.invOpen[v.id]) {
       const rows = candidates();
       card.append(h('div', { class: 'stack' }, h('p', { class: 'small muted', text: 'Candidate rows (same tender, two-day window; names shown on expansion and logged as a payment-purpose read):' }),
-        h('ul', { class: 'dc-sentences' }, ...rows.map((e) => h('li', { text: pname(S, e.patientId) + ' · ' + e.tender + ' payment ' + money(-e.amountCents) + ' · posted ' + shortDate(e.posted) + ' after 6 pm · #' + e.id }))),
+        h('ul', { class: 'dc-sentences' }, ...rows.map((e) => h('li', { text: pname(S, e.patientId) + ' · ' + e.tender + ' payment ' + money(-e.amountCents) + ' · posted ' + shortDate(e.posted) + ' after 6 pm' }))),
         h('p', { class: 'small muted', text: 'Investigate opens a control finding with these rows attached, routed to Money Desk → Variances.' })));
     }
     return card;
@@ -381,7 +384,9 @@
   /* ---- render: close ---- */
   function renderClose(r) {
     const S = Proto.store.get();
-    if (lastStore !== S) { lastStore = S; st = fresh(); }
+    if (lastStore !== S) { lastStore = S; for (const k of Object.keys(views)) delete views[k]; }
+    const uid = Proto.store.currentUser().id;
+    st = views[uid] || (views[uid] = fresh());
     // A PIN typed for one device never carries to another: the field empties when the device flips.
     const device = window.__proto && window.__proto.device; if (st.device !== device) { st.device = device; st.pin = ''; }
     lastRoute = r; attachKeys();
@@ -413,7 +418,9 @@
   }
   function renderRisk(r) {
     const S = Proto.store.get();
-    if (lastStore !== S) { lastStore = S; st = fresh(); }
+    if (lastStore !== S) { lastStore = S; for (const k of Object.keys(views)) delete views[k]; }
+    const uid = Proto.store.currentUser().id;
+    st = views[uid] || (views[uid] = fresh());
     lastRoute = r; detachKeys();
     // Each row carries its own Why (risk.row.<id>.why, CONTRACTS §4): the rule behind the row, read on demand.
     const row = (id, action, sev, word, text, label, kind, onClick, extra, why) => h('div', { class: 'dc-row' }, chip(sev, word),
