@@ -99,7 +99,9 @@
   const passUser = (dp) => ({ id: 'u-temp', name: dp.name, short: dp.name.split(' ')[0], role: dp.role, entitlements: dp.entitlements, dayPass: dp.id, pin: dp.pin });
   // A seat whose pass has ended is nobody again, so the gates that need a pass refuse as before it was issued.
   const tempSeat = () => (S.tempUser && S.dayPasses.some((d) => d.id === S.tempUser.dayPass && passLive(d)) ? S.tempUser : null);
-  const currentUser = () => { const p = window.__proto && window.__proto.persona; if (p === 'temp') return tempSeat() || NO_PASS; return user(S.personaUser[p]) || S.users[0]; };
+  // A persona the map does not name (nothing chosen yet, or a word typed into the address) is nobody, never
+  // the first user in the table, who happens to be the owner with every entitlement.
+  const currentUser = () => { const p = window.__proto && window.__proto.persona; if (p === 'temp') return tempSeat() || NO_PASS; return user(S.personaUser[p]) || NO_PASS; };
   const NO_PASS_WHY = 'A temp works under their own day pass: it is the name every record is frozen onto. Until Roles issues one there is nobody to post as.';
   const noPass = (verb) => (currentUser().noPass ? refuse('entitlement', verb, 'Open Roles', NO_PASS_WHY) : null);
   /* One entitlement rule: the seat carries one of the grants or the verb refuses and names a seat that does. */

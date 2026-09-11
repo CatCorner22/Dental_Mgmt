@@ -405,7 +405,9 @@
     };
     const starterBtns = starters().map((k, i) => btn(STARTERS[k].label, { kind: 'quiet', class: 'enc-starter', testid: 'enc.note.starter.' + i, onClick: () => applyStarter(r, enc, x, k) }));
     return Proto.ui.section('Note',
-      h('p', { class: 'small muted', text: 'Starters fill both fields; money lives on the plan card' }),
+      h('div', { class: 'row between' }, h('p', { class: 'small muted', text: 'Starters fill both fields; money lives on the plan card' }),
+        // SuperByte reads this same draft (per author) on its own glass; it observes and never files.
+        Proto.screens.superbyte ? btn('Open SuperByte', { kind: 'reversible', class: 'compact', testid: 'enc.note.superbyte', ariaLabel: 'Open SuperByte: read this draft against the note standard', onClick: () => Proto.router.go(r.persona, 'superbyte', enc.id) }) : null),
       h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Starters' }, ...starterBtns),
       field('assessment', 'Assessment', x.note.assessment),
       field('plan', 'Plan', x.note.plan),

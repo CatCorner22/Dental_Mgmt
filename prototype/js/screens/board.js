@@ -236,7 +236,7 @@
   }
   function card(a, r, inLane) {
     const priv = P().privacy; const outage = P().outage; const s = S();
-    const pt = Proto.store.patient(a.patientId); const name = displayName(pt.name, priv);
+    const pt = Proto.store.patient(a.patientId) || { name: 'Unknown patient', alerts: [] }; const name = displayName(pt.name, priv);
     const [ssev, sword] = STATUS[a.status] || ['info', a.status]; const [tsev, tword] = TYPE[a.type] || ['info', a.type]; const [esev, eword] = ELIG[a.eligibility] || ELIG.none;
     const el = h('article', { class: 'card appt ' + a.type, testid: 'board.card.' + a.id, 'aria-label': fmtTime(a.time) + ' ' + name + ', ' + tword + ', ' + sword });
     el.append(h('div', { class: 'who' }, h('span', { text: fmtTime(a.time) + ' · ' + name }), chip(ssev, sword)));
@@ -250,7 +250,7 @@
     if (a.labCase && a.labCase.status === 'not_back') meta.append(chip('review', 'Case not back'));
     if (a.referral) meta.append(chip('info', 'Referred in'));
     el.append(meta);
-    if (inLane) el.append(h('div', { class: 'stamp', text: windowWord(a) + ' · charges and claim release when ' + (Proto.store.user(a.providerId) || {}).short + ' files the note' }));
+    if (inLane) el.append(h('div', { class: 'stamp', text: windowWord(a) + ' · charges and claim release when ' + (Proto.store.user(a.providerId) || { short: 'the provider' }).short + ' files the note' }));
     // The arrived stamp is where the keyboard lands after Arrive (focusable, not a control), so Seat is a choice.
     if (a.status === 'arrived' && a.arrivedAt) el.append(h('div', { class: 'stamp', id: 'board-arrived-' + a.id, tabindex: '-1', text: 'Arrived ' + clock12(a.arrivedAt) + ' · Seat is the next step' }));
     if (outage) el.append(h('div', { class: 'stamp', text: 'As of ' + clock12(CACHE_TIME) + ' · ' + minutesBetween(CACHE_TIME, s.clock.time) + ' min old · read-only' }));
@@ -292,7 +292,7 @@
   // ---- Checkout queue ----------------------------------------------------------------------
   function queueRow(a, r) {
     const priv = P().privacy;
-    const pt = Proto.store.patient(a.patientId); const name = displayName(pt.name, priv); const prov = Proto.store.user(a.providerId) || { short: '—', name: '—' };
+    const pt = Proto.store.patient(a.patientId) || { name: 'Unknown patient', alerts: [] }; const name = displayName(pt.name, priv); const prov = Proto.store.user(a.providerId) || { short: '—', name: '—' };
     const filed = noteFiled(a); const [ssev, sword] = STATUS[a.status] || ['info', a.status];
     const noteChip = filed ? chip('clear', 'Filed') : chip('review', 'Open · ' + provInitials(prov));
     const claimChip = !filed ? chip('info', 'Waiting on note') : needsAttachment(a) ? chip('review', 'Needs: attachment') : chip('clear', 'Ready');

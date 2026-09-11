@@ -294,7 +294,8 @@
       h('p', { class: 'rl-sentence', text: 'Day pass issued to ' + dp.name + ' · ' + roleLabel(dp.role) + ' · expires ' + clock12(dp.shiftEnd) + ' + 30 min grace · magic link sent to their phone; TOTP on their own device' }),
       i.downgraded ? h('p', { class: 'rl-note', text: 'Issued as ' + roleLabel('frontdesk') + ', not ' + roleLabel(i.requestedRole) + ': no verified ' + (wanted.licence || 'clinical') + ' credential on file for ' + dp.name + '. Nothing clinical was granted; clinical entitlements issue only after the credential is verified.' }) : null,
       // Shown once, at issue: the PIN is how the holder posts under their own name on a shared desk.
-      i.pin ? h('p', { class: 'rl-sentence', text: 'PIN ' + i.pin + ' — for shared-desk postings; shown once' }) : null,
+      // Privacy glass never prints a credential: the owner turns Privacy mode off to read it, once.
+      i.pin ? h('p', { class: 'rl-sentence', text: P().privacy ? 'PIN hidden on privacy glass — turn Privacy mode off to read it once' : 'PIN ' + i.pin + ' — for shared-desk postings; shown once' }) : null,
       h('div', { class: 'rl-chips' }, h('span', { class: 'small muted', text: 'Granted:' }), ...dp.entitlements.map((e) => chip('info', entLabel(e)))),
       h('div', { class: 'btnrow' }, btn('Sign in as this temp', { kind: 'reversible', testid: 'roles.daypass.signin', onClick: () => { P().set({ persona: 'temp' }); location.hash = '#/temp/board'; } })),
       h('details', null, h('summary', { testid: 'roles.daypass.expiry.why' }, 'Why it expires'), h('p', { class: 'hint', text: 'At ' + clock12(dp.shiftEnd) + ' + 30 min the grants lapse and the session is revoked. The account remains as a frozen name on everything it posted; issued by ' + dp.createdBy + ' for ' + (S().locations.find((l) => l.id === dp.locationId) || {}).name + '.' })));
@@ -314,7 +315,7 @@
     } });
     addBtn.setAttribute('aria-expanded', String(s.formOpen));
     const page = h('div', { class: 'stack rl-page' },
-      pageHead('Roles · Main Street', 'Who may do what; the controls sit in the grant, not on a dashboard.', addBtn),
+      pageHead('Roles · ' + (S().locations[0] || { name: 'Main Street' }).name, 'Who may do what; the controls sit in the grant, not on a dashboard.', addBtn),
       h('p', { class: 'small muted rl-digest', text: 'Day passes issued this month: ' + (DIGEST_BASE + S().dayPasses.length) + ' (practice)' }),
       s.formOpen ? dayPassForm(r) : null,
       issuedCard(),

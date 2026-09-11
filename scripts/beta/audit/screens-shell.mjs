@@ -264,7 +264,8 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
           await press(p, 'pin.submit'); await p.waitForTimeout(150);
           author.refusalAfterSubmit = await dialogRefusal(p);
           const ev = await after(p, seq0);
-          author.keyEvents = ev.filter((e) => e.kind === 'key' && /^[0-9]$/.test(e.key)).map((e) => ({ seq: e.seq, key: e.key, testid: e.testid }));
+          // Digits typed on the pad are recorded as bullets (events.js masks what is typed); the bullet still counts as a keystroke.
+          author.keyEvents = ev.filter((e) => e.kind === 'key' && (/^[0-9]$/.test(e.key) || e.secret)).map((e) => ({ seq: e.seq, key: e.key, testid: e.testid }));
           author.refusalEvents = refusalEvents(ev); author.seqRange = range(ev, seq0);
         } finally { await c.close(); } }
       { const { c, p } = await ctx(b);

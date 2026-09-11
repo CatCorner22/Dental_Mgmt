@@ -9,9 +9,10 @@
     frontdesk: [['board', 'Board'], ['money', 'Money Desk'], ['roles', 'Roles']],
     temp: [['board', 'Board']],
     biller: [['money', 'Money Desk'], ['board', 'Board'], ['close', 'Daily Close'], ['roles', 'Roles']],
-    hygienist: [['chairs', 'Chairs'], ['board', 'Board']],
-    dentist: [['exams', 'Exams to sign'], ['chairs', 'Chairs'], ['board', 'Board']],
-    surgeon: [['exams', 'Exams to sign'], ['board', 'Board']],
+    hygienist: [['chairs', 'Chairs'], ['board', 'Board'], ['superbyte', 'SuperByte']],
+    assistant: [['board', 'Board'], ['chairs', 'Chairs']],
+    dentist: [['exams', 'Exams to sign'], ['chairs', 'Chairs'], ['board', 'Board'], ['superbyte', 'SuperByte']],
+    surgeon: [['exams', 'Exams to sign'], ['board', 'Board'], ['superbyte', 'SuperByte']],
     owner: [['close', 'Daily Close'], ['money', 'Money Desk'], ['board', 'Board'], ['roles', 'Roles'], ['risk', 'Practice risk']],
     compliance: [['risk', 'Practice risk'], ['roles', 'Roles'], ['close', 'Daily Close']],
   };
@@ -39,7 +40,7 @@
     if (!r.persona) { authorId = null; keepFocus(top, () => top.replaceChildren(h('span', { class: 'brand' }, h('span', { class: 'mark', 'aria-hidden': 'true' }), 'Riverbend Dental'), h('span', { class: 'spacer' }), btn(P.theme === 'dark' ? 'Light' : 'Dark', { testid: 'topbar.theme', ariaLabel: 'Switch to ' + (P.theme === 'dark' ? 'light' : 'dark'), onClick: () => { P.set({ theme: P.theme === 'dark' ? 'light' : 'dark' }); Proto.router.render(); refocus('topbar.theme'); } }))); return; }
     const u = Proto.store.currentUser(); authorId = u.id;
     const loc = S.locations[0];
-    const nav = h('nav', { 'aria-label': 'Primary' }, ...(NAV[r.persona] || NAV.frontdesk).map(([route, label]) => btn(label, { testid: 'nav.' + route, onClick: () => Proto.router.go(r.persona, route), class: r.route === route ? 'current' : '' })));
+    const nav = h('nav', { 'aria-label': 'Primary' }, ...(NAV[r.persona] || []).map(([route, label]) => btn(label, { testid: 'nav.' + route, onClick: () => Proto.router.go(r.persona, route), class: r.route === route ? 'current' : '' })));
     nav.querySelectorAll('button').forEach((b) => { if (b.classList.contains('current')) b.setAttribute('aria-current', 'page'); });
     // A missing day pass is not a person: the chip says so instead of printing the placeholder's initials.
     const authorWord = u.noPass ? u.short : (P.device === 'shared' || P.device === 'operatory' || P.privacy) ? (Proto.ui.initials(u.name) + (u.licence ? ' · ' + u.licence : '')) : (u.short || u.name);

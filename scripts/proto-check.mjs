@@ -25,7 +25,7 @@ fs.mkdirSync(path.join(OUT, 'shots'), { recursive: true });
 
 const PERSONAS = ['frontdesk', 'biller', 'hygienist', 'dentist', 'surgeon', 'owner', 'compliance', 'temp'];
 const HOME = { frontdesk: 'board', biller: 'money', hygienist: 'chairs', dentist: 'exams', surgeon: 'exams', owner: 'close', compliance: 'risk', temp: 'board' };
-const ROUTES = ['#/signin', ...PERSONAS.map((p) => '#/' + p + '/' + HOME[p]), '#/frontdesk/checkout/a-1044', '#/frontdesk/checkout/a-1045', '#/frontdesk/checkout/a-1046', '#/frontdesk/checkout/a-1047', '#/hygienist/perio/enc-9001', '#/dentist/encounter/enc-9002', '#/surgeon/encounter/enc-9020', '#/biller/ledger/p-303', '#/owner/roles', '#/owner/money', '#/phone/approvals', '#/frontdesk/board?outage=1', '#/frontdesk/board?privacy=1&device=shared'];
+const ROUTES = ['#/signin', ...PERSONAS.map((p) => '#/' + p + '/' + HOME[p]), '#/frontdesk/checkout/a-1044', '#/frontdesk/checkout/a-1045', '#/frontdesk/checkout/a-1046', '#/frontdesk/checkout/a-1047', '#/hygienist/perio/enc-9001', '#/dentist/encounter/enc-9002', '#/dentist/superbyte/enc-9002', '#/dentist/superbyte', '#/surgeon/encounter/enc-9020', '#/biller/ledger/p-303', '#/owner/roles', '#/owner/money', '#/phone/approvals', '#/frontdesk/board?outage=1', '#/frontdesk/board?privacy=1&device=shared'];
 const WIDTHS = [1280, 1024, 820, 420]; // 420 added after the beta panel found phone-width defects the first three widths missed
 // Controls that exist only behind a gate or a shortcut (PIN pad, refusal control, step-up keypad, palette): the targets and contrast
 // sweeps open each of these before measuring, so a control no landing route shows is still held to 44 px / 8 px / contrast.

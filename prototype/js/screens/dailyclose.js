@@ -148,7 +148,7 @@
   /* ---- Tied tile ---- */
   function tile(r, S) {
     const o = overall(S); const g = GRADE[o.grade];
-    const lag = Math.max(...S.reconciliation.map((x) => x.lagDays));
+    const lag = S.reconciliation.length ? Math.max(...S.reconciliation.map((x) => x.lagDays)) : 0;
     const sub = 'Yesterday ' + shortDate(S.tenant.yesterday) + ' · ' + S.locations.length + ' locations · detection lag ' + plural(lag, 'day') + ' · ' + (S.reconciliation.some((x) => x.source === 'feed') ? 'bank feed' : 'statement import');
     return h('button', { type: 'button', class: 'tile dc-tile ' + g[0], testid: 'close.tied.tile', 'aria-expanded': bool(st.tileOpen), 'aria-controls': 'dc-tile-detail', onClick: () => toggleTile(r) },
       h('span', { class: 'glyph', 'aria-hidden': 'true', text: g[1] }),
@@ -161,7 +161,7 @@
     if (st.tileOpen && !st.locOpen) {
       // open the location that needs hands first: variance, then second look, then the first
       const order = { variance: 0, second: 1, tied: 2 };
-      st.locOpen = S.reconciliation.slice().sort((a, b) => order[grade(a)] - order[grade(b)])[0].locationId;
+      st.locOpen = (S.reconciliation.slice().sort((a, b) => order[grade(a)] - order[grade(b)])[0] || {}).locationId || null;
     }
     rerender(r, 'close.tied.tile');
   }
@@ -411,7 +411,7 @@
   function auditSentences(S) {
     const all = (window.__events || []).filter((e) => e.kind === 'write');
     return all.slice(-8).reverse().map((e) => {
-      const uid = S.personaUser[e.persona]; const u = S.users.find((x) => x.id === uid);
+      const uid = e.userId || S.personaUser[e.persona]; const u = S.users.find((x) => x.id === uid);
       const who = e.persona === 'temp' ? 'The day-pass seat' : u ? u.short + ' (' + e.persona + ')' : 'Someone signed in as ' + e.persona;
       return who + ' ' + wroteWords(S, all, e) + ' #' + e.id + ' at +' + Math.round(e.t / 1000) + ' s on ' + e.route + ' (event ' + e.seq + ').';
     });

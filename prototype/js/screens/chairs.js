@@ -135,7 +135,7 @@
   // ---- Card --------------------------------------------------------------------------------
   function card(a, r) {
     const priv = P().privacy; const s = S();
-    const pt = Proto.store.patient(a.patientId); const name = displayName(pt.name, priv);
+    const pt = Proto.store.patient(a.patientId) || { name: 'Unknown patient', alerts: [] }; const name = displayName(pt.name, priv);
     const prov = Proto.store.user(a.providerId) || { short: '—' };
     const [ssev, sword] = STATUS[a.status] || ['info', a.status];
     const [tsev, tword] = TYPE[a.type] || ['info', a.type];
