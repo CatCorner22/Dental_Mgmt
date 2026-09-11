@@ -10,6 +10,7 @@
     temp: [['board', 'Board']],
     biller: [['money', 'Money Desk'], ['board', 'Board'], ['close', 'Daily Close'], ['roles', 'Roles']],
     hygienist: [['chairs', 'Chairs'], ['board', 'Board'], ['superbyte', 'SuperByte']],
+    assistant: [['board', 'Board'], ['chairs', 'Chairs']],
     dentist: [['exams', 'Exams to sign'], ['chairs', 'Chairs'], ['board', 'Board'], ['superbyte', 'SuperByte']],
     surgeon: [['exams', 'Exams to sign'], ['board', 'Board'], ['superbyte', 'SuperByte']],
     owner: [['close', 'Daily Close'], ['money', 'Money Desk'], ['board', 'Board'], ['roles', 'Roles'], ['risk', 'Practice risk']],
@@ -39,11 +40,13 @@
     if (!r.persona) { authorId = null; keepFocus(top, () => top.replaceChildren(h('span', { class: 'brand' }, h('span', { class: 'mark', 'aria-hidden': 'true' }), 'Riverbend Dental'), h('span', { class: 'spacer' }), btn(P.theme === 'dark' ? 'Light' : 'Dark', { testid: 'topbar.theme', ariaLabel: 'Switch to ' + (P.theme === 'dark' ? 'light' : 'dark'), onClick: () => { P.set({ theme: P.theme === 'dark' ? 'light' : 'dark' }); Proto.router.render(); refocus('topbar.theme'); } }))); return; }
     const u = Proto.store.currentUser(); authorId = u.id;
     const loc = S.locations[0];
-    const nav = h('nav', { 'aria-label': 'Primary' }, ...(NAV[r.persona] || NAV.frontdesk).map(([route, label]) => btn(label, { testid: 'nav.' + route, onClick: () => Proto.router.go(r.persona, route), class: r.route === route ? 'current' : '' })));
+    const nav = h('nav', { 'aria-label': 'Primary' }, ...(NAV[r.persona] || []).map(([route, label]) => btn(label, { testid: 'nav.' + route, onClick: () => Proto.router.go(r.persona, route), class: r.route === route ? 'current' : '' })));
     nav.querySelectorAll('button').forEach((b) => { if (b.classList.contains('current')) b.setAttribute('aria-current', 'page'); });
     // A missing day pass is not a person: the chip says so instead of printing the placeholder's initials.
     const authorWord = u.noPass ? u.short : (P.device === 'shared' || P.device === 'operatory' || P.privacy) ? (Proto.ui.initials(u.name) + (u.licence ? ' · ' + u.licence : '')) : (u.short || u.name);
-    const authorChip = h('button', { type: 'button', class: 'authorchip', testid: 'topbar.author', 'aria-label': 'Who is charting: ' + u.name + (u.licence ? ', ' + u.licence : '') + '. Switch author', onClick: () => openPinPad(r) }, h('span', { text: authorWord }));
+    // The accessible name says what the chip shows: initials on shared or privacy glass, never the full name a
+    // screen reader would speak across the operatory.
+    const authorChip = h('button', { type: 'button', class: 'authorchip', testid: 'topbar.author', 'aria-label': 'Who is charting: ' + authorWord + '. Switch author', onClick: () => openPinPad(r) }, h('span', { text: authorWord }));
     keepFocus(top, () => top.replaceChildren(
       h('span', { class: 'brand' }, h('span', { class: 'mark', 'aria-hidden': 'true' }), 'Riverbend'),
       btn(loc.short, { testid: 'topbar.location', ariaLabel: 'Location: ' + loc.name + '. Switch location', onClick: () => Proto.router.announce('Switch location: not in this prototype') }),
@@ -140,7 +143,7 @@
       close();
       const p = persona[0]; P.set({ persona: p });
       location.hash = '#/' + p + '/' + (r.route === 'signin' ? Proto.router.HOME[p] : r.route) + (r.id ? '/' + r.id : '');
-      Proto.router.announce('Now charting as ' + who.name);
+      Proto.router.announce('Now charting as ' + ((P.device === 'shared' || P.device === 'operatory' || P.privacy) ? (who.short || Proto.ui.initials(who.name)) : who.name));
     }
     const pad = h('div', { class: 'pinpad' }, ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => btn(String(d), { testid: 'pin.key.' + d, onClick: () => { if (digits.length < 6) { digits += d; dots.textContent = '•'.repeat(digits.length); } } })), btn('⌫', { testid: 'pin.backspace', ariaLabel: 'Backspace', onClick: () => { digits = digits.slice(0, -1); dots.textContent = '•'.repeat(digits.length); } }), btn('0', { testid: 'pin.key.0', onClick: () => { if (digits.length < 6) { digits += '0'; dots.textContent = '•'.repeat(digits.length); } } }), btn('Go', { testid: 'pin.submit', kind: 'irreversible', onClick: submit }));
     /* One PIN pad, one grammar. The phone step-up took typed digits, Backspace and Enter while this pad took

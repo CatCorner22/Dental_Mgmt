@@ -185,7 +185,8 @@
   }
 
   function field(label, input, hint) {
-    const id = input.id || (input.id = 'f-' + Math.random().toString(36).slice(2, 8));
+    // A stable id per control, so aria-describedby written on one render still resolves after the next.
+    const id = input.id || (input.id = 'f-' + String(input.getAttribute('data-testid') || label).replace(/[^\w-]+/g, '-').toLowerCase());
     const hintEl = h('p', { class: 'hint', id: id + '-hint', text: hint || '' });
     input.setAttribute('aria-describedby', hintEl.id);
     return { node: h('div', { class: 'field' }, h('label', { for: id, text: label }), input, hintEl), hint: hintEl, input };

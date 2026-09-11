@@ -32,13 +32,15 @@
     if (location.hash === h) { Proto.router.render(); } else { location.hash = h; }
   }
 
-  const handlers = {};
+  // A route word comes straight from the address bar, so it is looked up on a table with no prototype:
+  // #/frontdesk/constructor and #/frontdesk/hasOwnProperty are nowhere, not Object internals.
+  const handlers = Object.create(null);
   Proto.router = {
     PERSONAS, HOME, LABEL, parse, go,
     on(route, fn) { handlers[route] = fn; },
     render() {
       const r = parse();
-      const fn = handlers[r.route] || handlers.notfound;
+      const fn = (typeof handlers[r.route] === 'function' ? handlers[r.route] : null) || handlers.notfound;
       if (fn) fn(r);
       // A canvas repainted under a standing dialog rebuilds its gates with fresh ids; they give them up again (§4).
       if (Proto.ui && Proto.ui.topDialog && Proto.ui.topDialog()) Proto.ui.shadowGates(true);

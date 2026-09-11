@@ -589,3 +589,8 @@ textarea.input.sb-field { flex: 1 1 auto; min-height: 64px; resize: none; font-s
   textarea.input.sb-field { min-height: 120px; }
 }
 /* ---- end module: superbyte ---- */
+
+/* ---- omnibus review (2026-09-11): a state carried by fill alone gets a mark, so grayscale and colour-blind
+   readers see it too. A deep perio site is bold and underlined; a highlighted ledger row carries a left bar. */
+.psite.deep { font-weight: 700; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 2px; }
+.ledger-table tr.ledger-hi td:first-child { box-shadow: inset 3px 0 0 var(--focus); }

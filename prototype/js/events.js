@@ -40,7 +40,11 @@
     // A key pressed inside a text field is typing, not tapping (CONTRACTS §5).
     const el = ev.target;
     const field = !!(el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) || undefined;
-    record('key', { testid, key: ev.key, field });
+    // What is typed is never evidence: a printable character in a field, or any character while a PIN pad or
+    // step-up keypad is open, is recorded as a bullet. Named keys (Enter, Escape, arrows) stay legible.
+    const pad = !!(el && el.closest && el.closest('.pinpad, .pindots, .ph-stepup, [role="dialog"][aria-label="Switch author"]'));
+    const secret = (field || pad) && ev.key.length === 1 ? true : undefined;
+    record('key', { testid, key: secret ? '•' : ev.key, field, secret });
   }, true);
 
   document.addEventListener('focusin', (ev) => {
@@ -56,7 +60,9 @@
   Proto.events = {
     record,
     refusal(code, verb, control) { return record('refusal', { code, verb, control }); },
-    write(table, id) { return record('write', { table, id }); },
+    // The author is stamped at write time: the persona-to-user map moves with every PIN switch, so reading
+    // it later re-authors earlier rows.
+    write(table, id) { const u = Proto.store && Proto.store.currentUser ? Proto.store.currentUser() : null; return record('write', { table, id, userId: u ? u.id : undefined }); },
     reset() { events.length = 0; seq = 0; },
     all() { return events.slice(); },
   };

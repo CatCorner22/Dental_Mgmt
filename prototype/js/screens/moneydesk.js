@@ -99,7 +99,9 @@
 
   /* ---- data views ---- */
   function eraView(S) {
-    const b = S.eraBatches[0]; const lines = S.eraLines.filter((l) => l.batchId === b.id);
+    // No batch on file reads as an empty, posted batch rather than a TypeError on the ERA tab.
+    const b = S.eraBatches[0] || { id: null, payer: '—', lines: 0, postedLines: 0, eftCents: 0, trn: 'no ERA received', status: 'posted' };
+    const lines = S.eraLines.filter((l) => l.batchId === b.id);
     const by = (s) => lines.filter((l) => l.status === s);
     /* A line is matched until Post matched writes its ledger row and the store flips it to posted, so the status is the
        fact. The read-back is every line the payer paid differently (a CARC), decided or not, so a decided row keeps its
@@ -247,7 +249,7 @@
     const postRow = h('div', { class: 'btnrow' }, post, held ? h('span', { class: 'row' }, chip('review', 'Approval requested'), h('span', { class: 'small muted', text: approvers + ' will see it on their phone; this flips to Posted when they approve.' })) : null);
     // The gate stays on screen while the request is open: the refusal is the only thing that says what is
     // holding the posting and where to go next, and nulling it here left the Held button with no verb line.
-    if (held) setTimeout(() => { const el = document.querySelector('[data-testid="money.writeoff.post"]'); if (el) { const b = el.getBoundingClientRect(); if (b.bottom > window.innerHeight || b.top < 0) el.scrollIntoView({ block: 'center' }); } }, 0);
+    if (held) setTimeout(() => { if (Proto.router.current().raw !== r.raw) return; const el = document.querySelector('[data-testid="money.writeoff.post"]'); if (el) { const b = el.getBoundingClientRect(); if (b.bottom > window.innerHeight || b.top < 0) el.scrollIntoView({ block: 'center' }); } }, 0);
     // h() skips a null child; Element.append stringifies one, which put the word "null" on the card twice.
     const tail = [h('div', { class: 'md-two' }, h('div', { class: 'field' }, h('label', { for: 'md-wo-amt', text: 'Write-off amount' }), amt, hint), h('div', { class: 'field' }, h('label', { text: 'Reason code' }), reasons)), st.woRefusal, postRow, held ? h('p', { class: 'small muted', text: 'Approvals here usually take about 4 minutes (practice-level, last 30 days).' }) : null];
     card.append(...tail.filter(Boolean));
