@@ -73,7 +73,10 @@
   /* ---- open / close ---- */
   function open(r) {
     if (closeDialog) close();
-    if (Proto.ui.topDialog()) return;   // one dialog at a time: a pad already open keeps the keyboard
+    // A PIN pad owns every key until it closes (A-storm2-shell-3). A preview or Why dialog does not
+    // block Search: the first-shift gesture is Ctrl+K / the Search chip, and Escape then closes only Search.
+    const top = Proto.ui.topDialog();
+    if (top && (top.querySelector('[data-testid="pin.display"]') || top.querySelector('[data-testid="phone.stepup.display"]'))) return;
     st = { r, q: '', rows: [], sel: -1, step: 'search', patient: null, row: null, dob: '', dobTouched: false, refused: false };
     const body = h('div', { class: 'stack pal', onKeydown: onKey });
     st.body = body;

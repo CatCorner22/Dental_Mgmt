@@ -206,8 +206,11 @@
   const skip = document.querySelector('[data-testid="skip.canvas"]');
   if (skip) skip.addEventListener('click', (ev) => { ev.preventDefault(); canvas().focus(); });
 
-  // One dialog at a time: Ctrl+K yields to a pad or palette already open (docs/04).
+  // Ctrl+K yields to a PIN pad or an already-open palette. A statement preview does not swallow Search.
   document.addEventListener('keydown', (ev) => {
-    if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'k' || ev.key === 'K')) { const r = Proto.router.current(); if (r.persona) { ev.preventDefault(); if (!Proto.ui.topDialog()) Proto.screens.palette.open(r); } }
+    if ((ev.ctrlKey || ev.metaKey) && (ev.key === 'k' || ev.key === 'K')) {
+      const r = Proto.router.current();
+      if (r.persona) { ev.preventDefault(); if (!Proto.screens.palette.isOpen()) Proto.screens.palette.open(r); }
+    }
   });
 })();

@@ -44,6 +44,34 @@ export default ({ ctx, go, hop, click, rec }) => {
       } finally { await c.close(); }
     },
 
+    async 'U-palette-1'(b) {
+      const { c, p } = await ctx(b);
+      try {
+        await go(p, '#/biller/ledger/p-301');
+        await click(p, 'ledger.statement.preview');
+        await p.keyboard.press('Control+k');
+        await p.waitForTimeout(150);
+        const afterOpen = await p.evaluate(() => ({
+          dialogs: [...document.querySelectorAll('#dialogs [role="dialog"]')].map((d) => d.getAttribute('aria-label') || ((d.querySelector('h2') || {}).textContent || '').trim()),
+          palette: !!document.querySelector('[data-testid="palette.input"]'),
+        }));
+        if (afterOpen.palette) {
+          await fill(p, 'palette.input', 'vega');
+          await p.waitForTimeout(120);
+        }
+        const hint = await p.evaluate(() => ((document.getElementById('palette-hint') || {}).textContent || ''));
+        await p.keyboard.press('Escape');
+        await p.waitForTimeout(150);
+        const afterEsc = await p.evaluate(() => ({
+          dialogs: [...document.querySelectorAll('#dialogs [role="dialog"]')].map((d) => d.getAttribute('aria-label') || ((d.querySelector('h2') || {}).textContent || '').trim()),
+          palette: !!document.querySelector('[data-testid="palette.input"]'),
+        }));
+        rec('U-palette-1', 'Ctrl+K with the Statement preview open does not open Search, or one Escape closes the preview with it',
+          'B10 — Search stacks over a preview; Escape closes only Search; the hint does not say a two-row list is capped',
+          !afterOpen.palette || afterEsc.dialogs.length === 0 || /capped/i.test(hint), { afterOpen, hint, afterEsc });
+      } finally { await c.close(); }
+    },
+
     async 'U-perio-1'(b) {
       const { c, p } = await ctx(b);
       try {
