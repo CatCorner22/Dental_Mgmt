@@ -13,7 +13,7 @@ export default ({ ctx, go, hop, click, state, events, rec }) => {
   const rows = (S, pid) => S.ledger.filter((e) => e.patientId === pid);
   const fileEnc = (p, encId) => p.evaluate((e) => Proto.store.fileNote(e, { assessment: 'Recall exam; no new caries.', plan: 'Recall 6 months.' }, true), encId);
   const heldWriteoff = async (p) => { await go(p, '#/biller/money'); await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await click(p, 'money.writeoff.post'); await p.waitForTimeout(200); return p.evaluate(() => (window.__proto.state().approvals[0] || {}).id || null); };
-  const task = async (file, id) => { const fs = await import('node:fs'); const T = JSON.parse(fs.readFileSync('/workspace/scripts/beta/tasks/' + file, 'utf8')); return { start: T.start, task: T.tasks.find((t) => t.id === id) }; };
+  const task = async (file, id) => { const fs = await import('node:fs'); const T = JSON.parse(fs.readFileSync(new URL('../tasks/' + file, import.meta.url), 'utf8')); return { start: T.start, task: T.tasks.find((t) => t.id === id) }; };
   const isTestid = (s) => /^[a-z0-9]+(\.[a-z0-9-]+)+$/.test(s);
 
   return {

@@ -11,7 +11,7 @@ export default ({ ctx, go, hop, click, state, rec }) => {
   const net = (S, pid) => rows(S, pid).reduce((t, e) => t + e.amountCents, 0);
   const code = (r) => (r && (r.ok ? 'ok' : r.code || (r.needsStepup ? 'needsStepup' : null))) || null;
   const fileEnc = (p, encId) => p.evaluate((e) => Proto.store.fileNote(e, { assessment: 'Recall exam; no new caries.', plan: 'Recall 6 months.' }, true), encId);
-  const task = async (file, id) => { const fs = await import('node:fs'); const T = JSON.parse(fs.readFileSync('/workspace/scripts/beta/tasks/' + file, 'utf8')); return { start: T.start, task: T.tasks.find((t) => t.id === id) }; };
+  const task = async (file, id) => { const fs = await import('node:fs'); const T = JSON.parse(fs.readFileSync(new URL('../tasks/' + file, import.meta.url), 'utf8')); return { start: T.start, task: T.tasks.find((t) => t.id === id) }; };
   const isTestid = (s) => /^[a-z0-9]+(\.[a-z0-9-]+)+$/.test(s);
 
   return {
