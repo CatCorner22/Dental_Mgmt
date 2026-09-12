@@ -195,13 +195,14 @@ What the storms did not prove is the same as before, with one addition. The rand
 
 | Measure | Count |
 |---|---|
-| Functions in `prototype/js` (`scripts/audit/inventory.mjs`) | 713 |
+| Functions in `prototype/js` (`scripts/audit/inventory.mjs`) | 715 |
 | Of those, from the registered audited universe of 497 | 486 |
 | Registered functions the fix round removed or renamed | 10 |
 | Registered functions the five storms removed | 1 |
 | Functions the fix round introduced, audited by hand, still present | 76 |
 | Functions the fix round introduced that the storms removed | 2 |
 | Functions the five storms introduced, audited by hand | 151 |
+| Functions the UI and UX review (`docs/16`) introduced, audited by hand | 2 |
 | Functions with no row | 0 |
 | Per-file audits returned | 13 of 13 |
 | Lenses returned | 8 of 8 |
@@ -1239,6 +1240,8 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `section` | `ui.js` | 187 | operational | Screen modules (24 uses in dailyclose, 16 in moneydesk, …); page.evaluate. | raw.json S4-ui.helpers.section: '<section class="card stack" aria-label="Title"><h2>Title</h2><p>x</p></secti… |
 | `pageHead` | `ui.js` | 191 | operational | Screen modules; page.evaluate. | raw.json S4-ui.helpers.pageHead.*: h1 + p.sub + div.btnrow with two buttons; title only → no .sub, no .btnrow. |
 
+| `scrollRegion` | `ui.js` | 202 | operational | Checkout's procedures table, the Ledger's rows table (screen and rail); a11y-check at 420 px; A-ux-1. | A-ux-1: `checkout.lines` carries tabindex=0 at 420 px where the table overflows by 233 px and no tabindex at 1280 px where it fits; role=region with a label; three ArrowRight presses scroll it 120 px. |
+| `sync` | `ui.js` | 204 | operational | The ResizeObserver callback inside `scrollRegion` and the first frame after build; A-ux-1. | A-ux-1: the tab stop follows overflow after a viewport change in the same page (1280 px → no tabindex, 420 px → tabindex=0). |
 ## Appendix: the rules as the agents read them
 
 ### A. Operational

@@ -234,7 +234,7 @@
   function practiceLines(r, S) {
     const pairs = changedPairs(S); const late = lateRows(S);
     const line = (testid, label, n, open, onClick, items) => [
-      h('button', { type: 'button', class: 'dc-line', testid, 'aria-expanded': bool(open), onClick }, h('span', { text: label }), h('span', { class: 'count' }, String(n), h('span', { class: 'sr-only', text: n === 1 ? ' row' : ' rows' })), h('span', { class: 'muted', 'aria-hidden': 'true', text: open ? '▴' : '▾' })),
+      h('button', { type: 'button', class: 'dc-line', testid, 'aria-expanded': bool(open), onClick }, h('span', { text: label }), h('span', { class: 'count', text: String(n) }), h('span', { class: 'sr-only', text: n === 1 ? ' row' : ' rows' }), h('span', { class: 'muted', 'aria-hidden': 'true', text: open ? '▴' : '▾' })),
       open ? h('ul', { class: 'dc-sentences' }, ...(items.length ? items.map((s) => h('li', { text: s })) : [h('li', { text: 'None.' })])) : null];
     return h('div', { class: 'stack' },
       ...line('close.changed', 'Yesterday changed after close', pairs.length, st.changedOpen, () => { st.changedOpen = !st.changedOpen; rerender(r, 'close.changed'); }, pairs.map((p) => pairSentence(S, p))),

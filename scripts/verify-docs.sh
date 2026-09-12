@@ -165,5 +165,31 @@ if os.path.exists('docs/15-function-audit.md'):
     report('docs/15 function audit: registration, inventory total, one row per function', probs, f'{total} functions')
 else:
     print('SKIP function audit check (no docs/15 yet)')
+# 11. UX review (docs/16): method registered before findings, heuristics registered before the audit, every registered
+#     heuristic appears once in docs/16 and once in the knowledge-base table, evidence labels on every row
+if os.path.exists('docs/16-ux-review.md'):
+    d16 = open('docs/16-ux-review.md').read(); probs = []
+    if not re.search(r'^Status: method, measurements and heuristics registered 2026-09-12 before any finding was recorded', d16, re.M): probs.append('docs/16 lacks the dated registration line')
+    if '\n## Registered heuristics' not in d16 or '\n## Results' not in d16: probs.append('docs/16 lacks the Registered heuristics or Results line')
+    reg = d16.split('\n## Registered heuristics', 1)[1].split('\n## Results', 1)[0] if '\n## Registered heuristics' in d16 else ''
+    hp = 'knowledge/reviews/ux-review/registered-heuristics.json'
+    if os.path.exists(hp):
+        Hs = json.load(open(hp))['heuristics']
+        ids = [h['id'] for h in Hs]
+        if len(set(ids)) != len(ids): probs.append('registered-heuristics.json has duplicate ids')
+        full = open('knowledge/reviews/ux-review/registered-heuristics.md').read()
+        for h in Hs:
+            if reg.count('| ' + h['id'] + ' |') != 1: probs.append(f"docs/16 lists {h['id']} {reg.count('| ' + h['id'] + ' |')} times")
+            if full.count('| ' + h['id'] + ' |') != 1: probs.append(f"registered-heuristics.md lists {h['id']} {full.count('| ' + h['id'] + ' |')} times")
+            if h.get('basis') not in ('fetched primary source', 'fetched secondary source', 'training knowledge, unverified'): probs.append(f"{h['id']} has no evidence label")
+            if h.get('verified') and not h.get('source_quote'): probs.append(f"{h['id']} is marked verified without a quote")
+            if not h.get('verified') and h.get('basis') != 'training knowledge, unverified': probs.append(f"{h['id']} is unverified but labelled {h.get('basis')}")
+        report('docs/16 UX review: registration, one row per registered heuristic in docs/16 and the knowledge base, evidence label on every row', probs[:40], f'{len(Hs)} heuristics')
+    elif '_Pending' not in reg:
+        report('docs/16 UX review: registration', ['docs/16 has a heuristics section but knowledge/reviews/ux-review/registered-heuristics.json is missing'])
+    else:
+        report('docs/16 UX review: registration', probs)
+else:
+    print('SKIP UX review check (no docs/16 yet)')
 sys.exit(1 if fails else 0)
 PY

@@ -145,7 +145,7 @@
   function tabs(r, S) {
     const c = counts(S);
     return h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Worklists' }, ...TABS.map(([code, label]) => {
-      const b = btn([label, h('span', { class: 'count' }, String(c[code]), h('span', { class: 'sr-only', text: c[code] === 1 ? ' item' : ' items' }))], { testid: 'money.tab.' + code, onClick: () => { st.tab = code; rerender(r, 'money.tab.' + code); } });
+      const b = btn([label, h('span', { class: 'count', text: String(c[code]) }), h('span', { class: 'sr-only', text: c[code] === 1 ? ' item' : ' items' })], { testid: 'money.tab.' + code, onClick: () => { st.tab = code; rerender(r, 'money.tab.' + code); } });
       b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', pressed(st.tab === code)); return b;
     }));
   }
