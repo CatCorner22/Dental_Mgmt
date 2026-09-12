@@ -1,0 +1,17 @@
+{
+  "name": "dental-mgmt",
+  "private": true,
+  "description": "Planning repository and clickable prototype for the Smile Notes + Precog Pioneer consolidation. The prototype itself is dependency-free; Playwright is only needed by the checks under scripts/.",
+  "scripts": {
+    "setup": "npm install && playwright install chromium",
+    "syntax": "node scripts/syntax-check.mjs",
+    "check": "node scripts/proto-check.mjs",
+    "reproduce": "node scripts/beta/reproduce.mjs",
+    "verify-docs": "bash scripts/verify-docs.sh",
+    "test": "npm run syntax && npm run verify-docs && npm run check && npm run a11y && npm run reproduce",
+    "a11y": "node scripts/a11y-check.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

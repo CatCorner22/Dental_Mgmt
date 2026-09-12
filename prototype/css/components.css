@@ -191,7 +191,11 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 
 /* ---- board.js (Board screen) additions: begin. Appended by the Board module; existing rules above are untouched. ---- */
 .board-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: var(--space-4); align-items: start; }
-@media (max-width: 1279px) { .board-layout { grid-template-columns: 1fr; } }
+/* The breakpoint reads the Board's own width, not the viewport: with the 320 px Patient Rail open at 1280 px
+   the chair columns (3 × 220 px) overflowed a 552 px track into the queue column. Below 1040 px of page width
+   (three chairs, the gap and the 300 px side column) the two stacks go one under the other. */
+.boardpage { container-type: inline-size; }
+@container (max-width: 1040px) { .board-layout { grid-template-columns: 1fr; } }
 .rdrow { display: flex; align-items: center; gap: var(--gap); flex-wrap: wrap; min-height: var(--target); padding: var(--space-2) var(--space-3); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
 .rdrow .line { flex: 1; min-width: 200px; }
 .chairwrap { display: flex; flex-direction: column; gap: 4px; }
@@ -246,9 +250,20 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 /* ---- end module: perio ---- */
 
 /* ---- module: encounter (js/screens/encounter.js) — appended, never edits rules above ---- */
-.enc-layout { display: grid; grid-template-columns: minmax(856px, 1.25fr) minmax(320px, 1fr); gap: var(--space-4); align-items: start; }
-@media (max-width: 1279px) { .enc-layout { grid-template-columns: 1fr; } }
-.enc-odont-wrap { overflow-x: auto; padding-bottom: var(--space-1); display: flex; flex-direction: column; gap: var(--gap); }
+/* Columns shrink (minmax 0), so the odontogram scrolls inside .enc-odont-wrap and the canvas never pans sideways.
+   A 856 px minimum on the chart column was what forced the page itself past the viewport at 1024/820/420. */
+.enc-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); grid-template-rows: auto 1fr; grid-template-areas: "chart note" "chart gate"; gap: var(--space-4); align-items: start; }
+.enc-layout > * { min-width: 0; }
+.enc-col-chart { grid-area: chart; min-width: 0; }
+.enc-col-note { grid-area: note; min-width: 0; }
+.enc-gate-col { grid-area: gate; min-width: 0; }
+/* One column below 1280 px: the gate pins to the bottom of the viewport so File is in view at every stage,
+   instead of 1,300 px under tags, odontogram and cards. */
+@media (max-width: 1279px) {
+  .enc-layout { grid-template-columns: 1fr; grid-template-rows: auto; grid-template-areas: "chart" "note" "gate"; }
+  .enc-gate-col { position: sticky; bottom: 0; z-index: 3; background: var(--bg); border-top: 1px solid var(--line); padding-top: var(--space-2); max-height: 70vh; overflow: auto; }
+}
+.enc-odont-wrap { overflow-x: auto; max-width: 100%; padding-bottom: var(--space-1); display: flex; flex-direction: column; gap: var(--gap); }
 .tooth.enc-tagged { border-style: dashed; border-color: var(--required-rail); }
 .tooth.enc-tagged[aria-pressed="true"] { border-style: solid; }
 .surfaces .btn[aria-pressed="mixed"] { border-style: dashed; border-color: var(--focus); background: var(--surface-2); color: var(--ink); }
@@ -312,6 +327,12 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 .dc-sentences li { line-height: 1.5; }
 .dc-health { display: flex; align-items: center; gap: var(--gap); flex-wrap: wrap; color: var(--ink-2); padding: var(--space-2) 0; }
 .dc-lock { font-size: var(--fs-3); }
+/* Narrow glass: the source line takes its own row under the name and chip instead of a 51 px column six lines
+   tall, and the tender columns size to their text so the Gap chip ends inside the table. */
+@media (max-width: 599px) {
+  .dc-loc > .grow { flex-basis: 100%; }
+  .tender { grid-template-columns: minmax(0, 1fr) repeat(3, auto); }
+}
 
 /* ---- module: roles (js/screens/roles.js) — appended, never edits rules above ---- */
 .rl-page { max-width: 1100px; }
@@ -416,7 +437,7 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 /* ---- end module: phone ---- */
 
 /* ---- integration: shared disclosure floor (every <summary> is a 44 px focusable target) ---- */
-.canvas summary, .rail summary, .dialog summary { min-height: var(--target); display: inline-flex; align-items: center; cursor: pointer; color: var(--link); padding: 0 var(--space-2); }
+.canvas summary, .rail summary, .dialog summary { min-height: var(--target); min-width: var(--target); display: inline-flex; align-items: center; cursor: pointer; color: var(--link); padding: 0 var(--space-2); }
 .rail-sum summary, .ph-why summary { display: flex; }
 
 /* --- Beta round 1 fixes (2026-09-04) --- */

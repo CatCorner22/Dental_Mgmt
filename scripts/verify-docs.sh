@@ -153,7 +153,11 @@ if os.path.exists('docs/15-function-audit.md'):
     m = re.search(r'^\| \*\*Total\*\* \| \*\*(\d+)\*\* \|', d15, re.M)
     if not m or int(m.group(1)) != 497: probs.append(f'docs/15 registered inventory total {m.group(1) if m else "missing"}, expected the registered 497')
     results = d15.split('\n## Results', 1)[1] if '\n## Results' in d15 else ''
-    if 'Pending' not in results.split('\n## ', 1)[0]:
+    # Results are pending only while the registration-time marker line ("_Pending: the audit workflow is running. …_")
+    # still opens the section. Testing for the bare word matched a root-cause row that happened to contain "Pending"
+    # and silently skipped the reconciliation below for every run after the results landed.
+    pending = re.search(r'^_Pending: the audit workflow is running\.', results.split('\n## ', 1)[0], re.M)
+    if not pending:
         live = re.search(r'^\| Functions in `prototype/js` \(`scripts/audit/inventory\.mjs`\) \| (\d+) \|', results, re.M)
         if not live or int(live.group(1)) != total: probs.append(f'docs/15 Results coverage total {live.group(1) if live else "missing"} vs {total} functions in prototype/js')
         missing = [f'{f}:{fn["name"]}' for f, fns in inv.items() for fn in fns if not re.search(r'^\| `' + re.escape(fn['name']) + r'` \| `' + re.escape(f.replace('prototype/js/', '')) + r'`', results, re.M)]
@@ -161,5 +165,31 @@ if os.path.exists('docs/15-function-audit.md'):
     report('docs/15 function audit: registration, inventory total, one row per function', probs, f'{total} functions')
 else:
     print('SKIP function audit check (no docs/15 yet)')
+# 11. UX review (docs/16): method registered before findings, heuristics registered before the audit, every registered
+#     heuristic appears once in docs/16 and once in the knowledge-base table, evidence labels on every row
+if os.path.exists('docs/16-ux-review.md'):
+    d16 = open('docs/16-ux-review.md').read(); probs = []
+    if not re.search(r'^Status: method, measurements and heuristics registered 2026-09-12 before any finding was recorded', d16, re.M): probs.append('docs/16 lacks the dated registration line')
+    if '\n## Registered heuristics' not in d16 or '\n## Results' not in d16: probs.append('docs/16 lacks the Registered heuristics or Results line')
+    reg = d16.split('\n## Registered heuristics', 1)[1].split('\n## Results', 1)[0] if '\n## Registered heuristics' in d16 else ''
+    hp = 'knowledge/reviews/ux-review/registered-heuristics.json'
+    if os.path.exists(hp):
+        Hs = json.load(open(hp))['heuristics']
+        ids = [h['id'] for h in Hs]
+        if len(set(ids)) != len(ids): probs.append('registered-heuristics.json has duplicate ids')
+        full = open('knowledge/reviews/ux-review/registered-heuristics.md').read()
+        for h in Hs:
+            if reg.count('| ' + h['id'] + ' |') != 1: probs.append(f"docs/16 lists {h['id']} {reg.count('| ' + h['id'] + ' |')} times")
+            if full.count('| ' + h['id'] + ' |') != 1: probs.append(f"registered-heuristics.md lists {h['id']} {full.count('| ' + h['id'] + ' |')} times")
+            if h.get('basis') not in ('fetched primary source', 'fetched secondary source', 'training knowledge, unverified'): probs.append(f"{h['id']} has no evidence label")
+            if h.get('verified') and not h.get('source_quote'): probs.append(f"{h['id']} is marked verified without a quote")
+            if not h.get('verified') and h.get('basis') != 'training knowledge, unverified': probs.append(f"{h['id']} is unverified but labelled {h.get('basis')}")
+        report('docs/16 UX review: registration, one row per registered heuristic in docs/16 and the knowledge base, evidence label on every row', probs[:40], f'{len(Hs)} heuristics')
+    elif '_Pending' not in reg:
+        report('docs/16 UX review: registration', ['docs/16 has a heuristics section but knowledge/reviews/ux-review/registered-heuristics.json is missing'])
+    else:
+        report('docs/16 UX review: registration', probs)
+else:
+    print('SKIP UX review check (no docs/16 yet)')
 sys.exit(1 if fails else 0)
 PY
