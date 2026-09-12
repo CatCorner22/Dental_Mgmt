@@ -4,7 +4,7 @@
    criteria it maps to and the first offending node. Automated rules cover a minority of WCAG; the rest is
    measured by proto-check (targets, contrast, focus, motion, overflow) and by the UX audit's own probes.
 
-   node scripts/a11y-check.mjs [--json <path>] [--widths 1280,1024,420] [--only <route,...>]
+   node scripts/a11y-check.mjs [--json <path>] [--widths 1280,1024,420] [--only <route,...>]   (report: .scratch/a11y-check.json)
    Exit 1 when any serious or critical violation remains; moderate and minor are listed but do not fail. */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -75,7 +75,10 @@ try {
 } finally { await browser.close(); }
 
 const violations = [...seen.values()].sort((a, b) => ({ critical: 0, serious: 1, moderate: 2, minor: 3 }[a.impact] - { critical: 0, serious: 1, moderate: 2, minor: 3 }[b.impact]));
-const out = args.json || path.join(process.env.TMPDIR || '/tmp', 'a11y-check.json');
+// Reports land under the repository's gitignored .scratch/ like the other harnesses (README), unless --json says otherwise.
+const SCRATCH = process.env.SCRATCH || path.join(ROOT, '.scratch');
+fs.mkdirSync(SCRATCH, { recursive: true });
+const out = args.json || path.join(SCRATCH, 'a11y-check.json');
 fs.writeFileSync(out, JSON.stringify({ at: new Date().toISOString(), axe: '4.13.0', widths: WIDTHS, contexts: results, violations }, null, 2));
 
 const byImpact = (imp) => violations.filter((v) => v.impact === imp).length;
