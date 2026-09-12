@@ -201,7 +201,7 @@
         h('td', { text: reasonText(e, st.patientVoice) }),
         st.patientVoice ? null : h('td', { text: actorText(e) }),
         h('td', { class: 'num', text: money(e.amountCents) }))) : h('tr', null, h('td', { colspan: String(head.length), class: 'muted', text: 'No rows posted by this date' }))));
-    return h('div', { class: 'wrap-x' }, tbl);
+    return Proto.ui.scrollRegion('Ledger rows', 'ledger.rows', tbl);
   }
 
   /* One wording for the empty Explain, on the Ledger and in the rail, with the step that ends it. */

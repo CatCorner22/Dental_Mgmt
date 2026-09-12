@@ -221,7 +221,7 @@
     // The heading names the set below it: for a hygienist that is her own chairs, for anyone else
     // every hygiene chair at this location plus their own.
     const page = h('div', { class: 'stack chairspage' }, pageHead(hyg ? 'Chairs · mine' : 'Chairs · hygiene and my own', sub));
-    if (list.length) page.append(h('div', { class: 'ch-list', role: 'list', 'aria-label': 'Your chairs in seat order' }, ...list.map((a) => { const c = card(a, r); c.setAttribute('role', 'listitem'); return c; })));
+    if (list.length) page.append(h('div', { class: 'ch-list', role: 'list', 'aria-label': 'Your chairs in seat order' }, ...list.map((a) => h('div', { role: 'listitem' }, card(a, r)))));
     else page.append(h('section', { class: 'card stack', 'aria-label': 'No chairs' }, h('h2', { text: 'No chairs assigned to you today' }), h('p', { class: 'muted', text: 'The Board shows every chair at ' + s.locations[0].name + '.' }), h('div', { class: 'btnrow' }, btn('Open the Board', { kind: 'reversible', testid: 'chairs.empty.board', onClick: () => Proto.router.go(r.persona, 'board') }))));
     page.append(h('p', { class: 'small muted practice-line', text: practiceLine() }));
     Proto.screens.shell.mount(page);

@@ -195,7 +195,7 @@
     const gated = !!s.refusal[a.id];
     const card = h('article', { class: 'card ph-card', 'aria-label': 'Approval request ' + a.id, dataset: { req: a.id } });
     card.append(h('div', { class: 'ph-head' },
-      h('span', { class: 'ph-initials', 'aria-label': 'Requested by ' + a.requestedBy, title: 'Requester', text: initials(a.requestedBy) }),
+      h('span', { class: 'ph-initials', role: 'img', 'aria-label': 'Requested by ' + a.requestedBy, title: 'Requester', text: initials(a.requestedBy) }),
       h('div', { class: 'grow' },
         h('div', { class: 'ph-amount', text: money(a.amountCents) }),
         h('div', { class: 'small muted', text: (REASON_LABEL[a.reason] || a.reason) + ' write-off · ' + a.id })),

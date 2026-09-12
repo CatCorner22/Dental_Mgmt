@@ -197,7 +197,7 @@
     const held = live(st.varRefusal, v.id);
     // One gate per card, raised by the control that pressed it; that control carries the Held identity.
     const refuse = (by, res, fallback) => { st.varRefusal[v.id] = heldGate(by, res, gate(r, res, null, fallback)); rerender(r, 'refusal.control'); };
-    const card = h('div', { class: 'card flat stack', 'aria-label': 'Variance ' + v.id },
+    const card = h('div', { class: 'card flat stack', role: 'group', 'aria-label': 'Variance ' + v.id },
       h('div', { class: 'row' }, chip('required', 'Variance ' + money(v.amountCents)), h('span', { class: 'small muted', text: v.tender + ' · ' + locOf(S, v.locationId).name + ' · ' + shortDate(rr.date) })),
       h('p', { class: 'explain sentence', text: v.sentence }),
       h('p', null, h('b', { text: 'Proposed match: ' }), pm.bankLine + ' ↔ ' + plural(pm.ledgerEntries || 0, 'ledger entry').replace('entrys', 'entries')));
@@ -234,7 +234,7 @@
   function practiceLines(r, S) {
     const pairs = changedPairs(S); const late = lateRows(S);
     const line = (testid, label, n, open, onClick, items) => [
-      h('button', { type: 'button', class: 'dc-line', testid, 'aria-expanded': bool(open), onClick }, h('span', { text: label }), h('span', { class: 'count', 'aria-label': n + ' rows', text: String(n) }), h('span', { class: 'muted', 'aria-hidden': 'true', text: open ? '▴' : '▾' })),
+      h('button', { type: 'button', class: 'dc-line', testid, 'aria-expanded': bool(open), onClick }, h('span', { text: label }), h('span', { class: 'count' }, String(n), h('span', { class: 'sr-only', text: n === 1 ? ' row' : ' rows' })), h('span', { class: 'muted', 'aria-hidden': 'true', text: open ? '▴' : '▾' })),
       open ? h('ul', { class: 'dc-sentences' }, ...(items.length ? items.map((s) => h('li', { text: s })) : [h('li', { text: 'None.' })])) : null];
     return h('div', { class: 'stack' },
       ...line('close.changed', 'Yesterday changed after close', pairs.length, st.changedOpen, () => { st.changedOpen = !st.changedOpen; rerender(r, 'close.changed'); }, pairs.map((p) => pairSentence(S, p))),
@@ -267,7 +267,7 @@
         rerender(r, '#dc-reviewed-' + d.id);
       };
       const act = (action, label, kind) => btn(label, { kind: held.by === action ? 'held' : kind, testid: 'close.decision.' + d.id + '.' + action, onClick: () => (held.by === action ? heldPress(r, st.decisionRefusal, d.id, () => review(action)) : review(action)) });
-      return h('div', { class: 'card flat stack', 'aria-label': 'Decision ' + d.id },
+      return h('div', { class: 'card flat stack', role: 'group', 'aria-label': 'Decision ' + d.id },
         h('div', { class: 'row' }, chip('review', 'Review ' + (late > 0 ? 'was due ' + shortDate(d.reviewBy) + ' (' + plural(late, 'day') + ' ago)' : 'due ' + shortDate(d.reviewBy))), h('span', { class: 'small muted', text: 'Decided ' + shortDate(d.decidedAt) + ' by ' + shortName(S, d.decidedBy) })),
         h('p', null, h('b', { text: d.text })),
         h('p', { class: 'row' }, h('span', { text: 'Since this raise: ' + d.measuredEffect + '.' }), chip('info', 'Directional')),

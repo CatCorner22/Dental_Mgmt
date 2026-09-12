@@ -195,5 +195,17 @@
     return h('div', { class: 'page-head' }, h('div', null, h('h1', { text: title }), sub ? h('p', { class: 'sub', text: sub }) : null), controls.length ? h('div', { class: 'btnrow' }, ...controls) : null);
   }
 
-  Proto.ui = { h, btn, chip, refusal, resetGates, money, shortDate, longDate, dateTime, time, initials, displayName, dialog, topDialog, closeDialogs, shadowGates, section, pageHead, GLYPH, SUPPORT, support, STATUS, TYPE, ELIG, typeWord };
+  /* A table wider than its column scrolls sideways inside this wrapper rather than panning the page. A region
+     that scrolls must be reachable from the keyboard (WCAG 2.1.1, axe scrollable-region-focusable), so the
+     wrapper joins the tab order exactly while its content overflows and leaves it when the content fits: a tab
+     stop on a table that does not scroll is a stop that does nothing. The label names what the region holds. */
+  function scrollRegion(label, testid, ...children) {
+    const el = h('div', { class: 'wrap-x', role: 'region', 'aria-label': label, testid }, ...children);
+    const sync = () => { if (el.scrollWidth > el.clientWidth + 1) el.setAttribute('tabindex', '0'); else el.removeAttribute('tabindex'); };
+    if (window.ResizeObserver) new ResizeObserver(sync).observe(el);
+    requestAnimationFrame(sync);
+    return el;
+  }
+
+  Proto.ui = { h, btn, chip, refusal, resetGates, money, shortDate, longDate, dateTime, time, initials, displayName, dialog, topDialog, closeDialogs, shadowGates, section, pageHead, scrollRegion, GLYPH, SUPPORT, support, STATUS, TYPE, ELIG, typeWord };
 })();

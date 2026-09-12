@@ -167,7 +167,7 @@
     let bar = document.getElementById('rail1');
     if (r.persona !== 'temp') { if (bar) bar.remove(); return; }
     const S = Proto.store.get(); const steps = Proto.store.railSteps();
-    if (!bar) { bar = h('div', { class: 'rail1', id: 'rail1', 'aria-label': 'Your first shift' }); document.getElementById('andon').after(bar); }
+    if (!bar) { bar = h('div', { class: 'rail1', id: 'rail1', role: 'region', 'aria-label': 'Your first shift' }); document.getElementById('andon').after(bar); }
     if (S.rail1Collapsed) { bar.replaceChildren(btn('Show first-shift steps', { testid: 'rail1.toggle', onClick: () => { S.rail1Collapsed = false; renderRail1(r); refocus('rail1.toggle'); } })); return; }
     keepFocus(bar, () => bar.replaceChildren(h('span', { class: 'small muted', text: 'Your first shift:' }), ...steps.map(([code, label], i) => { const retired = !!Proto.store.railStateFor()[code]; return btn(retired ? label + ' ✓' : label, { testid: 'rail1.chip.' + i, dataset: { retired: retired ? '1' : '0' }, ariaLabel: label + (retired ? ', done' : ', show me'), onClick: () => pulseFor(code, r) }); }), btn('Hide', { testid: 'rail1.toggle', onClick: () => { S.rail1Collapsed = true; renderRail1(r); refocus('rail1.toggle'); } })));
   }

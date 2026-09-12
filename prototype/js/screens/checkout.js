@@ -150,7 +150,7 @@
   /* --- pieces --- */
   function threeNumbers(bal) {
     const n = (label, v) => h('div', { class: 'n' }, h('div', { class: 'v', text: money(v) }), h('div', { class: 'l', text: label }));
-    return h('div', { class: 'threenum', 'aria-label': 'Account balance' }, n('Patient due', bal.patientDue), n('Waiting on insurance', bal.insurancePending), n('Credit', bal.credit));
+    return h('div', { class: 'threenum', role: 'group', 'aria-label': 'Account balance' }, n('Patient due', bal.patientDue), n('Waiting on insurance', bal.insurancePending), n('Credit', bal.credit));
   }
 
   function proceduresCard(S, a, st, procs, est, coversNow) {
@@ -170,10 +170,10 @@
         h('td', null, pre),
         h('td', null, toggle));
     });
-    const table = h('div', { class: 'wrap-x' }, h('table', { class: 'data co-lines' },
+    const table = Proto.ui.scrollRegion('Completed procedures', 'checkout.lines', h('table', { class: 'data co-lines' },
       h('thead', null, h('tr', null, h('th', { text: 'Procedure' }), h('th', { class: 'num', text: 'Tooth' }), h('th', { class: 'num', text: 'Fee' }), h('th', { class: 'num co-est', text: 'Patient portion (estimate)' }), h('th', { text: 'Pre-flight' }), h('th', { text: 'Self-pay' }))),
       h('tbody', null, ...rows),
-      h('tfoot', null, h('tr', null, h('th', { text: 'Totals' }), h('th'), h('th', { class: 'num', text: money(feeTotal) }), h('th', { class: 'num co-est', text: money(est.patientCents) + ' est.' }), h('th', { colspan: '2', class: 'small muted', text: 'Estimate is separate from the balance above; it never enters the ledger.' })))));
+      h('tfoot', null, h('tr', null, h('th', { scope: 'row', text: 'Totals' }), h('td'), h('td', { class: 'num', text: money(feeTotal) }), h('th', { class: 'num co-est', text: money(est.patientCents) + ' est.' }), h('th', { colspan: '2', class: 'small muted', text: 'Estimate is separate from the balance above; it never enters the ledger.' })))));
     const why = h('details', null, h('summary', { class: 'co-summary', testid: 'checkout.estimate.why' }, 'Why this estimate'),
       h('p', { class: 'hint', text: (est.note || 'No plan estimate on file.') + (est.insuranceCents ? ' Insurance est. ' + money(est.insuranceCents) + '.' : '') + (est.writeoffCents ? ' PPO write-off est. ' + money(est.writeoffCents) + '.' : '') }));
     // An empty state says why it is empty and what to do next: with nothing charted there is nothing to bill,
@@ -244,7 +244,7 @@
     const reasons = h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Reason code' }, ...REASONS.map(([code, label]) => btn(label, { testid: 'checkout.writeoff.reason.' + code, pressed: pressed(st.writeoffReason === code), onClick: () => { st.writeoffReason = code; st.refusalNode = null; rerender(r, 'checkout.writeoff.reason.' + code); } })));
     // One id, one verb: the control that removes the write-off is not the control that adds it.
     const remove = btn('Remove write-off', { kind: 'quiet', class: 'compact', testid: 'checkout.writeoff.remove', onClick: () => removeWriteoff(r, st) });
-    return h('div', { class: 'stack co-writeoff', 'aria-label': 'Write-off or adjustment' }, h('div', { class: 'co-two' }, wf.node, h('div', { class: 'field' }, h('label', { text: 'Reason code' }), reasons)), remove);
+    return h('div', { class: 'stack co-writeoff', role: 'group', 'aria-label': 'Write-off or adjustment' }, h('div', { class: 'co-two' }, wf.node, h('div', { class: 'field' }, h('label', { text: 'Reason code' }), reasons)), remove);
   }
 
   function postRow(r, a, st) {
@@ -307,7 +307,7 @@
     p.plans.forEach((x) => items.push(li('Payment plan ' + money(x.amountCents) + ', ' + cadenceWord(x.cadence))));
     p.events.forEach((x) => items.push(li('Self-pay restriction on ' + procName(x.procedureId) + ': claim assembly refuses it')));
     p.decisions.forEach((d) => items.push(li('Collection decision: ' + DECISION_WORD[d.decision] + ', patient portion ' + money(d.patientPortionCents) + ', decided by ' + d.decidedBy)));
-    const receipt = st.receipt ? h('div', { class: 'explain', 'aria-label': 'Receipt, patient voice' }, h('p', { class: 'small muted', text: 'Receipt for ' + displayName(pt.name, window.__proto.privacy) + ' · ' + Proto.ui.longDate(S.tenant.today) + ' · patient voice, no reason codes or poster names' }),
+    const receipt = st.receipt ? h('div', { class: 'explain', role: 'group', 'aria-label': 'Receipt, patient voice' }, h('p', { class: 'small muted', text: 'Receipt for ' + displayName(pt.name, window.__proto.privacy) + ' · ' + Proto.ui.longDate(S.tenant.today) + ' · patient voice, no reason codes or poster names' }),
       ...p.ledger.filter((e) => e.kind === 'patient_payment').map((e) => h('p', { class: 'sentence', text: 'You paid ' + money(-e.amountCents) + ' today by ' + e.tender + '.' })),
       ...Proto.store.explain(a.patientId).map((s) => h('p', { class: 'sentence', text: s.patientVoice })),
       h('p', { class: 'small muted', text: 'Prototype: nothing prints and no disclosure row is written here; the product records a payment-purpose disclosure per print.' })) : null;

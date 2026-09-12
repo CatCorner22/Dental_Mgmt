@@ -152,7 +152,7 @@
     const s = state(); const f = s.form; const pv = Proto.store.previewDayPass(f);
     const tpl = template(f.role);
     const grantEnts = pv.licenceGate ? template('frontdesk').entitlements : pv.entitlements;
-    const box = h('div', { class: 'rl-preview', 'aria-label': 'Day pass preview' }, h('h3', { id: 'rl-preview-head', tabindex: '-1', text: 'Preview' }),
+    const box = h('div', { class: 'rl-preview', role: 'group', 'aria-label': 'Day pass preview' }, h('h3', { id: 'rl-preview-head', tabindex: '-1', text: 'Preview' }),
       h('div', { class: 'rl-chips' }, h('span', { class: 'small muted', text: 'Will grant:' }), ...grantEnts.map((e) => chip('info', entLabel(e))), h('span', { class: 'small muted', text: 'until ' + clock12(f.end) + ' + 30 min grace' })));
 
     // Licence gate (Codex fix): clinical entitlements only against a verified credential.

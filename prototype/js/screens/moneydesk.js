@@ -145,7 +145,7 @@
   function tabs(r, S) {
     const c = counts(S);
     return h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Worklists' }, ...TABS.map(([code, label]) => {
-      const b = btn([label, h('span', { class: 'count', 'aria-label': plural(c[code], 'item'), text: String(c[code]) })], { testid: 'money.tab.' + code, onClick: () => { st.tab = code; rerender(r, 'money.tab.' + code); } });
+      const b = btn([label, h('span', { class: 'count' }, String(c[code]), h('span', { class: 'sr-only', text: c[code] === 1 ? ' item' : ' items' }))], { testid: 'money.tab.' + code, onClick: () => { st.tab = code; rerender(r, 'money.tab.' + code); } });
       b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', pressed(st.tab === code)); return b;
     }));
   }
@@ -380,7 +380,7 @@
           : enc ? h('div', { class: 'btnrow' }, btn('Open the chart', { kind: 'reversible', testid: 'money.statement.' + s.id + '.chart', ariaLabel: 'Open the chart whose filed note releases the charges this statement bills', onClick: () => Proto.router.go(r.persona, 'encounter', enc) }))
           : h('div', { class: 'btnrow' }, btn('Send statement', { kind: g ? 'held' : 'irreversible', testid: 'money.statement.' + s.id + '.send', ariaLabel: g ? 'Send statement is held: ' + g.verb : null, onClick: () => { const res = post(Proto.store.sendStatement, s.id); if (!res.ok) { st.stmtGate[s.id] = res; rerender(r, 'refusal.control'); return; } delete st.stmtGate[s.id]; say('Sent the statement — disclosure recorded'); rerender(r, '#md-sd-stamp-' + s.id); } }), btn('Preview', { kind: 'reversible', testid: 'money.statement.' + s.id + '.preview', pressed: pressed(st.previewFor === s.id), onClick: () => { st.previewFor = st.previewFor === s.id ? null : s.id; rerender(r, 'money.statement.' + s.id + '.preview'); } })),
         g && !s.sent ? gate(r, g, s.patientId, { focus: '#md-sd-' + s.id }) : null), 'md-sd-' + s.id);
-      if (st.previewFor === s.id) { const ex = Proto.store.explain(s.patientId); row.append(h('div', { class: 'explain', 'aria-label': 'Patient-voice preview' }, h('p', { class: 'sentence', text: ex.length ? ex.map((x) => x.patientVoice).join(' ') : 'Your share is ' + money(s.amountCents) + ' after insurance. We held this statement so your plan could settle first; nothing here is an estimate.' }), h('p', { class: 'small muted', text: 'Same rows the biller sees, rendered in the patient voice: no reason codes, no poster names.' }))); }
+      if (st.previewFor === s.id) { const ex = Proto.store.explain(s.patientId); row.append(h('div', { class: 'explain', role: 'group', 'aria-label': 'Patient-voice preview' }, h('p', { class: 'sentence', text: ex.length ? ex.map((x) => x.patientVoice).join(' ') : 'Your share is ' + money(s.amountCents) + ' after insurance. We held this statement so your plan could settle first; nothing here is an estimate.' }), h('p', { class: 'small muted', text: 'Same rows the biller sees, rendered in the patient voice: no reason codes, no poster names.' }))); }
       return row;
     })));
     /* Where a statement is raised: every account that owes and has no statement (open, or sent today), the Ledger's gate

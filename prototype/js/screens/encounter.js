@@ -333,7 +333,7 @@
     if (!ces.length && !carried.length) return null;
     const carriedCards = carried.map((p) => {
       const name = (s.cdt[p.cdt] || [p.cdt])[0] + (p.tooth ? ' #' + p.tooth : ''); const done = Proto.store.charged(p);
-      return h('div', { class: 'card enc-tx stack', 'aria-label': 'On the visit · ' + name },
+      return h('div', { class: 'card enc-tx stack', role: 'group', 'aria-label': 'On the visit · ' + name },
         h('div', { class: 'row between' }, h('b', { text: 'On the visit before the chart opened' }), chip(done ? 'clear' : 'style', done ? 'Charged' : 'Today')),
         h('ul', { class: 'enc-rows' }, h('li', null, h('b', { text: 'Procedure ' }), p.cdt.toUpperCase() + ' ' + name + ' · ' + money(p.feeCents) + (done ? ' charged' : ' pending charge, released at File'))));
     });
@@ -343,7 +343,7 @@
       const fee = (s.cdt[ce.cdt] || [null, 0])[1];
       // Storage ids stay off the glass: a chart event, a procedure, a plan item and a note are named by
       // what they say, not by ce-1 / pr-500 / pl-1 (C3).
-      const card = h('div', { class: 'card enc-tx stack', 'aria-label': 'Transaction · ' + scaffoldLine(ce) },
+      const card = h('div', { class: 'card enc-tx stack', role: 'group', 'aria-label': 'Transaction · ' + scaffoldLine(ce) },
         h('div', { class: 'row between' }, h('b', { text: 'One paint, one transaction' }), chip(ce.temporality === 'today' ? 'style' : ce.temporality === 'planned' ? 'review' : 'info', TEMPORALITY.find((t) => t[0] === ce.temporality)[1])),
         h('ul', { class: 'enc-rows' },
           h('li', null, h('b', { text: 'Chart event ' }), scaffoldLine(ce) + byLine(ce.author)),
@@ -357,7 +357,7 @@
   }
   function renderPlanCard(plan, fee, x) {
     const owe = plan.estimateCents; const pays = Math.max(0, fee - owe);
-    return h('div', { class: 'card flat stack', 'aria-label': 'Plan card' },
+    return h('div', { class: 'card flat stack', role: 'group', 'aria-label': 'Plan card' },
       h('div', { class: 'row between' }, h('b', { text: 'Plan card' }), x.quoted && x.quoted.planId === plan.id ? chip('info', 'Quoted') : null),
       x.quoted && x.quoted.planId === plan.id ? h('div', { class: 'small muted', text: 'Quoted to the patient ' + longDate(x.quoted.date) }) : null,
       h('div', { class: 'threenum' }, num(money(fee), 'Fee'), num(money(pays), 'Your plan pays about'), num(money(owe), "You'd owe about")),
@@ -442,7 +442,7 @@
     // One gate, one 44 px control: the read-back used to carry three (Confirm and file, Switch author and
     // the held File). The gate card holds the gate; the author line and the primary stand beside it (§6).
     const area = h('div', { class: 'stack enc-gate-col', id: 'enc-gate-area' });
-    const wrap = h('div', { class: 'card stack', id: 'enc-gate', 'aria-label': 'Filing gate' });
+    const wrap = h('div', { class: 'card stack', id: 'enc-gate', role: 'group', 'aria-label': 'Filing gate' });
     area.append(wrap);
     // A File the store refused outright (outage, sealed note) stands here, beside the primary it held (§6),
     // and clears with the condition that raised it so the primary comes back when the server does.
@@ -485,7 +485,7 @@
   }
   function killerRow(r, enc, x, k, i) {
     // Sent already: the row is the stamp the send lands the keyboard on, not a second Send (Enter-twice rule).
-    if (isSent(k, enc)) return h('div', { class: 'row', id: 'enc-sent', tabindex: '-1', 'aria-label': 'Sent to Exams to sign' }, chip('clear', 'Sent to Exams to sign'), h('span', { class: 'small muted grow', text: k.sent ? k.verb : 'Wait for the dentist to file' }), btn(k.sent && k.control ? k.control : 'Back to Chairs', { kind: 'quiet', testid: 'enc.killer.' + i + '.fix', onClick: () => Proto.router.go(r.persona, 'chairs') }));
+    if (isSent(k, enc)) return h('div', { class: 'row', id: 'enc-sent', tabindex: '-1', role: 'group', 'aria-label': 'Sent to Exams to sign' }, chip('clear', 'Sent to Exams to sign'), h('span', { class: 'small muted grow', text: k.sent ? k.verb : 'Wait for the dentist to file' }), btn(k.sent && k.control ? k.control : 'Back to Chairs', { kind: 'quiet', testid: 'enc.killer.' + i + '.fix', onClick: () => Proto.router.go(r.persona, 'chairs') }));
     const node = refusal({ code: k.code, verb: k.verb, control: k.control, why: KILLER_WHY[k.fix] || 'The same list runs server-side at File.', severity: k.fix === 'contradiction' ? 'stop' : 'required', onControl: () => fixKiller(r, enc, x, k) });
     const c = node.querySelector('[data-testid="refusal.control"]'); if (c) c.setAttribute('data-testid', 'enc.killer.' + i + '.fix');
     return node;
@@ -555,8 +555,8 @@
     const s = S(); const procs = s.procedures.filter((p) => p.encounterId === enc.id).map((p) => p.id);
     const released = filed ? s.ledger.filter((e) => e.releasedByNoteId === filed.id) : s.ledger.filter((e) => e.kind === 'charge' && procs.includes(e.procedureId));
     const claim = s.claims.find((c) => c.encounterId === enc.id) || null;
-    return h('div', { class: 'card stack enc-filed', 'aria-label': 'Filed note' },
-      h('div', { class: 'row', id: 'enc-filed-head', tabindex: '-1', 'aria-label': 'Filed, audit passed' }, chip('clear', 'Filed', { big: true }), chip('clear', 'Audit passed')),
+    return h('div', { class: 'card stack enc-filed', role: 'group', 'aria-label': 'Filed note' },
+      h('div', { class: 'row', id: 'enc-filed-head', tabindex: '-1', role: 'group', 'aria-label': 'Filed, audit passed' }, chip('clear', 'Filed', { big: true }), chip('clear', 'Audit passed')),
       filed ? h('p', { class: 'small muted', text: 'By ' + filed.author + ' at ' + dateTime((filed.filedOn || '') + ' ' + (filed.filedTime || '')) + ' · text and version frozen; corrections are addenda, never edits.' }) : null,
       h('ul', { class: 'enc-rows' },
         h('li', null, h('b', { text: 'Charges released: ' + released.length }), released.length ? ' · ' + released.map((e) => money(e.amountCents) + (e.tooth ? ' #' + e.tooth : '')).join(', ') : ' (nothing pending)'),
