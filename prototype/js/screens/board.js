@@ -273,7 +273,8 @@
   }
   /* The words the card's face used to say in four more chips. The chip stays for the one thing that changes
      hour by hour — the visit's status — and the standing facts are read as a line (CLT-chip-vocab). */
-  const ELIG_LINE = { green: 'Eligibility active', amber: 'Eligibility amber', red: 'Eligibility inactive', none: 'Self-pay' };
+  // The eligibility word is ui.js ELIG's, the one Chairs and the rail print, so an amber visit reads the same everywhere (WCAG 3.2.4).
+  const ELIG_LINE = Object.fromEntries(Object.entries(Proto.ui.ELIG).map(([k, v]) => [k, v[1]]));
   function metaWords(a, pt) {
     const out = [Proto.ui.typeWord(a.type), ELIG_LINE[a.eligibility] || ELIG_LINE.none];
     if (pt.alerts.length) out.push(pt.alerts.length + ' alert' + (pt.alerts.length > 1 ? 's' : ''));

@@ -318,7 +318,8 @@
       el.classList.remove('pulse', 'pointed'); void el.offsetWidth;
       el.classList.add('pulse', 'pointed');                       // 'pointed' is a static ring: it survives reduced motion
       el.scrollIntoView({ block: 'center' });
-      (typeof pointTimers.get(el) === 'function' ? pointTimers.get(el)() : clearTimeout(pointTimers.get(el))); /* The ring used to leave on a 6000 ms timer, a time limit a person could neither extend nor turn off (WCAG 2.2.1). It now stays until the control it points at is pressed or the screen changes. */
+      // One ring at a time: pointing at the next step takes the ring off the last one (and off this one, if it is being re-pointed).
+      for (const [pointed, drop] of [...pointTimers]) (typeof drop === 'function' ? drop() : (clearTimeout(drop), pointed.classList.remove('pointed'), pointTimers.delete(pointed))); /* The ring used to leave on a 6000 ms timer, a time limit a person could neither extend nor turn off (WCAG 2.2.1). It now stays until the control it points at is pressed or the screen changes. */
       const clear = () => { el.classList.remove('pointed'); pointTimers.delete(el);  el.removeEventListener('click', clear); window.removeEventListener('hashchange', clear); };
       el.addEventListener('click', clear, { once: true }); window.addEventListener('hashchange', clear, { once: true }); pointTimers.set(el, clear);
       Proto.router.announce(verb);

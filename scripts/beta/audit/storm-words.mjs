@@ -21,7 +21,14 @@ export default ({ ctx, go, hop, click, txt, state, rec }) => {
   const lastSeq = (p) => p.evaluate(() => (window.__events.length ? window.__events[window.__events.length - 1].seq : 0));
   const writesAfter = (p, seq) => p.evaluate((s) => window.__events.filter((e) => e.seq > s && e.kind === 'write').map((e) => e.table + ':' + e.id), seq);
   // The word of a chip without its glyph: the glyph span is aria-hidden and the text node carries the word.
-  const chipWords = (p, sel) => p.evaluate((sel) => [...document.querySelectorAll(sel + ' .chip')].map((c) => [...c.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim()), sel);
+  // Chip words plus the middot-separated words of the same element: since the UX review (CLT-chip-vocab) the type and
+  // eligibility read as plain words in a card's meta line, not as chips, and the one-word rule applies to both.
+  const chipWords = (p, sel) => p.evaluate((sel) => {
+    const chips = [...document.querySelectorAll(sel + ' .chip')].map((c) => [...c.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim());
+    const text = [...document.querySelectorAll(sel)].flatMap((e) => [...e.querySelectorAll('span:not(.chip):not(.glyph)')].filter((s) => !s.closest('.chip') && !s.querySelector('span')).flatMap((s) => s.textContent.split('·').map((t) => t.trim()).filter(Boolean)));
+    return chips.concat(text);
+  }, sel);
+  const typeWords = (p) => p.evaluate(() => Object.values(Proto.ui.TYPE || {}).map((v) => (Array.isArray(v) ? v[1] : String(v))));
   // Press a gate's control and read what the live region says 200 ms later (announce clears, then writes after 10 ms).
   async function pressSupport(p, name) {
     const code = await gateCode(p); const label = await txt(p, 'refusal.control');
@@ -72,10 +79,11 @@ export default ({ ctx, go, hop, click, txt, state, rec }) => {
         await go(p, '#/frontdesk/board');
         const appts = (await state(p)).appointments.filter((a) => a.locationId === 'loc-1');
         const words = {}; const add = (id, screen, w) => { if (w) (words[id] = words[id] || {})[screen] = w; };
-        for (const a of appts) add(a.id, 'board', (await chipWords(p, tid('board.card.' + a.id) + ' > .meta'))[0]);
+        const TYPEW = await typeWords(p); const typeOf = (ws) => ws.find((w) => TYPEW.includes(w)) || ws[0];
+        for (const a of appts) add(a.id, 'board', typeOf(await chipWords(p, tid('board.card.' + a.id) + ' > .meta')));
         for (const persona of ['hygienist', 'dentist', 'surgeon']) {
           await hop(p, '#/' + persona + '/chairs'); await p.waitForTimeout(150);
-          for (const a of appts) add(a.id, 'chairs', (await chipWords(p, tid('chairs.card.' + a.id) + ' > .meta'))[0]);
+          for (const a of appts) add(a.id, 'chairs', typeOf(await chipWords(p, tid('chairs.card.' + a.id) + ' > .meta')));
         }
         for (const a of appts) {
           await hop(p, '#/frontdesk/checkout/' + a.id); await p.waitForTimeout(120);

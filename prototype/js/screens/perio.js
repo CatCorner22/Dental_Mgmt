@@ -353,7 +353,10 @@
     /* The cell is the widget: 168 buttons were 168 tab stops and 168 button identities for one instrument.
        Roving tabindex makes the grid one tab stop, and the cursor is the stop
        (INT-temp-first-screenful, CLT-similarity-identity, CLT-chunk-4). */
-    const roving = active || (st.saved && idx === 0) ? '0' : '-1';
+    /* Past the last site (the final site skipped) no cell is the cursor, so the last cell keeps the stop: the grid
+       reads keys only from inside itself (CUST-2.1.4), and a keyboard has to be able to come back to step back. */
+    const pastEnd = !st.saved && st.cur >= st.path.length && idx === st.path.length - 1;
+    const roving = active || (st.saved && idx === 0) || pastEnd ? '0' : '-1';
     const face = h('span', { class: cls.join(' ') }, v && v.depth != null ? String(v.depth) : '—');
     if (st.prior[key] != null) face.append(h('span', { class: 'ghost', 'aria-hidden': 'true', style: 'color: var(--ink-2)', text: st.prior[key] }));
     return h('td', { role: 'gridcell', class: 'pe-cell', tabindex: roving, testid: 'perio.grid.cell.' + key, 'aria-label': 'Tooth ' + t + ' site ' + s, 'aria-description': desc, title: desc,

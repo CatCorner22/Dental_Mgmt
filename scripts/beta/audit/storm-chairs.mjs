@@ -55,7 +55,8 @@ export default ({ ctx, go, hop, click, txt, state, rec }) => {
         await typeKeys(p, '2'.repeat(167)); await key(p, 'ArrowRight');
         await click(p, 'perio.save'); await p.waitForTimeout(200);
         const gate = (await refusals(p))[0] || null;
-        await key(p, 'ArrowLeft'); await typeKeys(p, '3');
+        // Single keys act only from the work surface unless the person has switched shortcuts on (CUST-2.1.4), so the hand returns to the cursor cell first.
+        await p.focus('[data-testid="perio.grid"] [tabindex="0"]').catch(() => {}); await key(p, 'ArrowLeft'); await typeKeys(p, '3');
         const after = { chooserH2: await q(p, '.pe-licence h2'), codes: await codes(p), save: await txt(p, 'perio.save'), count: await q(p, '.pe-count') };
         await click(p, 'perio.save'); await p.waitForTimeout(200);
         const ex = (await exams(p))[0] || null;

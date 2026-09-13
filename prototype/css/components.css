@@ -264,10 +264,15 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
   .enc-layout { grid-template-columns: 1fr; grid-template-rows: auto; grid-template-areas: "chart" "note" "gate"; }
   .enc-gate-col { position: sticky; bottom: 0; z-index: 3; background: var(--bg); border-top: 1px solid var(--line); padding-top: var(--space-2); max-height: 70vh; overflow: auto; }
 }
-/* On a phone the pinned gate stood 527px tall at 320px wide, so File sat over the procedure strip
-   and a tap meant for a procedure could land on File (WCAG 2.5.8; axe target-size). Below the phone
-   breakpoint the gate flows after the note instead of pinning: nothing can then stand over a target. */
+/* On a phone the pinned gate stood 459px tall at 420px and 527px at 320px once the filing summary was
+   raised inside it, so File and the summary sat over the procedure strip and the temporality segment
+   (WCAG 2.5.8; axe target-size). While the gate is compact it stays pinned, so File is in view at every
+   stage (A-storm-enc-17), read-back row included; the moment the filing summary (role=alert) stands in it, it flows after the note instead,
+   and nothing can then stand over a target. Below 360px it always flows. */
 @media (max-width: 639px) {
+  .enc-gate-col:has([role="alert"]) { position: static; max-height: none; overflow: visible; border-top: 0; }
+}
+@media (max-width: 359px) {
   .enc-gate-col { position: static; max-height: none; overflow: visible; border-top: 0; }
 }
 .enc-odont-wrap { overflow-x: auto; max-width: 100%; padding-bottom: var(--space-1); display: flex; flex-direction: column; gap: var(--gap); }
@@ -541,3 +546,12 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 
 /* A disclosure summary is as wide as its words, so the pressable area is the words (CDS-DETAILS-disclosure). */
 .rail summary, .rail-sum summary { display: inline-flex; width: fit-content; max-width: 100%; }
+
+/* The glove pad's three named groups stand side by side where the canvas is wide enough, so the pad card is one
+   group tall instead of three and the grid keeps its room on a 1024×768 operatory: the active-site line, the pad
+   and the cursor's row stay in one viewport (A-storm-chairs-12, S-perio-11). Below that width they stack. */
+@media (min-width: 900px) {
+  .pe-padcard { display: grid; grid-template-columns: max-content max-content max-content; column-gap: var(--gap-group); row-gap: var(--space-2); align-items: start; }
+  .pe-padcard > h2 { grid-column: 1 / -1; }
+  .pe-padcard > [role="group"] { margin-top: 0 !important; }
+}

@@ -115,9 +115,9 @@
     }
     const woTyped = !approved && st.writeoffOpen && String(st.writeoffStr).trim() !== '';
     if (woTyped && !(cents(st.writeoffStr) > 0)) { fieldGate(r, st, { code: 'amount_required', verb: 'Type an amount above zero', control: 'Go to amount', why: WRITEOFF_WHY }, 'writeoff', 'checkout.writeoff.amount'); return true; }
-    if (window.__proto.device === 'shared' && !String(st.pin || '').trim()) { fieldGate(r, st, { code: 'pin_required', verb: 'Enter your PIN to post', control: 'Enter PIN', why: PIN_WHY }, 'pin', 'checkout.pin'); return true; }
-    // Under an outage the store refuses before it writes, so the first press asks it and shows its gate in its own words.
+    // Under an outage the store refuses before it looks at a PIN, so the first press asks it first and shows its gate in its own words.
     if (Proto.store.get().outage) { doPost(r, a, st); return true; }
+    if (window.__proto.device === 'shared' && !String(st.pin || '').trim()) { fieldGate(r, st, { code: 'pin_required', verb: 'Enter your PIN to post', control: 'Enter PIN', why: PIN_WHY }, 'pin', 'checkout.pin'); return true; }
     return false;
   }
   /* What the second press will write, in the clinic's words, for the read-back row (WCAG 3.3.4). */

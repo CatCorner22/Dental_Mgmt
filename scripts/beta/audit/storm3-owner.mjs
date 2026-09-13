@@ -25,7 +25,9 @@ export default ({ ctx, go, hop, click, txt, state, events, rec }) => {
         await go(p, '#/owner/close?device=shared');
         const S0 = await state(p); const owner = S0.users.find((u) => u.id === 'u-dr-1');
         const hasPin = await has(p, 'close.pin');
-        await click(p, 'close.tied.tile'); await click(p, 'close.variance.v-1.match'); await p.waitForTimeout(120);
+        // The tile opens by itself when the day is not tied (CLT-disclosure-depth, UX review wave 3); press it only if it is closed.
+        if ((await p.getAttribute('[data-testid="close.tied.tile"]', 'aria-expanded')) !== 'true') await click(p, 'close.tied.tile');
+        await click(p, 'close.variance.v-1.match'); await p.waitForTimeout(120);
         const noPin = { gates: (await refusals(p)).map((g) => g.code), variance: (await state(p)).variances[0].status, label: await txt(p, 'close.variance.v-1.match') };
         await fill(p, 'close.pin', owner.pin); await click(p, 'close.variance.v-1.match'); await p.waitForTimeout(150);
         const S1 = await state(p);
