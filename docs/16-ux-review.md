@@ -239,4 +239,150 @@ Where the fetched sources disagreed on a number, the stricter number a fetched s
 
 ## Results
 
-_Pending: the audit and the changes follow the registration above._
+Recorded 2026-09-13, after the three waves of change and three full runs of every gate (`npm run review`, `scripts/final-review.sh`): the first two each found something, named below, and the third is the one the numbers report. Every number below was measured, not estimated; where a sentence rests on reading the code rather than on a probe, it says so.
+
+### What the audit found, in one paragraph
+
+Ten screen auditors scored the prototype against the 117 registered heuristics and produced 350 screen-level breach rows. Those collapse to 87 root causes: one heuristic, breached on one or more screens. Nine adversarial verifiers, each starting from "refuted" and re-measuring from a clean page, confirmed 47 as written, confirmed 37 with a correction to scope or numbers, and refuted 3. By the verifiers' severities the 84 standing root causes are 17 P1, 35 P2 and 32 P3 (the auditors had written 20 P1; a verifier could lower a severity, never raise it). The record is [`findings.md`](../knowledge/reviews/ux-review/findings.md), one row per root cause with the verifier's own measurement beside the auditor's claim.
+
+The three refuted claims stay in the record as refuted: **INT-no-double-submit** (a double-click and two clicks 80 ms apart each produce one mutation; the guard in `ui.js` holds), **WCAG-1.4.12** (the text-spacing overflow on the sign-in tiles was measured correctly, but the threshold's second clause — overflow visible — is met, and nothing is clipped) and **WCAG-1.4.4** (the "overlaps" at 200 % were bounding-box intersections with controls scrolled out of an `overflow: auto` region and painted nowhere).
+
+### The changes, in three waves
+
+| Wave | What changed | Root causes it answers |
+|---|---|---|
+| 1 · the visual layer (`tokens.css`, `base.css`, `components.css`) | Sizes in rem; body 16 px at line-height 1.5; a six-step type scale with no off-scale size and two weights (400, 600); spacing on a 4/8 scale; a 70ch measure on prose; tabular numerals; the input border raised from 2.11:1 / 2.23:1 to 3.81:1 / 4.13:1; the dark theme's severity rails declared; a 24 px glyph token; the colour scheme following the operating system when no choice is stored; `prefers-contrast: more` and forced colours answered; four causes of sideways panning at 320 px removed | 25 shared-layer causes, among them WCAG-1.4.3, WCAG-1.4.3-placeholder-hover-focus, WCAG-1.4.11, CDS-TYPE-body-16, CDS-TYPE-two-weights, TYPE-line-height-1.5, TYPE-measure-80ch, TYPE-scale-no-offscale, TYPE-tabular-money, CDS-SPACE-scale-4-8, CDS-ICON-size-24, CUST-tokens-rem, MQ5-color-scheme-follow-os, MQ5-prefers-contrast-more, MQ5-forced-colors |
+| 2 · the shared behaviour (`ui.js`, `app.js`, `store.js`, `shell.js`) | One announcement channel (chips lost `role="status"`; the Board had held 105 live regions); accessible names that lead with the printed words (`leadWithLabel`, used by every button); `confirmable()` — a read-back row with an equal-size Cancel that takes the keyboard before anything irreversible is written; `field()`, `setFieldError()` and `errorSummary()` — the requirement stated before typing, the refusal named in text beside the field, a `role="alert"` summary that links to each error; `scrollRegion()` for anything that scrolls sideways; seven per-user preferences behind one Settings control with a reset; the top bar cut to the brand, the location, search, the destinations, the author, Settings and sign-out | WCAG-4.1.3-status-messages, WCAG-2.5.3-label-in-name, CLT-topbar-7, CLT-proximity-ratio, CUST-settings-surface-small, CUST-3.3.7-remembered-layout, CDS-BTN-border-2px, CDS-TAG-tint-shade, CDS-TABLE-density, CDS-LABEL-hint-body-size, and the shared half of every screen cause below |
+| 3 · the screens (nine agents, one screen or overlay each, forbidden to touch a shared file) | 59 root causes were assigned to screens, 189 screen × cause rows fixed and re-measured, 43 rows left with a stated reason — most because the fix belonged in a shared file, which was then changed by hand (below) | 56 of the 59 fixed on at least one screen |
+
+Wave 3's `needs_shared` lists became the last shared edits: Escape cancels a read-back row; the refusal and read-back marks render in a 24 px box; error-summary links and rail disclosures meet the 44 px target; the point-at ring on the first-shift rail persists until the control is pressed or the route changes instead of vanishing after six seconds; `--required-ink` darkened to 7.61:1 on its soft fill; the author chip took the quiet button identity; nested routes mark their parent destination `aria-current="page"` (perio → Chairs, encounter → Exams, checkout → Board, ledger → Money Desk); the palette and phone chip words joined the shared `CHIP_WORDS` registry.
+
+### Before and after
+
+Like-for-like numbers from `measure.cjs` at 1280 px, light theme, on the seeded data: the tree this review started from → the final tree. Every cell is read from the live DOM.
+
+| Screen | Controls above the fold | Most controls on one card | Chips | Chip vocabulary | Longest label (words) | Text colours | Fills | Sub-line words | Font sizes in use |
+|---|---|---|---|---|---|---|---|---|---|
+| Sign-in | 22 → 17 | 0 | 0 | 0 | 7 → 4 | 3 → 4 | 3 | 0 | 12/13/15/20/26 → 14/16/22/28 |
+| Board | 43 → 29 | 8 → 3 | 105 → 31 | 29 → 10 | 4 | 11 → 8 | 9 → 6 | 16 → 11 | 11/13/15/20/26 → 14/16/22/28 |
+| Board (temp) | 43 → 31 | 8 → 3 | 105 → 31 | 29 → 10 | 4 | 11 → 8 | 10 → 7 | 16 → 11 | 11/13/15/20/26 → 14/16/22/28 |
+| Chairs | 32 → 13 | 4 | 20 → 9 | 12 → 6 | 22 → 2 | 8 → 6 | 7 → 6 | 18 → 7 | 11/13/15/26 → 14/16/28 |
+| Perio grid | 173 → 13 | 0 → 1 | 0 | 0 | 3 | 5 → 4 | 4 | 37 → 10 | 10/12/13/15/20/26 → 14/16/22/28 |
+| Exams to sign | 12 → 9 | 1 | 0 | 0 | 3 | 3 | 3 | 8 | 13/15/26 → 14/16/28 |
+| Encounter | 59 → 58 | 40 → 41 | 1 | 1 | 4 → 5 | 5 | 4 | 13 | 11/12/13/15/17/20/26 → 14/16/22/28 |
+| Checkout | 21 → 19 | 10 → 1 | 5 | 3 | 4 | 7 | 6 | 12 | 11/12/13/15/20/26 → 14/16/22/28 |
+| Money Desk | 20 → 18 | 2 → 3 | 3 → 1 | 3 → 1 | 3 | 8 → 5 | 6 → 4 | 20 → 10 | 11/12/13/15/20/26 → 14/16/22/28 |
+| Ledger + rail | 34 → 29 | 3 | 1 | 1 | 7 → 3 | 6 | 5 | 10 | 11/13/15/17/20/26 → 14/16/18/22/28 |
+| Daily Close | 17 → 14 | 4 → 5 | 6 → 10 | 5 → 9 | 14 → 4 | 11 → 10 | 7 → 8 | 20 → 12 | 11/13/15/20/26/34 → 14/16/22/28/36 |
+| Practice risk | 19 → 16 | 8 → 4 | 4 | 4 | 3 | 6 | 5 | 17 → 6 | 11/13/15/20/26 → 14/16/22/28 |
+| Roles (form open) | 18 → 12 | 11 | 25 → 1 | 14 → 1 | 6 → 3 | 5 → 4 | 5 → 4 | 14 → 9 | 11/13/15/20/26 → 14/16/22/28 |
+| Phone approvals | 17 → 15 | 4 | 2 | 2 | 8 → 3 | 6 | 4 | 10 | 11/13/15/17/26 → 14/16/18/28 |
+| **All 14** | 530 → 293 | — | 277 → 96 | 103 → 48 (sum) | — | — | — | — | — |
+
+Three numbers the table does not show. Buttons carrying none of the four identities (quiet, reversible, irreversible, held) fell from 244 to 0 across the fourteen screens (193 of them were the perio grid's cells, now one `role="grid"` widget with a roving tab stop; 33 were the odontogram's teeth). Body text moved from 15 px on a 21.75 px line to 16 px on a 24 px line, and no screen paints a size below 14 px where nine had 10–13 px text before. At 420 px the controls in the first screenful fell on eleven screens (perio 59 → 12, the temp Board 20 → 12, the Board 17 → 10) and rose on one (sign-in 10 → 12, the two theme choices now on the page).
+
+Two cautions on reading the table. The prose count rose on several screens (the Board 114 → 205 words above the fold, the perio grid 53 → 300) because `measure.cjs` counts every visible text node outside controls and headings: the review added visible field labels, hints, group names and the perio legend, and on the grid it counts each cell's dash and ghosted prior depth as a word. The per-heuristic prose budgets (CLT-prose-budget: at most 40 words between a region's heading and its finish control, at most 120 above the fold) were measured by the screen agents' own probes, which count sentences, and every screen they fixed is inside them (`findings.md`). And the top-bar column of the pre-review `measure.cjs` run over-counted (it included the skip link, the live region and hidden menu items); the final tree, counted as visible controls, carries 4–8 top-bar controls on one row at 1280 px and 3 on at most two rows at 420 px, none off the edge, on every route.
+
+Daily Close moves the other way on two columns (chips 6 → 10, vocabulary 5 → 9, fills 7 → 8) because the day's tile now opens by itself when the day is not tied (CLT-disclosure-depth), so the variance rows and their chips are on the page at rest instead of behind a press; per row the count is one chip, and the severity fills in the first screenful are two. Roles keeps 11 controls on its People card: one disclosure per seat, a grouping decision recorded for the owner below.
+
+### What the full suite found after the third wave, and what was done
+
+The first full run of every gate on the merged tree was green on syntax, proto-check, axe (0 violations in 144 contexts), verify-docs (12 of 12) — and reproduced 21 of 698 regression checks against 14 before the third wave. Ten were new. Each was root-caused rather than re-run:
+
+| Check | What had happened | Resolution |
+|---|---|---|
+| A-misc-1-2 | CONTRACTS §4 named the new read-back ids only in prose (`perio.save.confirm`, `.cancel`, `money.era.<id>.postmatched.cancel`) | Named in full in the Perio and Money rows |
+| A-screens-shell-2 | The ring that persists until pressed (WCAG 2.2.1 fix) persisted on every pointed control at once | Pointing at the next step takes the ring off the last |
+| A-storm-words-1 | Checkout's new first-press precheck asked for a PIN before the store could refuse an outage; the store refuses the outage first | Checkout and the Ledger ask the store first under an outage |
+| A-storm-words-2, -4 | The Board's meta line printed "Eligibility amber" from its own table while Chairs and the rail print "Re-verify" from `ui.js ELIG`; and the checks read only chips, while type and eligibility are now plain words in the meta line | The Board reads the shared table; the checks read chip words and meta words alike |
+| A-storm-chairs-12, S-perio-11 | The glove pad's three named groups stacked to 370 px, so on a 1024 × 768 operatory the grid's room fell to the 200 px floor, the canvas scrolled, and the active-site line and a refusal sat above the viewport | The three groups stand side by side from 900 px up; the pad card is one group tall |
+| A-storm-chairs-2 | With the grammar confined to the grid (CUST-2.1.4), a keyboard past the last site had no way back into the grid: no cell was the cursor, so none was a tab stop; the check had also typed from the body | The last cell keeps the tab stop past the end; the check returns focus to the grid first |
+| A-storm-enc-17 | Making the Encounter's gate flow after the note below 640 px (the target-size fix at 320) put File 2,000 px down at 420 | The gate stays pinned while compact and flows only while the filing summary stands in it; axe target-size 0 at 420 and 320, File in view on open, after painting and at the read-back |
+| A-storm3-owner-1 | The check pressed the Daily Close tile to open it; the tile now opens by itself, so the press closed it | The check opens the tile only if it is closed |
+
+The second full run reproduced 11 of 698 — but not the expected eleven: S-palette-rail-privacy-3 (the palette's four wrong-date-of-birth raises were announced once, because the shared refusal deduplicated on a single last-gate key) closed as a side effect of the standing-gate rule written for WCAG 4.1.3, and A-storm2-owner-8 opened because its probe read the phone's notice through the `role="status"` the same rule had removed; the probe now reads the notice by class. The same run's axe sweep found the rail's new Read-aloud button pushed under the tabs on the Ledger (target-size, 4 contexts); the alert bar is now one grid row. A third full run is the number reported below.
+
+Three pre-existing reproductions closed as a side effect of the third wave (S-perio-3, S-perio-6, S-palette-rail-privacy-5) and a fourth (S-palette-rail-privacy-3) with the standing-gate rule; 10 remain (S-checkout-screen-7, S-clinical-store-8, S-clinical-store-9, S-controls-3, S-encounter-6, S-moneydesk-close-10, S-palette-rail-privacy-2, S-perio-7, S-perio-8 and S-perio-13), every one already reproducing on the owner's base tree before this review began, none in code this review changed, and each already recorded in `docs/15` with its owner decision. A second full run after these fixes is the number reported under Regression below.
+
+### What the gates say on the final tree
+
+| Gate | Final tree |
+|---|---|
+| `scripts/syntax-check.mjs` | 102 files parse |
+| `scripts/proto-check.mjs` | 9 of 9 rows PASS; flow taps check-in 1, perio 3 + 168 keys, chart 8, checkout 4 + 16 keys, ERA-and-close 9 |
+| `scripts/a11y-check.mjs` | 0 violations of any impact in 144 runs (24 contexts × 2 themes × 3 widths); the pre-review baseline carried 20 nodes of the two critical `aria-required-children`/`-parent` rules on Daily Close alone and 29 `label-content-name-mismatch` nodes on the Board |
+| `scripts/verify-docs.sh` | 12 of 12 |
+| `scripts/beta/reproduce.mjs` | 10 of 698 reproduced, every one pre-existing (below) |
+| `A-ux-1` … `A-ux-8` | 0 of 8 reproduced |
+
+### The seventeen P1 causes, re-verified on the final tree
+
+An independent verifier, told to assume no fix had landed, re-measured each P1 cause on the final tree with its own probes ([`p1-reverification.json`](../knowledge/reviews/ux-review/p1-reverification.json)): **13 fixed, 3 partly fixed, 1 declined.** The three partly fixed were then answered and re-measured by this reviewer:
+
+- **WCAG-2.5.3-label-in-name** — axe reported 0 mismatches on 13 of 14 routes but 97 on the perio grid: a cell printed "3" (and its ghosted prior depth) while its name was "Tooth 2 site 1". The name now leads with the printed depth ("3 mm, Tooth 2 site 1") and the prior depth is drawn by CSS from `data-prior` rather than being a text node; axe `label-content-name-mismatch` on the grid after typing 3, 4, 5: 0 violations.
+- **WCAG-4.1.3-status-messages** — the Board (107 → 1 live region), Daily Close, Roles, Checkout and Chairs were clean; the Money Desk still re-mounted a second, `sr-only` `aria-live` copy of the sentence; a tooth press on the Encounter re-announced both standing gates and not the tooth; the phone inserted `role="status"` lines on each render and announced a sentence its card contradicted for a non-approver. Now: the Money Desk has one live region and a Post writes two `#live` lines (the read-back, then its confirmation) with 0 regions added or removed; a standing gate is not announced again while its element is still on the page (`ui.js refusal`, keyed by code, verb, control and scope) and the Encounter's Before File summary is `role="alert"` only on the paint that raises it — a tooth press now writes exactly "Selected #30"; the phone's notes are plain text, the announcement is the printed sentence, and it says "waiting on an approver" when the seat cannot approve.
+- **WCAG-1.4.10-reflow-320** — every route's page and canvas measure 320 px wide at 320, every two-dimensional scroller is a named region with a tab stop, and the step-up dialog's 321 px is gone; the phone route still squeezed the Andon sentence into a 0 px column (16 lines) and the request card's amount overflowed its box by 20.5 px. Now: the Andon sentence takes its own 296 px row (3 lines) and the amount column wraps below the initials with 0 px of overflow.
+- **AXE-2.4.1-bypass-verified** — declined as written (below): the skip link is the first Tab stop on 0 of 84 route × width × theme legs because arrival focus goes to the page `h1`; the link exists, Enter moves focus into the canvas on 84 of 84, and axe `bypass` and `skip-link` report 0 violations.
+
+### Regression, three ways
+
+The 697-check regression suite (`scripts/beta/reproduce.mjs`) was run on three trees. The owner's merged base reproduced 15 of 690; the tree this review started from, 20 of 690 (five checks the two audit rounds had left open); the final tree, 10 of 698 — the base tree's 15 less the five the review's changes closed (S-encounter-5, S-palette-rail-privacy-3, S-palette-rail-privacy-5, S-perio-3, S-perio-6), and none new. The five checks open at the start (A-storm-money-10, -12, A-storm2-ledger-9, -11, A-storm3-money-4) closed during the first two waves.
+
+### What the harness had to learn
+
+The product's path changed under the checks, and the checks changed with it, never the other way round:
+
+- **The press model.** Every money verb, Save exam, Ready for exam, Issue day pass, Send back and Close day now ask once before they write. `reproduce.mjs`'s `press` and `click` therefore auto-press `<testid>.confirm` when a read-back appears; `pressOnce` and `clickOnce` press once and stop, for the checks whose subject is the read-back itself.
+- **Flow budgets** (`scripts/lib/flows.mjs`, CONTRACTS §7): perio 2 → 3 taps (`perio.save.confirm`), ERA-and-close 6 → 9 (three second presses), checkout stays at 4 with `checkout.post.confirm` as the fourth. These are the product's path growing by one deliberate step, not a threshold loosened.
+- **`scripts/a11y-check.mjs`** drives seven more states (Daily Close expanded, the write-off form, the glove pad, the day-pass form, the Encounter's filing gate, the Settings dialog, a Ready-for-exam read-back) beside the 14 routes and three overlays — 24 contexts × 2 themes × 3 widths, 144 runs, in the sweep the final review runs (a `--widths 320` run was added by hand for the reflow rows and found the Encounter's filing gate covering the procedure strip, since fixed); it exits 1 on any serious or critical violation.
+- **`A-ux-1` … `A-ux-8`** in `scripts/beta/audit/ux-a11y.mjs` guard the shared fixes: scroll regions in the tab order only while they overflow; no prohibited `aria-label`; 100 % of accessible names contain and ≥ 95 % lead with the printed words; every irreversible verb two-step with Cancel focused; every field stating its requirement before input and naming a refusal in text with a linked summary; exactly seven preferences with a reset; the top bar ≤ 9 controls on ≤ 2 rows with nothing off the edge; the Encounter's filing gate never covering the focused element.
+- **`scripts/final-review.sh`** (`npm run review`) runs every gate in order and writes one report, so "it passed" has one meaning.
+- **Two measurement faults, corrected.** `measure.cjs` counted every focusable node inside `.topbar`, including the skip link, the live region and hidden menu items, and so reported 9–19 top-bar controls where a visible count gives 7–11; the numbers above use the visible count. And `proto-check`'s contrast sampler read colours 150 ms after a theme flip while a 140 ms transition was still running under load; it now finishes running animations before it samples.
+
+### Clauses declined, and the tensions between rows
+
+- **AXE-2.4.1-bypass-verified (P1, "the skip link is the first Tab stop")** is declined as written. `app.js` moves focus to the page `h1` on every route change so a screen reader lands on the work, which is what WCAG 2.4.3's focus-order rule and the review's own WCAG-2.4.3 row ask for; making the skip link the first stop would undo that. axe's `bypass` rule passes (the link exists and moves focus into the canvas). The verifier had already recorded this as a corrected-scope finding; the decision is the owner's to reverse.
+- **INT-verb-labels on `palette.confirm.back` ("Back to results").** The wave-1 glossary row "Dismissing a surface" and the check that enforces it require "Back to <place>"; the heuristic wants a verb first. The glossary wins until the owner chooses; the check is unchanged.
+- **INT-verb-labels on Chairs.** "Ready for exam" is the word `store.js RAIL_STEPS` uses for the step, so the button keeps it (18 of 19 verb-first when the card is seated); changing the step word is a store decision.
+- **CLT-one-task on Daily Close.** Opening the day by default (CLT-disclosure-depth) puts the day's finish buttons in the first screenful; the two rows pull against each other and disclosure depth was kept.
+- **COLOR-roles-per-screen and CDS-STATUS-roles-max on Daily Close.** Measured with every disclosure open, text colours fell 14 → 10 and backgrounds 9 → 7 against thresholds of 7 and 6; the four severities that remain each carry a shape and a word, and collapsing another would remove a signal the owner asked for.
+- **CLT-hick-7 and INT-temp-first-screenful on the Ledger.** The patient rail's nine tabs and the always-open rail put 19–20 controls in the Ledger's first screenful against a limit of 14; folding the rail is a rail redesign, recorded, not done.
+- **CLT-chunk-4 on Roles.** The People card holds one disclosure per seat (11); grouping seats by role is a design change the owner should see first.
+- **WCAG-1.4.6 (AAA).** Daily Close reaches 90.8 % of text at 7:1 in light (100 % in dark); the remaining text is the muted ink (`--ink-3`, 6.20:1), kept for hints and meta lines at AA.
+
+### Open items for the owner
+
+These need a store verb, a seed change or a product decision, and no screen file could make them:
+
+| Item | Where it lives | What it would take |
+|---|---|---|
+| No inverse for Arrive, Seat, Re-verify, Ping chair (Board), Keep/Tighten a threshold decision (Daily Close), Dismiss a hygienist tag (Encounter), Reverse a posting (Money Desk), Withdraw a simulated request (Phone) | `store.js` | One inverse verb each, writing an event that names the original; INT-exit-and-undo's reversible-inverse clause stays at partial until then |
+| `clearVariance(vid, extras)` records `cleared_with_reason` with no reason field | `store.js` | A `reason` on the reconciliation row; the screen already collects it and passes it in `extras` |
+| The compliance seat (`u-cl-1`) holds `review_logs` only, yet Roles is its home and its primary needs `grant_roles` | `seed.js` | Either the seat gains `grant_roles` or the compliance home moves to Practice risk |
+| `RAIL_STEPS` names the hygienist step "Ready for exam" | `store.js` | A verb-first step word, if the owner wants the button verb-first |
+| "Back to results" vs verb-first | glossary row + `screens-palette-2.mjs` | One decision; then the label and the check move together |
+| The patient rail's nine tabs and always-open state | `rail.js` (outside every screen's remit) | A filter or a single disclosure; a rail redesign |
+| Ten checks that reproduce on the base tree and still do (S-checkout-screen-7, S-clinical-store-8, S-clinical-store-9, S-controls-3, S-encounter-6, S-moneydesk-close-10, S-palette-rail-privacy-2, S-perio-7, S-perio-8 and S-perio-13) | `scripts/beta/audit/swarm-*.mjs`, `screens-*.mjs`; each is a `docs/15` row | Store-level rules the storms asked for (a money-word list on the note gate, a second-tooth contradiction, a write-off cap per entitlement, a screening addendum's note line, the privacy mode's name on the phone card); none is a screen fix and each waits on the owner |
+
+### What "live use" means here
+
+The tree that passed every gate is a static, dependency-free prototype on a synthetic seed: no backend, no real patient, no PHI, one browser tab. Live use means putting it in front of the practice's people to work the seeded day — arrive, seat, chart, file, post, close — and recording what they say and where they stall, with `window.__events` as the trace. It does not mean production: the roadmap in [`docs/08`](08-roadmap.md) still stands between this prototype and a system that holds real records, and nothing in this review shortens it. Before each change during live use, `npm run review` is the gate; a red row is a stop, and a check is never edited to make it pass.
+
+What this review still cannot prove is what it said it could not: real usability, time on task, learnability in one shift, screen-reader behaviour, satisfaction. It proves that the interface is on the right side of every measurable threshold the research supports except the ones named above, that it was on the wrong side of 84 of them before, and that the same scripts will say so again if it slips.
+
+### Coverage
+
+| Measure | Count |
+|---|---|
+| Registered heuristics | 117 (72 fetched primary source, 29 fetched secondary, 16 training knowledge, unverified) |
+| Screen-level breach rows | 350 |
+| Root causes | 87 |
+| Verifier verdicts | 47 confirmed · 37 confirmed with correction · 3 refuted |
+| Standing root causes by verifier severity | 17 P1 · 35 P2 · 32 P3 |
+| Shared-layer causes fixed in waves 1–2 | 25 |
+| Screen causes fixed in wave 3 (root causes with at least one screen fixed / screen × cause rows fixed) | 56 of 59 / 189 |
+| Screen × cause rows left with a reason | 43: 23 then closed by the shared edits above (the 24 px warning mark on three screens, the author chip's identity on five, `aria-current` on four nested routes, the 320 px overflows on three, the first-shift ring, the rail's alert bar and disclosures, the dialog backdrop's pointer, and three rows the screen agents found already passing), 20 still open — 9 are the declined AXE-2.4.1 clause, 11 are the owner decisions below |
+| Root causes declined or left open, named above | 1 declined (AXE-2.4.1), 6 with a clause left open for an owner decision (INT-exit-and-undo, INT-verb-labels, CLT-one-task, COLOR-roles-per-screen with CDS-STATUS-roles-max, CLT-hick-7 with INT-temp-first-screenful, CLT-chunk-4) |
+| Functions the review introduced (docs/15 rows) | 128 |
+| Regression checks | 698 (10 reproduced on the final tree, all pre-existing) |
+
