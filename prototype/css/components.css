@@ -523,7 +523,7 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 /* One summary before the form, with a link per error. */
 .errsummary { border: 4px solid var(--stop-rail); border-radius: var(--radius); padding: var(--space-3) var(--space-4); background: var(--surface); color: var(--ink); display: flex; flex-direction: column; gap: var(--space-2); }
 .errsummary ul { margin: 0; padding-left: var(--space-4); display: flex; flex-direction: column; gap: var(--space-1); }
-.errsummary a { color: var(--stop-ink); font-weight: var(--weight-bold); }
+.errsummary a { color: var(--stop-ink); font-weight: var(--weight-bold); display: inline-flex; align-items: center; min-height: var(--target); }
 
 /* The location is a fact the bar states, not a control. */
 .topbar .loc { color: var(--ink-2); font-weight: var(--weight-bold); white-space: nowrap; }
@@ -538,3 +538,6 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 
 /* The severity glyph on a refusal is the warning icon, so it is sized like one. */
 .refusal .glyph { font-size: var(--glyph-lg); line-height: 1; flex: 0 0 auto; }
+
+/* A disclosure summary is as wide as its words, so the pressable area is the words (CDS-DETAILS-disclosure). */
+.rail summary, .rail-sum summary { display: inline-flex; width: fit-content; max-width: 100%; }

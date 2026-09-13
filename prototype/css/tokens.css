@@ -15,7 +15,7 @@
 
   /* severity ladder: fill / soft / ink / rail / on-fill */
   --stop-fill: #9B1C1C; --stop-soft: #FEF2F2; --stop-ink: #7F1D1D; --stop-rail: #B91C1C; --stop-on: #FFFFFF;
-  --required-fill: #C2410C; --required-soft: #FFF7ED; --required-ink: #9A3412; --required-rail: #EA580C; --required-on: #FFFFFF;
+  --required-fill: #C2410C; --required-soft: #FFF7ED; --required-ink: #8F300F; --required-rail: #EA580C; --required-on: #FFFFFF;
   --review-fill: #D97706; --review-soft: #FFFBEB; --review-ink: #1C1917; --review-rail: #B45309; --review-on: #1C1917;
   --style-fill: #6D28D9; --style-soft: #F5F3FF; --style-ink: #5B21B6; --style-rail: #7C3AED; --style-on: #FFFFFF;
   --info-fill: #475569; --info-soft: #F8FAFC; --info-ink: #334155; --info-rail: #5B6578; --info-on: #FFFFFF;
@@ -36,13 +36,13 @@
   --brand-on: #FFFFFF;
   --accent: var(--teal);
   --accent-on: #FFFFFF;
-  --link: #1F5A99;
+  --link: #1F5A99;                   /* 7:1 on white */
   --focus: #2B6CB8;
   --held-line: var(--navy);
   --irreversible: var(--navy);
   --irreversible-on: #FFFFFF;
   --reversible-line: var(--teal);
-  --reversible-ink: #0B5C56;
+  --reversible-ink: #0B5C56;        /* 7:1 on white (WCAG 1.4.6) */
   --selected: #E4EEF8;
   --shadow: 0 1px 2px rgba(23, 35, 58, .08), 0 4px 12px rgba(23, 35, 58, .06);
 

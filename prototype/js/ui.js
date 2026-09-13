@@ -151,6 +151,12 @@
   };
   const TYPE = { hygiene: ['clear', 'Hygiene'], restorative: ['style', 'Restorative'], exam: ['info', 'Exam'], surgery: ['stop', 'Surgery'], emergency: ['required', 'Emergency'] };
   const ELIG = { green: ['clear', 'Active'], amber: ['review', 'Re-verify'], red: ['required', 'Inactive'], none: ['info', 'Self-pay'] };
+  /* Every chip word the product prints, in one place, so the same state reads the same on every screen
+     (WCAG 3.2.4). A screen that needs a new word adds it here, not in its own file. */
+  const CHIP_WORDS = ['Scheduled', 'Confirmed', 'Arrived', 'Seated', 'In chart', 'Exam requested', 'Note filed', 'Done', 'Filed later',
+    'Hygiene', 'Restorative', 'Exam', 'Surgery', 'Emergency', 'Active', 'Re-verify', 'Inactive', 'Self-pay',
+    'Waiting', 'Gated', 'Action', 'Patient', 'Claim', 'After hours', 'Denial', 'Sent back', 'Saved', 'Full chart due',
+    'Tied', 'Gap', 'Second', 'Complete', 'Outstanding', 'Queued', 'Posted', 'Held', 'Matched', 'Sent', 'Read-only'];
   const typeWord = (t) => (TYPE[t] || ['info', String(t || '').replace(/^./, (ch) => ch.toUpperCase())])[1];
 
   /* Dialog: focus trapped, Escape closes, returns close() */
@@ -200,8 +206,11 @@
     // A press on the dialog's own prose (a verb line, the heading, the Why text) is nowhere the keyboard can go: the browser
     // moved focus to body, outside the modal, until the next Tab. The click still lands; only the focus move is refused.
     box.addEventListener('mousedown', (ev) => { if (!(ev.target.closest && ev.target.closest('button, input, select, textarea, summary, a[href], [tabindex]'))) ev.preventDefault(); });
-    // The backdrop closes the dialog, so it is a control and carries an id like every other control.
+    // The backdrop closes the dialog, so it carries an id like every other control and the pointer says so
+    // (INT-signifiers). It is not given a button role: the dialog sits inside it, and a control nested in a
+    // control is an axe "nested-interactive" failure; Escape and the dialog's own Close serve the keyboard.
     overlay.setAttribute('data-testid', 'dialog.backdrop');
+    if (!opts.modal) overlay.style.cursor = 'pointer';
     overlay.addEventListener('click', (ev) => { if (ev.target === overlay && !opts.modal) close(); });
     root.append(overlay);
     const f = box.querySelector(opts.focus || 'input, button, [tabindex]');
@@ -235,6 +244,8 @@
         h('span', { class: 'verb', text: opts.readback || ('This cannot be undone: ' + label + '.') }),
         btn('Cancel', { kind: 'reversible', testid: opts.testid ? opts.testid + '.cancel' : null, onClick: () => { back(); if (opts.onCancel) opts.onCancel(); } }),
         btn(opts.confirmLabel || label, { kind: 'irreversible', testid: opts.testid ? opts.testid + '.confirm' : null, onClick: (ev) => opts.onConfirm(ev) }));
+      // Escape anywhere in the row is Cancel: the way out is the same key as in a dialog (INT-exit-and-undo).
+      row.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { ev.stopPropagation(); back(); if (opts.onCancel) opts.onCancel(); } });
       slot.replaceChildren(row);
       const cancel = row.querySelector('.btn.reversible');
       if (cancel) cancel.focus();
@@ -309,5 +320,5 @@
     return el;
   }
 
-  Proto.ui = { h, btn, chip, refusal, resetGates, money, shortDate, longDate, dateTime, time, initials, displayName, dialog, topDialog, closeDialogs, shadowGates, section, pageHead, scrollRegion, confirmable, field, errorSummary, setFieldError, leadWithLabel, visibleText, GLYPH, SUPPORT, support, STATUS, TYPE, ELIG, typeWord };
+  Proto.ui = { h, btn, chip, refusal, resetGates, money, shortDate, longDate, dateTime, time, initials, displayName, dialog, topDialog, closeDialogs, shadowGates, section, pageHead, scrollRegion, confirmable, field, errorSummary, setFieldError, leadWithLabel, visibleText, GLYPH, SUPPORT, support, STATUS, TYPE, ELIG, CHIP_WORDS, typeWord };
 })();

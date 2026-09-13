@@ -318,7 +318,9 @@
       el.classList.remove('pulse', 'pointed'); void el.offsetWidth;
       el.classList.add('pulse', 'pointed');                       // 'pointed' is a static ring: it survives reduced motion
       el.scrollIntoView({ block: 'center' });
-      clearTimeout(pointTimers.get(el)); pointTimers.set(el, setTimeout(() => { el.classList.remove('pointed'); pointTimers.delete(el); }, 6000));
+      (typeof pointTimers.get(el) === 'function' ? pointTimers.get(el)() : clearTimeout(pointTimers.get(el))); /* The ring used to leave on a 6000 ms timer, a time limit a person could neither extend nor turn off (WCAG 2.2.1). It now stays until the control it points at is pressed or the screen changes. */
+      const clear = () => { el.classList.remove('pointed'); pointTimers.delete(el);  el.removeEventListener('click', clear); window.removeEventListener('hashchange', clear); };
+      el.addEventListener('click', clear, { once: true }); window.addEventListener('hashchange', clear, { once: true }); pointTimers.set(el, clear);
       Proto.router.announce(verb);
     }
     else Proto.router.announce(code === 'checkout' || code === 'payment' ? 'Nothing to check out yet' : 'Nothing to do for this step yet');
