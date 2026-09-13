@@ -295,7 +295,7 @@
       for (const s of [1, 2, 3, 4, 5, 6]) body.append(h('tr', null, h('th', { class: 'pe-rowlab', scope: 'row', text: (s <= 3 ? 'F' : 'L') + s }), ...teeth.map((t) => h('td', null, cell(st, r, t, s)))));
       table.append(body);
     }
-    return h('div', { class: 'perio-wrap' }, table);
+    return Proto.ui.scrollRegion('Perio grid', 'perio.grid:perio-wrap', table);
   }
   function sextants(st, r) {
     return h('div', { class: 'pe-sextants', role: 'group', 'aria-label': 'Six sextant screening codes' }, ...SEXTANTS.map(([lab, range], i) => {

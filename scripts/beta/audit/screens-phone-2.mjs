@@ -268,7 +268,7 @@ const readinessRow = (p, control) => p.evaluate((c) => {
         await simulate(p);
         const ev = await after(p, seq0);
         const row = await approvalRow(p, 'ar-1');
-        const simNote = await p.evaluate(() => ((document.querySelector('.ph-sim [role="status"]') || {}).textContent || '').trim());
+        const simNote = await p.evaluate(() => ((document.querySelector('.ph-sim [role="status"], .ph-sim .chip') || {}).textContent || '').trim());
         const cardAmount = await p.evaluate(() => ((document.querySelector('.ph-card .ph-amount') || {}).textContent || '').trim());
         const sentence = await p.evaluate(() => ((document.querySelector('.ph-sentence') || {}).textContent || '').trim());
         const AMT = /−?\$[\d,]+(?:\.\d{2})?/g;

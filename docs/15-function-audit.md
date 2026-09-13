@@ -195,14 +195,14 @@ What the storms did not prove is the same as before, with one addition. The rand
 
 | Measure | Count |
 |---|---|
-| Functions in `prototype/js` (`scripts/audit/inventory.mjs`) | 715 |
+| Functions in `prototype/js` (`scripts/audit/inventory.mjs`) | 734 |
 | Of those, from the registered audited universe of 497 | 486 |
 | Registered functions the fix round removed or renamed | 10 |
 | Registered functions the five storms removed | 1 |
 | Functions the fix round introduced, audited by hand, still present | 76 |
 | Functions the fix round introduced that the storms removed | 2 |
 | Functions the five storms introduced, audited by hand | 151 |
-| Functions the UI and UX review (`docs/16`) introduced, audited by hand | 2 |
+| Functions the UI and UX review (`docs/16`) introduced, audited by hand | 20 |
 | Functions with no row | 0 |
 | Per-file audits returned | 13 of 13 |
 | Lenses returned | 8 of 8 |
@@ -1242,6 +1242,25 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 
 | `scrollRegion` | `ui.js` | 202 | operational | Checkout's procedures table, the Ledger's rows table (screen and rail); a11y-check at 420 px; A-ux-1. | A-ux-1: `checkout.lines` carries tabindex=0 at 420 px where the table overflows by 233 px and no tabindex at 1280 px where it fits; role=region with a label; three ArrowRight presses scroll it 120 px. |
 | `sync` | `ui.js` | 204 | operational | The ResizeObserver callback inside `scrollRegion` and the first frame after build; A-ux-1. | A-ux-1: the tab stop follows overflow after a viewport change in the same page (1280 px → no tabindex, 420 px → tabindex=0). |
+| `leadWithLabel` | `ui.js` | — | operational | Every button the product paints, through btn(). | A-ux-3 and the a11y check: with the audit's own probe, axe label-content-name-mismatch reports 0 nodes on the routes that carried 29 of them; a name that already leads with the printed words is returned unchanged. |
+| `visibleText` | `ui.js` | — | operational | leadWithLabel, for labels passed as a string, an array or a node. | A-ux-3: a Money Desk tab label built as [text, count span] yields 'ERA 12', so the name leads with what is printed. |
+| `nameKey` | `ui.js` | — | operational | leadWithLabel. | A-ux-3: 'Search  ⌘K' and 'search k' compare equal, so punctuation and spacing do not force a redundant prefix. |
+| `confirmable` | `ui.js` | — | operational | The read-back step before an irreversible action. | A-ux-4: one press renders the read-back row, focus lands on Cancel and no record is written until the second press. |
+| `ask` | `ui.js` | — | operational | confirmable, on the first press. | A-ux-4: the row carries the warning glyph, the read-back sentence, Cancel and the confirm; Cancel holds the keyboard. |
+| `back` | `ui.js` | — | operational | confirmable, from Cancel. | A-ux-4: Cancel restores the single button and returns focus to it; the store is unchanged. |
+| `first` | `ui.js` | — | operational | confirmable, to build the resting button. | A-ux-4: the resting control keeps the caller's test id and its irreversible identity. |
+| `field` | `ui.js` | — | operational | The shared labelled field. | A-ux-5: label[for] resolves to the input, the hint is joined by aria-describedby, and a required field carries aria-required and the printed word. |
+| `setFieldError` | `ui.js` | — | operational | field, and any screen that rejects input. | A-ux-5: an error sets aria-invalid, puts the message id first in aria-describedby and opens with a visually hidden 'Error:'; clearing it removes both. |
+| `errorSummary` | `ui.js` | — | operational | A failed submit. | A-ux-5: role=alert, a heading that counts the problems, and one link per error that moves focus to the field it names. |
+| `onClick` | `ui.js` | — | operational | The error-summary links. | A-ux-5: the link moves focus to its field instead of navigating. |
+| `prefsFor` | `store.js` | — | operational | app.js applyPrefs on every render; the Settings surface. | A-ux-6: defaults merge under the user's bucket; on a shared or operatory device density returns 'comfortable' whatever the user set. |
+| `setPref` | `store.js` | — | operational | Every control in the Settings surface. | A-ux-6: a value outside the option list is ignored; a valid one writes a preference row and returns the merged set. |
+| `resetPrefs` | `store.js` | — | operational | Reset to defaults in the Settings surface. | A-ux-6: the user's bucket is dropped and prefsFor returns the defaults. |
+| `openSettings` | `screens/shell.js` | — | operational | topbar.settings. | A-ux-6: the dialog paints seven preferences, the device's privacy control and Sign out, each with its registered test id. |
+| `paint` | `screens/shell.js` | — | operational | openSettings, on open and after every change. | A-ux-6: pressing an option repaints the dialog with that option pressed and the root attribute stamped. |
+| `openNavMenu` | `screens/shell.js` | — | operational | nav.menu, below 640 px. | A-ux-7: the menu lists this persona's destinations and the current one is not a primary; choosing one closes the dialog and routes. |
+| `onClick` | `screens/shell.js` | — | operational | The Settings and Go-to controls. | A-ux-6, A-ux-7: each closes its dialog before it acts, so no dialog outlives the route it opened on. |
+
 ## Appendix: the rules as the agents read them
 
 ### A. Operational

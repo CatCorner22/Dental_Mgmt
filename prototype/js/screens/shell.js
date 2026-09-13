@@ -42,20 +42,96 @@
     const nav = h('nav', { 'aria-label': 'Primary' }, ...(NAV[r.persona] || NAV.frontdesk).map(([route, label]) => btn(label, { testid: 'nav.' + route, onClick: () => Proto.router.go(r.persona, route), class: r.route === route ? 'current' : '' })));
     nav.querySelectorAll('button').forEach((b) => { if (b.classList.contains('current')) b.setAttribute('aria-current', 'page'); });
     // A missing day pass is not a person: the chip says so instead of printing the placeholder's initials.
-    const authorChip = h('button', { type: 'button', class: 'authorchip', testid: 'topbar.author', 'aria-label': 'Who is charting: ' + u.name + (u.licence ? ', ' + u.licence : '') + '. Switch author', onClick: () => openPinPad(r) }, h('span', { text: u.noPass ? u.short : (P.device === 'shared' || P.device === 'operatory') ? (Proto.ui.initials(u.name) + (u.licence ? ' · ' + u.licence : '')) : (u.short || u.name) }));
+    const chipWord = u.noPass ? u.short : (P.device === 'shared' || P.device === 'operatory') ? (Proto.ui.initials(u.name) + (u.licence ? ' · ' + u.licence : '')) : (u.short || u.name);
+    const authorChip = h('button', { type: 'button', class: 'authorchip btn quiet', testid: 'topbar.author', 'aria-label': Proto.ui.leadWithLabel(chipWord, 'Who is charting: ' + u.name + (u.licence ? ', ' + u.licence : '') + '. Switch author'), onClick: () => openPinPad(r) }, h('span', { text: chipWord }));
+    /* The bar carries the four things a person needs from every screen: where they are,
+       how to find a patient, where else they can go, and who is charting. Privacy, the
+       colour scheme, the seven preferences and Sign out moved behind one Settings control,
+       which took the signed-in bar from nine to eleven controls down to six to eight and
+       stopped it scrolling sideways on a phone with six of ten controls off the edge
+       (docs/16 CLT-topbar-7, WCAG 1.4.10). The location is a fact, not a control: it used
+       to be a button whose only act was to say that switching is not in this prototype. */
     keepFocus(top, () => top.replaceChildren(
       h('span', { class: 'brand' }, h('span', { class: 'mark', 'aria-hidden': 'true' }), 'Riverbend'),
-      btn(loc.short, { testid: 'topbar.location', ariaLabel: 'Location: ' + loc.name + '. Switch location', onClick: () => Proto.router.announce('Switch location: not in this prototype') }),
+      h('span', { class: 'loc', testid: 'topbar.location', title: loc.name, text: loc.short }),
       btn('Search  ⌘K', { testid: 'topbar.search', ariaLabel: 'Search patients, claims, and actions (Ctrl or Cmd K)', onClick: () => Proto.screens.palette.open(r) }),
       nav,
+      // Below the phone breakpoint the destinations collapse into one control, so nothing
+      // is pushed off the edge of the bar. The CSS shows exactly one of the two.
+      btn('Go to', { class: 'navmenu', testid: 'nav.menu', ariaLabel: 'Go to another screen', onClick: () => openNavMenu(r) }),
       h('span', { class: 'spacer' }),
       authorChip,
-      // "Privacy mode" is the one word for this control here, on sign-in and in the accessible name; the
-      // pressed state is the ✓ mark and aria-pressed, never a second label.
-      btn('Privacy mode', { testid: 'topbar.privacy', pressed: P.privacy, ariaLabel: 'Privacy mode: hide patient names on operatory glass', onClick: () => { P.set({ privacy: !P.privacy }); refocus('topbar.privacy'); } }),
-      btn(P.theme === 'dark' ? 'Light' : 'Dark', { testid: 'topbar.theme', ariaLabel: 'Switch to ' + (P.theme === 'dark' ? 'light' : 'dark'), onClick: () => { P.set({ theme: P.theme === 'dark' ? 'light' : 'dark' }); refocus('topbar.theme'); } }),
-      btn('Sign out', { testid: 'topbar.signout', onClick: () => { location.hash = '#/signin'; } }),
+      btn('Settings', { testid: 'topbar.settings', ariaLabel: 'Settings, privacy and sign out', onClick: () => openSettings(r) }),
     ));
+  }
+
+  /* Everything a person can set about how the product looks and behaves, in one place, at one
+     level of depth. Seven preferences, each with two or three options and a default that needs
+     no decision; the three whose equivalent the operating system already answers open on
+     "System", so a reader who set dark mode or reduced motion for their machine is obeyed
+     without touching this (docs/16 CUST-settings-surface-small, CUST-os-first-tristate).
+
+     Privacy mode and Sign out sit apart from the preferences because they are not preferences:
+     privacy belongs to the device in front of the patient, and signing out ends the session. */
+  const PREF_WORDS = {
+    theme: ['Colour scheme', { system: 'System', light: 'Light', dark: 'Dark' }],
+    textSize: ['Text size', { default: 'Default', large: 'Large', larger: 'Larger' }],
+    density: ['Density', { comfortable: 'Comfortable', compact: 'Compact' }],
+    contrast: ['Contrast', { system: 'System', more: 'More' }],
+    motion: ['Motion', { system: 'System', reduced: 'Reduced' }],
+    colourAid: ['Colour-vision aid', { off: 'Off', grayscale: 'Grey only' }],
+    shortcuts: ['Single-key shortcuts', { off: 'Off', on: 'On' }],
+  };
+  function openSettings(r) {
+    const P = window.__proto;
+    let close = null;
+    const body = h('div', { class: 'stack settings' });
+    function paint() {
+      const pr = Proto.store.prefsFor();
+      const device = P.device;
+      const rows = Object.keys(PREF_WORDS).map((name) => {
+        const [label, words] = PREF_WORDS[name];
+        const options = Proto.store.PREF_OPTIONS[name];
+        const id = 'set-' + name.toLowerCase();
+        const note = name === 'density' && (device === 'shared' || device === 'operatory')
+          ? 'This device keeps the comfortable spacing, whatever you set at your own desk.' : null;
+        return h('div', { class: 'field' },
+          h('span', { class: 'setlabel', id }, label),
+          note ? h('p', { class: 'hint', text: note }) : null,
+          h('div', { class: 'seg', role: 'group', 'aria-labelledby': id },
+            ...options.map((o) => btn(words[o] || o, {
+              testid: 'settings.' + name.toLowerCase() + '.' + o,
+              pressed: pr[name] === o,
+              onClick: () => { P.setPref(name, o); paint(); },
+            }))));
+      });
+      body.replaceChildren(
+        h('h2', { text: 'Settings' }),
+        h('p', { class: 'hint', text: 'These are yours: they follow your PIN to any device in the practice.' }),
+        h('div', { class: 'stack' }, ...rows),
+        btn('Reset to defaults', { kind: 'reversible', testid: 'settings.reset', onClick: () => { Proto.store.resetPrefs(); P.applyPrefs(); paint(); Proto.router.announce('Settings reset to defaults'); } }),
+        h('h3', { text: 'This device' }),
+        h('p', { class: 'hint', text: 'Privacy belongs to the screen in front of the patient, not to you, so it stays with the device.' }),
+        btn('Privacy mode', { testid: 'topbar.privacy', pressed: P.privacy, ariaLabel: 'Privacy mode: hide patient names on operatory glass', onClick: () => { P.set({ privacy: !P.privacy }); paint(); } }),
+        h('div', { class: 'btnrow' },
+          btn('Close', { kind: 'reversible', testid: 'settings.close', onClick: () => close && close() }),
+          btn('Sign out', { testid: 'topbar.signout', onClick: () => { if (close) close(); location.hash = '#/signin'; } })));
+    }
+    paint();
+    close = Proto.ui.dialog(body, { label: 'Settings' });
+  }
+
+  /* On a phone the destinations live behind one control rather than scrolling off the bar. */
+  function openNavMenu(r) {
+    let close = null;
+    const list = h('div', { class: 'stack' }, h('h2', { text: 'Go to' }),
+      ...(NAV[r.persona] || NAV.frontdesk).map(([route, label]) => btn(label, {
+        kind: route === r.route ? 'quiet' : 'reversible', testid: 'nav.menu.' + route,
+        ariaLabel: label + (route === r.route ? ', current screen' : ''),
+        onClick: () => { if (close) close(); Proto.router.go(r.persona, route); },
+      })),
+      btn('Close', { kind: 'reversible', testid: 'nav.menu.close', onClick: () => close && close() }));
+    close = Proto.ui.dialog(list, { label: 'Go to another screen' });
   }
 
   const supportLine = Proto.ui.support;                 // one support line for every outage gate (ui.js)

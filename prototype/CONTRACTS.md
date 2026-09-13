@@ -52,7 +52,8 @@ Every element with a click or key handler carries `data-testid`, lowercase, dot-
 
 | Screen | Test ids |
 |---|---|
-| Top bar | `topbar.location`, `topbar.search`, `topbar.theme`, `topbar.privacy`, `topbar.author`, `topbar.signout`, `andon.control` |
+| Top bar | `topbar.location` (the location the shift is at: a fact the bar states, not a control), `topbar.search`, `nav.<route>`, `nav.menu` and `nav.menu.<route>` (the destinations, which collapse into one control below 640 px), `topbar.author`, `topbar.settings`, `andon.control` |
+| Settings (opened from `topbar.settings`) | `settings.<theme\|textsize\|density\|contrast\|motion\|colouraid\|shortcuts>.<option>` (seven preferences, each two or three options, kept per user), `settings.reset`, `settings.close`, and, because neither is a preference, `topbar.privacy` (a property of the device) and `topbar.signout` |
 | Author PIN pad | `pin.display` (the digit display; focus lands here on open and Enter here is Go), `pin.key.<0-9>`, `pin.backspace`, `pin.submit`, `pin.cancel`, `pin.why` |
 | Palette | `palette.input`, `palette.row.<n>`, `palette.confirm.dob` |
 | Patient Rail | `rail.tab.<chart|notes|perio|imaging|plan|ledger|claims|docs|profile>`, `rail.alert`, `rail.close` |

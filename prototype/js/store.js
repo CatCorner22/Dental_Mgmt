@@ -959,6 +959,47 @@
   }
   function railStateFor() { const uid = currentUser().id; return (S.railState && S.railState[uid]) || {}; }
 
+  /* Per-user preferences, kept the way the first-shift rail keeps its state: one bucket per
+     user id, because a tablet is not a person and the next PIN is somebody else. Seven
+     preferences, each with two or three options and a default that needs no decision; every
+     one whose equivalent the operating system already answers starts at 'system', so a reader
+     who set dark mode or reduced motion there is obeyed without touching this product
+     (docs/16 CUST-os-first-tristate, CUST-settings-surface-small).
+
+     Density is deliberately not honoured on a shared or operatory device: a gloved hand at a
+     chairside tablet gets the comfortable spacing whatever the person set at their own desk
+     (CUST-device-over-user-density). Privacy is a property of the device, not of the person,
+     so it is not in this list at all. */
+  const PREF_OPTIONS = {
+    theme: ['system', 'light', 'dark'],
+    motion: ['system', 'reduced'],
+    contrast: ['system', 'more'],
+    textSize: ['default', 'large', 'larger'],
+    density: ['comfortable', 'compact'],
+    colourAid: ['off', 'grayscale'],
+    shortcuts: ['off', 'on'],
+  };
+  const PREF_DEFAULTS = { theme: 'system', motion: 'system', contrast: 'system', textSize: 'default', density: 'comfortable', colourAid: 'off', shortcuts: 'off' };
+  function prefsFor(user) {
+    const u = user || currentUser();
+    const bucket = (S.preferences && S.preferences[u.id]) || {};
+    const out = Object.assign({}, PREF_DEFAULTS, bucket);
+    // The device has the last word on density, whoever is signed in.
+    const device = (window.__proto && window.__proto.device) || 'desk';
+    if (device === 'shared' || device === 'operatory') out.density = 'comfortable';
+    return out;
+  }
+  function setPref(name, value) {
+    if (!PREF_OPTIONS[name] || !PREF_OPTIONS[name].includes(value)) return prefsFor();
+    const u = currentUser();
+    S.preferences = S.preferences || {};
+    const bucket = (S.preferences[u.id] = S.preferences[u.id] || {});
+    bucket[name] = value;
+    write('preference', { id: 'pref-' + u.id + '-' + name, userId: u.id, name, value });
+    return prefsFor();
+  }
+  function resetPrefs() { const u = currentUser(); if (S.preferences) delete S.preferences[u.id]; return prefsFor(); }
+
   // Palette search
   function search(q) {
     q = (q || '').trim().toLowerCase(); if (q.length < 3) return [];
@@ -972,10 +1013,10 @@
   }
 
   // Ensure tables referenced by write() exist
-  const TABLES = ['appointmentEvents', 'eligibilityChecks', 'messages', 'approvals', 'approvalsLog', 'allocations', 'allocationIntents', 'statementsDue', 'paymentPlans', 'domainEvents', 'collectionDecisions', 'perioExams', 'tags', 'chartEvents', 'procedures', 'planItems', 'filedNotes', 'claims', 'claimEvents', 'appealPackets', 'disclosures', 'reconciliationMatches', 'controlDecisions', 'dayCloses', 'deposits', 'dayPasses', 'userEntitlements', 'firstRunState', 'ledger', 'credits', 'sessions', 'findings'];
+  const TABLES = ['appointmentEvents', 'eligibilityChecks', 'messages', 'approvals', 'approvalsLog', 'allocations', 'allocationIntents', 'statementsDue', 'paymentPlans', 'domainEvents', 'collectionDecisions', 'perioExams', 'tags', 'chartEvents', 'procedures', 'planItems', 'filedNotes', 'claims', 'claimEvents', 'appealPackets', 'disclosures', 'reconciliationMatches', 'controlDecisions', 'dayCloses', 'deposits', 'dayPasses', 'userEntitlements', 'firstRunState', 'preference', 'ledger', 'credits', 'sessions', 'findings'];
   const _reset = reset;
   reset = function (seedNum) { const s = _reset(seedNum); for (const t of TABLES) if (!s[t]) s[t] = []; return s; };
 
   const LICENCE_WORDS = { implant: 'implant', crown_margin: 'crown margin', not_tolerated: 'patient could not tolerate probing', third_molar_absent: 'third molar absent' };
-  Proto.store = { reset, get, railStateFor, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, windowEstimate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, clinician, addTag, readyForExam, wholePatient, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, claimAction, disclose, sendStatement, raiseStatement, openStatement, requirePin, verifyPin, pinLockout, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, passState, passLive, livePasses, railSteps, retireChip, search, refuse, notFound };
+  Proto.store = { reset, get, railStateFor, prefsFor, setPref, resetPrefs, PREF_OPTIONS, PREF_DEFAULTS, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, windowEstimate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, clinician, addTag, readyForExam, wholePatient, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, claimAction, disclose, sendStatement, raiseStatement, openStatement, requirePin, verifyPin, pinLockout, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, passState, passLive, livePasses, railSteps, retireChip, search, refuse, notFound };
 })();

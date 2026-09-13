@@ -25,6 +25,26 @@
 
   const GLYPH = { stop: '■', required: '▲', review: '◆', style: '★', info: '▬', clear: '●' };
 
+  /* WCAG 2.5.3: a control's accessible name must begin with the words printed on it, or
+     a voice user who says what they see is not understood. Twenty-nine controls carried a
+     helpful aria-label that replaced the printed words instead of extending them
+     ("Details" named "Show forms and balance for Marisol Vega"). Rather than rewriting
+     each call site and hoping the next one remembers, the button builder puts the printed
+     words in front of whatever label the caller supplied. */
+  function visibleText(x) {
+    if (x == null || x === false) return '';
+    if (Array.isArray(x)) return x.map(visibleText).join(' ');
+    if (x instanceof Node) return x.textContent || '';
+    return String(x);
+  }
+  const nameKey = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  function leadWithLabel(visible, label) {
+    if (!label) return null;
+    const printed = visibleText(visible).trim();
+    if (!printed) return label;
+    return nameKey(label).startsWith(nameKey(printed)) ? label : printed + ': ' + label;
+  }
+
   function btn(label, opts) {
     opts = opts || {};
     const kind = opts.kind || 'quiet'; // irreversible | reversible | quiet | held
@@ -41,15 +61,19 @@
     // pressed in runs on purpose and keep every click.
     const primary = kind === 'irreversible' || kind === 'reversible';
     const onClick = primary && opts.onClick ? (ev) => (ev.detail > 1 ? ev.currentTarget.focus() : opts.onClick(ev)) : opts.onClick;
-    const b = h('button', { type: 'button', class: 'btn ' + kind + (opts.class ? ' ' + opts.class : ''), testid: opts.testid, onClick, 'aria-pressed': pressed, 'aria-label': opts.ariaLabel || (held ? 'Held: ' + label : null), 'aria-describedby': opts.describedby, title: opts.title || (held ? String(label) : null), disabled: opts.disabled, dataset: opts.dataset }, visible);
+    const b = h('button', { type: 'button', class: 'btn ' + kind + (opts.class ? ' ' + opts.class : ''), testid: opts.testid, onClick, 'aria-pressed': pressed, 'aria-label': leadWithLabel(visible, opts.ariaLabel || (held ? 'Held: ' + label : null)), 'aria-describedby': opts.describedby, title: opts.title || (held ? String(label) : null), disabled: opts.disabled, dataset: opts.dataset }, visible);
     // Selection is never colour alone: a pressed control carries a check mark as well as its fill.
     if (pressed === 'true') b.prepend(h('span', { class: 'pressmark', 'aria-hidden': 'true', text: '✓' }));
     return b;
   }
 
+  /* A chip states a fact that is already on the screen; it is not an announcement.
+     Every chip used to carry role="status", so a Board with 105 of them held 105 live
+     regions and one press tore down and re-inserted all of them. What changes is said
+     once, through #live, by the verb that changed it (docs/16 WCAG 4.1.3). */
   function chip(severity, word, opts) {
     opts = opts || {};
-    return h('span', { class: 'chip ' + severity + (opts.big ? ' big' : ''), role: 'status', testid: opts.testid },
+    return h('span', { class: 'chip ' + severity + (opts.big ? ' big' : ''), testid: opts.testid },
       h('span', { class: 'glyph', 'aria-hidden': 'true', text: GLYPH[severity] || '●' }), word);
   }
 
@@ -187,6 +211,82 @@
   // A rebuilt store leaves no dialog standing over it: each closes through its own close(), so onClose runs.
   function closeDialogs() { const r = dialogRoot(); if (r) for (const o of [...r.children]) if (o._close) o._close(); }
 
+  /* A second step before anything that cannot be taken back.
+
+     The audit found the same shape on seven screens: one press of Post, Post matched,
+     Ready for exam, Send statement, Match these, Clear with reason or Issue day pass
+     wrote the record straight through, with no confirmation and no inverse. One press of
+     Post matched wrote thirty-seven ledger rows (WCAG 3.3.4, which this product is
+     squarely inside: it posts money and files clinical records).
+
+     Daily Close already had the right shape — a read-back row that says what is about to
+     happen and asks again — so this is that shape, shared. The read-back names the thing
+     in the clinic's own words, carries a warning icon large enough to see, and puts an
+     equal-size Cancel beside the confirm with the keyboard on Cancel, never on the
+     irreversible half (CLT-neutral-irreversible). A re-render cancels a pending confirm,
+     which is the safe direction to fail. */
+  function confirmable(label, opts) {
+    opts = opts || {};
+    const slot = h('span', { class: 'confirmslot' });
+    const back = () => { slot.replaceChildren(first()); const b = slot.firstElementChild; if (b && b.focus) b.focus(); };
+    function ask() {
+      const row = h('span', { class: 'confirmrow', role: 'group', 'aria-label': 'Confirm ' + label },
+        h('span', { class: 'glyph', 'aria-hidden': 'true', text: GLYPH[opts.severity || 'required'] || '▲' }),
+        h('span', { class: 'verb', text: opts.readback || ('This cannot be undone: ' + label + '.') }),
+        btn('Cancel', { kind: 'reversible', testid: opts.testid ? opts.testid + '.cancel' : null, onClick: () => { back(); if (opts.onCancel) opts.onCancel(); } }),
+        btn(opts.confirmLabel || label, { kind: 'irreversible', testid: opts.testid ? opts.testid + '.confirm' : null, onClick: (ev) => opts.onConfirm(ev) }));
+      slot.replaceChildren(row);
+      const cancel = row.querySelector('.btn.reversible');
+      if (cancel) cancel.focus();
+      Proto.router.announce(opts.readback || ('Confirm: ' + label));
+    }
+    const first = () => btn(label, { kind: 'irreversible', testid: opts.testid, ariaLabel: opts.ariaLabel, disabled: opts.disabled, describedby: opts.describedby, onClick: ask });
+    slot.append(first());
+    return slot;
+  }
+
+  /* One field, built the same way everywhere: the label is visible and above the input, the
+     requirement and the format are stated before anyone types rather than discovered through
+     a refusal, and an error message sits between the hint and the input, in the error colour,
+     opening with a hidden "Error:" so a screen reader hears what kind of message it is.
+     (WCAG 3.3.1, 3.3.2; INT-instructions-before-input; the NHS and GOV.UK error pattern.) */
+  function field(label, input, opts) {
+    opts = opts || {};
+    const id = input.id || (input.id = 'f-' + (++refusalSeq) + '-in');
+    const hintEl = opts.hint ? h('p', { class: 'hint', id: id + '-hint', text: opts.hint }) : null;
+    const errEl = h('p', { class: 'fielderror', id: id + '-err', hidden: true });
+    const lab = h('label', { for: id }, label, opts.required ? h('span', { class: 'req' }, ' (required)') : null);
+    input.setAttribute('aria-describedby', [hintEl ? hintEl.id : null].filter(Boolean).join(' ') || null);
+    if (opts.required) input.setAttribute('aria-required', 'true');
+    const wrap = h('div', { class: 'field' }, lab, hintEl, errEl, input);
+    wrap._setError = (msg) => setFieldError(input, errEl, hintEl, msg);
+    return wrap;
+  }
+  function setFieldError(input, errEl, hintEl, msg) {
+    const ids = [hintEl ? hintEl.id : null].filter(Boolean);
+    if (msg) {
+      errEl.replaceChildren(h('span', { class: 'sr-only', text: 'Error: ' }), h('span', { text: msg }));
+      errEl.hidden = false; input.setAttribute('aria-invalid', 'true'); ids.unshift(errEl.id);
+    } else {
+      errEl.hidden = true; errEl.replaceChildren(); input.removeAttribute('aria-invalid');
+    }
+    input.setAttribute('aria-describedby', ids.join(' ') || null);
+    if (!ids.length) input.removeAttribute('aria-describedby');
+  }
+  /* When a submit fails, one summary stands before the form: a heading, role=alert so it is
+     read on arrival, and one link per error that moves the keyboard to the field it names. */
+  function errorSummary(errors, opts) {
+    opts = opts || {};
+    if (!errors || !errors.length) return null;
+    const box = h('div', { class: 'errsummary', role: 'alert', tabindex: '-1', testid: opts.testid || 'error.summary' },
+      h('h3', { text: errors.length === 1 ? 'There is a problem' : 'There are ' + errors.length + ' problems' }),
+      h('ul', null, ...errors.map((e) => h('li', null, h('a', {
+        href: '#' + (e.id || ''), testid: opts.testid ? opts.testid + '.link' : null,
+        onClick: (ev) => { ev.preventDefault(); const t = e.id && document.getElementById(e.id); if (t && t.focus) t.focus(); },
+      }, e.message)))));
+    return box;
+  }
+
   function section(title, ...children) {
     return h('section', { class: 'card stack', 'aria-label': title }, h('h2', { text: title }), ...children);
   }
@@ -200,12 +300,14 @@
      wrapper joins the tab order exactly while its content overflows and leaves it when the content fits: a tab
      stop on a table that does not scroll is a stop that does nothing. The label names what the region holds. */
   function scrollRegion(label, testid, ...children) {
-    const el = h('div', { class: 'wrap-x', role: 'region', 'aria-label': label, testid }, ...children);
+    // A caller may pass "perio.grid:perio-wrap" to keep the wrapper's own layout class.
+    const parts = String(testid || '').split(':');
+    const el = h('div', { class: 'wrap-x' + (parts[1] ? ' ' + parts[1] : ''), role: 'region', 'aria-label': label, testid: parts[0] || null }, ...children);
     const sync = () => { if (el.scrollWidth > el.clientWidth + 1) el.setAttribute('tabindex', '0'); else el.removeAttribute('tabindex'); };
     if (window.ResizeObserver) new ResizeObserver(sync).observe(el);
     requestAnimationFrame(sync);
     return el;
   }
 
-  Proto.ui = { h, btn, chip, refusal, resetGates, money, shortDate, longDate, dateTime, time, initials, displayName, dialog, topDialog, closeDialogs, shadowGates, section, pageHead, scrollRegion, GLYPH, SUPPORT, support, STATUS, TYPE, ELIG, typeWord };
+  Proto.ui = { h, btn, chip, refusal, resetGates, money, shortDate, longDate, dateTime, time, initials, displayName, dialog, topDialog, closeDialogs, shadowGates, section, pageHead, scrollRegion, confirmable, field, errorSummary, setFieldError, leadWithLabel, visibleText, GLYPH, SUPPORT, support, STATUS, TYPE, ELIG, typeWord };
 })();

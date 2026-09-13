@@ -123,7 +123,7 @@ export default ({ ctx, go, hop, click, txt, state, events, rec }) => {
         await reset(p); await p.waitForTimeout(150);
         const openAfterReset = await padOpen(p);
         await p.keyboard.press('Enter'); await p.waitForTimeout(200);
-        const notice = await p.evaluate(() => [...document.querySelectorAll('#canvas [role="status"], #canvas .refusal')].map((e) => e.textContent.trim()).filter((t) => /ar-1|no longer|request/i.test(t)));
+        const notice = await p.evaluate(() => [...document.querySelectorAll('#canvas [role="status"], #canvas .chip, #canvas .refusal')].map((e) => e.textContent.trim()).filter((t) => /ar-1|no longer|request/i.test(t)));
         const o = { openBefore, openAfterReset, openAfterEnter: await padOpen(p), approvals: (await state(p)).approvals.length, notice, focused: await focused(p) };
         rec('A-storm2-owner-8', 'reset() with the step-up pad open leaves the pad over a store with no request; Enter closes it with no word and focus on BODY', 'CONTRACTS §6 (a refusal with nowhere to go is a dead end); ROUND2 reset() twist (phone.js openStepup)', openBefore && o.approvals === 0 && !o.openAfterEnter && (!notice.length || o.focused === 'BODY'), o);
       } finally { await c.close(); }

@@ -166,3 +166,20 @@
   :focus-visible { outline: 3px solid Highlight; outline-offset: 2px; }
   :root[data-grayscale="1"] { filter: none; }
 }
+
+/* The seven preferences a person can set, applied. Every size is in rem, so text size is one
+   declaration: the root grows and the type, the spacing and the 44px targets grow with it. */
+:root[data-text-size="large"] { font-size: 112.5%; }
+:root[data-text-size="larger"] { font-size: 125%; }
+
+/* Compact density tightens the space between things. It never touches --target: a control
+   stays 44px whatever the density, and a shared or operatory device ignores the preference
+   altogether (store.js prefsFor). */
+:root[data-density="compact"] {
+  --space-3: 0.5rem; --space-4: 0.75rem; --space-5: 1rem; --space-6: 1.5rem;
+  --gap-group: 0.75rem;
+}
+
+/* The same answer as the system query, for a reader who asked inside the product instead. */
+:root[data-contrast="more"] { --ink-2: #17233A; --ink-3: #2B3654; --line: #8A8272; --line-strong: #4A4436; }
+:root[data-contrast="more"][data-theme="dark"] { --ink-2: #EEF2F8; --ink-3: #DCE3EE; --line: #6E80AA; --line-strong: #A9BBDD; }

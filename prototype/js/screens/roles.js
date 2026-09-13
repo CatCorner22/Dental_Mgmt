@@ -124,7 +124,7 @@
         h('td', null, dec ? chip('review', dec.text) : h('span', { class: 'muted', text: '—' }))));
       if (open) rows.push(h('tr', { class: 'rl-expanded' }, h('td', { colspan: '4' }, grantsPanel(u))));
     }
-    return h('div', { class: 'rl-tablewrap' }, h('table', { class: 'data rl-table' },
+    return Proto.ui.scrollRegion('Roles and grants', 'roles.table:rl-tablewrap', h('table', { class: 'data rl-table' },
       h('thead', null, h('tr', null, h('th', { text: 'Person' }), h('th', { text: 'Role' }), h('th', { text: 'Entitlements' }), h('th', { text: 'Accepted SoD decision' }))),
       h('tbody', null, ...rows)));
   }

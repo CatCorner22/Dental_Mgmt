@@ -206,9 +206,10 @@
     for (let n = 1; n <= loc.operatories; n++) {
       const seated = todays().find((a) => a.op === n && IN_CHAIR.includes(a.status));
       const prov = seated ? Proto.store.user(seated.providerId) : null;
-      const b = h('button', { type: 'button', class: 'chair', testid: 'board.chair.' + n, 'aria-expanded': String(!!chairOpen[n]), 'aria-label': 'Chair ' + n + (prov ? ', author ' + prov.name + (prov.licence ? ', ' + prov.licence : '') : ', empty') + '. Show device author', onClick: () => { chairOpen[n] = !chairOpen[n]; render(r); const el = document.querySelector('[data-testid="board.chair.' + n + '"]'); if (el) el.focus(); } },
+      const chairWord = 'Chair ' + n + ' · ' + provInitials(prov) + (prov && prov.licence ? ' · ' + prov.licence : '');
+      const b = h('button', { type: 'button', class: 'chair btn quiet', testid: 'board.chair.' + n, 'aria-expanded': String(!!chairOpen[n]), 'aria-label': Proto.ui.leadWithLabel(chairWord, 'Chair ' + n + (prov ? ', author ' + prov.name + (prov.licence ? ', ' + prov.licence : '') : ', empty') + '. Show device author'), onClick: () => { chairOpen[n] = !chairOpen[n]; render(r); const el = document.querySelector('[data-testid="board.chair.' + n + '"]'); if (el) el.focus(); } },
         h('span', { text: 'Chair ' + n + ' · ' + provInitials(prov) }),
-        prov && prov.licence ? h('span', { class: 'small muted', text: prov.licence }) : null,
+        prov && prov.licence ? h('span', { class: 'small muted', text: ' · ' + prov.licence }) : null,
         seated && seated.status === 'ready_for_exam' ? chip('review', 'Exam requested') : null);
       const detail = chairOpen[n] ? h('div', { class: 'stamp', text: prov ? prov.name + (prov.licence ? ', ' + prov.licence : '') + ' is the author on the chair ' + n + ' device' : 'No author on the chair ' + n + ' device; the next PIN opens a session' }) : null;
       strip.append(h('div', { class: 'chairwrap', role: 'listitem' }, b, detail));

@@ -111,15 +111,17 @@ export default ({ ctx, go, hop, click, txt, state, events, rec }) => {
       const { c, p } = await ctx(b);
       try {
         await go(p, '#/dentist/encounter/enc-9002');
-        await click(p, 'topbar.privacy'); const f0 = await focused(p);
+        // Privacy and the colour scheme moved into Settings (docs/16 CLT-topbar-7), so this
+        // check drives the bar controls that remain: focus is still not allowed to fall to BODY.
+        await click(p, 'topbar.settings'); await p.waitForTimeout(120); await click(p, 'settings.close'); const f0 = await focused(p);
         const out = [];
-        for (const [t, o] of [['topbar.privacy', { device: 'shared' }], ['topbar.theme', { motion: 'reduced' }], ['nav.exams', { theme: 'dark' }], ['topbar.author', { device: 'operatory' }]]) {
+        for (const [t, o] of [['topbar.settings', { device: 'shared' }], ['topbar.search', { motion: 'reduced' }], ['nav.exams', { theme: 'dark' }], ['topbar.author', { device: 'operatory' }]]) {
           await p.focus(tid(t)); const before = await focused(p);
           await p.evaluate((oo) => window.__proto.set(oo), o); await p.waitForTimeout(120);
           out.push({ tid: t, set: o, before, after: await focused(p) });
         }
         rec('A-storm4-shell-5', 'window.__proto.set of theme, device or motion rebuilds the top bar with replaceChildren() and drops keyboard focus to BODY when it was on topbar.theme, topbar.privacy, topbar.author or a nav.* control', 'FIX-ROUND4 focus-preservation rule (a set() re-render keeps the keyboard on the control that had it, by test id); docs/04 keyboard-first (focus never on BODY) — app.js P.set, shell.js renderTopbar',
-          f0 === 'topbar.privacy' && out.every((o) => o.before === o.tid) && out.some((o) => o.after !== o.tid), { f0, out });
+          f0 === 'topbar.settings' && out.every((o) => o.before === o.tid) && out.some((o) => o.after !== o.tid), { f0, out });
       } finally { await c.close(); }
     },
 

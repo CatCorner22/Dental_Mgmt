@@ -277,9 +277,12 @@
       // Charted is never colour alone: the tooth carries a mark and a fill as well as its rail (B5).
       return h('button', { type: 'button', class: 'tooth' + (has ? ' has' : '') + (isTag ? ' enc-tagged' : ''), testid: 'enc.tooth.' + n,
         style: has && !sel ? 'background: var(--style-soft)' : null,
-        'aria-pressed': sel ? 'true' : 'false', 'aria-label': 'Tooth ' + n + (has ? ', charted' : '') + (isTag ? ', tagged by hygienist' : ''),
+        'aria-pressed': sel ? 'true' : 'false',
         onClick: () => { if (x.tooth !== n) { x.tooth = n; x.surfaces = []; } rerender(r); } },
-      String(n), has ? h('span', { 'aria-hidden': 'true', style: 'position:absolute;left:4px;top:2px;font-size:10px;line-height:1', text: '●' }) : null);
+      h('span', { class: 'sr-only', text: 'Tooth ' }), String(n),
+      has ? h('span', { class: 'sr-only', text: ', charted' }) : null,
+      isTag ? h('span', { class: 'sr-only', text: ', tagged by hygienist' }) : null,
+      has ? h('span', { class: 'toothmark', 'aria-hidden': 'true', text: '●' }) : null);
     };
     const upper = h('div', { class: 'odont', role: 'group', 'aria-label': 'Upper arch, teeth 1 to 16' }, ...Array.from({ length: 16 }, (_, i) => toothBtn(i + 1)));
     const lower = h('div', { class: 'odont', role: 'group', 'aria-label': 'Lower arch, teeth 32 to 17' }, ...Array.from({ length: 16 }, (_, i) => toothBtn(32 - i)));
@@ -294,7 +297,7 @@
     const strip = h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Procedures, ranked for this tooth type; nothing is pre-selected' }, ...procs.map(([code, label]) => btn(label, { kind: 'reversible', testid: 'enc.proc.' + code, onClick: () => paint(r, enc, x, code) })));
     const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Temporality' }, ...TEMPORALITY.map(([k, w]) => btn(w, { testid: 'enc.temporality.' + k, pressed: x.temporality === k ? 'true' : 'false', onClick: () => { x.temporality = k; rerender(r); } })));
     const sec = Proto.ui.section('Chart',
-      h('div', { class: 'enc-odont-wrap' }, upper, lower),
+      Proto.ui.scrollRegion('Tooth chart', 'enc.odontogram:enc-odont-wrap', upper, lower),
       h('div', { class: 'activesite', id: 'enc-selected', 'aria-live': 'polite', text: sel }),
       x.tooth ? h('p', { class: 'small muted', text: 'Tap a dashed surface to confirm, again to remove' }) : null,
       surfaces,
