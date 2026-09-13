@@ -74,21 +74,22 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
           const num = (re) => { const m = t.match(re); return m ? Number(m[1]) : null; };
           return {
             headSentence: ((card && card.querySelector('.md-batchline')) || {}).textContent || null,
-            headNumber: num(/(\d+)\s+posted before you sat down/),
+            // Before Post matched the card reads "matched" (the lines are posted only once their ledger rows exist).
+            headNumber: num(/(\d+)\s+matched, ready to post/),
             chips: [...(card ? card.querySelectorAll('.chip') : [])].map((e) => e.textContent.trim()),
-            chipPostedNumber: num(/●?(\d+)\s+posted(?!\s+before)/),
+            chipPostedNumber: num(/●?(\d+)\s+matched(?!,)/),
             helperSentence: (t.match(/Posts the [^.;]+[.;]/) || [])[0] || null,
             helperNumber: num(/Posts the (\d+) matched lines/),
             whySummary: ((card && card.querySelector('[data-testid="money.era.era-1.why"]')) || {}).textContent || null,
-            whyNumber: num(/Why are (\d+) already posted\?/),
+            whyNumber: num(/Why are (\d+) already matched\?/),
             storePostedLines: Proto.store.get().eraBatches[0].postedLines,
-            storePostedLineCount: Proto.store.get().eraLines.filter((l) => l.batchId === 'era-1' && l.status === 'posted').length,
+            storePostedLineCount: Proto.store.get().eraLines.filter((l) => l.batchId === 'era-1' && l.status === 'matched').length,
           };
         });
         const before = await readCard();
         const mutation = await p.evaluate(() => {
           const S = Proto.store.get(); S.eraBatches[0].postedLines = 30;
-          const flip = S.eraLines.filter((l) => l.batchId === 'era-1' && l.status === 'posted').slice(0, 2);
+          const flip = S.eraLines.filter((l) => l.batchId === 'era-1' && l.status === 'matched').slice(0, 2);
           for (const l of flip) l.status = 'held';
           Proto.router.render();
           return { postedLinesSetTo: 30, linesFlippedToHeld: flip.map((l) => l.id) };
@@ -96,7 +97,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         await p.waitForTimeout(180);
         const afterM = await readCard();
         const computedMoved = before.headNumber !== afterM.headNumber && before.chipPostedNumber !== afterM.chipPostedNumber
-          && afterM.headNumber === afterM.storePostedLines && afterM.chipPostedNumber === afterM.storePostedLineCount;
+          && afterM.headNumber === afterM.storePostedLineCount && afterM.chipPostedNumber === afterM.storePostedLineCount;
         const literalStuck = afterM.helperNumber === before.helperNumber && afterM.whyNumber === before.whyNumber
           && afterM.helperNumber !== afterM.storePostedLines && afterM.helperNumber !== afterM.storePostedLineCount;
         rec('A-screens-moneydesk-2-1', 'The Money Desk ERA card prints "37" as a literal in the Post matched helper sentence and in the Why summary: move the store and the batch line and the posted chip follow, but both sentences still say 37', 'A7 / CHECKLIST — a number on screen is computed from state: change the state and the number moves; it is never a literal (moneydesk.js:81, :82)',

@@ -115,7 +115,9 @@
     // Prior perio exam for Marisol Vega (14 months ago), ghosted in the grid
     const priorPerio = {}; // key t<tooth>-s<site> -> depth
     for (let t = 1; t <= 32; t++) { if ([1, 16, 17, 32].includes(t)) continue; for (let s = 1; s <= 6; s++) priorPerio['t' + t + '-s' + s] = rnd() < 0.15 ? between(4, 5) : between(2, 3); }
-    const perioExams = [{ id: 'pe-1', patientId: 'p-301', encounterId: 'enc-old-1', date: '2025-07-01', sites: priorPerio, missing: [1, 16, 17, 32] }];
+    const perioExams = [{ id: 'pe-1', patientId: 'p-301', encounterId: 'enc-old-1', date: '2025-07-01', sites: priorPerio, missing: [1, 16, 17, 32] },
+      // The six-point exam the c-88 appeal packet cites (Cole Brandt): the record the disclosure row names.
+      { id: 'pe-c88', patientId: 'p-321', encounterId: 'enc-old-88', date: '2025-07-01', sites: {}, missing: [], probed: 168, skipped: 0, deepest: 6, mode: 'full', kind: 'exam', author: 'Bree Lawson' }];
 
     // Procedures and fee schedule
     const cdt = { d0120: ['Periodic exam', 6500], d0140: ['Limited exam', 9000], d0274: ['Bitewings, four', 7800], d1110: ['Prophylaxis, adult', 11800], d2392: ['Composite, 2 surf posterior', 26000], d2740: ['Crown, porcelain/ceramic', 118000], d4341: ['SRP, 4+ teeth per quadrant', 28500], d7210: ['Extraction, surgical', 36000], d9230: ['Nitrous oxide', 7500], d9243: ['IV sedation, each 15 min', 32000] };
@@ -129,6 +131,8 @@
       { id: 'pr-421', encounterId: 'enc-9005', patientId: 'p-305', cdt: 'd0140', tooth: null, feeCents: 9000, status: 'completed', selfPayRestricted: false },
       { id: 'pr-422', encounterId: 'enc-9005', patientId: 'p-305', cdt: 'd0274', tooth: null, feeCents: 7800, status: 'completed', selfPayRestricted: false },
       { id: 'pr-431', encounterId: 'enc-9006', patientId: 'p-306', cdt: 'd2740', tooth: 19, feeCents: 118000, status: 'completed', selfPayRestricted: false },
+      // The Filed-later hygiene visit: the prophy the $95 window payment (intent ai-0) waits on; filing releases it.
+      { id: 'pr-441', encounterId: 'enc-9010', patientId: 'p-307', cdt: 'd1110', tooth: null, feeCents: 11800, status: 'completed', selfPayRestricted: false },
     ];
     // Patient portion estimates per checkout appointment (estimate column, never in the ledger)
     const estimates = {
@@ -136,6 +140,7 @@
       'a-1045': { patientCents: 0, insuranceCents: 18300, writeoffCents: 0, note: 'Delta covers prophy and exam at 100%' },
       'a-1046': { patientCents: 16800, insuranceCents: 0, writeoffCents: 0, note: 'Patient asked to pay in full; no claim' },
       'a-1047': { patientCents: 41000, insuranceCents: 59000, writeoffCents: 18000, note: 'Crown #19: MetLife est. $590; PPO write-off est. $180' },
+      'a-1050': { patientCents: 9500, insuranceCents: 2300, writeoffCents: 0, note: 'Prophy $118: Delta est. $23 after the deductible; $95 collected at the window' },
     };
 
     // Ledger entries (append-only). Kinds: charge, patient_payment, insurance_payment, adjustment, write_off, refund, reversal.
@@ -198,14 +203,16 @@
     for (let i = 1; i <= 41; i++) {
       const p = patients[between(8, 39)];
       const expected = between(60, 900) * 100;
-      const row = { id: 'el-' + i, batchId: 'era-1', patientId: p.id, claimId: 'c-' + (40 + i), cdt: pick(['d1110', 'd0120', 'd2392', 'd2740', 'd4341', 'd0274']), tooth: null, expectedCents: expected, paidCents: expected, carc: null, status: 'posted' };
+      // Matched to its claim and fee-schedule row by the worker; posted only when Post matched writes the ledger row.
+      const row = { id: 'el-' + i, batchId: 'era-1', patientId: p.id, claimId: 'c-' + (40 + i), cdt: pick(['d1110', 'd0120', 'd2392', 'd2740', 'd4341', 'd0274']), tooth: null, expectedCents: expected, paidCents: expected, carc: null, status: 'matched' };
       eraLines.push(row);
     }
     Object.assign(eraLines[13], { patientId: 'p-330', cdt: 'd2740', tooth: 19, expectedCents: 59000, paidCents: 54000, carc: '45', status: 'delta', note: 'Paid below contract: expected $590, ERA says $540' });
     Object.assign(eraLines[21], { cdt: 'd4341', expectedCents: 28500, paidCents: 21400, carc: '45', status: 'delta', note: 'Paid below contract: expected $285, ERA says $214' });
     Object.assign(eraLines[30], { cdt: 'd2392', tooth: 14, expectedCents: 26000, paidCents: 20800, carc: '131', status: 'delta', note: 'Downcoded to D2391: expected $260, ERA says $208' });
     Object.assign(eraLines[39], { id: 'el-40', patientId: 'p-321', claimId: 'c-88', cdt: 'd4341', expectedCents: 28500, paidCents: 0, carc: '16', rarc: 'N4', status: 'denied', note: 'Claim lacks information: missing perio chart' });
-    const eraBatches = [{ id: 'era-1', payer: 'Delta Dental', received: TODAY + 'T06:10', lines: 41, postedLines: 37, eftCents: 481233, trn: 'TRN 20260903-90112', status: 'review' }];
+    // The EFT is what the 835's lines pay: the header said $4,812.33 was matched to the bank while the lines posted $21,385.00.
+    const eraBatches = [{ id: 'era-1', payer: 'Delta Dental', received: TODAY + 'T06:10', lines: 41, postedLines: 37, eftCents: eraLines.reduce((s, l) => s + l.paidCents, 0), trn: 'TRN 20260903-90112', status: 'review' }];
 
     const claims = [
       { id: 'c-88', patientId: 'p-321', status: 'denied', cdt: 'd4341', tooth: null, amountCents: 28500, payer: 'Delta Dental', carc: '16', rarc: 'N4', plain: 'Delta says the claim is missing information: the perio chart was not attached.', nextAction: 'Appeal with the perio chart and the SRP narrative from the note', appealBy: '2026-11-02', submitted: '2026-08-20', hasPerioChart: true, hasNarrative: true },
@@ -213,6 +220,9 @@
       { id: 'c-65', patientId: 'p-318', status: 'submitted', cdt: 'd2392', tooth: 30, amountCents: 26000, payer: 'MetLife', submitted: '2026-08-01', age: 33, nextAction: 'Call payer: no 277 status in 33 days' },
       { id: 'c-51', patientId: 'p-322', status: 'submitted', cdt: 'd4341', tooth: null, amountCents: 28500, payer: 'Delta Dental', submitted: '2026-07-02', age: 63, nextAction: 'Timely filing at 90 days: escalate' },
     ];
+    /* An open claim bills a charge the ledger carries: Aging said $1,180 was out on Nico Iyer while his Ledger read $0.00
+       everywhere. Each charge waits on its claim for the full fee, so the three numbers that already read right do not move. */
+    for (const c of claims.filter((x) => x.status !== 'denied')) L({ kind: 'charge', patientId: c.patientId, amountCents: c.amountCents, effective: c.submitted, posted: c.submitted, actor: 'Sam Dawson', actorKind: 'user', locationId: 'loc-1', cdt: c.cdt, tooth: c.tooth, insuranceExpectedCents: c.amountCents, claimId: c.id });
 
     /* A statement bills what the account owes, so the amount is read off the ledger rather than asserted
        beside it. Both rows used to name a figure of their own: sd-1 billed $84.00 to an account with no
@@ -224,7 +234,11 @@
       return { id: sid, patientId: pid, amountCents: owed, reason: 'window_deferred', createdBy: 'Priya Raman', created: YESTERDAY };
     };
     const statementsDue = [statementFor('sd-1', 'p-316', 8400), statementFor('sd-2', 'p-319', 21200)];
-    const credits = [{ id: 'cr-1', patientId: 'p-307', amountCents: -9500, reason: 'Checked out unfiled: payment waiting for charges (a-1050)', intents: 'pending charges on enc-9010' }];
+    /* The Filed-later lane holds a payment: the $95 the window took on a-1050 is a ledger row (the one the intent
+       ai-0 names), and the credits row describes it. The credit used to stand alone, so the Board, Checkout and
+       the Ledger showed $95.00 on an account with no rows. */
+    ledger.push({ id: 'le-window-9010', kind: 'patient_payment', patientId: 'p-307', amountCents: -9500, effective: TODAY, posted: TODAY, actor: 'Priya Raman', actorKind: 'user', locationId: 'loc-1', tender: 'card', gl: 'unapplied_credit' });
+    const credits = [{ id: 'cr-1', patientId: 'p-307', amountCents: -9500, reason: 'Checked out unfiled: payment waiting for charges (a-1050)', intents: 'pending charges on enc-9010', fromLedger: true }];
 
     // Roles and SoD rules
     const roleTemplates = [

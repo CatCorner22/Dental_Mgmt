@@ -26,8 +26,22 @@
   let st = {}; // encId -> { tooth, surfaces:[{s, mixed}], temporality, note:{assessment, plan}, checked, killers, readback, filed, dismissing:{tagId: reason}, quoted }
   const S = () => Proto.store.get();
   const P = () => window.__proto;
-  function syncStore() { const s = S(); if (s !== lastStore) { lastStore = s; st = {}; } }
-  function state(encId) { syncStore(); if (!st[encId]) st[encId] = { tooth: null, surfaces: [], temporality: 'today', note: { assessment: '', plan: '' }, checked: false, killers: [], readback: false, filed: null, dismissing: {}, quoted: null }; return st[encId]; }
+  function syncStore() { const s = S(); if (s !== lastStore) { lastStore = s; st = {}; handoff = null; } }
+  /* A draft belongs to its author: the PIN switch on a shared device leaves each author's draft under their own key, so
+     the next author starts clean and the first finds theirs again. The one exception is the read-back gate's own
+     Switch author: it says "this work is the other person's", so the draft moves to the author the pad names (once,
+     and only through that control) — otherwise the correction the gate offers drops the note it was meant to file. */
+  let handoff = null;                                   // { encId, fromKey, draft } set by the read-back's Switch author
+  function state(encId) {
+    syncStore(); const k = encId + '|' + Proto.store.currentUser().id;
+    if (handoff && handoff.encId === encId && handoff.fromKey !== k) { st[k] = handoff.draft; delete st[handoff.fromKey]; handoff = null; }
+    if (!st[k]) st[k] = { tooth: null, surfaces: [], temporality: 'today', note: { assessment: '', plan: '' }, checked: false, killers: [], readback: false, filed: null, dismissing: {}, quoted: null };
+    return st[k];
+  }
+  function switchAuthorWithDraft(r, enc, x) {
+    const fromKey = enc.id + '|' + Proto.store.currentUser().id;
+    Proto.screens.shell.openPinPad(r, { onSwitch: () => { handoff = { encId: enc.id, fromKey, draft: x }; } });
+  }
 
   // ---- lookups ------------------------------------------------------------------------------
   const isSurgeon = () => P().persona === 'surgeon';
@@ -77,6 +91,17 @@
   function focusFirst(...tids) {
     for (const t of tids) { if (!t) continue; const el = document.querySelector('[data-testid="' + t + '"]'); if (el && el.focus) { el.focus({ preventScroll: true }); return true; } }
     return false;
+  }
+  // A gate that has just been raised lands the keyboard on its verb, one Tab from its control: focusing the control
+  // let the Enter that raised the read-back confirm it (invariants-r2-8).
+  function focusGateVerb() { const v = document.querySelector('#enc-gate .refusal .verb') || document.querySelector('#enc-gate h2'); if (!v) return false; v.setAttribute('tabindex', '-1'); v.focus({ preventScroll: true }); return true; }
+  const focusId = (id) => { const el = document.getElementById(id); if (!el) return false; el.focus({ preventScroll: true }); return true; };
+  // Below 1280 px the gate column is pinned over the bottom of the page, so a field it points at is scrolled above it.
+  function reveal(el) {
+    el.scrollIntoView({ block: 'center' });
+    const gate = document.getElementById('enc-gate-area'); if (!gate) return;
+    const g = gate.getBoundingClientRect(); const b = el.getBoundingClientRect();
+    if (b.left < g.right && b.right > g.left && b.bottom > g.top) { const sc = document.getElementById('canvas') || document.scrollingElement; sc.scrollTop += b.bottom - g.top + 8; }
   }
 
   // =========================================================================================
@@ -157,7 +182,7 @@
       detachKeys();
       const nf = Proto.store.notFound('encounter');
       mount(h('div', { class: 'stack' }, h('h1', { text: 'Nothing here' }), h('p', { class: 'muted', text: nf.why }),
-        btn('Back to Exams', { testid: 'enc.back', kind: 'reversible', onClick: () => Proto.router.go(r.persona, 'exams') })), 'encounter:notfound');
+        btn('Back to home', { testid: 'notfound.home', kind: 'quiet', onClick: () => Proto.router.go(r.persona, Proto.router.HOME[r.persona]) })), 'encounter:notfound');
       return;
     }
     const a = apptOf(enc); const p = Proto.store.patient(enc.patientId); const x = state(enc.id);
@@ -169,9 +194,29 @@
     const filed = filedOf(enc.id);
     if (enc.noteFiled || filed) { detachKeys(); mount(h('div', { class: 'stack enc-page' }, head, renderFiledCard(enc, filed, x)), 'encounter:' + enc.id); return; }
     attachKeys();
-    const left = h('div', { class: 'stack' }, renderTags(r, enc, x), renderOdontogram(r, enc, x), renderTransactions(r, enc, x));
-    const right = h('div', { class: 'stack' }, renderNote(r, enc, x), renderGate(r, enc, x));
-    mount(h('div', { class: 'stack enc-page' }, head, a && a.referral ? h('div', { class: 'card flat' }, chip('info', 'Referral'), ' ', referralLine(a)) : null, h('div', { class: 'enc-layout' }, left, right)), 'encounter:' + enc.id);
+    // The filing gate is its own grid child so the stylesheet can pin it in view below 1280 px, where the
+    // chart, the note and the gate stack in one column and File sat 1,300 px under the fold.
+    const chart = h('div', { class: 'stack enc-col-chart' }, renderTags(r, enc, x), renderOdontogram(r, enc, x), renderTransactions(r, enc, x));
+    const note = h('div', { class: 'stack enc-col-note' }, renderNote(r, enc, x));
+    mount(h('div', { class: 'stack enc-page' }, head, a && a.referral ? h('div', { class: 'card flat' }, chip('info', 'Referral'), ' ', referralLine(a)) : null, h('div', { class: 'enc-layout' }, chart, note, renderGate(r, enc, x))), 'encounter:' + enc.id);
+  }
+  /* A gate this screen renders from a store refusal: one verb line, one control, and the control does what its
+     label says (the support line, the undo, the procedure strip, the dentist's queue), never only a re-render. */
+  // The store's control words, each doing the thing it names (the same words the Phone and Perio act on).
+  const BY_WORD = {
+    'Switch author': (r) => Proto.screens.shell.openPinPad(r),
+    'Open Roles': () => { location.hash = '#/owner/roles'; },   // the seat that issues a pass
+    'Open the note': (r, enc) => Proto.router.go(r.persona, 'encounter', enc.id),
+    'Open the ledger': (r, enc) => Proto.router.go(r.persona, 'ledger', enc.patientId),
+    'Open the procedure list': () => focusFirst('enc.proc.' + PROCS[0][0]),
+  };
+  function gateNode(r, enc, x, res, fallback) {
+    const act = res.code === 'outage' ? () => (Proto.ui.support ? Proto.ui.support() : Proto.router.announce('Call support: 615-555-0100, 7 am to 6 pm'))
+      : res.code === 'duplicate_paint' ? (res.undoable ? () => { x.gateNode = null; undo(r, enc, x, res.chartEventId); } : () => focusFirst('enc.proc.' + PROCS[0][0]))
+      : BY_WORD[res.control] ? () => BY_WORD[res.control](r, enc, x)
+      : res.code === 'licence_scope' ? () => { x.gateNode = null; fixKiller(r, enc, x, { fix: 'licence' }); }
+      : fallback || (() => focusFirst('enc.tooth.' + (openTags(enc.id)[0] || { tooth: 30 }).tooth, 'enc.tooth.30', 'enc.back'));
+    return refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, severity: res.code === 'outage' ? 'stop' : undefined, onControl: act });
   }
 
   // ---- tags ---------------------------------------------------------------------------------
@@ -186,9 +231,10 @@
     if (t.disposition === 'dismissed') { row.append(h('div', { class: 'small muted', text: 'Reason: ' + (t.reason || '—') + (t.dispositionBy ? ' · ' + shortName(t.dispositionBy) : '') })); return row; }
     if (t.disposition) return row;
     const dismissing = x.dismissing[t.id] != null;
+    // Dismissing is the dentist's disposition (store.js dismissTag refuses anyone else), so only they are offered it.
     const controls = h('div', { class: 'btnrow' },
       btn('Chart it', { kind: 'reversible', testid: 'enc.tag.' + t.id + '.chart', onClick: () => chartTag(r, enc, x, t) }),
-      btn(dismissing ? 'Dismiss with reason' : 'Dismiss', { kind: 'quiet', testid: 'enc.tag.' + t.id + '.dismiss', onClick: () => dismissTag(r, enc, x, t) }));
+      dentistLike() ? btn(dismissing ? 'Dismiss with reason' : 'Dismiss', { kind: 'quiet', testid: 'enc.tag.' + t.id + '.dismiss', onClick: () => dismissTag(r, enc, x, t) }) : h('span', { class: 'small muted', text: 'Dismissed only by the dentist' }));
     row.append(controls);
     if (dismissing) {
       const input = h('input', { class: 'input', type: 'text', id: 'reason-' + t.id, testid: 'enc.tag.' + t.id + '.reason', 'aria-label': 'One-line reason for dismissing the tag', placeholder: 'One line: what you saw instead', value: x.dismissing[t.id], onInput: (ev) => { x.dismissing[t.id] = ev.target.value; }, maxlength: '120' });
@@ -211,7 +257,7 @@
     if (!reason) { x.dismissTried = true; rerender(r); return; }
     // The store writes the disposition and logs the tags change; a screen never edits a row itself (A3, A5).
     const res = Proto.store.dismissTag(t.id, reason);
-    if (!res.ok) { x.gateNode = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: () => focusFirst('enc.tag.' + t.id + '.reason') }); rerender(r); return; }
+    if (!res.ok) { x.gateNode = gateNode(r, enc, x, res, () => focusFirst('enc.tag.' + t.id + '.reason')); rerender(r); focusFirst('refusal.control'); return; }
     delete x.dismissing[t.id];
     if (x.checked) x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3);
     rerender(r);
@@ -223,6 +269,9 @@
   // ---- odontogram, surfaces, procedures, temporality ----------------------------------------
   function renderOdontogram(r, enc, x) {
     const ces = eventsOf(enc.id); const tagged = openTags(enc.id).map((t) => t.tooth);
+    // The gate belongs to its cause and falls with it: a tooth picked, the server back (stale-gate rule).
+    const gc = x.gateNode && x.gateNode.dataset.code;
+    if ((gc === 'tooth_required' && x.tooth) || (gc === 'outage' && !S().outage) || (gc === 'entitlement' && !Proto.store.currentUser().noPass)) x.gateNode = null;
     const toothBtn = (n) => {
       const has = ces.some((c) => c.tooth === n); const isTag = tagged.includes(n); const sel = x.tooth === n;
       // Charted is never colour alone: the tooth carries a mark and a fill as well as its rail (B5).
@@ -262,20 +311,13 @@
     x.gateNode = null; rerender(r);
   }
   function paint(r, enc, x, code) {
-    x.undoGate = null;                                  // one live gate per screen: a new attempt supersedes the last
-    // One code, one verb: the tooth gate reads the same wherever it is raised (B4).
-    if (!x.tooth) { x.gateNode = refusal({ code: 'tooth_required', verb: 'Pick a tooth first', control: 'Go to teeth', onControl: () => focusFirst('enc.tooth.' + (openTags(enc.id)[0] || { tooth: 30 }).tooth, 'enc.tooth.30'), why: 'The procedure strip never auto-selects and never guesses a tooth; the chart event, plan item, and pending charge all point at the tooth you pick.' }); rerender(r); return; }
+    x.undoGate = null; x.fileGate = null;               // one live gate per screen: a new attempt supersedes the last
+    // One code, one verb: the tooth gate reads the same wherever it is raised (B4). A service that belongs to
+    // the visit (exam, prophy, sedation) carries no tooth, so it is charted with none picked.
+    if (!x.tooth && !Proto.store.wholePatient(code)) { x.gateNode = refusal({ code: 'tooth_required', verb: 'Pick a tooth first', control: 'Go to teeth', onControl: () => focusFirst('enc.tooth.' + (openTags(enc.id)[0] || { tooth: 30 }).tooth, 'enc.tooth.30'), why: 'The procedure strip never auto-selects and never guesses a tooth; the chart event, plan item, and pending charge all point at the tooth you pick.' }); rerender(r); focusFirst('refusal.control'); return; }
     const surfaces = x.surfaces.map((o) => o.s);
     const res = Proto.store.chartPaint(enc.id, x.tooth, surfaces, code, x.temporality);
-    if (!res.ok) {
-      // The control has to do what its words say. For a duplicate paint that means raising the same
-      // gate the Undo control raises: the first paint is a record, and a record is corrected, not erased.
-      const act = res.code === 'duplicate_paint'
-        ? () => { x.gateNode = null; undo(r, enc, x); }
-        : () => { x.gateNode = null; rerender(r); };
-      x.gateNode = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: act });
-      rerender(r); return;
-    }
+    if (!res.ok) { x.gateNode = gateNode(r, enc, x, res); rerender(r); focusFirst('refusal.control'); return; }
     x.gateNode = null; x.undoGate = null; x.lastPaint = res; x.surfaces = x.surfaces.map((o) => ({ s: o.s, mixed: false }));
     if (x.checked) x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3);
     rerender(r);
@@ -284,14 +326,24 @@
 
   // ---- transaction cards ---------------------------------------------------------------------
   function renderTransactions(r, enc, x) {
-    const s = S(); const ces = eventsOf(enc.id).slice().reverse(); if (!ces.length) return null;
+    const s = S(); const ces = eventsOf(enc.id).slice().reverse();
+    // Procedures the visit carried before the chart was opened release at File like any paint. Hiding them let
+    // the same exam be charted again and billed twice.
+    const carried = s.procedures.filter((p) => p.encounterId === enc.id && !p.chartEventId && !p.reversed);
+    if (!ces.length && !carried.length) return null;
+    const carriedCards = carried.map((p) => {
+      const name = (s.cdt[p.cdt] || [p.cdt])[0] + (p.tooth ? ' #' + p.tooth : ''); const done = Proto.store.charged(p);
+      return h('div', { class: 'card enc-tx stack', role: 'group', 'aria-label': 'On the visit · ' + name },
+        h('div', { class: 'row between' }, h('b', { text: 'On the visit before the chart opened' }), chip(done ? 'clear' : 'style', done ? 'Charged' : 'Today')),
+        h('ul', { class: 'enc-rows' }, h('li', null, h('b', { text: 'Procedure ' }), p.cdt.toUpperCase() + ' ' + name + ' · ' + money(p.feeCents) + (done ? ' charged' : ' pending charge, released at File'))));
+    });
     const cards = ces.map((ce, i) => {
       const proc = s.procedures.find((p) => p.chartEventId === ce.id);
-      const plan = s.planItems.slice().reverse().find((pl) => pl.encounterId === enc.id && pl.tooth === ce.tooth && pl.cdt === ce.cdt && pl.temporality === ce.temporality);
+      const plan = s.planItems.slice().reverse().find((pl) => pl.encounterId === enc.id && !pl.reversed && pl.tooth === ce.tooth && pl.cdt === ce.cdt && pl.temporality === ce.temporality);
       const fee = (s.cdt[ce.cdt] || [null, 0])[1];
       // Storage ids stay off the glass: a chart event, a procedure, a plan item and a note are named by
       // what they say, not by ce-1 / pr-500 / pl-1 (C3).
-      const card = h('div', { class: 'card enc-tx stack', 'aria-label': 'Transaction · ' + scaffoldLine(ce) },
+      const card = h('div', { class: 'card enc-tx stack', role: 'group', 'aria-label': 'Transaction · ' + scaffoldLine(ce) },
         h('div', { class: 'row between' }, h('b', { text: 'One paint, one transaction' }), chip(ce.temporality === 'today' ? 'style' : ce.temporality === 'planned' ? 'review' : 'info', TEMPORALITY.find((t) => t[0] === ce.temporality)[1])),
         h('ul', { class: 'enc-rows' },
           h('li', null, h('b', { text: 'Chart event ' }), scaffoldLine(ce) + byLine(ce.author)),
@@ -301,11 +353,11 @@
         i === 0 ? renderUndo(r, enc, x) : null);
       return card;
     });
-    return h('div', { class: 'stack' }, ...cards);
+    return h('div', { class: 'stack' }, ...cards, ...carriedCards);
   }
   function renderPlanCard(plan, fee, x) {
     const owe = plan.estimateCents; const pays = Math.max(0, fee - owe);
-    return h('div', { class: 'card flat stack', 'aria-label': 'Plan card' },
+    return h('div', { class: 'card flat stack', role: 'group', 'aria-label': 'Plan card' },
       h('div', { class: 'row between' }, h('b', { text: 'Plan card' }), x.quoted && x.quoted.planId === plan.id ? chip('info', 'Quoted') : null),
       x.quoted && x.quoted.planId === plan.id ? h('div', { class: 'small muted', text: 'Quoted to the patient ' + longDate(x.quoted.date) }) : null,
       h('div', { class: 'threenum' }, num(money(fee), 'Fee'), num(money(pays), 'Your plan pays about'), num(money(owe), "You'd owe about")),
@@ -318,21 +370,25 @@
      log one write for an id no table held, which erased part of a clinical record and left the note line
      behind, so the next paint filed the same procedure line twice. */
   function renderUndo(r, enc, x) {
+    if (staleGate(x.undoGate)) x.undoGate = null;
     if (!x.undoGate) return btn('Undo last paint', { kind: 'reversible', testid: 'enc.undo', onClick: () => undo(r, enc, x) });
     return h('div', { class: 'stack' },
-      refusal(Object.assign({}, x.undoGate, { onControl: () => { focusFirst('enc.note.field.assessment'); } })),
-      btn('Undo last paint', { kind: 'held', testid: 'enc.undo', ariaLabel: 'Held: ' + x.undoGate.verb, onClick: () => focusFirst('refusal.control', 'enc.note.field.assessment') }));
+      gateNode(r, enc, x, x.undoGate, () => focusFirst('enc.note.field.assessment')),
+      // A Held press re-evaluates first: if the gate has fallen (the outage ended), the press reverses the paint.
+      btn('Undo last paint', { kind: 'held', testid: 'enc.undo', ariaLabel: 'Held: ' + x.undoGate.verb, onClick: () => { rerender(r); if (x.undoGate) focusFirst('refusal.control', 'enc.note.field.assessment'); else undo(r, enc, x); } }));
   }
-  function undo(r, enc, x) {
-    x.gateNode = null;                                  // one live gate per screen
-    const res = Proto.store.chartUndo(enc.id);
-    if (!res.ok) { x.undoGate = res; rerender(r); focusFirst('enc.undo'); return; }
+  // `ceId` names the paint to reverse (the duplicate's original from chartPaint's refusal); without it, the last one.
+  function undo(r, enc, x, ceId) {
+    x.gateNode = null; x.fileGate = null;               // one live gate per screen
+    const res = Proto.store.chartUndo(enc.id, ceId);
+    // With no standing paint there is no card to carry the gate, so it stands in the Chart section instead.
+    if (!res.ok) { if (eventsOf(enc.id).length) x.undoGate = res; else x.gateNode = gateNode(r, enc, x, res); rerender(r); focusFirst('enc.undo', 'refusal.control'); return; }
     x.undoGate = null;
     x.tooth = null; x.surfaces = [];
     if (x.checked) x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3);
     rerender(r);
     focusFirst('enc.undo', 'enc.note.field.assessment');
-    Proto.router.announce('Reversed the last paint');
+    Proto.router.announce('Reversed ' + (res.reversal ? scaffoldLine(res.reversal) : 'the last paint'));
   }
 
   // ---- note ---------------------------------------------------------------------------------
@@ -377,17 +433,34 @@
   }
 
   // ---- filing gate: at most three rows to fix + one File -------------------------------------
+  // One stale-gate rule for File, Send and Undo: a gate whose cause is gone falls on the next render.
+  const staleGate = (g) => !!g && g.code === 'outage' && !S().outage;
+  // The chair is already in the dentist's queue: the Send killer reads as done, and a repeat writes nothing (A4).
+  const sentToExams = (enc) => { const a = apptOf(enc); return !!a && (a.status === 'ready_for_exam' || S().appointmentEvents.some((e) => e.appointmentId === a.id && e.kind === 'encounter.exam_requested')); };
+  const isSent = (k, enc) => k.fix === 'licence' && (!!k.sent || sentToExams(enc));
   function renderGate(r, enc, x) {
     // One gate, one 44 px control: the read-back used to carry three (Confirm and file, Switch author and
     // the held File). The gate card holds the gate; the author line and the primary stand beside it (§6).
-    const area = h('div', { class: 'stack', id: 'enc-gate-area' });
-    const wrap = h('div', { class: 'card stack', id: 'enc-gate', 'aria-label': 'Filing gate' });
+    const area = h('div', { class: 'stack enc-gate-col', id: 'enc-gate-area' });
+    const wrap = h('div', { class: 'card stack', id: 'enc-gate', role: 'group', 'aria-label': 'Filing gate' });
     area.append(wrap);
+    // A File the store refused outright (outage, sealed note) stands here, beside the primary it held (§6),
+    // and clears with the condition that raised it so the primary comes back when the server does.
+    if (staleGate(x.fileGate)) x.fileGate = null;
+    if (staleGate(x.sendGate)) x.sendGate = null;
+    if (x.fileGate) {
+      wrap.append(gateNode(r, enc, x, x.fileGate, () => focusFirst('enc.back')));
+      // A Held press re-evaluates first: if the gate has fallen (the outage ended), the press files.
+      area.append(btn('File', { kind: 'held', testid: 'enc.file', ariaLabel: 'Held: ' + x.fileGate.verb, onClick: () => { rerender(r); if (x.fileGate) focusFirst('refusal.control'); else doFile(r, enc, x, false); } }));
+      return area;
+    }
     const total = x.checked ? Proto.store.noteKillers(enc.id, x.note).length : 0;
-    if (x.sendGate) wrap.append(refusal(x.sendGate));
+    // A store refusal from Send to Exams to sign renders here with its own control; the screen's own gates carry theirs.
+    if (x.sendGate) wrap.append(x.sendGate.onControl ? refusal(x.sendGate) : gateNode(r, enc, x, x.sendGate, () => focusFirst('enc.back')));
     if (x.checked && x.killers.length) {
+      const open = x.killers.filter((k) => !isSent(k, enc)).length;
       wrap.append(h('div', { class: 'row between' }, h('h2', { text: 'Before File' }),
-        h('span', { class: 'row' }, chip('required', x.killers.length + ' to fix'), total > 3 ? h('span', { class: 'small muted', text: 'of ' + total }) : null)),
+        h('span', { class: 'row' }, open ? chip('required', open + ' to fix') : chip('clear', 'Sent'), total > 3 ? h('span', { class: 'small muted', text: 'of ' + total }) : null)),
         h('div', { class: 'killer' }, ...x.killers.map((k, i) => killerRow(r, enc, x, k, i))));
     } else if (x.checked) wrap.append(h('div', { class: 'row' }, chip('clear', 'Nothing outstanding'), h('span', { class: 'small muted', text: 'File runs the same checks server-side' })));
     else wrap.append(h('p', { class: 'small muted', text: 'Checks run when you leave a field' }));
@@ -400,7 +473,7 @@
       const res = Proto.store.fileNote(enc.id, x.note, false);
       if (res.ok === false && res.code === 'readback') {
         wrap.append(refusal({ code: res.code, verb: res.verb, control: res.control, controlKind: 'irreversible', why: res.why, severity: 'info', onControl: () => doFile(r, enc, x, true) }));
-        area.append(h('div', { class: 'row' }, h('span', { class: 'small muted grow', text: detail }), btn('Switch author', { kind: 'reversible', testid: 'enc.readback.switch', onClick: () => Proto.screens.shell.openPinPad(r) })),
+        area.append(h('div', { class: 'row' }, h('span', { class: 'small muted grow', text: detail }), btn('Switch author', { kind: 'reversible', testid: 'enc.readback.switch', onClick: () => switchAuthorWithDraft(r, enc, x) })),
           btn('Confirm the read-back', { kind: 'held', testid: 'enc.file', ariaLabel: 'Held: confirm the read-back', onClick: () => focusFirst('refusal.control') }));
         return area;
       }
@@ -411,6 +484,8 @@
     return area;
   }
   function killerRow(r, enc, x, k, i) {
+    // Sent already: the row is the stamp the send lands the keyboard on, not a second Send (Enter-twice rule).
+    if (isSent(k, enc)) return h('div', { class: 'row', id: 'enc-sent', tabindex: '-1', role: 'group', 'aria-label': 'Sent to Exams to sign' }, chip('clear', 'Sent to Exams to sign'), h('span', { class: 'small muted grow', text: k.sent ? k.verb : 'Wait for the dentist to file' }), btn(k.sent && k.control ? k.control : 'Back to Chairs', { kind: 'quiet', testid: 'enc.killer.' + i + '.fix', onClick: () => Proto.router.go(r.persona, 'chairs') }));
     const node = refusal({ code: k.code, verb: k.verb, control: k.control, why: KILLER_WHY[k.fix] || 'The same list runs server-side at File.', severity: k.fix === 'contradiction' ? 'stop' : 'required', onControl: () => fixKiller(r, enc, x, k) });
     const c = node.querySelector('[data-testid="refusal.control"]'); if (c) c.setAttribute('data-testid', 'enc.killer.' + i + '.fix');
     return node;
@@ -430,7 +505,7 @@
       x.note.assessment = strip(x.note.assessment); x.note.plan = strip(x.note.plan);
       const plan = S().planItems.slice().reverse().find((pl) => pl.encounterId === enc.id); x.quoted = { planId: plan ? plan.id : null, date: S().tenant.today };
       x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3); rerender(r);
-      focusFirst('enc.killer.0.fix', 'enc.file'); Proto.router.announce('Moved to plan card'); return;
+      focusGateVerb() || focusFirst('enc.file'); Proto.router.announce('Moved to plan card'); return;
     }
     if (k.fix === 'contradiction') {
       // The tooth comes from the killer row itself; reading it back out of the verb broke the moment the
@@ -440,42 +515,52 @@
       const fix = (txt) => (txt || '').replace(/#(\d{1,2})\b/g, (all, n) => (n === chartTooth ? all : '#' + chartTooth));
       x.note.assessment = fix(x.note.assessment); x.note.plan = fix(x.note.plan);
       x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3); rerender(r);
-      focusFirst('enc.killer.0.fix', 'enc.file'); Proto.router.announce('Note now says #' + chartTooth + ', matching the chart'); return;
+      focusGateVerb() || focusFirst('enc.file'); Proto.router.announce('Note now says #' + chartTooth + ', matching the chart'); return;
     }
-    if (k.fix === 'assessment') { const ta = document.getElementById('note-assessment'); if (ta) { ta.scrollIntoView({ block: 'center' }); ta.focus({ preventScroll: true }); } return; }
+    if (k.fix === 'assessment') {
+      const ta = document.getElementById('note-assessment');
+      // A read-only field takes no keys: for a seat that does not write the assessment the way through is the Send row.
+      if (ta && ta.readOnly) { const v = document.querySelector('#enc-gate .refusal[data-code="licence_scope"] .verb'); if (v) { v.setAttribute('tabindex', '-1'); v.focus({ preventScroll: true }); } Proto.router.announce('Only a dentist writes the assessment — send to Exams to sign'); return; }
+      if (ta) { reveal(ta); ta.focus({ preventScroll: true }); } return;
+    }
     if (k.fix === 'licence') {
       // A repeated press does not write a second request (A4): the chair is already in the queue.
-      const a = apptOf(enc);
-      const already = a && (a.status === 'ready_for_exam' || S().appointmentEvents.some((e) => e.appointmentId === a.id && e.kind === 'encounter.exam_requested'));
-      if (already) {
+      if (sentToExams(enc)) {
         x.sendGate = { code: 'already_decided', verb: 'Wait for the dentist to open it', control: 'Back to Chairs', severity: 'info', onControl: () => Proto.router.go(r.persona, 'chairs'), why: 'This chair is already in the dentist\'s queue with its place in line. Asking twice does not move it up; it would show as two chairs waiting for the same note.' };
         rerender(r); focusFirst('refusal.control'); return;
       }
       const res = Proto.store.readyForExam(enc.appointmentId);
-      if (res.ok) { rerender(r); focusFirst('enc.killer.0.fix', 'enc.file'); Proto.router.announce('Sent to Exams to sign'); }
+      if (res.ok) { x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3); rerender(r); const stamp = document.getElementById('enc-sent'); if (stamp) stamp.focus({ preventScroll: true }); else focusFirst('enc.file'); Proto.router.announce('Sent to Exams to sign'); return; }
+      x.sendGate = res; rerender(r); focusGateVerb();   // the store's verdict renders; a silent refusal is a dead control
       return;
     }
   }
   function doFile(r, enc, x, confirmed) {
     // The filing gate is the live one, so no earlier gate is left holding the contract selectors (§6).
-    x.checked = true; x.sendGate = null; x.gateNode = null; x.undoGate = null;
+    x.checked = true; x.sendGate = null; x.gateNode = null; x.undoGate = null; x.fileGate = null;
     const res = Proto.store.fileNote(enc.id, x.note, confirmed);
-    if (res.ok) { x.filed = res.filed; x.readback = false; rerender(r); focusFirst('enc.back'); Proto.router.announce('Filed · charges released · claim queued'); return; }
+    // Filed lands on the Filed card's stamp, never on Back to Exams: Enter twice used to leave before the card could be read.
+    if (res.ok) { x.filed = res.filed; x.readback = false; rerender(r); focusId('enc-filed-head') || focusFirst('enc.rail'); Proto.router.announce('Filed · ' + (res.released ? 'charges released' : 'nothing to release') + (res.claim ? ' · claim queued' : '')); return; }
     if (res.killers) { x.killers = res.killers; x.readback = false; }
     else if (res.code === 'readback') { x.killers = []; x.readback = true; }
-    else { x.gateNode = refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: () => rerender(r) }); }
+    else { x.fileGate = res; x.readback = false; }
     rerender(r);
-    if (res.code === 'readback') { const c = document.querySelector('#enc-gate [data-testid="refusal.control"]'); if (c) c.focus({ preventScroll: true }); }
-    else if (res.killers) focusFirst('enc.killer.0.fix', 'enc.file');
+    // Refused: the keyboard lands on the gate's verb, one Tab from its control. The first killer control used to take it,
+    // and for a hygienist that control is Send to Exams to sign, so Enter twice on File sent the chair.
+    focusGateVerb() || focusFirst('enc.file');
   }
   function renderFiledCard(enc, filed, x) {
-    const s = S(); const released = filed ? s.ledger.filter((e) => e.releasedByNoteId === filed.id) : []; const claim = s.claims.slice().reverse().find((c) => c.patientId === enc.patientId && c.status === 'scrubbed');
-    return h('div', { class: 'card stack enc-filed', 'aria-label': 'Filed note' },
-      h('div', { class: 'row' }, chip('clear', 'Filed', { big: true }), chip('clear', 'Audit passed')),
+    // The claim and the charges are the encounter's own: a claim looked up by patient said "queued" on a visit
+    // that queued none, and a seeded filed visit counted no charge.
+    const s = S(); const procs = s.procedures.filter((p) => p.encounterId === enc.id).map((p) => p.id);
+    const released = filed ? s.ledger.filter((e) => e.releasedByNoteId === filed.id) : s.ledger.filter((e) => e.kind === 'charge' && procs.includes(e.procedureId));
+    const claim = s.claims.find((c) => c.encounterId === enc.id) || null;
+    return h('div', { class: 'card stack enc-filed', role: 'group', 'aria-label': 'Filed note' },
+      h('div', { class: 'row', id: 'enc-filed-head', tabindex: '-1', role: 'group', 'aria-label': 'Filed, audit passed' }, chip('clear', 'Filed', { big: true }), chip('clear', 'Audit passed')),
       filed ? h('p', { class: 'small muted', text: 'By ' + filed.author + ' at ' + dateTime((filed.filedOn || '') + ' ' + (filed.filedTime || '')) + ' · text and version frozen; corrections are addenda, never edits.' }) : null,
       h('ul', { class: 'enc-rows' },
         h('li', null, h('b', { text: 'Charges released: ' + released.length }), released.length ? ' · ' + released.map((e) => money(e.amountCents) + (e.tooth ? ' #' + e.tooth : '')).join(', ') : ' (nothing pending)'),
-        h('li', null, h('b', { text: 'Claim queued' }), claim ? ' · ' + claim.id + ' to ' + claim.payer + ' · ' + claim.nextAction : ''),
+        claim ? h('li', null, h('b', { text: 'Claim queued' }), ' · to ' + claim.payer + ' · ' + claim.nextAction) : h('li', null, h('b', { text: 'No claim queued' }), ' · ' + (released.length ? 'no plan on file to bill' : 'nothing released to bill')),
         h('li', null, 'Board chip flipped to Note filed; checkout releases any held payment.')),
       filed && filed.markdown ? h('div', { class: 'enc-readonly small', text: filed.markdown }) : null);
   }

@@ -57,7 +57,8 @@ const readinessRow = (p, control) => p.evaluate((c) => {
   // Chip word with its shape glyph stripped: chips render "<glyph><word>" (ui.js chip()).
   const chipWords = (p, sel) => p.evaluate((sel) => [...document.querySelectorAll(sel)].map((e) => ({ raw: e.textContent.trim(), word: e.textContent.replace(/[■▲◆★▬●✓]/g, '').trim(), severity: (e.className.match(/chip\s+(\w+)/) || [])[1] || null })), sel);
   const simulate = async (p) => { const ok = await click(p, 'phone.simulate'); await p.waitForTimeout(150); return ok; };
-  const pin = async (p, digits = ['1', '2', '3', '4']) => { for (const d of digits) await click(p, 'phone.stepup.' + d); await click(p, 'phone.stepup.submit'); await p.waitForTimeout(250); };
+  // The step-up verifies the approver's OWN PIN (store.js verifyPin(pin, approver.id)); with no digits given, the current user's PIN is read at run time.
+  const pin = async (p, digits) => { const ds = digits || [...await p.evaluate(() => String((Proto.store.currentUser() || {}).pin || ''))]; for (const d of ds) await click(p, 'phone.stepup.' + d); await click(p, 'phone.stepup.submit'); await p.waitForTimeout(250); };
 
   return {
     // RC-223 · B4 · phone.js:80/84/168 name the PIN challenge "Re-verify" ("Re-verify: enter your PIN", dialog

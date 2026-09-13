@@ -41,23 +41,42 @@
     return { ledger: S.ledger.slice(b.ledger), allocations: S.allocations.slice(b.allocations), intents: S.allocationIntents.slice(b.intents), decisions: S.collectionDecisions.slice(b.decisions), statements: S.statementsDue.slice(b.statements), plans: S.paymentPlans.slice(b.plans), events: S.domainEvents.slice(b.events).filter((e) => e.type === 'procedure.self_pay_restricted') };
   }
 
-  function rerender(r, focusTestid) {
+  function rerender(r, focus) {
     r = r || lastRoute || Proto.router.current();
     render(r);
     Proto.screens.shell.refreshAndon(r);
-    if (focusTestid) { const el = document.querySelector('[data-testid="' + focusTestid + '"]'); if (el && el.focus) el.focus(); }
+    if (focus) { const el = document.querySelector(focus[0] === '#' ? focus : '[data-testid="' + focus + '"]'); if (el && el.focus) el.focus(); }
   }
+  const focusPin = () => { const el = document.querySelector('[data-testid="checkout.pin"]'); if (el) el.focus(); };
+  const removeWriteoff = (r, st, focus) => { st.writeoffOpen = false; st.writeoffStr = ''; st.writeoffReason = null; st.refusalNode = null; rerender(r, focus || 'checkout.writeoff.add'); };
+  const focusField = (t) => () => { const el = document.querySelector('[data-testid="' + t + '"]'); if (el && el.focus) el.focus(); };
+  const openRoles = () => { location.hash = '#/owner/roles'; };   // the seat that issues a pass, not the pass-less temp's own Roles
 
-  /* Every gate has one control. The store leaves a few controls null; supply the obvious one. */
+  /* Every gate has one control, and the control does what the store's word says. The store leaves a few controls
+     null; supply the obvious one. */
   function withControl(res, r, a, st) {
     const v = { code: res.code, verb: res.verb, control: res.control, why: res.why };
     if (res.code === 'zero_collect_refused') { v.control = res.control || 'Nothing due today'; v.onControl = () => { st.decision = 'zero_due'; st.refusalNode = null; rerender(r, 'checkout.collect.seg.zero-due'); }; }
-    else if (res.code === 'pin_required') { v.control = 'Enter PIN'; v.onControl = () => { const el = document.querySelector('[data-testid="checkout.pin"]'); if (el) el.focus(); }; }
+    // A second wrong PIN reads the same as the first and is still a second refusal (ui.js refusal `fresh`).
+    else if (res.code === 'pin_required' || res.code === 'pin_no_match') { v.control = 'Enter PIN'; v.fresh = res.code === 'pin_no_match'; v.onControl = focusPin; }
+    else if (res.code === 'pin_locked') { v.control = res.control || 'Close'; v.fresh = true; v.onControl = () => { st.pin = ''; st.refusalNode = null; rerender(r, 'checkout.pin'); }; }
+    // After hours the write-off waits for business hours; the payment need not. The control takes the write-off
+    // off this posting rather than requesting an approval the hours policy would still hold.
+    else if (res.code === 'after_hours' || (res.code === 'amount_required' && res.control === 'Remove the write-off')) { v.control = res.control || 'Remove the write-off'; v.onControl = () => removeWriteoff(r, st, 'checkout.post'); }
+    // The store's write-off cap names the field the number goes in.
+    else if (res.code === 'amount_required') { v.control = res.control || 'Go to amount'; v.onControl = focusField('checkout.writeoff.amount'); }
     else if (res.code === 'tender_required') { v.control = 'Choose card'; v.onControl = () => { st.tender = 'card'; st.refusalNode = null; rerender(r, 'checkout.card.number'); }; }
     // The control that says "Open the ledger" opens the ledger. Every unnamed code used to fall through to the
     // Board, so the one gate whose label named a destination landed somewhere else.
     else if (res.code === 'already_decided') { v.control = res.control || 'Open the ledger'; v.onControl = () => Proto.router.go(r.persona, 'ledger', a.patientId); }
-    else if (res.code === 'outage') { v.control = res.control || 'Support line'; v.severity = 'stop'; v.onControl = () => Proto.router.announce('Support: 615-555-0100, answered 7 am to 6 pm Central'); }
+    // "Open the day" opens Daily Close, where the closed day is read.
+    else if (res.code === 'already_closed') { v.control = res.control || 'Open the day'; v.onControl = () => Proto.router.go(r.persona, 'close'); }
+    // The requester cannot be the approver: the gate stands until the request is dismissed here.
+    else if (res.code === 'blocked_same_person') { v.control = res.control || 'Dismiss'; v.onControl = () => { st.refusalNode = null; rerender(r, 'checkout.post'); }; }
+    // Two entitlement gates: no pass (Open Roles) and a seat without post_payment (Switch author, the PIN pad).
+    else if (res.code === 'entitlement' && res.control === 'Switch author') { v.onControl = () => Proto.screens.shell.openPinPad(r); }
+    else if (res.code === 'entitlement') { v.control = res.control || 'Open Roles'; v.onControl = openRoles; }
+    else if (res.code === 'outage') { v.control = res.control || 'Support line'; v.severity = 'stop'; v.onControl = Proto.ui.support; }
     else { v.control = res.control || 'Back to Board'; v.onControl = () => Proto.router.go(r.persona, 'board'); }
     return v;
   }
@@ -67,6 +86,14 @@
     st.refusalNode = refusal(Object.assign({}, v, { onControl: () => { const el = document.querySelector('[data-testid="' + focusTestid + '"]'); if (el && el.focus) el.focus(); } }));
     rerender(r, 'refusal.control');
   }
+  /* A restriction posts only with the payment that covers its fee (docs/13 feature 1). The toggle hides when the
+     tender stops covering it, but st.selfPay kept the id, so Send statement posted a restriction with no payment. */
+  function selfPayFor(S, a, st, payCents) {
+    if (st.decision !== 'collect') return [];
+    return [...st.selfPay].filter((pid) => { const p = S.procedures.find((x) => x.id === pid && x.encounterId === a.encounterId); return p && !p.selfPayRestricted && payCents >= p.feeCents; });
+  }
+  // A statement or plan bills what the write-off typed beside it leaves: the row the store writes carries the same number.
+  const afterWriteoff = (st, est) => { const wo = st.writeoffOpen ? cents(st.writeoffStr) : 0; return Math.max(0, est.patientCents - (wo > 0 ? wo : 0)); };
   const AMOUNT_WHY = 'A payment posts the number in the field against the balance, so it cannot be blank, negative, or a value that is not a number. To take nothing at the window, choose Nothing due today.';
   const WRITEOFF_WHY = 'A write-off posts the number in the field against the balance, so it cannot be blank, negative, or a value that is not a number. Remove the write-off to post without one.';
 
@@ -85,7 +112,7 @@
       decision: st.decision,
       tender: st.decision === 'collect' ? st.tender : null,
       amountCents: st.decision === 'collect' ? payCents : 0,
-      selfPay: [...st.selfPay],
+      selfPay: selfPayFor(S, a, st, payCents),
       writeoffCents: woCents,
       writeoffReason: st.writeoffReason || 'courtesy',
       cadence: st.cadence,
@@ -96,19 +123,22 @@
     if (res.ok) {
       st.posted = diff(S, before); st.posted.form = form; st.refusalNode = null;
       Proto.router.announce('Posted');
-      rerender(r, 'checkout.back');
+      // The keyboard lands on the Posted card's heading, never on Back: a repeated Enter must not leave the read-back.
+      rerender(r, '#co-posted-head');
       return;
     }
-    if (res.held) {
+    if (res.held && res.code !== 'after_hours') {
       // The request row is written when this control is pressed, by the store verb that owns it. Post writes
       // nothing here, so a control labelled "Request approval" performs the request it names.
       st.refusalNode = refusal({ code: res.code, verb: res.verb, control: res.control || 'Request approval', why: res.why, onControl: () => {
+        // The pending request names the PIN poster (store.js posterId), so the phone's same-person rule reads the right name.
         const out = Proto.store.requestApproval(res.pendingRequest);
         if (!out.ok) { st.refusalNode = refusal(withControl(out, r, a, st)); rerender(r, 'refusal.control'); return; }
         st.heldReq = Proto.store.get().approvals.find((x) => x.id === out.requestId) || null;
-        st.requested = true; st.refusalNode = null;
+        st.requested = true; st.refusalNode = null; st.pin = '';
         Proto.router.announce('Approval requested');
-        rerender(r, 'checkout.post');
+        // The keyboard lands on the request stamp, not on the Held primary.
+        rerender(r, '#co-requested');
       } });
       rerender(r, 'refusal.control');
       return;
@@ -120,7 +150,7 @@
   /* --- pieces --- */
   function threeNumbers(bal) {
     const n = (label, v) => h('div', { class: 'n' }, h('div', { class: 'v', text: money(v) }), h('div', { class: 'l', text: label }));
-    return h('div', { class: 'threenum', 'aria-label': 'Account balance' }, n('Patient due', bal.patientDue), n('Waiting on insurance', bal.insurancePending), n('Credit', bal.credit));
+    return h('div', { class: 'threenum', role: 'group', 'aria-label': 'Account balance' }, n('Patient due', bal.patientDue), n('Waiting on insurance', bal.insurancePending), n('Credit', bal.credit));
   }
 
   function proceduresCard(S, a, st, procs, est, coversNow) {
@@ -140,10 +170,10 @@
         h('td', null, pre),
         h('td', null, toggle));
     });
-    const table = h('div', { class: 'wrap-x' }, h('table', { class: 'data co-lines' },
+    const table = Proto.ui.scrollRegion('Completed procedures', 'checkout.lines', h('table', { class: 'data co-lines' },
       h('thead', null, h('tr', null, h('th', { text: 'Procedure' }), h('th', { class: 'num', text: 'Tooth' }), h('th', { class: 'num', text: 'Fee' }), h('th', { class: 'num co-est', text: 'Patient portion (estimate)' }), h('th', { text: 'Pre-flight' }), h('th', { text: 'Self-pay' }))),
       h('tbody', null, ...rows),
-      h('tfoot', null, h('tr', null, h('th', { text: 'Totals' }), h('th'), h('th', { class: 'num', text: money(feeTotal) }), h('th', { class: 'num co-est', text: money(est.patientCents) + ' est.' }), h('th', { colspan: '2', class: 'small muted', text: 'Estimate is separate from the balance above; it never enters the ledger.' })))));
+      h('tfoot', null, h('tr', null, h('th', { scope: 'row', text: 'Totals' }), h('td'), h('td', { class: 'num', text: money(feeTotal) }), h('th', { class: 'num co-est', text: money(est.patientCents) + ' est.' }), h('th', { colspan: '2', class: 'small muted', text: 'Estimate is separate from the balance above; it never enters the ledger.' })))));
     const why = h('details', null, h('summary', { class: 'co-summary', testid: 'checkout.estimate.why' }, 'Why this estimate'),
       h('p', { class: 'hint', text: (est.note || 'No plan estimate on file.') + (est.insuranceCents ? ' Insurance est. ' + money(est.insuranceCents) + '.' : '') + (est.writeoffCents ? ' PPO write-off est. ' + money(est.writeoffCents) + '.' : '') }));
     // An empty state says why it is empty and what to do next: with nothing charted there is nothing to bill,
@@ -165,7 +195,8 @@
     const S = Proto.store.get();
     const policy = [];   // policy sentences live behind Why, never on the finish path (C6)
     const zero = est.patientCents <= 0;
-    const segs = (zero ? [['zero-due', 'Nothing due today']] : [['collect', 'Collect']]).concat([['send-statement', 'Send statement'], ['payment-plan', 'Set up payment plan']]);
+    // At $0 the decision is Nothing due today: a statement or a plan is a money object, and there is no money.
+    const segs = zero ? [['zero-due', 'Nothing due today']] : [['collect', 'Collect'], ['send-statement', 'Send statement'], ['payment-plan', 'Set up payment plan']];
     const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Collection decision' }, ...segs.map(([code, label]) => btn(label, { testid: 'checkout.collect.seg.' + code, pressed: pressed(st.decision === SEG[code]), onClick: () => { st.decision = SEG[code]; st.refusalNode = null; rerender(r, 'checkout.collect.seg.' + code); } })));
     const body = h('div', { class: 'stack' });
     if (st.decision === 'collect') {
@@ -184,11 +215,11 @@
       body.append(h('div', { class: 'co-two' }, af.node, unfiled ? h('p', { class: 'hint co-alloc', text: 'The note is not filed yet: this payment waits as credit until the charges post.' }) : null));
       policy.push('Allocates to oldest open charge first' + (unfiled ? '; until the note is filed the payment waits as credit rather than landing on a charge.' : '.'));
     } else if (st.decision === 'send_statement') {
-      body.append(h('p', { class: 'muted', text: 'No ledger entry today. A statement-due row for ' + money(est.patientCents) + ' appears on Money Desk → Statements due.' }));
+      body.append(h('p', { class: 'muted', text: 'No ledger entry today. A statement-due row for ' + money(afterWriteoff(st, est)) + ' appears on Money Desk → Statements due.' }));
       policy.push('The window defers the balance to a statement, and the decision is reversible until the statement job runs.');
     } else if (st.decision === 'payment_plan') {
       body.append(h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Cadence' }, ...CADENCES.map(([code, label]) => btn(label, { testid: 'checkout.plan.cadence.' + code, pressed: pressed(st.cadence === code), onClick: () => { st.cadence = code; st.refusalNode = null; rerender(r, 'checkout.plan.cadence.' + code); } }))));
-      body.append(h('p', { class: 'muted', text: 'Plan for ' + money(est.patientCents) + ', ' + CADENCES.find((c) => c[0] === st.cadence)[1].toLowerCase() + ', on the processor token.' }));
+      body.append(h('p', { class: 'muted', text: 'Plan for ' + money(afterWriteoff(st, est)) + ', ' + CADENCES.find((c) => c[0] === st.cadence)[1].toLowerCase() + ', on the processor token.' }));
       policy.push('Only patient-due charges are eligible; charges waiting on insurance are greyed.');
     } else {
       body.append(h('p', { class: 'muted', text: 'Nothing due today; there is nothing to collect at the window.' }));
@@ -203,7 +234,8 @@
 
   function writeoffBlock(r, st, policy) {
     const S = Proto.store.get();
-    if (st.heldReq && st.heldReq.status === 'approved') return h('div', { class: 'row' }, chip('clear', 'Write-off ' + money(st.heldReq.amountCents) + ' approved by ' + st.heldReq.decidedBy), h('span', { class: 'small muted', text: 'Already on the ledger; Post writes the rest.' }));
+    // What posted, not what was asked: the store settles min(amount, due) when the approval lands.
+    if (st.heldReq && st.heldReq.status === 'approved') return h('div', { class: 'row' }, chip('clear', 'Write-off ' + money(st.heldReq.postedCents != null ? st.heldReq.postedCents : st.heldReq.amountCents) + ' approved by ' + st.heldReq.decidedBy), h('span', { class: 'small muted', text: 'Already on the ledger; Post writes the rest.' }));
     if (!st.writeoffOpen) return h('div', null, btn('Add write-off or adjustment', { kind: 'reversible', testid: 'checkout.writeoff.add', onClick: () => { st.writeoffOpen = true; st.refusalNode = null; rerender(r, 'checkout.writeoff.amount'); } }));
     policy.push('At or above ' + money(S.tenant.dualReleaseThresholdCents) + ' a second approver is needed; the posting is held, never silently allowed.');
     const amt = h('input', { class: 'input co-amount', type: 'text', inputmode: 'decimal', testid: 'checkout.writeoff.amount', value: st.writeoffStr, onInput: (ev) => { st.writeoffStr = ev.target.value; if (st.refusalNode) { st.refusalNode = null; rerender(r, 'checkout.writeoff.amount'); } } });
@@ -211,8 +243,8 @@
     amt.addEventListener('blur', () => { const bad = st.writeoffStr.trim() !== '' && !(cents(st.writeoffStr) > 0); amt.classList.toggle('invalid', bad); if (bad) wf.hint.textContent = 'Enter a dollar amount, or remove the write-off.'; });
     const reasons = h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Reason code' }, ...REASONS.map(([code, label]) => btn(label, { testid: 'checkout.writeoff.reason.' + code, pressed: pressed(st.writeoffReason === code), onClick: () => { st.writeoffReason = code; st.refusalNode = null; rerender(r, 'checkout.writeoff.reason.' + code); } })));
     // One id, one verb: the control that removes the write-off is not the control that adds it.
-    const remove = btn('Remove write-off', { kind: 'quiet', class: 'compact', testid: 'checkout.writeoff.remove', onClick: () => { st.writeoffOpen = false; st.writeoffStr = ''; st.writeoffReason = null; st.refusalNode = null; rerender(r, 'checkout.writeoff.add'); } });
-    return h('div', { class: 'stack co-writeoff', 'aria-label': 'Write-off or adjustment' }, h('div', { class: 'co-two' }, wf.node, h('div', { class: 'field' }, h('label', { text: 'Reason code' }), reasons)), remove);
+    const remove = btn('Remove write-off', { kind: 'quiet', class: 'compact', testid: 'checkout.writeoff.remove', onClick: () => removeWriteoff(r, st) });
+    return h('div', { class: 'stack co-writeoff', role: 'group', 'aria-label': 'Write-off or adjustment' }, h('div', { class: 'co-two' }, wf.node, h('div', { class: 'field' }, h('label', { text: 'Reason code' }), reasons)), remove);
   }
 
   function postRow(r, a, st) {
@@ -223,43 +255,64 @@
     const gated = !held && !!st.refusalNode;
     const row = h('div', { class: 'co-postrow' });
     if (P.device === 'shared') {
-      const pin = h('input', { class: 'input co-pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', testid: 'checkout.pin', value: st.pin, onInput: (ev) => { st.pin = ev.target.value; } });
+      // Typing the PIN dissolves the gate that asked for it, as typing an amount does; Post is live again.
+      const pin = h('input', { class: 'input co-pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', testid: 'checkout.pin', value: st.pin, onInput: (ev) => { st.pin = ev.target.value; if (st.refusalNode) { st.refusalNode = null; rerender(r, 'checkout.pin'); const el = document.querySelector('[data-testid="checkout.pin"]'); if (el) el.setSelectionRange(el.value.length, el.value.length); } } });
       pin.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); const b = document.querySelector('[data-testid="checkout.post"]'); if (b) b.click(); } });
       row.append(field('Your PIN', pin, 'Shared desk: the PIN makes you the frozen poster for this posting.').node);
     }
     if (held) {
       row.append(btn('Post', { kind: 'held', testid: 'checkout.post', ariaLabel: 'Held: waiting on a second approver', onClick: () => Proto.router.announce('Waiting on ' + ((st.heldReq.eligible || []).slice(0, 2).join(' or ') || 'a second approver')) }));
-      if (st.requested) row.append(h('span', { class: 'row' }, chip('review', 'Request ' + st.heldReq.id + ' waiting'), h('span', { class: 'small muted', text: 'Dana or Dr. Reagan will see it on their phone; this screen flips to Post when they approve.' })));
+      if (st.requested) row.append(h('span', { class: 'row', id: 'co-requested', tabindex: '-1' }, chip('review', 'Request ' + st.heldReq.id + ' waiting'), h('span', { class: 'small muted', text: ((st.heldReq.eligible || []).join(' or ') || 'The approver') + ' will see it on their phone; this screen flips to Post when they approve.' })));
     } else if (gated) {
-      row.append(btn('Post', { kind: 'held', testid: 'checkout.post', ariaLabel: 'Held: Post', onClick: () => { const el = document.querySelector('[data-testid="refusal.control"]'); if (el && el.focus) el.focus(); } }));
+      // A press on Held re-evaluates first: a gate whose cause is gone has fallen on the render, and the press posts.
+      row.append(btn('Post', { kind: 'held', testid: 'checkout.post', ariaLabel: 'Held: Post', onClick: () => { render(r); const el = document.querySelector('[data-testid="refusal.control"]'); if (el) el.focus(); else if (!st.refusalNode) doPost(r, a, st); } }));
     } else {
       row.append(btn('Post', { kind: 'irreversible', testid: 'checkout.post', onClick: () => doPost(r, a, st) }));
-      if (st.heldReq && st.heldReq.status !== 'approved') row.append(chip('info', 'Write-off ' + st.heldReq.status.replace(/_/g, ' ') + ' by ' + (st.heldReq.decidedBy || 'approver')));
+      // Send back carries the approver's one line to the requester (docs/13 feature 24), not the chip alone.
+      if (st.heldReq && st.heldReq.status !== 'approved') row.append(h('span', { class: 'row' }, chip('info', 'Write-off ' + st.heldReq.status.replace(/_/g, ' ') + ' by ' + (st.heldReq.decidedBy || 'approver')), st.heldReq.decisionReason ? h('span', { class: 'small muted', text: '“' + st.heldReq.decisionReason + '”' }) : null));
     }
     return h('div', { class: 'stack' }, st.refusalNode, row);
   }
 
+  /* The rows the card reads are the store's, live: the snapshot taken at Post names them, and a visit decided
+     before this screen opened (the seeded Filed-later visit) derives them from its procedures and intents. A
+     payment "held as credit until the note is filed" stops saying so once the note files. */
+  function postedRows(S, a, st) {
+    const byId = (table, rows) => S[table].filter((x) => rows.some((y) => y.id === x.id));
+    const p = st.posted;
+    if (p) return Object.assign({}, p, { ledger: byId('ledger', p.ledger), intents: byId('allocationIntents', p.intents), decisions: byId('collectionDecisions', p.decisions) });
+    const procIds = S.procedures.filter((x) => x.encounterId === a.encounterId).map((x) => x.id);
+    const intents = S.allocationIntents.filter((i) => i.encounterId === a.encounterId);
+    const charges = S.ledger.filter((e) => e.kind === 'charge' && procIds.includes(e.procedureId));
+    const payIds = new Set(intents.map((i) => i.paymentId));
+    const allocations = S.allocations.filter((x) => payIds.has(x.paymentId) || charges.some((c) => c.id === x.chargeId));
+    allocations.forEach((x) => payIds.add(x.paymentId));
+    return { ledger: S.ledger.filter((e) => payIds.has(e.id) || charges.includes(e)), allocations, intents, statements: [], plans: [], events: [], decisions: S.collectionDecisions.filter((d) => d.encounterId === a.encounterId) };
+  }
+
   function postedCard(r, a, st, pt) {
-    const S = Proto.store.get(); const p = st.posted;
+    const S = Proto.store.get(); const p = postedRows(S, a, st); const enc = Proto.store.encounter(a.encounterId);
     const li = (t) => h('li', { text: t });
     const items = [];
     // The card names what was written in the words a person reads: storage row ids stay out of it (C3).
     const procName = (pid) => { const x = S.procedures.find((y) => y.id === pid); return x ? (S.cdt[x.cdt] || [x.cdt])[0] + (x.tooth ? ' #' + x.tooth : '') : 'this procedure'; };
     const chargeName = (lid) => { const e = S.ledger.find((y) => y.id === lid); return e && e.cdt ? (S.cdt[e.cdt] || [e.cdt])[0] + (e.tooth ? ' #' + e.tooth : '') : 'the oldest open charge'; };
     const cadenceWord = (code) => ((CADENCES.find((c) => c[0] === code) || [null, code])[1] || '').toLowerCase();
-    p.ledger.forEach((e) => items.push(li((KIND_WORD[e.kind] || e.kind) + ' ' + money(Math.abs(e.amountCents)) + (e.tender ? ' by ' + e.tender : '') + (e.cdt ? ' · ' + (S.cdt[e.cdt] || [e.cdt])[0] : '') + (e.gl === 'unapplied_credit' ? ' · held as credit until the note is filed' : ''))));
+    const waiting = (e) => e.gl === 'unapplied_credit' && !(enc && enc.noteFiled);
+    // A row that landed on a day already closed says so here, as Daily Close counts it (store.js ledgerRow).
+    p.ledger.forEach((e) => items.push(li((KIND_WORD[e.kind] || e.kind) + ' ' + money(Math.abs(e.amountCents)) + (e.tender ? ' by ' + e.tender : '') + (e.cdt ? ' · ' + (S.cdt[e.cdt] || [e.cdt])[0] : '') + (waiting(e) ? ' · held as credit until the note is filed' : '') + (e.postedAfterClose ? ' · posted into the closed day' : ''))));
     p.allocations.forEach((x) => items.push(li('Applied ' + money(x.amountCents) + ' to ' + chargeName(x.chargeId))));
-    p.intents.forEach((x) => items.push(li('Allocation intent ' + money(x.amountCents) + ' waits for this visit\'s charges (Filed-later lane)')));
+    p.intents.forEach((x) => items.push(li('Allocation intent ' + money(x.amountCents) + (x.appliedTo ? ' applied to ' + procName(x.appliedTo) + ' when the note filed' : ' waits for this visit\'s charges (Filed-later lane)'))));
     p.statements.forEach((x) => items.push(li('Statement due ' + money(x.amountCents) + ' · goes out on the next statement run')));
     p.plans.forEach((x) => items.push(li('Payment plan ' + money(x.amountCents) + ', ' + cadenceWord(x.cadence))));
     p.events.forEach((x) => items.push(li('Self-pay restriction on ' + procName(x.procedureId) + ': claim assembly refuses it')));
     p.decisions.forEach((d) => items.push(li('Collection decision: ' + DECISION_WORD[d.decision] + ', patient portion ' + money(d.patientPortionCents) + ', decided by ' + d.decidedBy)));
-    const receipt = st.receipt ? h('div', { class: 'explain', 'aria-label': 'Receipt, patient voice' }, h('p', { class: 'small muted', text: 'Receipt for ' + displayName(pt.name, window.__proto.privacy) + ' · ' + Proto.ui.longDate(S.tenant.today) + ' · patient voice, no reason codes or poster names' }),
+    const receipt = st.receipt ? h('div', { class: 'explain', role: 'group', 'aria-label': 'Receipt, patient voice' }, h('p', { class: 'small muted', text: 'Receipt for ' + displayName(pt.name, window.__proto.privacy) + ' · ' + Proto.ui.longDate(S.tenant.today) + ' · patient voice, no reason codes or poster names' }),
       ...p.ledger.filter((e) => e.kind === 'patient_payment').map((e) => h('p', { class: 'sentence', text: 'You paid ' + money(-e.amountCents) + ' today by ' + e.tender + '.' })),
       ...Proto.store.explain(a.patientId).map((s) => h('p', { class: 'sentence', text: s.patientVoice })),
       h('p', { class: 'small muted', text: 'Prototype: nothing prints and no disclosure row is written here; the product records a payment-purpose disclosure per print.' })) : null;
     return h('section', { class: 'card stack co-posted', 'aria-label': 'Posted' },
-      h('div', { class: 'row' }, chip('clear', 'Posted', { big: true }), h('h2', { text: 'Posted in one transaction' })),
+      h('div', { class: 'row' }, chip('clear', 'Posted', { big: true }), h('h2', { id: 'co-posted-head', tabindex: '-1', text: st.posted ? 'Posted in one transaction' : 'Posted at the window earlier' })),
       h('ul', { class: 'co-rows' }, ...items),
       h('div', { class: 'btnrow' }, btn('Print receipt (disclosure)', { kind: 'reversible', testid: 'checkout.receipt', pressed: pressed(st.receipt), onClick: () => { st.receipt = !st.receipt; Proto.router.announce(st.receipt ? 'Receipt shown in patient voice' : 'Receipt hidden'); rerender(r, 'checkout.receipt'); } })),
       receipt);
@@ -284,29 +337,35 @@
     const S = Proto.store.get(); const P = window.__proto; const aid = r.id;
     if (stateOwner !== S) { for (const k of Object.keys(state)) delete state[k]; stateOwner = S; }
     const a = Proto.store.appt(aid);
-    // An id in the address that names no visit lands on the shell's Nothing-here screen, not on a fifth
-    // private heading that reads the raw id back to whoever typed it (A6).
-    if (!a) { Proto.router.go(r.persona, 'notfound'); return; }
+    // An id in the address that names no visit reads Nothing here in place, the shell's words with the store's
+    // sentence under them: the address keeps the bad id, so Back returns to the screen before it (A6, docs/04).
+    if (!a) { const nf = Proto.store.notFound('appointment'); Proto.screens.shell.mount(h('div', { class: 'stack' }, h('h1', { text: 'Nothing here' }), h('p', { class: 'muted', text: nf.why }), btn('Back to home', { kind: 'quiet', testid: 'notfound.home', onClick: () => Proto.router.go(r.persona, Proto.router.HOME[r.persona]) }))); return; }
     const pt = Proto.store.patient(a.patientId); const enc = Proto.store.encounter(a.encounterId);
-    const seedEst = S.estimates[aid] || { patientCents: a.balanceCents || 0, insuranceCents: 0, writeoffCents: 0, note: 'No plan estimate on file; the patient portion shown is the appointment balance.' };
-    /* What the window collects is what the ledger still says is open, never a stored estimate on its own.
-       A $410 write-off approved from the phone landed on the ledger and took Patient due to zero while this
-       screen went on footing "$410.00 est.", prefilling Collect 410.00 and offering a live Post, so the same
-       visit read two ways on two screens (C5, A7). The plan estimate stays a separate number and still never
-       joins the balance (docs/13 feature 23); it is only capped by what is actually still owed. */
-    const openNow = Proto.store.balances(a.patientId).patientDue;
-    const notYetCharged = S.procedures.filter((p) => p.encounterId === a.encounterId && !Proto.store.charged(p)).reduce((t, p) => t + p.feeCents, 0);
-    const collectible = openNow + notYetCharged;
-    const est = Object.assign({}, seedEst, { patientCents: Math.min(seedEst.patientCents, collectible) });
+    /* What the window collects is the store's one estimate (windowEstimate: the plan estimate capped by what the
+       ledger still leaves open, or the released charges' patient side). This screen used to foot its own from
+       S.estimates / a.balanceCents, so a visit charted and filed today read $130 due above a $0.00 est. footer. */
+    const est = Object.assign({ note: 'No plan estimate on file; the patient portion shown is what the account still owes.' }, Proto.store.windowEstimate(aid));
     const st = state[aid] || (state[aid] = fresh(est.patientCents));
     // A stale prefill outlives the state it was built from: re-read it when the ledger has moved under it.
-    if (st.decision === 'collect' && est.patientCents <= 0 && !st.posted) { st.decision = 'zero_due'; st.amountStr = dollars(0); st.tender = null; }
+    if (st.decision !== 'zero_due' && est.patientCents <= 0 && !st.posted) { st.decision = 'zero_due'; st.amountStr = dollars(0); st.tender = null; }
+    // A gate goes with its cause (the Board prunes its own the same way): Post is never Held for an outage the
+    // Andon no longer shows or a pass that has since been issued.
+    const code = st.refusalNode ? st.refusalNode.dataset.code : null;
+    // Only the pass gate ("Open Roles") falls with a pass: a seat without post_payment keeps its Switch author gate.
+    const ctl = st.refusalNode ? ((st.refusalNode.querySelector('button') || {}).textContent || '') : '';
+    const me = Proto.store.currentUser(); const uid = me.id;
+    // A gate remembers who raised it: another author at the desk re-evaluates rather than inheriting it.
+    if (st.refusalNode) { const o = st.refusalNode.dataset.owner; if (!o) st.refusalNode.dataset.owner = uid; else if (o !== uid) st.refusalNode = null; }
+    if ((code === 'outage' && !P.outage) || (code === 'after_hours' && !S.clock.afterHours) || (code === 'entitlement' && ctl === 'Open Roles' && !me.noPass) || (code === 'entitlement' && ctl === 'Switch author' && (me.entitlements || []).includes('post_payment'))) st.refusalNode = null;
+    // The PIN authorises the person who typed it: a switch of author (the pad, a persona change) discards it.
+    if (st.pinOwner !== uid) { if (st.pinOwner) st.pin = ''; st.pinOwner = uid; }
     if (st.heldReq) st.heldReq = S.approvals.find((x) => x.id === st.heldReq.id) || st.heldReq;
     const procs = S.procedures.filter((p) => p.encounterId === a.encounterId);
     const bal = Proto.store.balances(a.patientId);
     const covers = (fee) => st.decision === 'collect' && cents(st.amountStr) >= fee;
     const name = displayName(pt.name, P.privacy);
-    const sub = a.time + ' · ' + a.type + ' · ' + (S.users.find((u) => u.id === a.providerId) || {}).short + ' · ' + (pt.primary ? Proto.store.carrierName(pt.primary) + (pt.secondary ? ' + ' + Proto.store.carrierName(pt.secondary) : '') : 'Self-pay');
+    // The same clock and the same type word as the Board card for this visit (ui.js time, typeWord).
+    const sub = Proto.ui.time(a.time) + ' · ' + Proto.ui.typeWord(a.type) + ' · ' + (S.users.find((u) => u.id === a.providerId) || {}).short + ' · ' + (pt.primary ? Proto.store.carrierName(pt.primary) + (pt.secondary ? ' + ' + Proto.store.carrierName(pt.secondary) : '') : 'Self-pay');
     const railBtn = Proto.screens.rail ? Proto.screens.rail.button(a.patientId, r, 'checkout.rail') : null;
     const head = pageHead('Checkout · ' + name, sub, railBtn, btn('Back to Board', { kind: 'reversible', testid: 'checkout.back', onClick: () => Proto.router.go(r.persona, 'board') }));
     const status = h('div', { class: 'row' },
@@ -316,7 +375,8 @@
     // The decision and its finish control come before the line-by-line detail, so Post is on screen without
     // scrolling at 1280×900, 1024×768 and 420×860; the completed procedures read below it.
     const page = h('div', { class: 'stack co-page' }, head, threeNumbers(bal), status);
-    if (st.posted) page.append(postedCard(r, a, st, pt));
+    // One typed decision per visit: a visit already decided shows its record, not a form whose only outcome is a refusal.
+    if (st.posted || S.collectionDecisions.some((d) => d.encounterId === a.encounterId)) page.append(postedCard(r, a, st, pt));
     else page.append(paymentCard(r, a, st, est, procs, postRow(r, a, st)));
     page.append(proceduresCard(S, a, st, procs, est, covers), explainCard(r, a, st));
     Proto.screens.shell.mount(page);

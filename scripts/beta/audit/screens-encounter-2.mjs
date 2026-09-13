@@ -120,35 +120,51 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
     } finally { await c.close(); }
   },
 
-  /* RC-95 · B3 one verb, two button identities.
-     Negative control: the check first proves both buttons carry the SAME label ("Back to Exams") —
-     two different verbs are allowed to carry two identities, so a label mismatch reports false. It
-     then reads the identity class and the rendered border through getComputedStyle: if both were
-     'btn quiet' (or both 'btn reversible') and painted the same border colour, sameLabel would be
-     true but differentIdentity false and the check reports false. */
+  /* RC-95 · B3 one verb, two button identities; and a bad id has one way back that works.
+     The not-found page now renders `notfound.home` in place of `enc.back` (CONTRACTS §4), so the check
+     measures both: the one control on the Nothing-here page (identity, that it is the only way back, and
+     that a press lands on the persona home) against `enc.back` on a live encounter (identity, and that a
+     press lands on Exams). Negative control: both elements measured, one way back on the bad id, both
+     presses reach their route, and when the two carry the same label they carry the same identity — then
+     every breach flag is false and the check reports false. A page that rendered neither control is
+     recorded as unmeasured evidence, never as a pass. */
   async 'A-screens-encounter-2-2'(b) {
     const { c, p } = await ctx(b, 1280, 900);
     try {
-      const readBack = async () => p.$eval('[data-testid="enc.back"]', (e) => {
+      const read = async (tid) => p.$eval(`[data-testid="${tid}"]`, (e) => {
         const cs = getComputedStyle(e);
         return { className: e.className, label: e.textContent.trim(), borderColor: cs.borderTopColor, borderWidth: cs.borderTopWidth, background: cs.backgroundColor, color: cs.color, fontWeight: cs.fontWeight };
       }).catch(() => null);
+      const waysBack = () => p.$$eval('#canvas button, #canvas a[href]', (es) => es.map((e) => e.getAttribute('data-testid') || e.textContent.trim()));
+      const hash = () => p.evaluate(() => location.hash);
       await go(p, '#/dentist/encounter/enc-9999');
-      const notFound = await readBack();
+      const home = await p.evaluate(() => (Proto.router.HOME || {}).dentist || null);
+      const notFound = await read('notfound.home');
+      const encBackOnNotFound = await read('enc.back');
+      const notFoundControls = await waysBack();
+      const hashBefore = await hash();
+      await click(p, 'notfound.home'); await p.waitForTimeout(200);
+      const hashAfterHome = await hash();
       await go(p, '#/dentist/encounter/enc-9002');
-      const live = await readBack();
-      const sameLabel = !!notFound && !!live && notFound.label === live.label;
+      const live = await read('enc.back');
+      await click(p, 'enc.back'); await p.waitForTimeout(200);
+      const hashAfterBack = await hash();
       const kindOf = (cls) => (String(cls).split(/\s+/).find((k) => ['irreversible', 'reversible', 'quiet', 'held'].includes(k)) || null);
       const kNotFound = notFound && kindOf(notFound.className);
       const kLive = live && kindOf(live.className);
-      const differentIdentity = !!kNotFound && !!kLive && kNotFound !== kLive;
-      const rendersDifferently = !!notFound && !!live && notFound.borderColor !== live.borderColor;
+      const sameLabel = !!notFound && !!live && notFound.label === live.label;
+      const differentIdentity = sameLabel && !!kNotFound && !!kLive && kNotFound !== kLive;
+      const oneWayBack = !!notFound && !encBackOnNotFound && notFoundControls.length === 1;
+      const homeWorks = hashBefore === '#/dentist/encounter/enc-9999' && !!home && hashAfterHome === '#/dentist/' + home;
+      const backWorks = !!live && hashAfterBack === '#/dentist/exams';
+      const bothMeasured = !!notFound && !!live;
       rec('A-screens-encounter-2-2',
-        'The one verb "Back to Exams" carries two button identities in encounter.js: reversible on the not-found page and quiet on a live encounter',
-        'CHECKLIST B3 (the same verb carries the same identity on every screen)',
-        sameLabel && differentIdentity && rendersDifferently,
-        { notFoundPage: notFound, liveEncounter: live, label: sameLabel ? notFound.label : { notFound: notFound && notFound.label, live: live && live.label },
-          identity: { notFound: kNotFound, live: kLive }, sameLabel, differentIdentity, rendersDifferently });
+        'A bad encounter id has no single working way back: the Nothing-here page renders no notfound.home, or a second return control beside it, or its press does not reach the persona home; or the one label carries two button identities across the not-found and live pages',
+        'CHECKLIST B3 (the same verb carries the same identity on every screen); CONTRACTS §2/§4 (a bad id renders notfound.home, which returns to the persona home)',
+        !bothMeasured || !oneWayBack || !homeWorks || !backWorks || differentIdentity,
+        { notFoundPage: { control: notFound, encBackPresent: !!encBackOnNotFound, controlsOnPage: notFoundControls, hashBefore, hashAfterPress: hashAfterHome, personaHome: home },
+          liveEncounter: { control: live, hashAfterPress: hashAfterBack },
+          identity: { notFound: kNotFound, live: kLive }, sameLabel, differentIdentity, oneWayBack, homeWorks, backWorks, bothMeasured });
     } finally { await c.close(); }
   },
 

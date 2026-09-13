@@ -2,7 +2,7 @@
 (function () {
   const Proto = window.Proto; const { h, btn } = Proto.ui;
   Proto.screens = Proto.screens || {}; // signin.js loads before shell.js
-  const ROLES = { frontdesk: 'Lands on the Board', biller: 'Lands on Money Desk', hygienist: 'Lands on Chairs', dentist: 'Lands on Exams to sign', surgeon: 'Lands on Exams to sign', owner: 'Lands on Daily Close', compliance: 'Lands on Practice risk', temp: 'Board with the first-shift rail' };
+  const ROLES = { frontdesk: 'Lands on the Board', biller: 'Lands on Money Desk', hygienist: 'Lands on Chairs', assistant: 'Lands on the Board', dentist: 'Lands on Exams to sign', surgeon: 'Lands on Exams to sign', owner: 'Lands on Daily Close', compliance: 'Lands on Practice risk', temp: 'Board with the first-shift rail' };
 
   function render(r) {
     const P = window.__proto;
@@ -12,7 +12,8 @@
       // replaceChildren throws the focused button away, so the keyboard landed on the body after every
       // choice. Put it back on the persona the person just picked.
       const had = document.activeElement && document.activeElement.getAttribute && document.activeElement.getAttribute('data-testid');
-      list.replaceChildren(...Proto.router.PERSONAS.map((p) => btn([h('span', { text: Proto.router.LABEL[p] }), h('span', { class: 'role', text: ROLES[p] })], { testid: 'signin.persona.' + p, pressed: persona === p, onClick: () => { persona = p; paint(); } })));
+      // The choice is shell state at once, so an option toggle's re-render finds it instead of Front desk.
+      list.replaceChildren(...Proto.router.PERSONAS.map((p) => btn([h('span', { text: Proto.router.LABEL[p] }), h('span', { class: 'role', text: ROLES[p] })], { testid: 'signin.persona.' + p, pressed: persona === p, onClick: () => { persona = p; P.set({ persona: p }); paint(); } })));
       if (had && /^signin\.persona\./.test(had)) { const back = list.querySelector('[data-testid="signin.persona.' + persona + '"]'); if (back) back.focus(); }
     }
     paint();
@@ -32,13 +33,17 @@
     // Signing in is reversible: Sign out returns here with the persona still chosen, so it carries the
     // reversible identity. The irreversible identity belongs to Post, File, Save exam, Close day and Send.
     const go = btn('Open my home', { testid: 'signin.go', kind: 'reversible', onClick: () => { P.set({ persona }); location.hash = '#/' + persona + '/' + Proto.router.HOME[persona]; } });
+    // An option toggle rebuilds the screen and takes the focused control with it; the keyboard goes back to that
+    // control's replacement. On arrival nothing here is focused: the shell lands on the heading.
+    const had = document.activeElement && document.activeElement.getAttribute && document.activeElement.getAttribute('data-testid');
     Proto.screens.shell.mount(h('div', { class: 'signin' },
       h('div', null, h('h1', { text: 'Riverbend Dental' }), h('p', { class: 'muted', text: 'Prototype for the beta panel. Synthetic data, one tenant, three locations, today is Thursday 9/3/2026, 8:40 am.' })),
       h('h2', { text: 'Who are you today?' }), list,
       h('h2', { text: 'Device and display' }), opts,
       h('div', { class: 'btnrow' }, go),
       h('p', { class: 'small muted', text: 'Role was set at provisioning. Your home is your work; nothing here is a dashboard.' })));
-    go.focus();
+    const back = had && /^signin\./.test(had) ? document.querySelector('[data-testid="' + had + '"]') : null;
+    if (back) back.focus();
   }
   Proto.screens.signin = { render };
   Proto.router.on('signin', render);

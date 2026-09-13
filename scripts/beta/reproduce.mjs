@@ -6,12 +6,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '/opt/pw-browsers';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+if (!process.env.PLAYWRIGHT_BROWSERS_PATH && fs.existsSync('/opt/pw-browsers')) process.env.PLAYWRIGHT_BROWSERS_PATH = '/opt/pw-browsers';
 const require = createRequire(import.meta.url);
 let chromium;
 try { chromium = require('playwright').chromium; } catch { try { chromium = require('/usr/lib/node_modules/playwright').chromium; } catch { chromium = require('/opt/node22/lib/node_modules/playwright').chromium; } }
 
-const ROOT = path.resolve(path.dirname(new globalThis.URL(import.meta.url).pathname), '../..');
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const FILE = 'file://' + path.join(ROOT, 'prototype', 'index.html');
 const args = Object.fromEntries(process.argv.slice(2).map((a, i, arr) => a.startsWith('--') ? [a.slice(2), arr[i + 1] && !arr[i + 1].startsWith('--') ? arr[i + 1] : '1'] : []).filter(Boolean));
 const ONLY = args.only ? args.only.split(',') : null;
@@ -500,7 +501,7 @@ const AUDIT_DIR = path.join(ROOT, 'scripts', 'beta', 'audit');
 if (fs.existsSync(AUDIT_DIR)) {
   const helpers = { ctx, go, hop, press, click, txt, box, state, events, rec, FILE };
   for (const f of fs.readdirSync(AUDIT_DIR).filter((x) => x.endsWith('.mjs')).sort()) {
-    const mod = await import(path.join(AUDIT_DIR, f));
+    const mod = await import(pathToFileURL(path.join(AUDIT_DIR, f)).href);
     const extra = mod.default(helpers);
     for (const id of Object.keys(extra)) if (CHECKS[id]) throw new Error(`duplicate check id ${id} in ${f}`);
     Object.assign(CHECKS, extra);
@@ -525,7 +526,8 @@ try {
 } finally { await browser.close(); }
 for (const r of results) if (r.claim === 'check crashed' || r.claim === 'check recorded no result') r.measured = false;
 
-const out = args.json || path.join('/tmp/claude-0/-home-user-Dental-Mgmt/4c28e93a-776f-5803-ad14-686b00bc97f0/scratchpad', 'reproduce.json');
+const out = args.json || path.join(process.env.SCRATCH || path.join(ROOT, '.scratch'), 'reproduce.json');
+fs.mkdirSync(path.dirname(out), { recursive: true });
 fs.writeFileSync(out, JSON.stringify({ at: new Date().toISOString(), results }, null, 2));
 const yes = results.filter((r) => r.reproduced);
 const unmeasured = results.filter((r) => r.measured === false);

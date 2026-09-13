@@ -169,7 +169,14 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         await measure('close.closeday', '#/owner/close?outage=1', async () => [await click(p, 'close.closeday'), await click(p, 'close.closeday.confirm')]);
         await measure('encounter.file', '#/dentist/encounter/enc-9002?outage=1', async () => { const s = [await click(p, 'enc.tag.tag-1.chart'), await click(p, 'enc.surface.30.d'), await click(p, 'enc.proc.d2392'), await click(p, 'enc.note.starter.0')]; await p.waitForTimeout(120); s.push(await click(p, 'enc.file')); await p.waitForTimeout(150); s.push(await click(p, 'refusal.control')); await p.waitForTimeout(200); return s; });
         await measure('roles.daypass.save', '#/owner/roles?outage=1', async () => [await click(p, 'roles.daypass.add'), await fill(p, 'roles.daypass.name', 'Alex Rivera'), await click(p, 'roles.daypass.role.rdh'), await click(p, 'roles.daypass.save')]);
-        await measure('phone.approve', '#/owner/phone/approvals?outage=1', async () => { const s = [await click(p, 'phone.simulate')]; await p.waitForTimeout(150); const reqId = await p.evaluate(() => ((window.__proto.state().approvals.filter((a) => a.status === 'pending')[0]) || {}).id || null); s.push(reqId); s.push(await click(p, 'phone.request.' + reqId + '.approve')); for (const d of ['1', '2', '3', '4']) s.push(await click(p, 'phone.stepup.' + d)); s.push(await click(p, 'phone.stepup.submit')); await p.waitForTimeout(200); return s; });
+        // The request is raised before the outage (phone.simulate is itself refused offline, so raising it inside the
+        // range left no request and a vacuous leg); its write sits outside the measured range, and the step-up types the
+        // approver's own PIN so a live Approve would post.
+        await go(p, '#/owner/phone/approvals?outage=0');
+        const simulated = await click(p, 'phone.simulate'); await p.waitForTimeout(150);
+        const reqId = await p.evaluate(() => ((window.__proto.state().approvals.filter((a) => a.status === 'pending')[0]) || {}).id || null);
+        const approverPin = await p.evaluate(() => String((Proto.store.currentUser() || {}).pin || ''));
+        await measure('phone.approve', '#/owner/phone/approvals?outage=1', async () => { const s = [simulated, reqId, await click(p, 'phone.request.' + reqId + '.approve')]; for (const d of approverPin) s.push(await click(p, 'phone.stepup.' + d)); s.push(await click(p, 'phone.stepup.submit')); await p.waitForTimeout(200); return s; });
         const comparatorRefused = results['checkout.post'].outageRefusals.length > 0 && results['checkout.post'].writes.length === 0;
         const andonClaims = Object.values(results).every((r) => /reads only, no postings/.test(r.andon) && r.outageFlag.store === true);
         const verbsWritingUnderOutage = Object.entries(results).filter(([k, r]) => k !== 'checkout.post' && r.writes.length > 0 && r.outageRefusals.length === 0).map(([k]) => k);
@@ -297,12 +304,14 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const reqId = await p.evaluate(() => ((window.__proto.state().approvals.filter((a) => a.status === 'pending')[0]) || {}).id || null);
         const rows = () => p.evaluate((id) => { const S = window.__proto.state(); return { status: (S.approvals.find((a) => a.id === id) || {}).status, approvalsLog: S.approvalsLog.filter((l) => l.requestId === id).map((l) => l.id + ':' + l.decision), writeoffs: S.ledger.filter((e) => e.kind === 'write_off' && e.approvalRequestId === id).map((e) => e.id + ':' + e.amountCents), balances: Proto.store.balances('p-306') }; }, reqId);
         const seq0 = await lastSeq(p);
-        await click(p, 'phone.request.' + reqId + '.approve'); for (const d of ['1', '2', '3', '4']) await click(p, 'phone.stepup.' + d); await click(p, 'phone.stepup.submit'); await p.waitForTimeout(200);
+        // The step-up verifies the approver's own PIN (store.js verifyPin(pin, approver.id)), read from state so the check stays right for any persona.
+        const approverPin = await p.evaluate(() => String((Proto.store.currentUser() || {}).pin || ''));
+        await click(p, 'phone.request.' + reqId + '.approve'); for (const d of approverPin) await click(p, 'phone.stepup.' + d); await click(p, 'phone.stepup.submit'); await p.waitForTimeout(200);
         const afterFirst = await rows();
         const ev1 = await after(p, seq0);
         const uiControlLeft = !!(await p.$('[data-testid="phone.request.' + reqId + '.approve"]'));
         const seq1 = await lastSeq(p);
-        const second = await p.evaluate((id) => { const r = Proto.store.decideApproval(id, 'u-dr-1', 'approved', true); return { ok: r.ok, code: r.code || null, verb: r.verb || null }; }, reqId);
+        const second = await p.evaluate((id) => { const pin = (window.__proto.state().users.find((u) => u.id === 'u-dr-1') || {}).pin; const r = Proto.store.decideApproval(id, 'u-dr-1', 'approved', { pin }); return { ok: r.ok, code: r.code || null, verb: r.verb || null, pinFromState: !!pin }; }, reqId);
         await p.waitForTimeout(100);
         const afterSecond = await rows();
         const ev2 = await after(p, seq1);
