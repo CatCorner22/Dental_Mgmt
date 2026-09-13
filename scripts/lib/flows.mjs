@@ -48,11 +48,17 @@ export const FLOWS = [
     ],
   },
   {
-    id: 'eraClose', name: 'Post ERAs + close the day', budgetTaps: 6, persona: 'biller', start: '#/biller/money',
+    /* Every posting on this path now asks once before it writes (the batch post wrote 37 ledger rows on one press,
+       a line Confirm wrote two): each irreversible press is a read-back and a second press, as Close day already was.
+       The budget carries those three second presses. */
+    id: 'eraClose', name: 'Post ERAs + close the day', budgetTaps: 9, persona: 'biller', start: '#/biller/money',
     steps: [
       { press: 'money.era.era-1.postmatched' },
+      { press: 'money.era.era-1.postmatched.confirm' },
       { press: 'money.era.line.el-14.confirm' },
+      { press: 'money.era.line.el-14.confirm.confirm' },
       { press: 'money.era.line.el-22.confirm' },
+      { press: 'money.era.line.el-22.confirm.confirm' },
       { press: 'money.era.line.el-31.hold' },
       { route: '#/owner/close' },
       { press: 'close.closeday' },
