@@ -1,2 +1,6 @@
 node_modules/
 .scratch/
+
+# Agent worktrees: transient checkouts of this same repository, created when a
+# background agent needs an isolated tree. Never part of a commit.
+.claude/worktrees/
