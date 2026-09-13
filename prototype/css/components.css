@@ -264,6 +264,12 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
   .enc-layout { grid-template-columns: 1fr; grid-template-rows: auto; grid-template-areas: "chart" "note" "gate"; }
   .enc-gate-col { position: sticky; bottom: 0; z-index: 3; background: var(--bg); border-top: 1px solid var(--line); padding-top: var(--space-2); max-height: 70vh; overflow: auto; }
 }
+/* On a phone the pinned gate stood 527px tall at 320px wide, so File sat over the procedure strip
+   and a tap meant for a procedure could land on File (WCAG 2.5.8; axe target-size). Below the phone
+   breakpoint the gate flows after the note instead of pinning: nothing can then stand over a target. */
+@media (max-width: 639px) {
+  .enc-gate-col { position: static; max-height: none; overflow: visible; border-top: 0; }
+}
 .enc-odont-wrap { overflow-x: auto; max-width: 100%; padding-bottom: var(--space-1); display: flex; flex-direction: column; gap: var(--gap); }
 .tooth.enc-tagged { border-style: dashed; border-color: var(--required-rail); }
 .tooth.enc-tagged[aria-pressed="true"] { border-style: solid; }
