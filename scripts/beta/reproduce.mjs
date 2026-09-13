@@ -28,12 +28,21 @@ async function ctx(browser, w = 1280, h = 900, opts = {}) {
 }
 async function go(p, hash) { await p.goto(FILE + hash); await p.waitForFunction(() => window.__proto && window.__proto.ready); await p.waitForTimeout(120); }
 async function hop(p, hash) { await p.evaluate((h) => { location.hash = h; }, hash); await p.waitForTimeout(150); }
-const press = async (p, tid) => { const s = `[data-testid="${tid}"]`; if (!(await p.$(s))) return false; await p.focus(s); await p.keyboard.press('Enter'); await p.waitForTimeout(90); return true; };
-const click = async (p, tid) => { const s = `[data-testid="${tid}"]`; if (!(await p.$(s))) return false; await p.click(s); await p.waitForTimeout(90); return true; };
+/* A press, the way a person completes one. Every verb that writes a record now asks once and writes
+   on the second press (docs/16, WCAG 3.3.4): the first press swaps in a read-back row whose confirm
+   carries `<testid>.confirm`. The harness's press model follows: if a read-back appears, it presses the
+   confirm, so a check written when the verb wrote on one press still measures the write it was written
+   for, and its assertion is untouched. A verb that does not ask is pressed once as before, and a check
+   that wants exactly one press — to look at the read-back itself — uses pressOnce / clickOnce. */
+const settle = async (p, tid) => { const c = `[data-testid="${tid}.confirm"]`; if (await p.$(c)) { await p.click(c); await p.waitForTimeout(150); } };
+const pressOnce = async (p, tid) => { const s = `[data-testid="${tid}"]`; if (!(await p.$(s))) return false; await p.focus(s); await p.keyboard.press('Enter'); await p.waitForTimeout(90); return true; };
+const clickOnce = async (p, tid) => { const s = `[data-testid="${tid}"]`; if (!(await p.$(s))) return false; await p.click(s); await p.waitForTimeout(90); return true; };
+const press = async (p, tid) => { const ok = await pressOnce(p, tid); if (ok) await settle(p, tid); return ok; };
+const click = async (p, tid) => { const ok = await clickOnce(p, tid); if (ok) await settle(p, tid); return ok; };
 // A verb that posts money now asks first and writes on the second press (docs/16, WCAG 3.3.4). A check that
 // drives such a verb presses the read-back's confirm when one appears, so it still measures the write it was
 // written for; a verb that does not ask is pressed once as before.
-const commit = async (p, tid) => { const pressed = await click(p, tid); if (!pressed) return false; await p.waitForTimeout(120); if (await p.$(`[data-testid="${tid}.confirm"]`)) { await click(p, tid + '.confirm'); await p.waitForTimeout(150); } return true; };
+const commit = click;   // the drivers that were switched by hand keep their name; it is the same press model
 const txt = (p, tid) => p.$eval(`[data-testid="${tid}"]`, (e) => e.textContent.trim()).catch(() => null);
 const box = (p, tid) => p.$eval(`[data-testid="${tid}"]`, (e) => { const b = e.getBoundingClientRect(); return { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) }; }).catch(() => null);
 const state = (p) => p.evaluate(() => window.__proto.state());
@@ -505,7 +514,7 @@ const CHECKS = {
    `default (helpers) => ({ [checkId]: async (browser) => {...} })` and uses the same helpers. */
 const AUDIT_DIR = path.join(ROOT, 'scripts', 'beta', 'audit');
 if (fs.existsSync(AUDIT_DIR)) {
-  const helpers = { ctx, go, hop, press, click, txt, box, state, events, rec, FILE };
+  const helpers = { ctx, go, hop, press, click, pressOnce, clickOnce, txt, box, state, events, rec, FILE };
   for (const f of fs.readdirSync(AUDIT_DIR).filter((x) => x.endsWith('.mjs')).sort()) {
     const mod = await import(pathToFileURL(path.join(AUDIT_DIR, f)).href);
     const extra = mod.default(helpers);
