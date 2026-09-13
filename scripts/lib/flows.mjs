@@ -44,6 +44,7 @@ export const FLOWS = [
       { press: 'checkout.tender.card' },
       { fill: ['checkout.card.number', '4242424242424242'] },
       { press: 'checkout.post' },
+      { press: 'checkout.post.confirm' }, // read-back confirm (CONTRACTS §7 flow 4, fourth and last tap of the budget)
       { expect: (s) => (s.collectionDecisions.some((d) => d.encounterId === 'enc-9003' && d.decision === 'collect') || 'no collect decision') },
       { expect: (s) => (s.ledger.some((e) => e.kind === 'patient_payment' && e.patientId === 'p-303' && e.amountCents === -4400) || 'payment not posted') },
     ],
