@@ -403,65 +403,95 @@
     if (e.table === 'approvals' && first && first.seq !== e.seq) { const a = table(S, 'approvals').find((x) => x.id === e.id) || {}; return DECIDED[a.status] || 'changed an approval request'; }
     return WROTE[e.table] || 'wrote a record';
   }
+  // The log reads as sentences, so it uses the screen's own words: the seat, the verb and the screen it
+  // happened on. The row id and the event number are how the record is stored, not what a person reads
+  // (INT-real-world-words).
+  const SEAT_WORD = { frontdesk: 'front desk', biller: 'billing', hygienist: 'hygiene', assistant: 'assisting', dentist: 'the dentist chair', surgeon: 'surgery', owner: 'the owner seat', compliance: 'compliance', temp: 'a day pass' };
+  const ROUTE_WORD = { board: 'the Board', chairs: 'Chairs', exams: 'Exams to sign', encounter: 'an encounter', perio: 'a perio exam', checkout: 'Checkout', money: 'Money Desk', ledger: 'a patient ledger', close: 'Daily Close', roles: 'Roles', risk: 'Practice risk', phone: 'the approvals card', signin: 'sign-in' };
   function auditSentences(S) {
     const all = (window.__events || []).filter((e) => e.kind === 'write');
     return all.slice(-8).reverse().map((e) => {
       const uid = S.personaUser[e.persona]; const u = S.users.find((x) => x.id === uid);
-      const who = e.persona === 'temp' ? 'The day-pass seat' : u ? u.short + ' (' + e.persona + ')' : 'Someone signed in as ' + e.persona;
-      return who + ' ' + wroteWords(S, all, e) + ' #' + e.id + ' at +' + Math.round(e.t / 1000) + ' s on ' + e.route + ' (event ' + e.seq + ').';
+      const who = e.persona === 'temp' ? 'The day-pass seat' : u ? u.short + ' (' + (SEAT_WORD[e.persona] || e.persona) + ')' : 'Someone at the ' + (SEAT_WORD[e.persona] || e.persona) + ' seat';
+      const secs = Math.round(e.t / 1000);
+      const where = ROUTE_WORD[String(e.route || '').split('/').filter(Boolean).pop()] || 'this practice';
+      return who + ' ' + wroteWords(S, all, e) + ' on ' + where + ', ' + secs + (secs === 1 ? ' second' : ' seconds') + ' into this session.';
     });
   }
   function renderRisk(r) {
     const S = Proto.store.get();
     if (lastStore !== S) { lastStore = S; st = fresh(); }
     lastRoute = r; detachKeys();
-    // Each row carries its own Why (risk.row.<id>.why, CONTRACTS §4): the rule behind the row, read on demand.
+    /* Each row carries its own Why (risk.row.<id>.why, CONTRACTS §4): the rule behind the row, read on demand.
+       A closed <details> still lays its answer out, so four unread rules counted as 104 words of standing
+       prose on the first screenful; the answer is hidden until the disclosure is open (CLT-prose-budget). */
+    const whyBlock = (id, text) => {
+      const body = h('p', { class: 'small muted', hidden: true, text: text });
+      const d = h('details', null, h('summary', { class: 'small', testid: 'risk.row.' + id + '.why' }, 'Why'), body);
+      d.addEventListener('toggle', () => { body.hidden = !d.open; });
+      return d;
+    };
     const row = (id, action, sev, word, text, label, kind, onClick, extra, why) => h('div', { class: 'dc-row' }, chip(sev, word),
       h('span', { class: 'text' }, h('span', { text: text }), extra ? h('span', { class: 'small muted', text: ' ' + extra }) : null,
-        why ? h('details', null, h('summary', { class: 'small', testid: 'risk.row.' + id + '.why' }, 'Why'), h('p', { class: 'small muted', text: why })) : null),
+        why ? whyBlock(id, why) : null),
       btn(label, { kind, testid: 'risk.row.' + id + '.' + action, onClick }));
     const due = S.decisions.filter((d) => d.status === 'review_due');
     const items = [];
-    /* A standing row's control marks the task for this session only: nothing here has a store verb to write
-       through yet, so a repeat press is a visible no-op that says it was already done, never the completed
-       action announced a second time. */
-    const standing = (key, id, action, sev, word, text, label, doneLabel, firstSay, againSay, doneExtra, why) => {
-      const done = !!st.riskDone[key]; const tid = 'risk.row.' + id + '.' + action;
-      return row(id, action, sev, word, text, done ? doneLabel : label, done ? 'quiet' : 'reversible', () => {
-        if (st.riskDone[key]) { say(againSay); rerender(r, tid); return; }
-        st.riskDone[key] = true; say(firstSay); rerender(r, tid);
-      }, done ? doneExtra : null, why);
+    /* A standing row's control marks the task for this session only. Pressing it again used to announce
+       "Already requested today" — words no one could see (WCAG 1.3.2) — and left the mark with no way back
+       (INT-exit-and-undo). The done row now offers the inverse, and every announcement is a line on the row. */
+    st.riskUndone = st.riskUndone || {};
+    const standing = (o) => {
+      const done = !!st.riskDone[o.key]; const undone = !done && !!st.riskUndone[o.key];
+      const tid = 'risk.row.' + o.id + '.' + o.action;
+      return row(o.id, o.action, done ? 'clear' : o.sev, done ? o.doneWord : o.word, o.text, done ? o.undoLabel : o.label, 'reversible', () => {
+        if (st.riskDone[o.key]) { st.riskDone[o.key] = false; st.riskUndone[o.key] = true; say(o.undoSay); rerender(r, tid); return; }
+        st.riskDone[o.key] = true; st.riskUndone[o.key] = false; say(o.doneSay); rerender(r, tid);
+      }, done ? o.doneExtra : undone ? o.undoneExtra : null, o.why);
     };
-    due.forEach((d) => items.push(row(d.id, 'open', 'required', 'Past review', d.text + ': past review date (review was ' + shortDate(d.reviewBy) + ').', 'Open', 'reversible', () => Proto.router.go(r.persona, 'close'), null,
+    // Both controls go to the same place, so they read the same: "open" carried two labels on one screen
+    // (WCAG 3.2.4).
+    due.forEach((d) => items.push(row(d.id, 'open', 'required', 'Past review', d.text + ': past review date (review was ' + shortDate(d.reviewBy) + ').', 'Open Daily Close', 'reversible', () => Proto.router.go(r.persona, 'close'), null,
       'An unreviewed decision stops applying at midnight of its review date and becomes a finding; neglect tightens, never loosens. Keep, Tighten or Retire it on Daily Close.')));
     if (!due.length) items.push(h('div', { class: 'dc-row' }, chip('clear', 'Nothing due'), h('span', { class: 'text', text: 'No decisions past their review date.' })));
     // Countdowns and counts are read against today and the practice's own records, so the list moves with them.
     const baaExpires = '2026-09-24';
     const baaLeft = days(S.tenant.today, baaExpires);
     const baaWord = baaLeft >= 0 ? plural(baaLeft, 'day') : 'Expired';
-    items.push(standing('baa', 'baa-lab', 'renew', 'review', baaWord,
-      'BAA: Ridge Dental Lab ' + (baaLeft >= 0 ? 'expires in ' + plural(baaLeft, 'day') : 'expired ' + plural(-baaLeft, 'day') + ' ago') + ' (' + shortDate(baaExpires) + ').',
-      'Renew', 'Renewal sent', 'Renewal requested', 'Already requested today', 'Renewal requested today; the row stays until the countersigned copy is filed.',
-      'A business associate agreement that lapses leaves PHI flowing to a vendor with no signed terms. The countdown reads the practice calendar against today.'));
+    // The agreement is named in the words staff use before the initials (INT-real-world-words).
+    items.push(standing({ key: 'baa', id: 'baa-lab', action: 'renew', sev: 'review', word: baaWord, doneWord: 'Requested',
+      text: 'Business associate agreement (BAA): Ridge Dental Lab ' + (baaLeft >= 0 ? 'expires in ' + plural(baaLeft, 'day') : 'expired ' + plural(-baaLeft, 'day') + ' ago') + ' (' + shortDate(baaExpires) + ').',
+      label: 'Renew', undoLabel: 'Undo renewal', doneSay: 'Renewal requested', undoSay: 'Renewal request undone',
+      doneExtra: 'Renewal requested today; the row stays until the countersigned copy is filed.',
+      undoneExtra: 'Renewal request undone; the row is open again.',
+      why: 'A business associate agreement that lapses leaves patient records flowing to a vendor with no signed terms. The countdown reads the practice calendar against today.' }));
     const withCred = new Set(table(S, 'credentials').filter((c) => c.userId && c.verifiedBy).map((c) => c.userId));
     const untrained = table(S, 'users').filter((u) => u.licence && !withCred.has(u.id)).length;
-    items.push(standing('training', 'training', 'assign', 'review', 'Due',
-      'Training due: ' + plural(untrained, 'clinical seat') + ' with no verified credential on file (practice).',
-      'Assign', 'Assigned', 'Training assigned', 'Already assigned today', 'Assigned today; this row shows the practice count only.',
-      'A clinical seat charts and records perio under its own licence, so a seat with no verified credential row is a finding. The count is practice-level; nobody is named here.'));
+    items.push(standing({ key: 'training', id: 'training', action: 'assign', sev: 'review', word: 'Due', doneWord: 'Assigned',
+      text: 'Training due: ' + plural(untrained, 'clinical seat') + ' with no verified credential on file (practice).',
+      label: 'Assign', undoLabel: 'Undo assignment', doneSay: 'Training assigned', undoSay: 'Training assignment undone',
+      doneExtra: 'Training assigned today; this row shows the practice count only.',
+      undoneExtra: 'Training assignment undone; the row is open again.',
+      why: 'A clinical seat charts and records perio under its own licence, so a seat with no verified credential row is a finding. The count is practice-level; nobody is named here.' }));
     const logDue = monthlyDue(S.tenant.today, 5);
     const ev = window.__events || [];
     const seen = plural(ev.filter((e) => e.kind === 'write').length, 'write') + ' and ' + plural(ev.filter((e) => e.kind === 'refusal').length, 'refusal');
-    items.push(standing('log', 'logreview', 'start', 'review', 'Due ' + shortDate(logDue),
-      'Monthly log review: due ' + shortDate(logDue) + '.',
-      'Start', 'Opened', 'Audit log opened', 'Already opened today', 'Opened: ' + seen + ' this session, below; the chain head is verified nightly.',
-      'The monthly review reads the audit log as sentences and checks the chain head; it falls due on the 5th of each month.'));
+    const logItem = standing({ key: 'log', id: 'logreview', action: 'start', sev: 'review', word: 'Due ' + shortDate(logDue), doneWord: 'Opened',
+      text: 'Monthly log review: due ' + shortDate(logDue) + '.',
+      label: 'Start', undoLabel: 'Undo start', doneSay: 'Audit log opened', undoSay: 'Audit log review undone',
+      doneExtra: 'Audit log opened: ' + seen + ' this session, below.',
+      undoneExtra: 'Audit log review undone; the row is open again.',
+      why: 'The monthly review reads the audit log as sentences and checks the chain head; it falls due on the 5th of each month.' });
     const sentences = auditSentences(S);
+    /* One card per kind of work, each within four controls: "Due now" carried all four rows at once, eight
+       controls in one bounded region (CLT-chunk-4). The monthly review sits with the log it reviews. */
     const page = h('div', { class: 'stack dc-page' },
-      pageHead('Practice risk', 'Open decisions past review, BAAs expiring, training due, the monthly log review. Practice-level; nothing here ranks people.'),
-      section('Due now', h('div', { class: 'worklist' }, ...items)),
+      pageHead('Practice risk', 'Practice-level only; nothing here ranks people.'),
+      section('Decisions past review', h('div', { class: 'worklist' }, ...items.slice(0, due.length || 1))),
+      section('Agreements and training', h('div', { class: 'worklist' }, ...items.slice(due.length || 1))),
       section('Audit log (sentences)',
-        h('p', { class: 'small muted', text: 'The last ' + sentences.length + ' writes this session, as sentences. Every row is append-only; the chain head is verified nightly.' }),
+        h('div', { class: 'worklist' }, logItem),
+        h('p', { class: 'small muted', text: 'The last ' + sentences.length + ' writes this session, as sentences.' }),
         sentences.length ? h('ul', { class: 'dc-sentences' }, ...sentences.map((s) => h('li', { text: s }))) : h('p', { class: 'muted', text: 'No writes yet this session.' }),
         h('div', { class: 'btnrow' }, btn('Refresh', { kind: 'quiet', testid: 'risk.row.audit.refresh', onClick: () => rerender(r, 'risk.row.audit.refresh') }), btn('Open Daily Close', { kind: 'quiet', testid: 'risk.row.close.open', onClick: () => Proto.router.go(r.persona, 'close') }))));
     Proto.screens.shell.mount(page);
