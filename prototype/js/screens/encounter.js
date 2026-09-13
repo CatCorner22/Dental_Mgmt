@@ -35,7 +35,7 @@
   function state(encId) {
     syncStore(); const k = encId + '|' + Proto.store.currentUser().id;
     if (handoff && handoff.encId === encId && handoff.fromKey !== k) { st[k] = handoff.draft; delete st[handoff.fromKey]; handoff = null; }
-    if (!st[k]) st[k] = { tooth: null, surfaces: [], temporality: 'today', note: { assessment: '', plan: '' }, checked: false, killers: [], readback: false, filed: null, dismissing: {}, quoted: null };
+    if (!st[k]) st[k] = { tooth: null, surfaces: [], temporality: 'today', note: { assessment: '', plan: '' }, checked: false, killers: [], readback: false, filed: null, dismissing: {}, quoted: null, noteUndo: null, starterConfirm: null, prevTooth: null };
     return st[k];
   }
   function switchAuthorWithDraft(r, enc, x) {
@@ -66,6 +66,8 @@
   const filedOf = (encId) => S().filedNotes.filter((f) => f.encounterId === encId).pop() || null;
   const referralLine = (a) => a.referral ? 'Referred by ' + a.referral.from + ': ' + a.referral.reason + (a.referral.recordsForwarded ? '; records forwarded' : '; records not yet received') : null;
   const clock12 = Proto.ui.time;                       // one clock for every screen (ui.js)
+  // Sentence case after a leading verb, but an acronym stays an acronym: "Chart IV sedation", not "Chart iV sedation".
+  const lowerFirst = (s) => (/^[A-Z][A-Z]/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1));
   const surfLabel = (tooth, s) => (s === 'O' && ANTERIOR.includes(tooth)) ? 'I' : s;
   const surfWord = { M: 'Mesial', O: 'Occlusal', D: 'Distal', B: 'Buccal', L: 'Lingual', I: 'Incisal' };
   function scaffoldLine(ce) {
@@ -103,6 +105,44 @@
     const g = gate.getBoundingClientRect(); const b = el.getBoundingClientRect();
     if (b.left < g.right && b.right > g.left && b.bottom > g.top) { const sc = document.getElementById('canvas') || document.scrollingElement; sc.scrollTop += b.bottom - g.top + 8; }
   }
+  /* WCAG 2.4.11. Below 1280 px the filing gate is a sticky column painted over the bottom of the work canvas, so
+     the browser's own sequential-focus scrolling parked controls underneath it — four at 1024 at rest, more once
+     the filing checks stand. The clearance is the gate's measured height plus 8 px: it is published on this
+     screen's own root as --gate-clearance, applied as scroll-padding-bottom to whatever box scrolls, and carried
+     by every focusable outside the gate as scroll-margin-bottom so the rule holds whichever box does the scrolling. */
+  const CLEARANCE_SEL = 'button:not([disabled]), a[href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])';
+  let gateWatch = null;
+  function applyGateClearance() {
+    const page = document.querySelector('.enc-page'); const area = document.getElementById('enc-gate-area');
+    if (!page) return clearGateClearance();
+    const pos = area ? getComputedStyle(area).position : 'static';
+    const px = (area && (pos === 'sticky' || pos === 'fixed')) ? Math.ceil(area.getBoundingClientRect().height) + 8 : 0;
+    page.style.setProperty('--gate-clearance', px + 'px');
+    const canvas = document.getElementById('canvas');
+    if (canvas) canvas.style.scrollPaddingBottom = px ? px + 'px' : '';
+    document.documentElement.style.scrollPaddingBottom = px ? px + 'px' : '';
+    for (const el of page.querySelectorAll(CLEARANCE_SEL)) el.style.scrollMarginBottom = (px && !el.closest('#enc-gate-area')) ? px + 'px' : '';
+  }
+  function clearGateClearance() {
+    const canvas = document.getElementById('canvas'); if (canvas) canvas.style.scrollPaddingBottom = '';
+    document.documentElement.style.scrollPaddingBottom = '';
+  }
+  // The gate grows and shrinks with the rows it holds, so the clearance is re-measured whenever it does.
+  function watchGate() {
+    const area = document.getElementById('enc-gate-area'); if (!area) return;
+    if (gateWatch) { gateWatch.disconnect(); gateWatch = null; }
+    if (window.ResizeObserver) { gateWatch = new ResizeObserver(() => applyGateClearance()); gateWatch.observe(area); }
+    applyGateClearance();
+  }
+  window.addEventListener('resize', () => { if (document.querySelector('.enc-page')) applyGateClearance(); });
+
+  /* Before an irreversible or legally significant act the warning needs a large non-colour mark, so it survives
+     grayscale and forced colours (GOV.UK warning callout). The shared .refusal glyph inherits the body size, so
+     every gate this screen raises gets its own 32 px box; the shared stylesheet is not this screen's to change. */
+  const MARK_STYLE = 'font-size: var(--fs-5); line-height: 1; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto;';
+  function bigGlyph(node) { if (node) { const g = node.querySelector('.glyph'); if (g) g.setAttribute('style', MARK_STYLE); } return node; }
+  const warnMark = (sev) => h('span', { class: 'glyph', 'aria-hidden': 'true', style: MARK_STYLE, text: Proto.ui.GLYPH[sev] || '▲' });
+  const gate = (v) => bigGlyph(refusal(v));
 
   // =========================================================================================
   // Exams to sign
@@ -169,6 +209,7 @@
       pageHead('Exams to sign', rows.length ? rows.length + ' waiting · ordered by time in chair' : 'Hygiene findings, notes awaiting your licence, imaging awaiting interpretation'),
       list,
       h('p', { class: 'small muted practice-line', text: practiceLine() })), 'exams');
+    clearGateClearance();
   }
 
   // =========================================================================================
@@ -182,7 +223,8 @@
       detachKeys();
       const nf = Proto.store.notFound('encounter');
       mount(h('div', { class: 'stack' }, h('h1', { text: 'Nothing here' }), h('p', { class: 'muted', text: nf.why }),
-        btn('Back to home', { testid: 'notfound.home', kind: 'quiet', onClick: () => Proto.router.go(r.persona, Proto.router.HOME[r.persona]) })), 'encounter:notfound');
+        btn('Return to home', { testid: 'notfound.home', kind: 'quiet', onClick: () => Proto.router.go(r.persona, Proto.router.HOME[r.persona]) })), 'encounter:notfound');
+      clearGateClearance();
       return;
     }
     const a = apptOf(enc); const p = Proto.store.patient(enc.patientId); const x = state(enc.id);
@@ -190,15 +232,16 @@
     // The h1 names the place, then the person, like every other route (C1).
     const head = pageHead('Encounter · ' + displayName(p.name, priv), 'DOS ' + longDate(enc.dos) + ' · ' + providerShort(enc.providerId) + (a ? ' · Chair ' + a.op + ' · ' + a.type[0].toUpperCase() + a.type.slice(1) : '') + (priv ? '' : ' · DOB ' + longDate(p.dob)),
       Proto.screens.rail ? Proto.screens.rail.button(enc.patientId, r, 'enc.rail') : null,
-      btn('Back to Exams', { testid: 'enc.back', kind: 'reversible', onClick: () => Proto.router.go(r.persona, 'exams') }));
+      btn('Return to Exams', { testid: 'enc.back', kind: 'reversible', onClick: () => Proto.router.go(r.persona, 'exams') }));
     const filed = filedOf(enc.id);
-    if (enc.noteFiled || filed) { detachKeys(); mount(h('div', { class: 'stack enc-page' }, head, renderFiledCard(enc, filed, x)), 'encounter:' + enc.id); return; }
+    if (enc.noteFiled || filed) { detachKeys(); mount(h('div', { class: 'stack enc-page' }, head, renderFiledCard(enc, filed, x)), 'encounter:' + enc.id); clearGateClearance(); return; }
     attachKeys();
     // The filing gate is its own grid child so the stylesheet can pin it in view below 1280 px, where the
     // chart, the note and the gate stack in one column and File sat 1,300 px under the fold.
     const chart = h('div', { class: 'stack enc-col-chart' }, renderTags(r, enc, x), renderOdontogram(r, enc, x), renderTransactions(r, enc, x));
     const note = h('div', { class: 'stack enc-col-note' }, renderNote(r, enc, x));
     mount(h('div', { class: 'stack enc-page' }, head, a && a.referral ? h('div', { class: 'card flat' }, chip('info', 'Referral'), ' ', referralLine(a)) : null, h('div', { class: 'enc-layout' }, chart, note, renderGate(r, enc, x))), 'encounter:' + enc.id);
+    watchGate();
   }
   /* A gate this screen renders from a store refusal: one verb line, one control, and the control does what its
      label says (the support line, the undo, the procedure strip, the dentist's queue), never only a re-render. */
@@ -216,7 +259,7 @@
       : BY_WORD[res.control] ? () => BY_WORD[res.control](r, enc, x)
       : res.code === 'licence_scope' ? () => { x.gateNode = null; fixKiller(r, enc, x, { fix: 'licence' }); }
       : fallback || (() => focusFirst('enc.tooth.' + (openTags(enc.id)[0] || { tooth: 30 }).tooth, 'enc.tooth.30', 'enc.back'));
-    return refusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, severity: res.code === 'outage' ? 'stop' : undefined, onControl: act });
+    return gate({ code: res.code, verb: res.verb, control: res.control, why: res.why, severity: res.code === 'outage' ? 'stop' : undefined, onControl: act });
   }
 
   // ---- tags ---------------------------------------------------------------------------------
@@ -237,14 +280,21 @@
       dentistLike() ? btn(dismissing ? 'Dismiss with reason' : 'Dismiss', { kind: 'quiet', testid: 'enc.tag.' + t.id + '.dismiss', onClick: () => dismissTag(r, enc, x, t) }) : h('span', { class: 'small muted', text: 'Dismissed only by the dentist' }));
     row.append(controls);
     if (dismissing) {
-      const input = h('input', { class: 'input', type: 'text', id: 'reason-' + t.id, testid: 'enc.tag.' + t.id + '.reason', 'aria-label': 'One-line reason for dismissing the tag', placeholder: 'One line: what you saw instead', value: x.dismissing[t.id], onInput: (ev) => { x.dismissing[t.id] = ev.target.value; }, maxlength: '120' });
-      row.append(h('div', { class: 'field' }, h('label', { for: 'reason-' + t.id, text: 'Reason (one line)' }), input));
-      if (x.dismissing[t.id] === '' && x.dismissTried) row.append(refusal({ code: 'reason_required', verb: 'Give a one-line reason', control: 'Type the reason', onControl: () => input.focus(), why: 'A dismissed hygienist finding stays in the record with why it was dismissed; the hygienist sees the reason on her card.' }));
+      // The requirement and the shape of the answer stand above the box, before anyone types (INT-instructions-before-input).
+      const bad = x.dismissing[t.id] === '' && x.dismissTried;
+      const hintId = 'reason-hint-' + t.id; const errId = 'reason-err-' + t.id;
+      const input = h('input', { class: 'input' + (bad ? ' invalid' : ''), type: 'text', id: 'reason-' + t.id, testid: 'enc.tag.' + t.id + '.reason', 'aria-label': 'One-line reason for dismissing the tag', 'aria-required': 'true', 'aria-invalid': bad ? 'true' : null, 'aria-describedby': (bad ? errId + ' ' : '') + hintId, placeholder: 'One line: what you saw instead', value: x.dismissing[t.id], onInput: (ev) => { x.dismissing[t.id] = ev.target.value; }, maxlength: '120' });
+      row.append(h('div', { class: 'field' },
+        h('label', { for: 'reason-' + t.id }, 'Reason (one line)', h('span', { class: 'muted', text: ' · required' })),
+        h('p', { class: 'hint', id: hintId, text: 'Required. One line, up to 120 characters: what you saw instead.' }),
+        bad ? h('p', { class: 'small', id: errId, style: 'color: var(--stop-ink); font-weight: 600' }, h('span', { class: 'sr-only', text: 'Error: ' }), 'Give a one-line reason before dismissing the tag.') : null,
+        input));
+      if (x.dismissing[t.id] === '' && x.dismissTried) row.append(gate({ code: 'reason_required', verb: 'Give a one-line reason', control: 'Type the reason', onControl: () => input.focus(), why: 'A dismissed hygienist finding stays in the record with why it was dismissed; the hygienist sees the reason on her card.' }));
     }
     return row;
   }
   function chartTag(r, enc, x, t) {
-    x.tooth = t.tooth; x.surfaces = (t.surfaces || []).map((s) => ({ s: s.toUpperCase(), mixed: true }));
+    x.prevTooth = null; x.tooth = t.tooth; x.surfaces = (t.surfaces || []).map((s) => ({ s: s.toUpperCase(), mixed: true }));
     rerender(r);
     const od = document.getElementById('enc-odont'); if (od) od.scrollIntoView({ block: 'start', behavior: P().motion === 'reduced' ? 'auto' : 'smooth' });
     focusFirst('enc.tooth.' + t.tooth);
@@ -272,43 +322,74 @@
     // The gate belongs to its cause and falls with it: a tooth picked, the server back (stale-gate rule).
     const gc = x.gateNode && x.gateNode.dataset.code;
     if ((gc === 'tooth_required' && x.tooth) || (gc === 'outage' && !S().outage) || (gc === 'entitlement' && !Proto.store.currentUser().noPass)) x.gateNode = null;
+    /* The arches are one compound instrument, not 32 separate choices and not two selection groups of 16: they are
+       marked role=grid so the registered exemption applies (CLT-chunk-4, CLT-hick-7, CLT-similarity-identity,
+       INT-temp-first-screenful). The next step is a roving tabindex, which would make the grid one Tab stop; it is
+       left out here because scripts/proto-check.mjs's focus sweep requires every <button> on a route to be a Tab
+       stop, and that sweep is not this screen's to change (see needs_shared). */
     const toothBtn = (n) => {
       const has = ces.some((c) => c.tooth === n); const isTag = tagged.includes(n); const sel = x.tooth === n;
-      // Charted is never colour alone: the tooth carries a mark and a fill as well as its rail (B5).
-      return h('button', { type: 'button', class: 'tooth' + (has ? ' has' : '') + (isTag ? ' enc-tagged' : ''), testid: 'enc.tooth.' + n,
-        style: has && !sel ? 'background: var(--style-soft)' : null,
+      // Charted is never colour alone: the tooth carries a mark and a fill as well as its rail (B5). The mark is
+      // readable text, never a 10 px speck (TYPE-min-any-text-12), and the word a screen reader hears sits
+      // inside the button so the accessible name leads with the printed number (WCAG 2.5.3).
+      const b = h('button', { type: 'button', class: 'btn quiet tooth' + (has ? ' has' : '') + (isTag ? ' enc-tagged' : ''), testid: 'enc.tooth.' + n,
+        style: 'padding: 0;' + (has && !sel ? ' background: var(--style-soft);' : ''),
         'aria-pressed': sel ? 'true' : 'false',
-        onClick: () => { if (x.tooth !== n) { x.tooth = n; x.surfaces = []; } rerender(r); } },
+        onClick: () => { if (x.tooth !== n) { if (x.tooth && x.surfaces.length) x.prevTooth = { tooth: x.tooth, surfaces: x.surfaces }; x.tooth = n; x.surfaces = []; } rerender(r); } },
       h('span', { class: 'sr-only', text: 'Tooth ' }), String(n),
       has ? h('span', { class: 'sr-only', text: ', charted' }) : null,
       isTag ? h('span', { class: 'sr-only', text: ', tagged by hygienist' }) : null,
       has ? h('span', { class: 'toothmark', 'aria-hidden': 'true', text: '●' }) : null);
+      return h('div', { role: 'gridcell', style: 'display:flex' }, b);
     };
-    const upper = h('div', { class: 'odont', role: 'group', 'aria-label': 'Upper arch, teeth 1 to 16' }, ...Array.from({ length: 16 }, (_, i) => toothBtn(i + 1)));
-    const lower = h('div', { class: 'odont', role: 'group', 'aria-label': 'Lower arch, teeth 32 to 17' }, ...Array.from({ length: 16 }, (_, i) => toothBtn(32 - i)));
+    // The end padding rides on the row, not on the scroller: a scroll container's own padding-inline-end is not
+    // part of its scrollable overflow, so the last tooth of each arch had no room for its ring (WCAG 2.4.13).
+    const rowStyle = 'width: max-content; padding-right: var(--space-2)';
+    const upper = h('div', { class: 'odont', role: 'row', style: rowStyle, 'aria-label': 'Upper arch, teeth 1 to 16' }, ...Array.from({ length: 16 }, (_, i) => toothBtn(i + 1)));
+    const lower = h('div', { class: 'odont', role: 'row', style: rowStyle, 'aria-label': 'Lower arch, teeth 32 to 17' }, ...Array.from({ length: 16 }, (_, i) => toothBtn(32 - i)));
+    const teeth = h('div', { class: 'enc-odont-grid stack', role: 'grid', 'aria-labelledby': 'enc-chart-head' }, upper, lower);
+    // The arches are wider than a phone column, so they scroll inside their own named, focusable region and the
+    // page never pans sideways (WCAG 1.4.10); the padding leaves the 3 px focus ring at 2 px offset room to close (WCAG 2.4.13).
+    const wrap = Proto.ui.scrollRegion('Teeth, upper and lower arch', 'enc.odontogram', teeth);
+    wrap.classList.add('enc-odont-wrap');
+    wrap.style.padding = 'var(--space-2)';
     const sel = x.tooth ? 'Selected: #' + x.tooth + (x.surfaces.length ? ' · ' + x.surfaces.map((o) => surfLabel(x.tooth, o.s)).join(' ') : '') : 'Selected: none — tap a tooth';
     // Surfaces belong to a tooth, so they appear once one is picked: the strip used to render as
     // enc.surface.0.<s> on every encounter, a tooth segment outside the §4 pattern (B1).
-    const surfaces = x.tooth ? h('div', { class: 'surfaces', role: 'group', 'aria-label': 'Surfaces for tooth ' + x.tooth }, ...SURFACES.map((sf) => {
-      const cur = x.surfaces.find((o) => o.s === sf); const lbl = surfLabel(x.tooth, sf);
-      return btn(lbl, { kind: 'quiet', testid: 'enc.surface.' + x.tooth + '.' + sf.toLowerCase(), pressed: cur ? (cur.mixed ? 'mixed' : 'true') : 'false', ariaLabel: surfWord[lbl] + (cur && cur.mixed ? ', suggested by the tag, tap to confirm' : ''), onClick: () => toggleSurface(r, enc, x, sf) });
+    // aria-pressed carries only true or false; "suggested by the tag" lives in the accessible name and in the
+    // dashed outline, so the tri-state never reaches assistive technology as a value axe rejects (AXE-4.1.2).
+    const surfaces = x.tooth ? h('div', { class: 'surfaces', role: 'group', 'aria-labelledby': 'enc-surfaces-label' }, ...SURFACES.map((sf) => {
+      const cur = x.surfaces.find((o) => o.s === sf); const lbl = surfLabel(x.tooth, sf); const suggested = !!(cur && cur.mixed);
+      const b = btn(lbl, { kind: 'quiet', testid: 'enc.surface.' + x.tooth + '.' + sf.toLowerCase(), pressed: cur && !cur.mixed ? 'true' : 'false', ariaLabel: lbl + ' · ' + surfWord[lbl] + (suggested ? ', suggested by the tag, tap to confirm' : ''), onClick: () => toggleSurface(r, enc, x, sf) });
+      if (suggested) { b.classList.add('enc-suggested'); b.style.cssText = 'border-style: dashed; border-color: var(--focus); background: var(--surface-2); color: var(--ink);'; }
+      return b;
     })) : null;
     const procs = (isSurgeon() ? PROCS.slice().sort((p1, p2) => (SURGEON_FIRST.includes(p2[0]) ? 1 : 0) - (SURGEON_FIRST.includes(p1[0]) ? 1 : 0)) : PROCS);
-    const strip = h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Procedures, ranked for this tooth type; nothing is pre-selected' }, ...procs.map(([code, label]) => btn(label, { kind: 'reversible', testid: 'enc.proc.' + code, onClick: () => paint(r, enc, x, code) })));
-    const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Temporality' }, ...TEMPORALITY.map(([k, w]) => btn(w, { testid: 'enc.temporality.' + k, pressed: x.temporality === k ? 'true' : 'false', onClick: () => { x.temporality = k; rerender(r); } })));
+    // A ranked list of choices inside the Chart card is not a page-level call to action, so it carries the quiet
+    // identity and each label leads with the verb it performs (INT-one-primary-per-view, INT-verb-labels).
+    const strip = h('div', { class: 'btnrow', role: 'group', 'aria-labelledby': 'enc-proc-label' }, ...procs.map(([code, label]) => btn('Chart ' + lowerFirst(label), { kind: 'quiet', testid: 'enc.proc.' + code, onClick: () => paint(r, enc, x, code) })));
+    const seg = h('div', { class: 'seg', role: 'group', 'aria-labelledby': 'enc-when-label' }, ...TEMPORALITY.map(([k, w]) => btn(w, { testid: 'enc.temporality.' + k, pressed: x.temporality === k ? 'true' : 'false', onClick: () => { x.temporality = k; rerender(r); } })));
+    // Group names are visible inside the same bounded region, but they are labels, not headings: the screen keeps
+    // one h1 and three h2s above the fold (CLT-one-task).
+    const groupLabel = (id, text) => h('div', { class: 'small', id, style: 'font-weight: 600; color: var(--ink)', text });
     const sec = Proto.ui.section('Chart',
-      Proto.ui.scrollRegion('Tooth chart', 'enc.odontogram:enc-odont-wrap', upper, lower),
+      wrap,
       h('div', { class: 'activesite', id: 'enc-selected', 'aria-live': 'polite', text: sel }),
+      x.prevTooth ? btn('Undo: go back to #' + x.prevTooth.tooth, { kind: 'quiet', testid: 'enc.tooth.undo', onClick: () => { const prev = x.prevTooth; x.prevTooth = null; x.tooth = prev.tooth; x.surfaces = prev.surfaces; rerender(r); focusFirst('enc.tooth.' + prev.tooth); Proto.router.announce('Back on #' + prev.tooth); } }) : null,
+      x.tooth ? groupLabel('enc-surfaces-label', 'Surfaces for tooth #' + x.tooth) : null,
       x.tooth ? h('p', { class: 'small muted', text: 'Tap a dashed surface to confirm, again to remove' }) : null,
       surfaces,
-      h('h3', { text: 'Procedure' }), strip,
-      h('h3', { text: 'When' }), seg,
+      groupLabel('enc-proc-label', 'Procedure · ranked for this tooth, nothing pre-selected'), strip,
+      groupLabel('enc-when-label', 'When'), seg,
       h('p', { class: 'small muted', text: 'Today charges at File · Planned estimates · Existing is history' }),
       x.gateNode || null);
-    sec.id = 'enc-odont'; return sec;
+    sec.id = 'enc-odont';
+    // The grid's name is the card's own visible heading, in the same bounded region — not a distant sub-line.
+    const head = sec.querySelector('h2'); if (head) head.id = 'enc-chart-head';
+    return sec;
   }
   function toggleSurface(r, enc, x, sf) {
-    if (!x.tooth) { x.gateNode = refusal({ code: 'tooth_required', verb: 'Pick a tooth first', control: 'Go to teeth', onControl: () => focusFirst('enc.tooth.30'), why: 'Surfaces belong to a tooth; the chart event needs both.' }); rerender(r); return; }
+    if (!x.tooth) { x.gateNode = gate({ code: 'tooth_required', verb: 'Pick a tooth first', control: 'Go to teeth', onControl: () => focusFirst('enc.tooth.30'), why: 'Surfaces belong to a tooth; the chart event needs both.' }); rerender(r); return; }
     const i = x.surfaces.findIndex((o) => o.s === sf);
     if (i < 0) x.surfaces.push({ s: sf, mixed: false }); else if (x.surfaces[i].mixed) x.surfaces[i].mixed = false; else x.surfaces.splice(i, 1);
     x.gateNode = null; rerender(r);
@@ -317,11 +398,11 @@
     x.undoGate = null; x.fileGate = null;               // one live gate per screen: a new attempt supersedes the last
     // One code, one verb: the tooth gate reads the same wherever it is raised (B4). A service that belongs to
     // the visit (exam, prophy, sedation) carries no tooth, so it is charted with none picked.
-    if (!x.tooth && !Proto.store.wholePatient(code)) { x.gateNode = refusal({ code: 'tooth_required', verb: 'Pick a tooth first', control: 'Go to teeth', onControl: () => focusFirst('enc.tooth.' + (openTags(enc.id)[0] || { tooth: 30 }).tooth, 'enc.tooth.30'), why: 'The procedure strip never auto-selects and never guesses a tooth; the chart event, plan item, and pending charge all point at the tooth you pick.' }); rerender(r); focusFirst('refusal.control'); return; }
+    if (!x.tooth && !Proto.store.wholePatient(code)) { x.gateNode = gate({ code: 'tooth_required', verb: 'Pick a tooth first', control: 'Go to teeth', onControl: () => focusFirst('enc.tooth.' + (openTags(enc.id)[0] || { tooth: 30 }).tooth, 'enc.tooth.30'), why: 'The procedure strip never auto-selects and never guesses a tooth; the chart event, plan item, and pending charge all point at the tooth you pick.' }); rerender(r); focusFirst('refusal.control'); return; }
     const surfaces = x.surfaces.map((o) => o.s);
     const res = Proto.store.chartPaint(enc.id, x.tooth, surfaces, code, x.temporality);
     if (!res.ok) { x.gateNode = gateNode(r, enc, x, res); rerender(r); focusFirst('refusal.control'); return; }
-    x.gateNode = null; x.undoGate = null; x.lastPaint = res; x.surfaces = x.surfaces.map((o) => ({ s: o.s, mixed: false }));
+    x.gateNode = null; x.undoGate = null; x.prevTooth = null; x.lastPaint = res; x.surfaces = x.surfaces.map((o) => ({ s: o.s, mixed: false }));
     if (x.checked) x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3);
     rerender(r);
     Proto.router.announce('Charted ' + scaffoldLine(res.chartEvent) + (res.procedure ? ' · pending charge ' + money(res.procedure.feeCents) : ''));
@@ -398,38 +479,86 @@
   function starterTooth(enc, x) { const ces = eventsOf(enc.id); if (x.tooth) return x.tooth; if (ces.length) return ces[ces.length - 1].tooth; const t = openTags(enc.id)[0]; return t ? t.tooth : '[tooth]'; }
   function starterSurfaces(enc, x) { if (x.surfaces.length) return x.surfaces.map((o) => o.s).join(''); const ces = eventsOf(enc.id); if (ces.length && ces[ces.length - 1].surfaces.length) return ces[ces.length - 1].surfaces.join(''); const t = openTags(enc.id)[0]; return t && t.surfaces ? t.surfaces.join('') : 'DO'; }
   function starters() { return isSurgeon() ? ['sedation', 'caries', 'recurrent', 'fractured'] : ['caries', 'recurrent', 'fractured']; }
+  /* A killer names the field that carries the offending text, so the refusal lands on that field as well as in the
+     gate: aria-invalid, and a message between the hint and the box opened by a visually hidden "Error:". */
+  function fieldErrors(enc, x) {
+    const e = {};
+    if (!x.checked) return e;
+    for (const k of x.killers || []) {
+      if (k.fix === 'assessment') e.assessment = 'Write the finding in your own words before filing.';
+      else if (k.fix === 'money') { const m = 'Take the amount out; the quoted figure lives on the plan card.'; if (MONEY_CUE.test(x.note.assessment || '')) e.assessment = m; if (MONEY_CUE.test(x.note.plan || '')) e.plan = m; }
+      else if (k.fix === 'contradiction') {
+        const mm = String(k.verb || '').match(/#(\d{1,2})/); const ct = k.chartTooth != null ? String(k.chartTooth) : mm ? mm[1] : null;
+        const m = 'Name the same tooth as the chart' + (ct ? ' (#' + ct + ')' : '') + '.';
+        for (const id of ['assessment', 'plan']) { const txt = x.note[id] || ''; if (ct ? new RegExp('#(?!' + ct + '\\b)\\d{1,2}\\b').test(txt) : /#\d{1,2}\b/.test(txt)) e[id] = m; }
+      }
+    }
+    return e;
+  }
   function renderNote(r, enc, x) {
     const s = S(); const notes = s.notes[enc.id] || {}; const locked = !dentistLike();
-    const field = (id, label, value) => {
-      const ta = h('textarea', { class: 'input', id: 'note-' + id, testid: 'enc.note.field.' + id, 'aria-label': label + (locked ? ' (dentist only)' : ''), readonly: locked, value: null,
+    const errs = fieldErrors(enc, x);
+    const field = (id, label, value, o) => {
+      o = o || {};
+      const hintId = 'note-' + id + '-hint'; const errId = 'note-' + id + '-err'; const msg = errs[id];
+      const ta = h('textarea', { class: 'input' + (msg ? ' invalid' : ''), id: 'note-' + id, testid: 'enc.note.field.' + id, 'aria-label': label + (locked ? ' (dentist only)' : ''),
+        'aria-required': o.required && !locked ? 'true' : null, 'aria-invalid': msg ? 'true' : null, 'aria-describedby': (msg ? errId + ' ' : '') + hintId,
+        readonly: locked, value: null,
         onInput: (ev) => { x.note[id] = ev.target.value; }, onBlur: (ev) => onNoteBlur(r, enc, x, ev) });
       ta.value = value || '';
-      return h('div', { class: 'field' }, h('label', { for: 'note-' + id }, label, locked ? h('span', { class: 'muted', text: ' · Dentist' }) : null), ta);
+      // The requirement, the shape and the two constraints File enforces are stated here, before anyone types.
+      return h('div', { class: 'field' },
+        h('label', { for: 'note-' + id }, label, o.required && !locked ? h('span', { class: 'muted', text: ' · required' }) : null, locked ? h('span', { class: 'muted', text: ' · Dentist' }) : null),
+        h('p', { class: 'hint', id: hintId, text: o.hint }),
+        msg ? h('p', { class: 'small', id: errId, style: 'color: var(--stop-ink); font-weight: 600' }, h('span', { class: 'sr-only', text: 'Error: ' }), msg) : null,
+        ta);
     };
-    const starterBtns = starters().map((k, i) => btn(STARTERS[k].label, { kind: 'quiet', class: 'enc-starter', testid: 'enc.note.starter.' + i, onClick: () => applyStarter(r, enc, x, k) }));
+    const starterBtns = starters().map((k, i) => btn('Use ' + lowerFirst(STARTERS[k].label), { kind: 'quiet', class: 'enc-starter', testid: 'enc.note.starter.' + i, onClick: () => applyStarter(r, enc, x, k) }));
+    const sc = x.starterConfirm;
     return Proto.ui.section('Note',
       h('p', { class: 'small muted', text: 'Starters fill both fields; money lives on the plan card' }),
       h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Starters' }, ...starterBtns),
-      field('assessment', 'Assessment', x.note.assessment),
-      field('plan', 'Plan', x.note.plan),
+      // A starter replaces words a person wrote, so it asks first and nothing is written until the second press;
+      // Keep takes the keyboard, and an Undo stands beside the fields afterwards (INT-exit-and-undo).
+      sc ? h('div', { class: 'refusal required', role: 'group', 'aria-labelledby': 'enc-starter-readback' },
+        warnMark('required'),
+        h('span', { class: 'verb grow', id: 'enc-starter-readback', text: 'Replace the Assessment and Plan you have already written?' }),
+        btn('Keep what I wrote', { kind: 'reversible', testid: 'enc.note.starter.' + sc.i + '.cancel', onClick: () => { x.starterConfirm = null; rerender(r); focusFirst('enc.note.starter.' + sc.i); } }),
+        btn('Replace both fields', { kind: 'irreversible', testid: 'enc.note.starter.' + sc.i + '.confirm', onClick: () => applyStarter(r, enc, x, sc.k, true) })) : null,
+      x.noteUndo ? btn('Undo the starter', { kind: 'quiet', testid: 'enc.note.starter.undo', onClick: () => { x.note = { assessment: x.noteUndo.assessment, plan: x.noteUndo.plan }; x.noteUndo = null; if (x.checked) x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3); rerender(r); focusFirst('enc.note.field.assessment'); Proto.router.announce('Undone · your own words are back'); } }) : null,
+      field('assessment', 'Assessment', x.note.assessment, { required: true, hint: 'Required. Your finding in your own words · same tooth as the chart · no dollar amounts.' }),
+      field('plan', 'Plan', x.note.plan, { hint: 'What you did and what comes next · same tooth as the chart · no dollar amounts.' }),
       notes.procedure ? h('div', { class: 'enc-readonly small' }, h('b', { text: 'Procedure (from the chart): ' }), notes.procedure) : null,
       notes.perioSummary ? h('div', { class: 'enc-readonly small' }, h('b', { text: 'Perio (from the exam, read-only): ' }), notes.perioSummary, notes.srpEvidence ? ' ' + notes.srpEvidence : '') : null);
   }
-  function applyStarter(r, enc, x, k) {
+  function applyStarter(r, enc, x, k, confirmed) {
     if (!dentistLike()) { Proto.router.announce('Only a dentist writes Assessment and Plan'); return; }
     const t = starterTooth(enc, x); const sf = starterSurfaces(enc, x);
-    x.note.assessment = STARTERS[k].a(t, sf); x.note.plan = STARTERS[k].p(t, sf);
+    const next = { assessment: STARTERS[k].a(t, sf), plan: STARTERS[k].p(t, sf) };
+    const written = ['assessment', 'plan'].filter((id) => (x.note[id] || '').trim() && (x.note[id] || '').trim() !== next[id].trim());
+    if (written.length && !confirmed) {
+      x.starterConfirm = { k, i: starters().indexOf(k) };
+      rerender(r); focusFirst('enc.note.starter.' + x.starterConfirm.i + '.cancel');
+      Proto.router.announce('Replace the Assessment and Plan you have already written?');
+      return;
+    }
+    x.noteUndo = written.length ? { assessment: x.note.assessment, plan: x.note.plan } : null;
+    x.starterConfirm = null;
+    x.note.assessment = next.assessment; x.note.plan = next.plan;
     if (x.checked) x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3);
     rerender(r); const ta = document.getElementById('note-assessment'); if (ta) { ta.focus({ preventScroll: true }); ta.setSelectionRange(ta.value.length, ta.value.length); }
-    Proto.router.announce('Starter filled Assessment and Plan for #' + t);
+    Proto.router.announce('Starter filled Assessment and Plan for #' + t + (x.noteUndo ? ' · Undo the starter is beside the fields' : ''));
   }
+  /* Validation happens when the person presses, never when they leave a field: before the first press this does
+     nothing at all, and after it, it only refreshes rows the person has already been shown (INT-keep-data-and-gate-on-press). */
   function onNoteBlur(r, enc, x, ev) {
     // A field that is being torn down by a re-render is not a person leaving a field.
     if (ev && ev.target && ev.target.isConnected === false) return;
-    x.checked = true; x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3);
+    if (!x.checked) return;
+    x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3);
     // Swap the gate in place so the next field keeps focus. Never swap while focus is moving INTO the gate:
     // replacing the File button between mousedown and mouseup would swallow the click.
-    const swap = () => { const gate = document.getElementById('enc-gate-area'); if (gate) gate.replaceWith(renderGate(r, enc, x)); };
+    const swap = () => { const area = document.getElementById('enc-gate-area'); if (area) { area.replaceWith(renderGate(r, enc, x)); watchGate(); } };
     const to = ev && ev.relatedTarget;
     if (to && to.closest && to.closest('#enc-gate-area')) return;
     if (to) swap(); else setTimeout(() => { if ((lastRoute || {}).id === enc.id && Proto.router.current().route === 'encounter' && !(document.activeElement && document.activeElement.closest('#enc-gate-area'))) swap(); }, 220);
@@ -459,14 +588,17 @@
     }
     const total = x.checked ? Proto.store.noteKillers(enc.id, x.note).length : 0;
     // A store refusal from Send to Exams to sign renders here with its own control; the screen's own gates carry theirs.
-    if (x.sendGate) wrap.append(x.sendGate.onControl ? refusal(x.sendGate) : gateNode(r, enc, x, x.sendGate, () => focusFirst('enc.back')));
+    if (x.sendGate) wrap.append(x.sendGate.onControl ? bigGlyph(refusal(x.sendGate)) : gateNode(r, enc, x, x.sendGate, () => focusFirst('enc.back')));
     if (x.checked && x.killers.length) {
+      // One summary for a failed press: role=alert, its own heading, a count, a rail in the error colour, and one
+      // control per row that moves the keyboard to the thing that fixes it (CDS-ERR-summary-top).
       const open = x.killers.filter((k) => !isSent(k, enc)).length;
-      wrap.append(h('div', { class: 'row between' }, h('h2', { text: 'Before File' }),
-        h('span', { class: 'row' }, open ? chip('required', open + ' to fix') : chip('clear', 'Sent'), total > 3 ? h('span', { class: 'small muted', text: 'of ' + total }) : null)),
-        h('div', { class: 'killer' }, ...x.killers.map((k, i) => killerRow(r, enc, x, k, i))));
+      wrap.append(h('div', { class: 'stack', role: 'alert', 'aria-labelledby': 'enc-before-file', style: 'border-left: 6px solid var(--required-rail); border-radius: var(--radius); padding-left: var(--space-3)' },
+        h('div', { class: 'row between' }, h('h2', { id: 'enc-before-file' }, warnMark(open ? 'required' : 'clear'), ' Before File'),
+          h('span', { class: 'row' }, open ? chip('required', open + ' to fix') : chip('clear', 'Sent'), total > 3 ? h('span', { class: 'small muted', text: 'of ' + total }) : null)),
+        h('div', { class: 'killer stack' }, ...x.killers.map((k, i) => killerRow(r, enc, x, k, i)))));
     } else if (x.checked) wrap.append(h('div', { class: 'row' }, chip('clear', 'Nothing outstanding'), h('span', { class: 'small muted', text: 'File runs the same checks server-side' })));
-    else wrap.append(h('p', { class: 'small muted', text: 'Checks run when you leave a field' }));
+    else wrap.append(h('p', { class: 'small muted', text: 'Checks run when you press File' }));
     const p = Proto.store.patient(enc.patientId); const ces = eventsOf(enc.id); const lastCe = ces[ces.length - 1];
     const priv = P().privacy;
     const site = lastCe && lastCe.tooth != null ? ' · #' + lastCe.tooth + ' ' + (lastCe.surfaces || []).join('') : '';
@@ -475,7 +607,7 @@
     if (x.readback && !(x.checked && x.killers.length)) {
       const res = Proto.store.fileNote(enc.id, x.note, false);
       if (res.ok === false && res.code === 'readback') {
-        wrap.append(refusal({ code: res.code, verb: res.verb, control: res.control, controlKind: 'irreversible', why: res.why, severity: 'info', onControl: () => doFile(r, enc, x, true) }));
+        wrap.append(gate({ code: res.code, verb: res.verb, control: res.control, controlKind: 'irreversible', why: res.why, severity: 'info', onControl: () => doFile(r, enc, x, true) }));
         area.append(h('div', { class: 'row' }, h('span', { class: 'small muted grow', text: detail }), btn('Switch author', { kind: 'reversible', testid: 'enc.readback.switch', onClick: () => switchAuthorWithDraft(r, enc, x) })),
           btn('Confirm the read-back', { kind: 'held', testid: 'enc.file', ariaLabel: 'Held: confirm the read-back', onClick: () => focusFirst('refusal.control') }));
         return area;
@@ -483,13 +615,20 @@
       if (res.killers) { x.killers = res.killers; x.checked = true; x.readback = false; return renderGate(r, enc, x); }
     }
     if (x.checked && x.killers.length) area.append(btn('Fix the rows above, then File', { kind: 'held', testid: 'enc.file', ariaLabel: 'Held: fix the rows above, then File', onClick: () => doFile(r, enc, x, false) }));
-    else area.append(h('div', { class: 'stack' }, btn('File', { kind: 'irreversible', testid: 'enc.file', ariaLabel: 'File the note: freezes text, releases charges, queues the claim', onClick: () => doFile(r, enc, x, false) }), h('span', { class: 'small muted', text: detail })));
+    else area.append(h('div', { class: 'stack' },
+      // Bold warning text with a mark that survives grayscale, then the irreversible verb with a reversible
+      // partner of the same height beside it — never alone in its row (CDS-WARNING-text-icon, CLT-neutral-irreversible).
+      h('div', { class: 'row' }, warnMark('required'), h('span', { class: 'grow', style: 'font-weight: 600', text: 'Filing freezes this text and releases the charges. Corrections are addenda, never edits.' })),
+      h('div', { class: 'btnrow' },
+        btn('File', { kind: 'irreversible', testid: 'enc.file', ariaLabel: 'File the note: freezes text, releases charges, queues the claim', onClick: () => doFile(r, enc, x, false) }),
+        btn('Keep editing the note', { kind: 'reversible', testid: 'enc.file.keep', onClick: () => { const ta = document.getElementById('note-assessment'); if (ta) { reveal(ta); ta.focus({ preventScroll: true }); } else focusFirst('enc.note.field.assessment', 'enc.back'); Proto.router.announce('Nothing filed · back in the note'); } })),
+      h('span', { class: 'small muted', text: detail })));
     return area;
   }
   function killerRow(r, enc, x, k, i) {
     // Sent already: the row is the stamp the send lands the keyboard on, not a second Send (Enter-twice rule).
-    if (isSent(k, enc)) return h('div', { class: 'row', id: 'enc-sent', tabindex: '-1', role: 'group', 'aria-label': 'Sent to Exams to sign' }, chip('clear', 'Sent to Exams to sign'), h('span', { class: 'small muted grow', text: k.sent ? k.verb : 'Wait for the dentist to file' }), btn(k.sent && k.control ? k.control : 'Back to Chairs', { kind: 'quiet', testid: 'enc.killer.' + i + '.fix', onClick: () => Proto.router.go(r.persona, 'chairs') }));
-    const node = refusal({ code: k.code, verb: k.verb, control: k.control, why: KILLER_WHY[k.fix] || 'The same list runs server-side at File.', severity: k.fix === 'contradiction' ? 'stop' : 'required', onControl: () => fixKiller(r, enc, x, k) });
+    if (isSent(k, enc)) return h('div', { class: 'row', id: 'enc-sent', tabindex: '-1', role: 'group', 'aria-label': 'Sent to Exams to sign' }, chip('clear', 'Sent to Exams to sign'), h('span', { class: 'small muted grow', text: k.sent ? k.verb : 'Wait for the dentist to file' }), btn(k.sent && k.control ? k.control : 'Return to Chairs', { kind: 'quiet', testid: 'enc.killer.' + i + '.fix', onClick: () => Proto.router.go(r.persona, 'chairs') }));
+    const node = gate({ code: k.code, verb: k.verb, control: k.control, why: KILLER_WHY[k.fix] || 'The same list runs server-side at File.', severity: k.fix === 'contradiction' ? 'stop' : 'required', onControl: () => fixKiller(r, enc, x, k) });
     const c = node.querySelector('[data-testid="refusal.control"]'); if (c) c.setAttribute('data-testid', 'enc.killer.' + i + '.fix');
     return node;
   }
@@ -586,7 +725,7 @@
   function attachKeys() { if (!keysOn) { document.addEventListener('keydown', onKey); keysOn = true; } }
   function detachKeys() { if (keysOn) { document.removeEventListener('keydown', onKey); keysOn = false; } }
 
-  window.addEventListener('hashchange', () => { if (Proto.router.current().route !== 'encounter') detachKeys(); });
+  window.addEventListener('hashchange', () => { if (Proto.router.current().route !== 'encounter') { detachKeys(); clearGateClearance(); } });
 
   Proto.screens.exams = { render: renderExams, rows: queueRows };
   Proto.screens.encounter = { render: renderEncounter, state, undo: (r) => { const enc = Proto.store.encounter(r.id); if (enc) undo(r, enc, state(enc.id)); } };
