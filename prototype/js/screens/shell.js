@@ -39,7 +39,12 @@
     if (!r.persona) { authorId = null; keepFocus(top, () => top.replaceChildren(h('span', { class: 'brand' }, h('span', { class: 'mark', 'aria-hidden': 'true' }), 'Riverbend Dental'), h('span', { class: 'spacer' }), btn(P.theme === 'dark' ? 'Light' : 'Dark', { testid: 'topbar.theme', ariaLabel: 'Switch to ' + (P.theme === 'dark' ? 'light' : 'dark'), onClick: () => { P.set({ theme: P.theme === 'dark' ? 'light' : 'dark' }); Proto.router.render(); refocus('topbar.theme'); } }))); return; }
     const u = Proto.store.currentUser(); authorId = u.id;
     const loc = S.locations[0];
-    const nav = h('nav', { 'aria-label': 'Primary' }, ...(NAV[r.persona] || NAV.frontdesk).map(([route, label]) => btn(label, { testid: 'nav.' + route, onClick: () => Proto.router.go(r.persona, route), class: r.route === route ? 'current' : '' })));
+    // A nested screen belongs to the destination that leads to it, so that destination reads as
+    // current: the Ledger under Money Desk, Checkout under the Board, Perio under Chairs, an
+    // Encounter under Exams to sign (docs/16 CLT-jakob-nav; WCAG 2.4.8).
+    const PARENT = { checkout: 'board', ledger: 'money', perio: 'chairs', encounter: 'exams' };
+    const isCurrent = (route) => r.route === route || PARENT[r.route] === route;
+    const nav = h('nav', { 'aria-label': 'Primary' }, ...(NAV[r.persona] || NAV.frontdesk).map(([route, label]) => btn(label, { testid: 'nav.' + route, onClick: () => Proto.router.go(r.persona, route), class: isCurrent(route) ? 'current' : '' })));
     nav.querySelectorAll('button').forEach((b) => { if (b.classList.contains('current')) b.setAttribute('aria-current', 'page'); });
     // A missing day pass is not a person: the chip says so instead of printing the placeholder's initials.
     const chipWord = u.noPass ? u.short : (P.device === 'shared' || P.device === 'operatory') ? (Proto.ui.initials(u.name) + (u.licence ? ' · ' + u.licence : '')) : (u.short || u.name);

@@ -21,7 +21,7 @@ const args = Object.fromEntries(process.argv.slice(2).map((a, i, arr) => a.start
 const WIDTHS = (args.widths || '1280,1024,420').split(',').map(Number);
 const ONLY = args.only ? args.only.split(',') : null;
 
-// Every persona home, the deep screens, and the surfaces that open over them.
+// Every persona home, the deep screens, the surfaces that open over them, and the states a press opens.
 const ROUTES = [
   ['signin', '#/signin'],
   ['frontdesk/board', '#/frontdesk/board'],
@@ -40,6 +40,15 @@ const ROUTES = [
   ['palette', '#/frontdesk/board', async (p) => { await p.click('[data-testid="topbar.search"]'); await p.waitForTimeout(200); await p.fill('[data-testid="palette.input"]', 'mar'); await p.waitForTimeout(250); }],
   ['pinpad', '#/hygienist/perio/enc-9001', async (p) => { await p.click('[data-testid="topbar.author"]'); await p.waitForTimeout(250); }],
   ['refusal', '#/biller/money', async (p) => { await p.click('[data-testid="money.writeoff.p-306"]'); await p.waitForTimeout(150); await p.click('[data-testid="money.writeoff.reason.courtesy"]'); await p.click('[data-testid="money.writeoff.post"]'); await p.waitForTimeout(300); }],
+  // States the UX audit found axe had never been shown: a first run over the resting routes reported
+  // zero violations while five critical ones stood behind one expanded tile (docs/16 AXE-RUN-all-contexts).
+  ['owner/close expanded', '#/owner/close', async (p) => { const t = await p.$('[data-testid="close.tied.tile"]'); if (t) { await t.click(); await p.waitForTimeout(250); } const c = await p.$('[data-testid="close.closeday"]'); if (c) { await c.click(); await p.waitForTimeout(250); } }],
+  ['biller/money writeoff', '#/biller/money', async (p) => { await p.click('[data-testid="money.writeoff.p-306"]'); await p.waitForTimeout(200); }],
+  ['hygienist/perio pad', '#/hygienist/perio/enc-9001', async (p) => { const t = await p.$('[data-testid="perio.pad.toggle"]'); if (t) { await t.click(); await p.waitForTimeout(200); } }],
+  ['compliance/roles daypass', '#/compliance/roles', async (p) => { const a = await p.$('[data-testid="roles.daypass.add"]'); if (a) { await a.click(); await p.waitForTimeout(250); } }],
+  ['dentist/encounter gate', '#/dentist/encounter/enc-9002', async (p) => { const f = await p.$('[data-testid="enc.file"]'); if (f) { await f.click(); await p.waitForTimeout(300); } }],
+  ['settings', '#/frontdesk/board', async (p) => { await p.click('[data-testid="topbar.settings"]'); await p.waitForTimeout(250); }],
+  ['chairs ready', '#/hygienist/chairs', async (p) => { const r = await p.$('[data-testid^="chairs.card."][data-testid$=".ready"]'); if (r) { await r.click(); await p.waitForTimeout(250); } }],
 ];
 
 const browser = await chromium.launch({ headless: true });
