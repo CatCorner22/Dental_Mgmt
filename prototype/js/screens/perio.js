@@ -358,8 +358,13 @@
     const pastEnd = !st.saved && st.cur >= st.path.length && idx === st.path.length - 1;
     const roving = active || (st.saved && idx === 0) || pastEnd ? '0' : '-1';
     const face = h('span', { class: cls.join(' ') }, v && v.depth != null ? String(v.depth) : '—');
-    if (st.prior[key] != null) face.append(h('span', { class: 'ghost', 'aria-hidden': 'true', style: 'color: var(--ink-2)', text: st.prior[key] }));
-    return h('td', { role: 'gridcell', class: 'pe-cell', tabindex: roving, testid: 'perio.grid.cell.' + key, 'aria-label': 'Tooth ' + t + ' site ' + s, 'aria-description': desc, title: desc,
+    // The ghosted prior depth is drawn by CSS from data-prior, so it is not part of the cell's text: the printed depth alone is
+    // what a voice user says and what the name leads with (WCAG 2.5.3); the description still carries 'prior N'.
+    if (st.prior[key] != null) face.dataset.prior = String(st.prior[key]);
+    /* The name leads with the printed depth when there is one, so what a voice user sees is what they say
+       (WCAG 2.5.3, axe label-content-name-mismatch); the tooth and site follow, and the rest is the description. */
+    const name = (v && v.depth != null ? v.depth + ' mm, ' : '') + 'Tooth ' + t + ' site ' + s;
+    return h('td', { role: 'gridcell', class: 'pe-cell', tabindex: roving, testid: 'perio.grid.cell.' + key, 'aria-label': name, 'aria-description': desc, title: desc,
       onClick: () => { if (st.saved) { openAmendGate(st, r); return; } if (idx < 0) return; st.cur = idx; st.padOpen = true; say(st, 'Cursor at ' + siteLabel(key) + (st.prior[key] != null ? ', prior ' + st.prior[key] + ' mm' : '')); rerender(r); } }, face);
   }
   const KEY_LEGEND = [['1–9', 'depth'], ['Space', 'bleeding'], ['S', 'suppuration'], ['⌫', 'undo'], ['→', 'not probed'], ['PgDn', 'next tooth']];

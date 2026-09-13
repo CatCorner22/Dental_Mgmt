@@ -566,8 +566,7 @@
       pageHead('Money Desk', 'Every row: the patient, the amount, one reason, one action.'),
       pinField(r),
       tabs(r, S),
-      h('div', { class: 'stack', role: 'tabpanel', 'aria-label': (TABS.find((t) => t[0] === st.tab) || [])[1] }, body, writeoffCard(r, S)),
-      h('p', { class: 'sr-only', 'aria-live': 'polite', text: st.announced }));
+      h('div', { class: 'stack', role: 'tabpanel', 'aria-label': (TABS.find((t) => t[0] === st.tab) || [])[1] }, body, writeoffCard(r, S)));   // #live is the one announcement channel (WCAG 4.1.3); no second live region here
     // Escape takes back a standing read-back, the way it closes a dialog: nothing is written either way.
     page.addEventListener('keydown', (ev) => {
       if (ev.key !== 'Escape') return;

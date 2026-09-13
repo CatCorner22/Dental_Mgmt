@@ -335,7 +335,7 @@
       const b = h('button', { type: 'button', class: 'btn quiet tooth' + (has ? ' has' : '') + (isTag ? ' enc-tagged' : ''), testid: 'enc.tooth.' + n,
         style: 'padding: 0;' + (has && !sel ? ' background: var(--style-soft);' : ''),
         'aria-pressed': sel ? 'true' : 'false',
-        onClick: () => { if (x.tooth !== n) { if (x.tooth && x.surfaces.length) x.prevTooth = { tooth: x.tooth, surfaces: x.surfaces }; x.tooth = n; x.surfaces = []; } rerender(r); } },
+        onClick: () => { if (x.tooth !== n) { if (x.tooth && x.surfaces.length) x.prevTooth = { tooth: x.tooth, surfaces: x.surfaces }; x.tooth = n; x.surfaces = []; } rerender(r); Proto.router.announce('Selected #' + n); } },
       h('span', { class: 'sr-only', text: 'Tooth ' }), String(n),
       has ? h('span', { class: 'sr-only', text: ', charted' }) : null,
       isTag ? h('span', { class: 'sr-only', text: ', tagged by hygienist' }) : null,
@@ -374,7 +374,7 @@
     const groupLabel = (id, text) => h('div', { class: 'small', id, style: 'font-weight: 600; color: var(--ink)', text });
     const sec = Proto.ui.section('Chart',
       wrap,
-      h('div', { class: 'activesite', id: 'enc-selected', 'aria-live': 'polite', text: sel }),
+      h('div', { class: 'activesite', id: 'enc-selected', text: sel }),   // #live announces the pick (below); a live region rebuilt on every repaint announced nothing (WCAG 4.1.3)
       x.prevTooth ? btn('Undo: go back to #' + x.prevTooth.tooth, { kind: 'quiet', testid: 'enc.tooth.undo', onClick: () => { const prev = x.prevTooth; x.prevTooth = null; x.tooth = prev.tooth; x.surfaces = prev.surfaces; rerender(r); focusFirst('enc.tooth.' + prev.tooth); Proto.router.announce('Back on #' + prev.tooth); } }) : null,
       x.tooth ? groupLabel('enc-surfaces-label', 'Surfaces for tooth #' + x.tooth) : null,
       x.tooth ? h('p', { class: 'small muted', text: 'Tap a dashed surface to confirm, again to remove' }) : null,
@@ -593,12 +593,13 @@
       // One summary for a failed press: role=alert, its own heading, a count, a rail in the error colour, and one
       // control per row that moves the keyboard to the thing that fixes it (CDS-ERR-summary-top).
       const open = x.killers.filter((k) => !isSent(k, enc)).length;
-      wrap.append(h('div', { class: 'stack', role: 'alert', 'aria-labelledby': 'enc-before-file', style: 'border-left: 6px solid var(--required-rail); border-radius: var(--radius); padding-left: var(--space-3)' },
+      // role=alert only on the paint that raises it: every later repaint of the page would otherwise announce it again (WCAG 4.1.3).
+      const announce = !x.summaryShown; x.summaryShown = true;
+      wrap.append(h('div', { class: 'stack enc-summary', role: announce ? 'alert' : 'group', 'aria-labelledby': 'enc-before-file', style: 'border-left: 6px solid var(--required-rail); border-radius: var(--radius); padding-left: var(--space-3)' },
         h('div', { class: 'row between' }, h('h2', { id: 'enc-before-file' }, warnMark(open ? 'required' : 'clear'), ' Before File'),
           h('span', { class: 'row' }, open ? chip('required', open + ' to fix') : chip('clear', 'Sent'), total > 3 ? h('span', { class: 'small muted', text: 'of ' + total }) : null)),
         h('div', { class: 'killer stack' }, ...x.killers.map((k, i) => killerRow(r, enc, x, k, i)))));
-    } else if (x.checked) wrap.append(h('div', { class: 'row' }, chip('clear', 'Nothing outstanding'), h('span', { class: 'small muted', text: 'File runs the same checks server-side' })));
-    else wrap.append(h('p', { class: 'small muted', text: 'Checks run when you press File' }));
+    } else { x.summaryShown = false; if (x.checked) wrap.append(h('div', { class: 'row' }, chip('clear', 'Nothing outstanding'), h('span', { class: 'small muted', text: 'File runs the same checks server-side' }))); else wrap.append(h('p', { class: 'small muted', text: 'Checks run when you press File' })); }
     const p = Proto.store.patient(enc.patientId); const ces = eventsOf(enc.id); const lastCe = ces[ces.length - 1];
     const priv = P().privacy;
     const site = lastCe && lastCe.tooth != null ? ' · #' + lastCe.tooth + ' ' + (lastCe.surfaces || []).join('') : '';

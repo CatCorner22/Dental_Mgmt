@@ -92,7 +92,11 @@
     // the same as the first and is still a second refusal — and `scope` (the pressing control's test id) tells the
     // same words raised by another control apart, so Keep, Tighten and Retire on one card each log their gate.
     const key = v.code + '|' + v.verb + '|' + (v.control || '') + '|' + (v.scope || '');
-    if (lastGate !== key || v.fresh) {
+    // A gate already standing on the page (the same key on a .refusal still in the document while the screen
+    // rebuilds) is not raised again: two gates standing side by side used to take turns being "the last gate"
+    // and were both read aloud on every repaint (WCAG 4.1.3). One that left and came back is raised again.
+    const standing = !!document.querySelector('.refusal[data-gatekey="' + key.replace(/"/g, '') + '"]');
+    if (v.fresh || (lastGate !== key && !standing)) {
       lastGate = key;
       Proto.events.refusal(v.code, v.verb, v.control);
       Proto.router.announce(v.verb);                    // one verb line: the control label is not read as a second sentence
@@ -100,7 +104,7 @@
     // Two gates can stand on one page. Each keeps its own contract ids: renaming every earlier gate to
     // refusal.prior.* left the older of two card gates with no refusal.control. Only a dialog shadows the gates
     // beneath it, and it gives them back when it closes (see dialog()).
-    const el = h('div', { class: 'refusal ' + sev, role: 'group', 'aria-labelledby': id, dataset: { code: v.code, severity: sev } },
+    const el = h('div', { class: 'refusal ' + sev, role: 'group', 'aria-labelledby': id, dataset: { code: v.code, severity: sev, gatekey: key.replace(/"/g, '') } },
       h('span', { class: 'glyph', 'aria-hidden': 'true', text: GLYPH[sev] || '▲' }),   // severity three ways: glyph, word, fill
       h('span', { class: 'sevword sr-only', text: sev === 'stop' ? 'Stop' : sev === 'required' ? 'Required' : sev === 'review' ? 'Review' : sev === 'clear' ? 'Clear' : 'Note' }),
       h('span', { class: 'verb', id, testid: 'refusal.verb', text: v.verb }),

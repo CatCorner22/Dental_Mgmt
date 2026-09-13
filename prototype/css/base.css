@@ -27,7 +27,8 @@ button:focus-visible, [role="button"]:focus-visible, input:focus-visible, select
 
 .topbar { display: flex; align-items: center; gap: var(--gap); padding: var(--space-2) var(--space-3); background: var(--surface); border-bottom: 1px solid var(--line); min-height: 60px; position: sticky; top: 0; z-index: 20; flex-wrap: wrap; }
 .andon:empty { display: none; }
-.andon { display: flex; align-items: center; gap: var(--gap); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); background: var(--surface-2); min-height: 52px; }
+.andon { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); background: var(--surface-2); min-height: 52px; }
+.andon .grow { flex: 1 1 12rem; min-width: 0; }  /* the sentence takes its own row on a narrow phone instead of a zero-width column (WCAG 1.4.10) */
 .shell { display: flex; flex: 1; min-height: 0; }
 .rail { width: 320px; flex: 0 0 320px; border-right: 1px solid var(--line); background: var(--surface); padding: var(--space-3); overflow: auto; display: flex; flex-direction: column; gap: var(--space-3); }
 .canvas { flex: 1; min-width: 0; padding: var(--space-4); overflow: auto; }

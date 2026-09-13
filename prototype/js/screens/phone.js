@@ -202,7 +202,7 @@
     let res;
     try { p.persona = 'biller'; res = Proto.store.requestWriteoff(x.pid, x.cents, x.reason, { pin: me().pin || null }); }
     finally { p.persona = prev; }
-    if (res && res.held) { s.simNote = 'Sam (biller) tapped Post on the ' + simWords(x) + '; it is waiting on you as request ' + res.requestId + '.'; say('Request ' + res.requestId + ' is waiting for you'); }
+    if (res && res.held) { s.simNote = 'Sam (biller) tapped Post on the ' + simWords(x) + '; it is waiting on ' + (iAmEligible() ? 'you' : 'an approver') + ' as request ' + res.requestId + '.'; say(s.simNote); }   // the announcement is the printed sentence, and it says who it waits on (WCAG 4.1.3)
     else if (res && res.ok) { s.simNote = 'Below the threshold: the write-off posted without a second approver.'; say(s.simNote); }
     else { s.simNote = null; s.simGate = Object.assign({ fresh: true }, res, { onControl: res.code === 'outage' ? () => Proto.ui.support() : () => { st().simGate = null; rerender(r, 'phone.simulate'); } }); rerender(r, 'refusal.control'); return; }
     rerender(r, 'phone.simulate');
@@ -291,7 +291,7 @@
     const s = a.status === 'approved' ? ['clear', 'Approved'] : ['required', 'Sent back'];
     return h('article', { class: 'card flat ph-decided', 'aria-label': 'Decided request ' + a.id },
       h('div', { class: 'ph-head' }, chip(s[0], s[1]), h('span', { class: 'ph-amount small', text: money(a.postedCents != null ? a.postedCents : a.amountCents) }), h('span', { class: 'small muted grow', text: a.id })),
-      done ? h('p', { class: 'ph-done', role: 'status', tabindex: '-1', text: done.text }) : null,
+      done ? h('p', { class: 'ph-done', tabindex: '-1', text: done.text }) : null,
       // A gate raised against a request that was decided under this approver's hands renders here, on the row it names.
       gated ? refusal(gated) : null,
       h('p', { class: 'small muted', text: cardSentence(a) + (a.decidedBy ? ' · ' + s[1] + ' · ' + a.decidedBy + ' at ' + time(a.decidedAt) : '') }),
@@ -323,7 +323,7 @@
     const decided = s.approvals.filter((a) => a.status !== 'pending');
     const root = h('div', { class: 'phone ph-page' });
     root.append(pageHead('Approvals', 'Signed in as ' + who.name + (iAmEligible() ? ' · eligible second approver' : ' · not an approver')));
-    if (cards.notice) root.append(h('p', { class: 'small ph-notice', role: 'status', tabindex: '-1', text: cards.notice }));
+    if (cards.notice) root.append(h('p', { class: 'small ph-notice', tabindex: '-1', text: cards.notice }));
     if (pending.length) {
       root.append(h('p', { class: 'small muted', text: pending.length + ' waiting · one decision per card' }));
       // The rule that holds every card, said once for the screen rather than copied onto each card.
@@ -349,7 +349,7 @@
       // to a second line at 1024 and 1280 (CDS-BTN-text-bold-body, CLT-label-words).
       btn('Simulate a request', { testid: 'phone.simulate', kind: cards.simGate ? 'held' : 'reversible', ariaLabel: 'Simulate a request for the ' + simWords(sim), onClick: () => simulate(r) }),
       cards.simGate ? refusal(cards.simGate) : null,
-      cards.simNote ? h('p', { class: 'small', role: 'status', text: cards.simNote }) : null));
+      cards.simNote ? h('p', { class: 'small', text: cards.simNote }) : null));
     if (cards.simGate) cards.simGate.fresh = false;
     Proto.screens.shell.mount(root);
     attachKeys();

@@ -88,6 +88,7 @@ textarea.input { padding: var(--space-2) var(--space-3); min-height: 88px; resiz
 .perio td { padding: 0; }
 .psite { width: var(--target); height: var(--target); border: 2px solid var(--line-strong); border-radius: var(--radius); background: var(--surface); font-variant-numeric: tabular-nums; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; position: relative; color: var(--ink); }
 .psite .ghost { position: absolute; top: 1px; right: 4px; font-size: var(--fs-1); color: var(--ink-3); font-weight: var(--weight-regular); }
+.psite[data-prior]::after { content: attr(data-prior); position: absolute; top: 1px; right: 4px; font-size: var(--fs-1); color: var(--ink-2); font-weight: var(--weight-regular); }  /* the prior depth, drawn, not text */
 .psite.active { border-color: var(--focus); background: var(--selected); box-shadow: 0 0 0 2px var(--focus); }
 .psite.bleed { border-color: var(--stop-rail); }
 .psite.bleed::after { content: "●"; position: absolute; bottom: 1px; right: 4px; font-size: var(--fs-1); color: var(--stop-rail); }
@@ -267,10 +268,10 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 /* On a phone the pinned gate stood 459px tall at 420px and 527px at 320px once the filing summary was
    raised inside it, so File and the summary sat over the procedure strip and the temporality segment
    (WCAG 2.5.8; axe target-size). While the gate is compact it stays pinned, so File is in view at every
-   stage (A-storm-enc-17), read-back row included; the moment the filing summary (role=alert) stands in it, it flows after the note instead,
+   stage (A-storm-enc-17), read-back row included; the moment the filing summary (.enc-summary) stands in it, it flows after the note instead,
    and nothing can then stand over a target. Below 360px it always flows. */
 @media (max-width: 639px) {
-  .enc-gate-col:has([role="alert"]) { position: static; max-height: none; overflow: visible; border-top: 0; }
+  .enc-gate-col:has(.enc-summary) { position: static; max-height: none; overflow: visible; border-top: 0; }
 }
 @media (max-width: 359px) {
   .enc-gate-col { position: static; max-height: none; overflow: visible; border-top: 0; }
@@ -423,9 +424,10 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 /* ---- module: phone (js/screens/phone.js) — appended, never edits rules above ---- */
 .ph-page .page-head h1 { font-size: var(--fs-5); }
 .ph-card { display: flex; flex-direction: column; gap: var(--space-3); }
-.ph-head { display: flex; align-items: center; gap: var(--gap); }
+.ph-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap); }
+.ph-head > .grow { flex: 1 1 10rem; min-width: 0; }  /* the amount column asks for 10rem and drops below the initials rather than clipping at 320px */  /* the amount wraps under the chip at 320px instead of overflowing (WCAG 1.4.10) */
 .ph-initials { display: inline-flex; align-items: center; justify-content: center; min-width: var(--target); min-height: var(--target); border-radius: 50%; background: var(--surface-2); border: 1px solid var(--line-strong); color: var(--ink); font-weight: var(--weight-bold); letter-spacing: .04em; }
-.ph-amount { font-size: var(--fs-5); font-weight: var(--weight-bold); font-variant-numeric: tabular-nums; color: var(--ink); }
+.ph-amount { font-size: var(--fs-5); font-weight: var(--weight-bold); font-variant-numeric: tabular-nums; color: var(--ink); flex: 0 0 auto; max-width: 100%; }  /* keeps its own width in a wrapping row, never clipped (WCAG 1.4.10) */
 .ph-amount.small { font-size: var(--fs-3); }
 .ph-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2) var(--gap); }
 .ph-kv { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
