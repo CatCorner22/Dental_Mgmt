@@ -162,7 +162,12 @@
   const pinLock = { misses: 0, until: 0 };
   const PIN_LOCK_MS = 5 * 60 * 1000;
   const LOCK_VERB = 'Wait five minutes — device locked';
-  const NO_MATCH = { verb: 'Retype the PIN — no match', control: 'Clear and retype', why: 'Six digits at most. Three misses lock this device for five minutes.' };
+  /* One sentence in front of the first digit, on this pad and on the phone step-up: how long the PIN is and
+     what three misses cost. The pad used to say only "Enter the other person's PIN" and let the length and the
+     lock be discovered through a refusal that said "Six digits at most" only after the miss
+     (INT-instructions-before-input, WCAG 3.3.2). */
+  const PIN_RULE = 'Four to six digits. Three misses lock this device for five minutes.';
+  const NO_MATCH = { verb: 'Retype the PIN — no match', control: 'Clear and retype', why: PIN_RULE };
   const lockedOut = () => ({ ok: false, code: 'pin_locked', verb: LOCK_VERB, control: 'Close', why: 'Three PINs missed in a row. This device takes no PIN for five minutes.' });
   const localLock = () => typeof Proto.store.verifyPin !== 'function' && pinLock.until > Date.now();
   function verifyPin(typed) {
@@ -180,31 +185,66 @@
   function openPinPad(r, opts) {
     const P = window.__proto; const S = Proto.store.get(); opts = opts || {};
     let digits = '';
+    let shown = false;          // the show-digits assist: the PIN is otherwise a pure memory test with nothing to read back
+    let lockTick = null;
     // The keyboard lands on the digit display, not on a key: typed digits fill it and Enter there is Go, while Enter
     // on a focused key presses that key (one grammar with the phone step-up, whose landing key is its display).
-    const dots = h('div', { class: 'pindots', testid: 'pin.display', tabindex: '0', role: 'textbox', 'aria-readonly': 'true', 'aria-label': 'PIN typed so far; Enter is Go', 'aria-live': 'polite', text: '' });
+    // It carries .input because it is the box a person types into: with no border on a transparent ground there was
+    // nothing on screen to type into, and an aria-label was its only name (WCAG 3.3.2, 1.4.11).
+    const dots = h('div', { class: 'pindots input', testid: 'pin.display', tabindex: '0', role: 'textbox', 'aria-readonly': 'true', 'aria-live': 'polite', text: '' });
+    const paint = () => { dots.textContent = shown ? digits : '•'.repeat(digits.length); };
+    // The label is visible and above the box, the rule is stated before the first digit, and a refused press
+    // writes its message between the two, opened by a hidden "Error:" (ui.js field/setFieldError).
+    const field = Proto.ui.field('PIN', dots, { hint: PIN_RULE + ' Enter here is Go.', required: true });
+    const lab = field.querySelector('label'); lab.id = 'pin-label';
+    dots.setAttribute('aria-labelledby', 'pin-label');   // a div is not labelable: it is named the way a widget is named
+    const showSlot = h('div', { class: 'pin-show' });
+    function paintShow() {
+      showSlot.replaceChildren(btn('Show digits', { testid: 'pin.show', pressed: shown, class: 'compact', ariaLabel: 'Show digits: read the PIN back as numbers instead of dots', onClick: toggleShow }));
+    }
+    function toggleShow() { shown = !shown; paintShow(); paint(); const b = showSlot.querySelector('button'); if (b) b.focus(); }
+    paintShow(); paint(); field.append(showSlot);
     // The finish path carries the instruction alone. What switching costs is an explanation, so it sits
     // behind a disclosure instead of standing in front of the first digit.
-    const status = h('p', { class: 'hint', text: 'Enter the other person\'s PIN' });
     const policy = h('details', null, h('summary', { class: 'small', testid: 'pin.why' }, 'Why this signs you out'),
       // The sentence says what the product does: drafts are kept per author (perio.js stateFor, encounter.js state), not wiped.
       h('p', { class: 'small muted', text: P.device === 'desk' ? 'This desk is not shared, so switching signs you out and in as the other person.' : 'Their session opens on this page and yours is revoked; your unsaved draft waits under your PIN.' }));
     let close;
     const refusalSlot = h('div', { class: 'pin-refusal' });
     // Rebuilding the slot removes the control that may hold the keyboard; it lands on the new gate's control, never body.
-    function showRefusal(v) { refusalSlot.replaceChildren(Proto.ui.refusal(v)); if (document.activeElement === document.body) { const k = refusalSlot.querySelector('[data-testid="refusal.control"]') || dots; k.focus(); } }
-    // The store's refusal, the pad's way out: retype puts the keyboard on the first key, a lock or an outage
-    // closes the pad (the outage gate's control is the support line, so it says the number the Andon's says).
+    function showRefusal(v, extra) { refusalSlot.replaceChildren(...[Proto.ui.refusal(v), extra].filter(Boolean)); if (document.activeElement === document.body) { const k = refusalSlot.querySelector('[data-testid="refusal.control"]') || dots; k.focus(); } }
+    /* The five-minute device lock is a security limit WCAG 2.2.1 exempts, but a wait with no clock is still a
+       wait nobody can plan around: the gate prints the time left and counts it down while the pad is open. */
+    function lockLeft() {
+      const until = (((Proto.store.get() || {}).pinLock || {}).until) || pinLock.until || 0;   // the store's lock, or this file's fallback
+      const el = h('p', { class: 'hint' });
+      const write = () => {
+        const ms = until - Date.now();
+        if (ms <= 0) { el.textContent = 'The lock has ended — enter the PIN again.'; clearInterval(lockTick); lockTick = null; return; }
+        const s = Math.ceil(ms / 1000);
+        el.textContent = 'Time left on this device: ' + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0') + '.';
+      };
+      write(); clearInterval(lockTick); lockTick = setInterval(write, 1000);
+      return el;
+    }
+    // The store's refusal, the pad's way out: the way out clears the digits and puts the keyboard back on the
+    // display, a lock or an outage closes the pad (the outage gate's control is the support line, so it says
+    // the number the Andon's says).
     function showStoreRefusal(res) {
-      const retype = () => dots.focus();
+      const retype = () => { digits = ''; paint(); field._setError(null); dots.focus(); };
       const out = res.code === 'pin_no_match' ? retype : res.code === 'outage' ? () => { close(); supportLine(); } : () => close();
-      showRefusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: out, severity: res.code === 'pin_no_match' ? 'required' : 'stop', fresh: res.code === 'pin_no_match' || res.code === 'pin_locked' });
+      showRefusal({ code: res.code, verb: res.verb, control: res.control, why: res.why, onControl: out, severity: res.code === 'pin_no_match' ? 'required' : 'stop', fresh: res.code === 'pin_no_match' || res.code === 'pin_locked' },
+        res.code === 'pin_locked' ? lockLeft() : null);
     }
     function submit() {
-      const typed = digits; digits = ''; dots.textContent = '';
-      // An empty Go is not a miss: it is refused here without reaching the device's count.
-      const res = typed ? verifyPin(typed) : Object.assign({ ok: false, code: 'pin_no_match' }, NO_MATCH);
+      const typed = digits;
+      // An empty Go is not a miss: it is answered at the field, without reaching the device's count.
+      if (!typed) { field._setError('Enter the PIN before you press Go.'); dots.focus(); return; }
+      // The digits stay on screen through the verdict: a refusal that wipes the field makes the person start
+      // from nothing and hides what they actually typed (INT-keep-data-and-gate-on-press).
+      const res = verifyPin(typed);
       if (!res.ok) { showStoreRefusal(res); return; }
+      field._setError(null); digits = ''; paint();
       const who = res.user;
       const persona = Object.entries(S.personaUser).find(([, uid]) => uid === who.id);   // the day-pass holder is the temp persona's user
       if (!persona) {
@@ -222,7 +262,19 @@
       location.hash = '#/' + p + '/' + (r.route === 'signin' ? Proto.router.HOME[p] : r.route) + (r.id ? '/' + r.id : '');
       Proto.router.announce('Now charting as ' + who.name);
     }
-    const pad = h('div', { class: 'pinpad' }, ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => btn(String(d), { testid: 'pin.key.' + d, onClick: () => { if (digits.length < 6) { digits += d; dots.textContent = '•'.repeat(digits.length); } } })), btn('⌫', { testid: 'pin.backspace', ariaLabel: 'Backspace', onClick: () => { digits = digits.slice(0, -1); dots.textContent = '•'.repeat(digits.length); } }), btn('0', { testid: 'pin.key.0', onClick: () => { if (digits.length < 6) { digits += '0'; dots.textContent = '•'.repeat(digits.length); } } }), btn('Go', { testid: 'pin.submit', kind: 'irreversible', onClick: submit }));
+    const type = (d) => { if (digits.length < 6) { digits += d; paint(); } };
+    // Twelve keys with nothing naming them was a group of twelve anonymous controls (CLT-common-region); the
+    // heading above them is visible, sits in the same bounded region, and is what the group is labelled by.
+    const padHead = h('h3', { class: 'small', id: 'pin-pad-label', text: 'Keypad' });
+    const pad = h('div', { class: 'pinpad', role: 'group', 'aria-labelledby': 'pin-pad-label' },
+      ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => btn(String(d), { testid: 'pin.key.' + d, onClick: () => type(String(d)) })),
+      btn('⌫', { testid: 'pin.backspace', ariaLabel: 'Backspace', onClick: () => { digits = digits.slice(0, -1); paint(); } }),
+      btn('0', { testid: 'pin.key.0', onClick: () => type('0') }));
+    // Go and Cancel stand side by side at equal size, as they do on the phone step-up: one pad, one grammar,
+    // and the irreversible half never alone in its row (CLT-neutral-irreversible, WCAG 3.2.4).
+    const decide = h('div', { class: 'btnrow' },
+      btn('Cancel', { testid: 'pin.cancel', onClick: () => close() }),
+      btn('Go', { testid: 'pin.submit', kind: 'irreversible', ariaLabel: 'Go: sign in as the person whose PIN this is', onClick: submit }));
     /* One PIN pad, one grammar. The phone step-up took typed digits, Backspace and Enter while this pad took
        clicks only, so the same four keystrokes filled one pad and left the other empty — and Go then refused
        a PIN nobody had failed to type. The listener lives only while the pad is open. Enter on a focused control
@@ -231,14 +283,15 @@
     const onPadKey = (ev) => {
       const t = ev.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return;
       const top = Proto.ui.topDialog(); if (!top || !top.contains(pad)) return;   // the top dialog owns the keyboard
-      if (/^[0-9]$/.test(ev.key)) { ev.preventDefault(); if (digits.length < 6) { digits += ev.key; dots.textContent = '•'.repeat(digits.length); } }
-      else if (ev.key === 'Backspace') { ev.preventDefault(); digits = digits.slice(0, -1); dots.textContent = '•'.repeat(digits.length); }
+      if (/^[0-9]$/.test(ev.key)) { ev.preventDefault(); type(ev.key); }
+      else if (ev.key === 'Backspace') { ev.preventDefault(); digits = digits.slice(0, -1); paint(); }
       else if (ev.key === 'Enter' && !(t && t.closest && t.closest('button, summary, a, [role="button"]'))) { ev.preventDefault(); submit(); }
     };
     document.addEventListener('keydown', onPadKey, true);
     // Escape, the backdrop and a route change close the dialog without passing through Cancel, so the listener
     // leaves with the dialog itself: a wrapper around close() left it alive and typed digits kept switching authors.
-    close = Proto.ui.dialog(h('div', { class: 'stack' }, h('h2', { text: 'Who is charting?' }), status, refusalSlot, dots, pad, policy, btn('Cancel', { testid: 'pin.cancel', onClick: () => close() })), { label: 'Switch author', focus: '[data-testid="pin.display"]', onClose: () => document.removeEventListener('keydown', onPadKey, true) });
+    close = Proto.ui.dialog(h('div', { class: 'stack' }, h('h2', { text: 'Who is charting?' }), refusalSlot, field, padHead, pad, policy, decide),
+      { label: 'Switch author', focus: '[data-testid="pin.display"]', onClose: () => { document.removeEventListener('keydown', onPadKey, true); clearInterval(lockTick); lockTick = null; } });
     // A locked device says so before the first digit (the fallback's lock; the store's shows on the first Go).
     if (localLock()) showStoreRefusal(lockedOut());
   }
@@ -277,7 +330,8 @@
 
   Proto.screens.shell = {
     render(r) { renderTopbar(r); renderAndon(r); renderRail1(r); document.getElementById('rail').hidden = !Proto.screens.rail || !Proto.screens.rail.isOpen(); },
-    mount, canvas, openPinPad, refreshAndon, refreshRail1: renderRail1,
+    // PIN_RULE is shared with the phone step-up: the same component states the same rule in the same words.
+    mount, canvas, openPinPad, refreshAndon, refreshRail1: renderRail1, PIN_RULE,
   };
 
   // A hash with no persona in it still has a way home: the persona signed in, or sign-in itself.

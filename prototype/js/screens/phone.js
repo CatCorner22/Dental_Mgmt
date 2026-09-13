@@ -23,7 +23,8 @@
 
   let lastRoute = null;
   let keysOn = false;
-  let pad = null;                 // step-up state while the dialog is open: {reqId, digits, dots, hint, close, store}
+  let left = false;               // the screen was navigated away from: its confirmations do not outlive the route
+  let pad = null;                 // step-up state while the dialog is open: {reqId, digits, dots, close, store}
   /* Card state is per user, never global: the gate one approver answered and the line they read after deciding
      belong to them, not to whoever opens the card next on a shared phone. It is keyed to the store instance, so a
      rebuilt store (reset) starts every card clean; a disclosed name is read from the store's own rows, not kept here. */
@@ -77,14 +78,28 @@
   /* ---- step-up: 'Confirm your PIN' (the store matches the digits against the approver's own PIN) ---- */
   function openStepup(r, a) {
     // The display is where the keyboard lands and where Enter is Approve, as pin.display is Go on the author pad.
-    const dots = h('div', { class: 'pindots', testid: 'phone.stepup.display', tabindex: '0', role: 'textbox', 'aria-readonly': 'true', 'aria-live': 'polite', 'aria-label': 'PIN typed so far; Enter is Approve', text: '' });
-    const hint = h('p', { class: 'hint ph-hint', text: 'Four to six digits.' });
-    const state = { reqId: a.id, digits: '', dots, hint, close: null, store: S() };
-    function paint() { dots.textContent = '•'.repeat(state.digits.length); }
+    // It carries .input because it is the box a person types into: with no border on a transparent ground there
+    // was nothing on screen to type into, and an aria-label was its only name (WCAG 3.3.2, 1.4.11).
+    let shown = false;
+    const dots = h('div', { class: 'pindots input', testid: 'phone.stepup.display', tabindex: '0', role: 'textbox', 'aria-readonly': 'true', 'aria-live': 'polite', text: '' });
+    // One pad, one grammar: the visible label above the box, the same length rule the author pad states, and a
+    // refused press answered between the label and the box (ui.js field/setFieldError, WCAG 3.2.4, 3.3.1).
+    const field = Proto.ui.field('PIN', dots, { hint: Proto.screens.shell.PIN_RULE + ' Enter here is Approve.', required: true });
+    const lab = field.querySelector('label'); lab.id = 'stepup-label';
+    dots.setAttribute('aria-labelledby', 'stepup-label');
+    const state = { reqId: a.id, digits: '', dots, close: null, store: S() };
+    function paint() { dots.textContent = shown ? state.digits : '•'.repeat(state.digits.length); }
+    const showSlot = h('div', { class: 'pin-show' });
+    function paintShow() {
+      showSlot.replaceChildren(btn('Show digits', { testid: 'phone.stepup.show', pressed: shown, class: 'compact', ariaLabel: 'Show digits: read the PIN back as numbers instead of dots', onClick: toggleShow }));
+    }
+    function toggleShow() { shown = !shown; paintShow(); paint(); const b = showSlot.querySelector('button'); if (b) b.focus(); }
+    paintShow(); field.append(showSlot);
     state.add = (d) => { if (state.digits.length < 6) { state.digits += d; paint(); } };
     state.back = () => { state.digits = state.digits.slice(0, -1); paint(); };
     state.submit = () => {
-      if (state.digits.length < 4) { hint.textContent = 'Enter at least four digits, then tap Approve.'; hint.classList.add('ph-hint-warn'); return; }
+      if (state.digits.length < 4) { field._setError('Enter at least four digits, then press Approve.'); dots.focus(); return; }
+      field._setError(null);
       state.done = true;
       // The store may have been rebuilt under the pad: then there is no request to decide, and the person is told so.
       if (state.store !== S() || !S().approvals.some((x) => x.id === a.id)) { state.close(); notice(r, a.id); return; }
@@ -100,17 +115,27 @@
       say('Approved ' + posted + '. Posted with your name as second approver.');
       rerender(r, '.ph-done');
     };
-    const keys = h('div', { class: 'pinpad', role: 'group', 'aria-label': 'PIN keypad' },
+    // Twelve keys named by an invisible aria-label were a group of twelve anonymous controls on screen; the
+    // heading above them is visible, sits in the same bounded region, and names the group (CLT-common-region).
+    const padHead = h('h3', { class: 'small', id: 'stepup-pad-label', text: 'Keypad' });
+    const keys = h('div', { class: 'pinpad', role: 'group', 'aria-labelledby': 'stepup-pad-label' },
       ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => btn(String(d), { testid: 'phone.stepup.' + d, onClick: () => state.add(String(d)) })),
       btn('⌫', { testid: 'phone.stepup.backspace', ariaLabel: 'Backspace', onClick: state.back }),
       btn('0', { testid: 'phone.stepup.0', onClick: () => state.add('0') }),
-      h('span', { class: 'ph-pad-spacer', 'aria-hidden': 'true' }),
-      btn('Approve', { testid: 'phone.stepup.submit', kind: 'irreversible', class: 'ph-submit', ariaLabel: 'Submit PIN and approve ' + money(a.amountCents), onClick: state.submit }));
+      h('span', { class: 'ph-pad-spacer', 'aria-hidden': 'true' }));
+    // Approve and Cancel stand side by side at equal size, as Go and Cancel do on the author pad: Approve used
+    // to span the keypad alone on its own row (CLT-neutral-irreversible, WCAG 3.2.4).
+    const decide = h('div', { class: 'btnrow' },
+      btn('Cancel', { testid: 'phone.stepup.cancel', kind: 'quiet', onClick: () => state.close() }),
+      btn('Approve', { testid: 'phone.stepup.submit', kind: 'irreversible', ariaLabel: 'Approve ' + money(a.amountCents) + ' with this PIN', onClick: state.submit }));
     const body = h('div', { class: 'stack ph-stepup' },
       h('h2', { text: 'Confirm your PIN' }),
-      h('p', { class: 'small muted', text: 'Approving ' + money(a.amountCents) + ' ' + (REASON_LABEL[a.reason] || a.reason) + ' write-off for ' + initials(pat(a.patientId).name) + ' · ' + pat(a.patientId).mrn + '. Your name is recorded as second approver.' }),
-      hint, dots, keys,
-      btn('Cancel', { testid: 'phone.stepup.cancel', kind: 'quiet', onClick: () => state.close() }));
+      // The warning before the money moves: a mark the eye reads at 28 px, and the consequence in the bold
+      // weight, so it survives grayscale and forced colours (CDS-WARNING-text-icon).
+      h('p', { class: 'ph-line' },
+        h('span', { class: 'glyph', 'aria-hidden': 'true', style: 'font-size: var(--fs-5); line-height: 1;', text: '▲' }),
+        h('span', { style: 'font-weight: var(--weight-bold);', text: 'This cannot be undone: ' + money(a.amountCents) + ' ' + (REASON_LABEL[a.reason] || a.reason).toLowerCase() + ' write-off for ' + initials(pat(a.patientId).name) + ' · ' + pat(a.patientId).mrn + ' posts with your name as second approver.' })),
+      field, padHead, keys, decide);
     // A pad closed over a rebuilt store (reset) confirmed nothing: the next render says so where focus can land.
     state.close = Proto.ui.dialog(body, { label: 'Confirm your PIN', focus: '[data-testid="phone.stepup.display"]', onClose: () => { if (pad === state) pad = null; if (!state.done && state.store !== S()) { const s = st(); s.notice = NOTICE(a.id); s.noticeFresh = true; } } });
     pad = state;
@@ -162,7 +187,8 @@
     // log row, so "Send back with one line" leaves a line behind and not just a name.
     const res = Proto.store.decideApproval(a.id, me().id, 'declined', true, reason);
     if (!res.ok) { s.refusal[a.id] = gate(r, a, res); rerender(r, 'refusal.control'); return; }
-    s.done[a.id] = { kind: 'declined', text: 'Sent back to ' + a.requestedBy + ': ' + reason, reason };
+    // The confirmation names the object, the completion and what happens next, in that order.
+    s.done[a.id] = { kind: 'declined', text: 'Sent back to ' + a.requestedBy + ': ' + reason + ' · they pick it up on the Money Desk; nothing posted', reason };
     s.declineOpen[a.id] = false;
     say('Sent back: ' + reason);
     rerender(r, '.ph-done');
@@ -183,6 +209,9 @@
   }
 
   /* ---- render pieces ---- */
+  /* A disclosure summary shrink-wraps its words so the focus ring hugs the label rather than running the width
+     of the card (CDS-DETAILS-disclosure); the shared floor keeps it 44 px tall. */
+  const SHRINK = 'display: inline-flex; width: fit-content; max-width: 100%;';
   function kv(label, value, extraClass) { return h('div', { class: 'ph-kv' + (extraClass ? ' ' + extraClass : '') }, h('span', { class: 'ph-k', text: label }), h('span', { class: 'ph-v', text: value })); }
 
   function requestCard(r, a) {
@@ -222,23 +251,38 @@
     if (s.declineOpen[a.id]) {
       // Validation is silent until blur; the hint updates in place so a blur never re-renders the
       // card under a tap that is landing on Approve or Send back.
-      const hintId = 'ph-reason-hint-' + a.id;
-      const hintEl = h('p', { class: 'hint' + (s.declineHint[a.id] ? ' ph-hint-warn' : ''), id: hintId, text: s.declineHint[a.id] || 'One line for the biller; it rides with the request.' });
-      const input = h('input', { class: 'input', type: 'text', maxlength: '80', id: 'ph-reason-' + a.id, testid: 'phone.request.' + a.id + '.reason', placeholder: 'e.g. appeal first', value: s.declineReason[a.id] || '', 'aria-describedby': hintId,
+      const input = h('input', { class: 'input', type: 'text', maxlength: '80', id: 'ph-reason-' + a.id, testid: 'phone.request.' + a.id + '.reason', placeholder: 'e.g. appeal first', value: s.declineReason[a.id] || '',
         onInput: (ev) => { st().declineReason[a.id] = ev.target.value; },
-        onBlur: (ev) => { if (!ev.target.value.trim()) { st().declineHint[a.id] = 'One line for the biller: what should happen first?'; hintEl.textContent = st().declineHint[a.id]; hintEl.classList.add('ph-hint-warn'); } },
-        onKeydown: (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); onDecline(r, a); } } });
-      card.append(h('div', { class: 'field' }, h('label', { for: 'ph-reason-' + a.id, text: 'Send back with one line' }), input, hintEl));
+        // Enter opens the read-back the button opens; it never writes the decision straight through.
+        onKeydown: (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); const b = card.querySelector('[data-testid="phone.request.' + a.id + '.decline"]'); if (b) b.click(); } } });
+      // The requirement and what the line is for are stated before anyone types, and a refused press answers
+      // between the label and the box, opened by a hidden "Error:" (ui.js field, INT-instructions-before-input).
+      const wrap = Proto.ui.field('Send back with one line', input, { hint: 'One line for the biller; it rides with the request.', required: true });
+      if (s.declineHint[a.id]) wrap._setError(s.declineHint[a.id]);
+      card.append(wrap);
     }
     // While a gate stands the primary carries the Held identity (CONTRACTS §6): it never dims, and the
     // word Held is the button's whole label; what is held stays in its accessible name.
+    /* Send back is a decision the store writes and nothing on this screen takes back, so the press that writes
+       it wears the irreversible identity and asks once more first (INT-irreversible-identity). The first press
+       only opens the reason line — it writes nothing, so it stays reversible. */
     card.append(h('div', { class: 'ph-actions' },
       gated
         ? btn('Approve ' + money(a.amountCents) + ' write-off', { testid: 'phone.request.' + a.id + '.approve', kind: 'held', onClick: () => (stale(s.refusal[a.id]) ? onApprove(r, a) : focusOn('refusal.control')) })
         : btn('Approve', { testid: 'phone.request.' + a.id + '.approve', kind: 'irreversible', ariaLabel: 'Approve ' + money(a.amountCents) + ' write-off; you will confirm your PIN', onClick: () => onApprove(r, a) }),
-      btn('Send back', { testid: 'phone.request.' + a.id + '.decline', kind: 'reversible', ariaLabel: s.declineOpen[a.id] ? 'Send back with the reason above' : 'Send back with a one-line reason', onClick: () => onDecline(r, a) })));
-    card.append(h('details', { class: 'ph-why' }, h('summary', { testid: 'phone.request.' + a.id + '.why', text: 'Why am I seeing this?' }),
-      h('p', { class: 'small muted', text: 'Write-offs at or above ' + money(S().tenant.dualReleaseThresholdCents) + ', and any refund, adjustment, or write-off outside business hours, are held for a distinct second approver. The card carries the frozen evaluation so you never open the ledger. Requester and approver are two attributed identities; the requester’s session is never elevated.' })));
+      s.declineOpen[a.id]
+        ? Proto.ui.confirmable('Send back', {
+          testid: 'phone.request.' + a.id + '.decline',
+          ariaLabel: 'Send back with the reason above',
+          readback: 'This cannot be undone: the request goes back to ' + a.requestedBy + ' with your line.',
+          confirmLabel: 'Send back',
+          onConfirm: () => onDecline(r, a),
+        })
+        : btn('Send back', { testid: 'phone.request.' + a.id + '.decline', kind: 'reversible', ariaLabel: 'Send back with a one-line reason', onClick: () => onDecline(r, a) })));
+    // Why this one is held, not the policy that holds them all: the policy paragraph stood verbatim on every
+    // card, so a second card said nothing a first card had not (CLT-redundancy). It now stands once, above.
+    card.append(h('details', { class: 'ph-why' }, h('summary', { testid: 'phone.request.' + a.id + '.why', style: SHRINK, text: 'Why am I seeing this?' }),
+      h('p', { class: 'small muted', text: heldForHours(a) ? 'Asked at ' + time(at) + ', after the location closed, so it waits for a second approver.' : money(a.amountCents) + ' is at or above the ' + money(S().tenant.dualReleaseThresholdCents) + ' dual-release line, so it waits for a second approver.' })));
     return card;
   }
 
@@ -270,6 +314,10 @@
     // checkout, encounter and ledger, not the Approvals screen wearing someone else's id.
     if (r && r.id && r.id !== 'approvals') { renderNotFound(r); return; }
     const s = S(); const who = me(); const cards = st();
+    /* A confirmation is about the press that just happened, so it does not outlive the route. "Approved $410.00
+       · posted…" used to stand on the decided row after a trip to Daily Close and back, where the record is the
+       row itself and the line reads as a second, newer event (INT-success-says-what-next). */
+    if (left) { left = false; for (const u of Object.keys(byUser)) { byUser[u].done = {}; byUser[u].notice = null; byUser[u].noticeFresh = false; } }
     if (pad && pad.store !== s) { const gone = pad; pad = null; gone.close(); }   // its onClose leaves the notice
     const pending = Proto.store.pendingApprovalsFor();
     const decided = s.approvals.filter((a) => a.status !== 'pending');
@@ -277,7 +325,10 @@
     root.append(pageHead('Approvals', 'Signed in as ' + who.name + (iAmEligible() ? ' · eligible second approver' : ' · not an approver')));
     if (cards.notice) root.append(h('p', { class: 'small ph-notice', role: 'status', tabindex: '-1', text: cards.notice }));
     if (pending.length) {
-      root.append(h('p', { class: 'small muted', text: pending.length + ' waiting. One decision per card; there is no Approve all.' }));
+      root.append(h('p', { class: 'small muted', text: pending.length + ' waiting · one decision per card' }));
+      // The rule that holds every card, said once for the screen rather than copied onto each card.
+      root.append(h('details', { class: 'ph-why' }, h('summary', { testid: 'phone.policy.why', style: SHRINK, text: 'Why these are held' }),
+        h('p', { class: 'small muted', text: 'Write-offs at or above ' + money(s.tenant.dualReleaseThresholdCents) + ', and anything outside business hours, wait for a second approver who did not ask for it. The card carries the frozen evaluation, so you never open the ledger. There is no Approve all.' })));
       pending.forEach((a) => root.append(requestCard(r, a)));
     } else {
       // The count is read from the decided rows, not printed as a figure a person would have to trust.
@@ -292,9 +343,11 @@
     const sim = nextSim();
     root.append(h('section', { class: 'card flat stack ph-sim', 'aria-label': 'Simulate a request' },
       h('h2', { class: 'ph-h2', text: 'Test the flow alone' }),
-      h('p', { class: 'small muted', text: 'Plays the biller’s side of the request so you can approve from here.' }),
+      h('p', { class: 'small muted', text: 'Plays the biller’s side so you can approve from here.' }),
       // While the sim's gate stands the control carries the Held identity; its press re-runs the sim, which re-evaluates the gate.
-      btn('Simulate: the biller requests the ' + simWords(sim), { testid: 'phone.simulate', kind: cards.simGate ? 'held' : 'reversible', class: 'ph-wrap', onClick: () => simulate(r) }),
+      // The label is three words and what it simulates rides in the accessible name: the eight-word label wrapped
+      // to a second line at 1024 and 1280 (CDS-BTN-text-bold-body, CLT-label-words).
+      btn('Simulate a request', { testid: 'phone.simulate', kind: cards.simGate ? 'held' : 'reversible', ariaLabel: 'Simulate a request for the ' + simWords(sim), onClick: () => simulate(r) }),
       cards.simGate ? refusal(cards.simGate) : null,
       cards.simNote ? h('p', { class: 'small', role: 'status', text: cards.simNote }) : null));
     if (cards.simGate) cards.simGate.fresh = false;
@@ -317,7 +370,7 @@
   }
   function attachKeys() { if (!keysOn) { document.addEventListener('keydown', onKey); keysOn = true; } }
   function detachKeys() { if (keysOn) { document.removeEventListener('keydown', onKey); keysOn = false; } }
-  window.addEventListener('hashchange', () => { if (Proto.router.current().route !== 'phone') { detachKeys(); if (pad) pad.close(); } });
+  window.addEventListener('hashchange', () => { if (Proto.router.current().route !== 'phone') { left = true; detachKeys(); if (pad) pad.close(); } });
 
   Proto.screens.phone = { render, simulate, approve: onApprove, decline: onDecline, state: () => st() };
   Proto.router.on('phone', (r) => Proto.screens.phone.render(r));
