@@ -13,11 +13,12 @@ export const FLOWS = [
     ],
   },
   {
-    id: 'perio', name: 'Perio, full mouth, one operator', budgetTaps: 2, budgetKeystrokes: 200, persona: 'hygienist', start: '#/hygienist/chairs',
+    id: 'perio', name: 'Perio, full mouth, one operator', budgetTaps: 3, budgetKeystrokes: 200, persona: 'hygienist', start: '#/hygienist/chairs',
     steps: [
       { press: 'chairs.card.a-1042.perio' },
       { keys: '323'.repeat(56) }, // 168 digits over 28 present teeth × 6 sites
       { press: 'perio.save' },
+      { press: 'perio.save.confirm' },   // the read-back: Save exam writes on the second press (docs/16, WCAG 3.3.4)
       { expect: (s) => (s.perioExams.some((e) => e.encounterId === 'enc-9001' && e.probed >= 160) || 'perio exam not saved with ≥160 sites') },
     ],
   },

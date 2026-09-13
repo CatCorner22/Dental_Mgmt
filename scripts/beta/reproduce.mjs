@@ -76,7 +76,7 @@ const CHECKS = {
     const { c, p } = await ctx(b); await go(p, '#/hygienist/perio/enc-9001');
     await click(p, 'perio.screening');
     for (const k of ['1', '2', '3', '2', '1', '0']) { await p.keyboard.press(k); await p.waitForTimeout(20); }
-    await click(p, 'perio.save'); await p.waitForTimeout(200);
+    await commit(p, 'perio.save'); await p.waitForTimeout(200);
     const note = await p.evaluate(() => (window.__proto.state().notes['enc-9001'] || {}).perioSummary || null);
     rec('R4', 'Saving the screening lane derives the hygiene note as "0 sites probed, deepest 0 mm, bleeding at 0 sites"', 'docs/13 feature 6: Save exam derives the note from what was recorded',
       !!note && /0 sites probed/.test(note), { perioSummary: note });
@@ -185,6 +185,8 @@ const CHECKS = {
   // ---------- perio.js ----------
   async R15(b) { // Space activates a focused button
     const { c, p } = await ctx(b); await go(p, '#/hygienist/perio/enc-9001');
+    // The single-key grammar ships off (docs/16 CUST-2.1.4); the risky case is a hygienist who turned it on.
+    await p.evaluate(() => window.__proto.setPref('shortcuts', 'on')); await p.waitForTimeout(200);
     await p.keyboard.type('3'.repeat(168), { delay: 0 }); await p.waitForTimeout(200);  // a chart ready to save is the risky case
     await p.focus('[data-testid="perio.save"]');
     await p.keyboard.press('Space'); await p.waitForTimeout(300);
@@ -211,7 +213,7 @@ const CHECKS = {
   },
   async R18(b) { // saved exam locks the encounter silently
     const { c, p } = await ctx(b); await go(p, '#/hygienist/perio/enc-9001');
-    await p.keyboard.type('3'.repeat(168), { delay: 0 }); await click(p, 'perio.save'); await p.waitForTimeout(250);
+    await p.keyboard.type('3'.repeat(168), { delay: 0 }); await commit(p, 'perio.save'); await p.waitForTimeout(250);
     await p.keyboard.press('4'); await p.waitForTimeout(120);
     const screening = await p.$('[data-testid="perio.screening"]');
     const refusal = await p.$('[data-testid="refusal.verb"]');
@@ -232,7 +234,7 @@ const CHECKS = {
     const { c, p } = await ctx(b); await go(p, '#/hygienist/perio/enc-9001');
     await p.keyboard.type('3'.repeat(20), { delay: 0 }); await p.keyboard.press('ArrowRight');
     await p.keyboard.type('3'.repeat(140), { delay: 0 });
-    await click(p, 'perio.save'); await p.waitForTimeout(200);
+    await commit(p, 'perio.save'); await p.waitForTimeout(200);
     const verb = await txt(p, 'refusal.verb');
     await click(p, 'refusal.control'); await p.waitForTimeout(120);
     // Choosing the reason saves: the separate Confirm step was collapsed by the fix round (§7 tap budget).

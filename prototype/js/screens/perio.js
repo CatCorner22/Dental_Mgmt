@@ -579,7 +579,9 @@
     // A Held press re-reads the condition first. ui.js owns the held name: "Held" on glass, "Held: Save exam"
     // in the accessible name, the same on every screen (WCAG-3.2.4).
     else if (st.gate) save = btn('Save exam', { kind: 'held', testid: 'perio.save', onClick: () => { rerender(r); if (st.gate) focusGateControl(); } });
-    else save = btn('Save exam', { kind: 'irreversible', testid: 'perio.save', ariaLabel: 'Save exam: one transaction, derives the note and the recall', onClick: () => doSave(st, r, null) });
+    else save = Proto.ui.confirmable('Save exam', { testid: 'perio.save', ariaLabel: 'Save exam: one transaction, derives the note and the recall',
+      readback: 'This files the perio exam as one transaction and derives the note and the recall. It cannot be edited afterwards; an addendum can add to it.',
+      confirmLabel: 'Save exam', onConfirm: () => doSave(st, r, null) });
 
     /* An irreversible control is never alone in its row: the way out stands beside the way on, at the same
        height, and the row ends with the control that finishes (CLT-neutral-irreversible, CLT-serial-position).
