@@ -9,12 +9,12 @@
   const THEMES = ['light', 'dark'], DEVICES = ['desk', 'operatory', 'shared', 'phone'], MOTION = ['auto', 'reduced'];
   P.set = function (opts) {
     opts = opts || {};
-    if (THEMES.includes(opts.theme)) { P.theme = opts.theme; root.setAttribute('data-theme', opts.theme); }
+    if (THEMES.includes(opts.theme)) { P.theme = opts.theme; P.sessionTheme = opts.theme; root.setAttribute('data-theme', opts.theme); }
     if (DEVICES.includes(opts.device)) { P.device = opts.device; root.setAttribute('data-device', opts.device); }
     if (opts.outage != null) { P.outage = opts.outage === true || opts.outage === 1 || opts.outage === '1' || opts.outage === 'true'; Proto.store.get().outage = P.outage; }
     if (opts.privacy != null) { P.privacy = opts.privacy === true || opts.privacy === 1 || opts.privacy === '1' || opts.privacy === 'true'; root.toggleAttribute('data-privacy', P.privacy); }
-    if (opts.grayscale != null) { P.grayscale = opts.grayscale === true || opts.grayscale === 1 || opts.grayscale === '1' || opts.grayscale === 'true'; if (P.grayscale) root.setAttribute('data-grayscale', '1'); else root.removeAttribute('data-grayscale'); }
-    if (MOTION.includes(opts.motion)) { P.motion = opts.motion; if (opts.motion === 'reduced') root.setAttribute('data-motion', 'reduced'); else root.removeAttribute('data-motion'); }
+    if (opts.grayscale != null) { P.grayscale = opts.grayscale === true || opts.grayscale === 1 || opts.grayscale === '1' || opts.grayscale === 'true'; P.sessionGrayscale = P.grayscale; if (P.grayscale) root.setAttribute('data-grayscale', '1'); else root.removeAttribute('data-grayscale'); }
+    if (MOTION.includes(opts.motion)) { P.motion = opts.motion; P.sessionMotion = opts.motion; if (opts.motion === 'reduced') root.setAttribute('data-motion', 'reduced'); else root.removeAttribute('data-motion'); }
     if (Proto.router.PERSONAS.includes(opts.persona)) P.persona = opts.persona;
     if (opts.afterHours != null) Proto.store.get().clock.afterHours = opts.afterHours === true || opts.afterHours === 1 || opts.afterHours === '1' || opts.afterHours === 'true';
     // A scripted set() paints what the same flag on the hash paints: the Andon and the top bar at once, and the
@@ -42,20 +42,29 @@
     const pr = Proto.store.prefsFor();
     // P.themePref is what the person chose; P.theme is what is actually painted, which is
     // what every event records and what the contract admits (light or dark, never 'system').
+    // A value set for this session — by the hash (?theme=dark), by the sign-in toggles or by a
+    // script through window.__proto.set — outranks a preference that says "System": the person or
+    // the test asked for it explicitly, and a re-render must not undo it. A preference the person
+    // chose in Settings is itself explicit, so it outranks the session value and clears it.
+    const theme = pr.theme === 'system' && P.sessionTheme ? P.sessionTheme : pr.theme;
     P.themePref = pr.theme;
-    if (pr.theme === 'system') { root.removeAttribute('data-theme'); P.theme = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; }
-    else { root.setAttribute('data-theme', pr.theme); P.theme = pr.theme; }
-    if (pr.motion === 'reduced') root.setAttribute('data-motion', 'reduced'); else root.removeAttribute('data-motion');
-    if (pr.colourAid === 'grayscale') root.setAttribute('data-grayscale', '1'); else root.removeAttribute('data-grayscale');
+    if (theme === 'system') { root.removeAttribute('data-theme'); P.theme = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; }
+    else { root.setAttribute('data-theme', theme); P.theme = theme; }
+    const motion = pr.motion === 'system' && P.sessionMotion ? P.sessionMotion : (pr.motion === 'reduced' ? 'reduced' : 'auto');
+    if (motion === 'reduced') root.setAttribute('data-motion', 'reduced'); else root.removeAttribute('data-motion');
+    const grayscale = pr.colourAid === 'grayscale' || (pr.colourAid === 'off' && P.sessionGrayscale === true);
+    if (grayscale) root.setAttribute('data-grayscale', '1'); else root.removeAttribute('data-grayscale');
     if (pr.contrast === 'more') root.setAttribute('data-contrast', 'more'); else root.removeAttribute('data-contrast');
     root.setAttribute('data-text-size', pr.textSize);
     root.setAttribute('data-density', pr.density);
-    P.motion = pr.motion === 'reduced' ? 'reduced' : 'auto';
-    P.grayscale = pr.colourAid === 'grayscale';
+    P.motion = motion;
+    P.grayscale = grayscale;
     P.prefs = pr;
     return pr;
   };
-  P.setPref = function (name, value) { const pr = Proto.store.setPref(name, value); P.applyPrefs(); if (P.ready && !rendering) { Proto.screens.shell.render(Proto.router.current()); repaintCanvas(); } return pr; };
+  P.setPref = function (name, value) {
+    if (name === 'theme') P.sessionTheme = null; if (name === 'motion') P.sessionMotion = null; if (name === 'colourAid') P.sessionGrayscale = null;
+    const pr = Proto.store.setPref(name, value); P.applyPrefs(); if (P.ready && !rendering) { Proto.screens.shell.render(Proto.router.current()); repaintCanvas(); } return pr; };
   P.state = function () { return JSON.parse(JSON.stringify(Proto.store.get())); };
   P.events = function () { return Proto.events.all(); };
 

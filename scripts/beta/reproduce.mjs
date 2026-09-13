@@ -30,6 +30,10 @@ async function go(p, hash) { await p.goto(FILE + hash); await p.waitForFunction(
 async function hop(p, hash) { await p.evaluate((h) => { location.hash = h; }, hash); await p.waitForTimeout(150); }
 const press = async (p, tid) => { const s = `[data-testid="${tid}"]`; if (!(await p.$(s))) return false; await p.focus(s); await p.keyboard.press('Enter'); await p.waitForTimeout(90); return true; };
 const click = async (p, tid) => { const s = `[data-testid="${tid}"]`; if (!(await p.$(s))) return false; await p.click(s); await p.waitForTimeout(90); return true; };
+// A verb that posts money now asks first and writes on the second press (docs/16, WCAG 3.3.4). A check that
+// drives such a verb presses the read-back's confirm when one appears, so it still measures the write it was
+// written for; a verb that does not ask is pressed once as before.
+const commit = async (p, tid) => { const pressed = await click(p, tid); if (!pressed) return false; await p.waitForTimeout(120); if (await p.$(`[data-testid="${tid}.confirm"]`)) { await click(p, tid + '.confirm'); await p.waitForTimeout(150); } return true; };
 const txt = (p, tid) => p.$eval(`[data-testid="${tid}"]`, (e) => e.textContent.trim()).catch(() => null);
 const box = (p, tid) => p.$eval(`[data-testid="${tid}"]`, (e) => { const b = e.getBoundingClientRect(); return { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) }; }).catch(() => null);
 const state = (p) => p.evaluate(() => window.__proto.state());
@@ -39,7 +43,7 @@ const CHECKS = {
   // ---------- store.js ----------
   async R1(b) { // dual-release names the wrong second approvers
     const { c, p } = await ctx(b); await go(p, '#/biller/money');
-    await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await click(p, 'money.writeoff.post');
+    await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await commit(p, 'money.writeoff.post');
     const verb = await txt(p, 'refusal.verb');
     const seedNames = await p.evaluate(() => window.__proto.state().users.filter((u) => u.entitlements.includes('approve_second')).map((u) => u.short));
     const namesDana = /Dana/.test(verb || '');
@@ -308,7 +312,7 @@ const CHECKS = {
   async R28(b) { // Send confirms only to a screen reader (strengthened after bp-09 round 2)
     const { c, p } = await ctx(b); await go(p, '#/biller/money');
     await click(p, 'money.tab.statements');
-    await click(p, 'money.statement.sd-1.send'); await p.waitForTimeout(250);
+    await commit(p, 'money.statement.sd-1.send'); await p.waitForTimeout(250);
     // A row that vanishes is not a confirmation. Require a VISIBLE node that says it went.
     const vis = await p.evaluate(() => {
       // A leaf node whose own words say the statement went. Substring matches inside unrelated copy do not count.
@@ -439,7 +443,7 @@ const CHECKS = {
   },
   async R40(b) { // the Held state is off-screen while its own refusal control stays live
     const { c, p } = await ctx(b, 420, 860); await go(p, '#/biller/money');
-    await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await click(p, 'money.writeoff.post'); await p.waitForTimeout(250);
+    await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await commit(p, 'money.writeoff.post'); await p.waitForTimeout(250);
     const o = await p.evaluate(() => {
       const held = [...document.querySelectorAll('.btn.held')][0];
       const ctl = document.querySelector('[data-testid="refusal.control"]');
@@ -465,7 +469,7 @@ const CHECKS = {
   },
   async R42(b) { // the amount being agreed to is only in an accessible name
     const { c, p } = await ctx(b); await go(p, '#/biller/money');
-    await click(p, 'money.era.era-1.postmatched'); await p.waitForTimeout(250);
+    await commit(p, 'money.era.era-1.postmatched'); await p.waitForTimeout(250);
     const o = await p.evaluate(() => {
       const row = document.querySelector('[data-testid="money.era.line.el-14.confirm"]');
       if (!row) return null;
@@ -480,7 +484,7 @@ const CHECKS = {
   },
   async R43(b) { // focus moves to a tab that does not become the selected tab
     const { c, p } = await ctx(b); await go(p, '#/biller/money');
-    await click(p, 'money.era.era-1.postmatched');
+    await commit(p, 'money.era.era-1.postmatched');
     await click(p, 'money.era.line.el-14.confirm'); await click(p, 'money.era.line.el-22.confirm'); await click(p, 'money.era.line.el-31.hold'); await p.waitForTimeout(300);
     const o = await p.evaluate(() => {
       const a = document.activeElement;
