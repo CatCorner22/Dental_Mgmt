@@ -105,7 +105,7 @@
               onClick: () => { P.setPref(name, o); paint(); },
             }))));
       });
-      body.replaceChildren(
+      keepFocus(body, () => body.replaceChildren(
         h('h2', { text: 'Settings' }),
         h('p', { class: 'hint', text: 'These are yours: they follow your PIN to any device in the practice.' }),
         h('div', { class: 'stack' }, ...rows),
@@ -115,7 +115,7 @@
         btn('Privacy mode', { testid: 'topbar.privacy', pressed: P.privacy, ariaLabel: 'Privacy mode: hide patient names on operatory glass', onClick: () => { P.set({ privacy: !P.privacy }); paint(); } }),
         h('div', { class: 'btnrow' },
           btn('Close', { kind: 'reversible', testid: 'settings.close', onClick: () => close && close() }),
-          btn('Sign out', { testid: 'topbar.signout', onClick: () => { if (close) close(); location.hash = '#/signin'; } })));
+          btn('Sign out', { testid: 'topbar.signout', onClick: () => { if (close) close(); location.hash = '#/signin'; } }))));
     }
     paint();
     close = Proto.ui.dialog(body, { label: 'Settings' });

@@ -40,7 +40,10 @@
   P.applyPrefs = function () {
     if (!Proto.store.prefsFor) return;
     const pr = Proto.store.prefsFor();
-    if (pr.theme === 'system') { root.removeAttribute('data-theme'); P.theme = 'system'; }
+    // P.themePref is what the person chose; P.theme is what is actually painted, which is
+    // what every event records and what the contract admits (light or dark, never 'system').
+    P.themePref = pr.theme;
+    if (pr.theme === 'system') { root.removeAttribute('data-theme'); P.theme = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; }
     else { root.setAttribute('data-theme', pr.theme); P.theme = pr.theme; }
     if (pr.motion === 'reduced') root.setAttribute('data-motion', 'reduced'); else root.removeAttribute('data-motion');
     if (pr.colourAid === 'grayscale') root.setAttribute('data-grayscale', '1'); else root.removeAttribute('data-grayscale');
