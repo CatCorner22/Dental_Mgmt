@@ -390,8 +390,10 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 /* ---- module: rail (js/screens/rail.js: Patient Rail and Ledger) — appended, never edits rules above ---- */
 .rail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--gap); }
 .rail-ids { color: var(--ink-2); font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
-.rail .alertbar { flex-wrap: wrap; }
-.rail .alertbar .btn { margin-left: auto; }
+/* Glyph, words and the Read-aloud button share one row; the words wrap inside their own column, so the button is
+   never pushed under the tabs below (axe target-size on the Ledger). */
+.rail .alertbar { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }
+.rail .alertbar .btn { justify-self: end; }
 .rail .alertbar.rail-clear { background: var(--clear-soft); color: var(--clear-ink); border-color: var(--clear-rail); }
 .rail .alertbar .glyph { font-size: var(--glyph); line-height: 1; flex: 0 0 auto; }
 .rail-alerts { margin: 0; padding-left: var(--space-4); display: flex; flex-direction: column; gap: 4px; }
