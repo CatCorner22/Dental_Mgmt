@@ -153,9 +153,12 @@
     const active = document.activeElement;
     const keepFocus = active && box.contains(active) ? active.getAttribute('data-testid') : null;
     const alertText = p.alerts.length ? 'Critical alerts: ' + p.alerts.join('; ') : 'No critical alerts';
-    const alertbar = h('div', { class: 'alertbar' + (p.alerts.length ? '' : ' rail-clear'), testid: 'rail.alert', role: 'button', tabindex: '0', 'aria-label': alertText + '. Read aloud', onClick: () => announce(alertText), onKeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); announce(alertText); } } },
+    /* The alert bar states a fact; it is not a button (CLT-chip-not-button, CLT-similarity-identity). The one act
+       it offers, reading the alerts aloud, is a real button beside the text. */
+    const alertbar = h('div', { class: 'alertbar' + (p.alerts.length ? '' : ' rail-clear'), testid: 'rail.alert' },
       h('span', { class: 'glyph', 'aria-hidden': 'true', text: p.alerts.length ? '■' : '●' }),
-      p.alerts.length ? h('ul', { class: 'rail-alerts' }, p.alerts.map((a) => h('li', { text: a }))) : h('span', { text: 'No critical alerts' }));
+      p.alerts.length ? h('ul', { class: 'rail-alerts' }, p.alerts.map((a) => h('li', { text: a }))) : h('span', { text: 'No critical alerts' }),
+      btn('Read aloud', { kind: 'quiet', class: 'compact', testid: 'rail.alert.read', ariaLabel: 'Read aloud: ' + alertText, onClick: () => announce(alertText) }));
     const tabs = h('div', { class: 'railtabs', role: 'navigation', 'aria-label': 'Patient sections' }, TABS.map(([code, label]) => { const cur = code === 'ledger' && r.route === 'ledger' && r.id === rail.pid; return btn(label, { kind: 'quiet', class: 'rail-tab', testid: 'rail.tab.' + code, onClick: () => tabGo(code) , ariaLabel: label + (cur ? ', current' : '') }); }));
     tabs.querySelectorAll('.btn').forEach((el) => { if (el.getAttribute('data-testid') === 'rail.tab.ledger' && r.route === 'ledger' && r.id === rail.pid) el.setAttribute('aria-current', 'page'); });
     // An Explain with no rows says why it is empty, in the same words as the Ledger's own Explain.

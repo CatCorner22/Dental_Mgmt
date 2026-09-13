@@ -96,7 +96,7 @@ textarea.input { padding: var(--space-2) var(--space-3); min-height: 88px; resiz
 .pad { display: grid; grid-template-columns: repeat(5, var(--target)); gap: var(--gap); margin-top: var(--space-3); }
 .pad .btn { min-width: var(--target); padding: 0; }
 .pad .next { grid-column: 1 / -1; min-height: 56px; }
-.activesite { font-size: var(--fs-4); font-weight: 600; min-height: var(--target); display: flex; align-items: center; gap: var(--space-3); }
+.activesite { font-size: var(--fs-4); font-weight: 600; min-height: var(--target); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }  /* wraps at 320px so the Undo keycap never widens the canvas (WCAG 1.4.10) */
 
 /* Odontogram */
 .odont { display: grid; grid-template-columns: repeat(16, var(--target)); gap: var(--gap); }
@@ -389,7 +389,8 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 /* ---- module: rail (js/screens/rail.js: Patient Rail and Ledger) — appended, never edits rules above ---- */
 .rail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--gap); }
 .rail-ids { color: var(--ink-2); font-size: var(--fs-1); font-variant-numeric: tabular-nums; }
-.rail .alertbar { cursor: pointer; }
+.rail .alertbar { flex-wrap: wrap; }
+.rail .alertbar .btn { margin-left: auto; }
 .rail .alertbar.rail-clear { background: var(--clear-soft); color: var(--clear-ink); border-color: var(--clear-rail); }
 .rail .alertbar .glyph { font-size: var(--glyph); line-height: 1; flex: 0 0 auto; }
 .rail-alerts { margin: 0; padding-left: var(--space-4); display: flex; flex-direction: column; gap: 4px; }
@@ -517,7 +518,7 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
    sentence that says what is about to happen, then Cancel and the confirm at equal weight. */
 .confirmslot { display: inline-flex; }
 .confirmrow { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--gap); padding: var(--space-2) var(--space-3); border: 2px solid var(--required-rail); border-radius: var(--radius); background: var(--required-soft); color: var(--required-ink); max-width: 100%; }
-.confirmrow .glyph { font-size: var(--glyph-lg); line-height: 1; flex: 0 0 auto; }
+.confirmrow .glyph { font-size: var(--glyph-lg); line-height: 1; flex: 0 0 auto; min-width: var(--glyph-lg); text-align: center; }
 .confirmrow .verb { font-weight: var(--weight-bold); max-width: var(--measure); }
 
 /* A field error: between the hint and the input, bold, in the error colour. */
@@ -542,7 +543,7 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 .tooth .toothmark { position: absolute; left: 4px; top: 2px; font-size: var(--fs-1); line-height: 1; }
 
 /* The severity glyph on a refusal is the warning icon, so it is sized like one. */
-.refusal .glyph { font-size: var(--glyph-lg); line-height: 1; flex: 0 0 auto; }
+.refusal .glyph { font-size: var(--glyph-lg); line-height: 1; flex: 0 0 auto; min-width: var(--glyph-lg); text-align: center; }
 
 /* A disclosure summary is as wide as its words, so the pressable area is the words (CDS-DETAILS-disclosure). */
 .rail summary, .rail-sum summary { display: inline-flex; width: fit-content; max-width: 100%; }
