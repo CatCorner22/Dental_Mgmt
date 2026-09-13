@@ -195,14 +195,14 @@ What the storms did not prove is the same as before, with one addition. The rand
 
 | Measure | Count |
 |---|---|
-| Functions in `prototype/js` (`scripts/audit/inventory.mjs`) | 743 |
+| Functions in `prototype/js` (`scripts/audit/inventory.mjs`) | 744 |
 | Of those, from the registered audited universe of 497 | 486 |
 | Registered functions the fix round removed or renamed | 10 |
 | Registered functions the five storms removed | 1 |
 | Functions the fix round introduced, audited by hand, still present | 76 |
 | Functions the fix round introduced that the storms removed | 2 |
 | Functions the five storms introduced, audited by hand | 151 |
-| Functions the UI and UX review (`docs/16`) introduced, audited by hand | 29 |
+| Functions the UI and UX review (`docs/16`) introduced, audited by hand | 30 |
 | Functions with no row | 0 |
 | Per-file audits returned | 13 of 13 |
 | Lenses returned | 8 of 8 |
@@ -1270,6 +1270,8 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `gate` | `screens/encounter.js` | — | operational | The filing gate card. | A-ux-8: the gate is one role=alert summary that lists each unmet check as a link to the field it names, instead of a card rendered after the fields with a single control. |
 | `groupLabel` | `screens/encounter.js` | — | operational | Every group of three or more controls on the Encounter. | A-ux-8: each of the odontogram, the surfaces, the procedure strip and the temporality segment carries a visible name inside its own bounded region. |
 | `fieldErrors` | `screens/encounter.js` | — | operational | The File press, when a note field is unmet. | A-ux-8: the field carries aria-invalid and its message leads the description order; nothing is validated when a field merely loses focus, so a refusal never erases what was typed. |
+
+| `isCurrent` | `screens/shell.js` | — | operational | renderTopbar, once per destination on every render. | A-ux-7 and a nav probe: on #/biller/ledger the Money Desk destination carries aria-current="page"; on #/dentist/encounter it is Exams to sign; on a home route it is that home; never more than one destination is current. |
 
 ## Appendix: the rules as the agents read them
 
