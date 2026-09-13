@@ -202,5 +202,69 @@ export default ({ ctx, go, click, rec }) => {
         rec('A-ux-7', 'The shell top bar carries ten or more controls, wraps past two rows, scrolls sideways, or hides a control off its own edge', 'docs/16 CLT-topbar-7, WCAG 1.4.10 reflow', bad.length > 0, { ...out, failing: bad, pageErrors: errs });
       } finally { await c.close(); }
     },
+
+    // A-ux-8 · WCAG 2.4.11 / 3.3.1 / 3.3.2 · the Encounter's filing gate: a sticky column must never
+    // cover the element holding keyboard focus, the gate must be one summary that links to each unmet
+    // check, and validation must happen on the press rather than when a field loses focus.
+    async 'A-ux-8'(b) {
+      const { c, p, errs } = await ctx(b, 1280, 900);
+      try {
+        const covered = async (w) => {
+          await p.setViewportSize({ width: w, height: 900 });
+          await go(p, '#/dentist/encounter/enc-9002'); await p.waitForTimeout(250);
+          return p.evaluate(() => {
+            const sticky = [...document.querySelectorAll('#canvas *')].filter((e) => { const cs = getComputedStyle(e); return cs.position === 'sticky' || cs.position === 'fixed'; });
+            const stops = [...document.querySelectorAll('#canvas button:not([disabled]), #canvas input, #canvas textarea, #canvas [tabindex]:not([tabindex="-1"])')].filter((e) => e.offsetParent !== null);
+            let hidden = 0;
+            for (const el of stops) {
+              el.focus();
+              const r = el.getBoundingClientRect();
+              if (r.width === 0 || r.height === 0) continue;
+              for (const s of sticky) {
+                if (s.contains(el)) continue;
+                const q = s.getBoundingClientRect();
+                if (q.left <= r.left && q.right >= r.right && q.top <= r.top && q.bottom >= r.bottom) { hidden++; break; }
+              }
+            }
+            const root = document.querySelector('#canvas .encpage, #canvas > *');
+            return { hidden, stops: stops.length, clearance: root ? getComputedStyle(root).getPropertyValue('--gate-clearance').trim() : '' };
+          });
+        };
+        const at1280 = await covered(1280), at1024 = await covered(1024), at420 = await covered(420);
+        await p.setViewportSize({ width: 1280, height: 900 });
+        await go(p, '#/dentist/encounter/enc-9002'); await p.waitForTimeout(200);
+        // The summary belongs to a failed submit, so press File before looking for it.
+        await click(p, 'enc.file'); await p.waitForTimeout(300);
+        const gate = await p.evaluate(() => {
+          const alerts = document.querySelectorAll('#canvas [role="alert"]').length;
+          const box = document.querySelector('#canvas [role="alert"]');
+          const glyph = box ? box.querySelector('.glyph') : null;
+          // What matters is that each unmet check offers a way to the field it names, not
+          // whether that way is an anchor or a button.
+          return { alerts, links: box ? box.querySelectorAll('a[href], button').length : 0, glyphPx: glyph ? parseFloat(getComputedStyle(glyph).fontSize) : null };
+        });
+        // and that pressing the first one actually puts the keyboard in a field
+        const movedToField = await p.evaluate(async () => {
+          const box = document.querySelector('#canvas [role="alert"]');
+          const first = box && box.querySelector('a[href], button');
+          if (!first) return false;
+          first.click(); await new Promise((r) => setTimeout(r, 250));
+          const a = document.activeElement;
+          return !!a && (a.tagName === 'TEXTAREA' || a.tagName === 'INPUT' || (a.getAttribute('data-testid') || '').startsWith('enc.'));
+        });
+        // A refusal never erases what was typed: type into a note field and leave it.
+        const kept = await p.evaluate(async () => {
+          const t = document.querySelector('[data-testid^="enc.note.field."]');
+          if (!t) return null;
+          t.focus(); t.value = 'MY OWN WORDS'; t.dispatchEvent(new Event('input', { bubbles: true }));
+          t.blur(); await new Promise((r) => setTimeout(r, 300));
+          const again = document.querySelector('[data-testid="' + t.getAttribute('data-testid') + '"]');
+          return again ? again.value : null;
+        });
+        const o = { at1280, at1024, at420, gate, movedToField, kept };
+        const reproduced = at1280.hidden > 0 || at1024.hidden > 0 || at420.hidden > 0 || gate.alerts < 1 || gate.links < 1 || !movedToField || kept !== 'MY OWN WORDS';
+        rec('A-ux-8', 'The Encounter\'s sticky filing gate covers the element that has keyboard focus, or the gate is not one linked summary, or leaving a note field erases what was typed', 'WCAG 2.4.11 Focus Not Obscured, 3.3.1, 3.3.2; docs/16 CDS-ERR-summary-top, INT-keep-data-and-gate-on-press', reproduced, { ...o, pageErrors: errs });
+      } finally { await c.close(); }
+    },
   };
 };
