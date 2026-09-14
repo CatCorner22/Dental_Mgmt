@@ -9,7 +9,8 @@
     "reproduce": "node scripts/beta/reproduce.mjs",
     "verify-docs": "bash scripts/verify-docs.sh",
     "test": "npm run syntax && npm run verify-docs && npm run check && npm run a11y && npm run reproduce",
-    "a11y": "node scripts/a11y-check.mjs"
+    "a11y": "node scripts/a11y-check.mjs",
+    "review": "bash scripts/final-review.sh"
   },
   "devDependencies": {
     "playwright": "1.63.0"

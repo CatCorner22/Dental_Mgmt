@@ -35,10 +35,10 @@
   function rowSyn(row) {
     // A patient row never prints the date of birth or the last-4: those are what the gate asks for,
     // and printing them here turns the second identifier into a formality (docs/13 feature 28).
-    if (row.kind === 'patient') return 'Confirm the date of birth to open the chart';
+    if (row.kind === 'patient') return 'Date of birth opens the chart';
     if (row.syn) return row.syn;
     // The palette navigates; it does not open another screen's gate. The row says where the gate is.
-    if (row.kind === 'action' && row.irreversible) return 'Opens the screen that holds its gate; nothing runs from here';
+    if (row.kind === 'action' && row.irreversible) return 'Opens the screen that holds its gate';
     if (row.kind === 'action') return row.route ? 'Screen' : 'Opens from a patient';
     if (row.kind === 'claim') return 'Money Desk';
     return '';
@@ -95,22 +95,29 @@
       class: 'input pal-input', type: 'text', autocomplete: 'off', spellcheck: 'false',
       testid: 'palette.input', id: 'palette-input',
       role: 'combobox', 'aria-expanded': 'true', 'aria-controls': 'palette-list', 'aria-autocomplete': 'list',
-      'aria-label': 'Search patients, appointments, claims, reports, and actions',
-      placeholder: 'Type three letters… try walkout statement, day sheet, Office Journal',
+      // No aria-label: the field is named by the visible label above it. It used to be named by an aria-label
+      // and a ten-word placeholder, so nothing on screen said what the box was for once a letter was typed
+      // (WCAG 3.3.2, INT-labels-visible-above).
+      placeholder: 'e.g. fis, 4821, walkout statement',
       value: st.q,
       onInput: (ev) => { st.q = ev.target.value; st.sel = -1; refreshList(); },
     });
     st.input = input;
     st.status = h('div', { class: 'sr-only', 'aria-live': 'polite', id: 'palette-status' });
-    st.hint = h('p', { class: 'hint pal-hint', id: 'palette-hint' });
     st.list = h('div', { class: 'palette-list', id: 'palette-list', role: 'listbox', 'aria-label': 'Results' });
+    // The label is visible and above the box; the standing hint says how many letters it takes and what may be
+    // typed, before anyone types (ui.js field; INT-instructions-before-input).
+    const searchField = Proto.ui.field('Search', input, { hint: 'Three letters or more: a name, the last four of a phone, an MRN, a claim, or a screen.' });
+    st.hint = searchField.querySelector('.hint'); st.hint.classList.add('pal-hint');
     st.body.replaceChildren(
       h('div', { class: 'pal-head' },
-        h('h2', { class: 'pal-title', text: 'Search' }),
+        h('h2', { class: 'pal-title', text: 'Search and actions' }),
         btn('Close', { testid: 'palette.close', kind: 'quiet', class: 'compact', ariaLabel: 'Close search (Escape)', onClick: close })),
-      input, st.hint, st.status, st.list,
+      searchField, st.status, st.list,
       h('details', { class: 'pal-more' }, h('summary', { testid: 'palette.how' }, 'How search works'),
-        h('div', { class: 'whytext', text: 'Three letters list patients (by name, by the last four of the phone, or by the MRN), claims, screens, and actions. Words from Dentrix, Eaglesoft, Open Dental, and Curve are translated to the words this system uses, so you learn the term at the moment you need it. A patient row prints the name only: the date of birth is what the chart gate asks for, so it is never printed here and it is not something you search by. Irreversible actions (Close day, Post matched) open the screen that holds their gate; nothing runs from here. Patient search never widens to phonetic matches, and the list is capped, so add letters to narrow it.' })),
+        // Split at the semicolons the audit measured: two sentences of 27 and 32 words carried the panel's
+        // reading grade past the eighth-grade line (CLT-reading-grade).
+        h('div', { class: 'whytext', text: 'Three letters list patients, claims, screens, and actions. Patients match on the name, the last four of the phone, or the MRN. Words from Dentrix, Eaglesoft, Open Dental, and Curve are translated to the words this system uses. So you learn the term when you need it. A patient row prints the name only. The date of birth is what the chart gate asks for, so it is never printed here. You cannot search by it either. Close day and Post matched open the screen that holds their gate. Nothing runs from here. Patient search never widens to sound-alike names. The list is capped, so add letters to narrow it.' })),
     );
     refreshList();
     // B10: an in-dialog step change lands the keyboard on the next control. On the first render the body is not
@@ -149,12 +156,17 @@
     if (q.length >= 3 && Proto.screens.shell && Proto.screens.shell.refreshRail1) Proto.screens.shell.refreshRail1(st.r);
   }
 
+  /* A result row is an option in a listbox, not an action button: it was a <button> whose printed label ran to
+     ten words in the regular weight, which put it in the population every button rule is measured against and
+     failed all of them (CLT-label-words, CDS-BTN-text-bold-body, CLT-similarity-identity). It is the same
+     control to use — 44 px, pressable, Enter and Space activate, arrow keys move — and it keeps its test id. */
   function renderRow(row, i) {
     const id = 'palette-row-' + i;
-    return h('button', {
-      type: 'button', class: 'palette-row', id, role: 'option', testid: 'palette.row.' + i,
+    return h('div', {
+      class: 'palette-row', id, role: 'option', tabindex: '-1', testid: 'palette.row.' + i,
       'aria-selected': i === st.sel ? 'true' : 'false',
       onClick: () => activate(row),
+      onKeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); activate(row); } },
       onFocus: () => { st.sel = i; syncSelection(); },
     },
     h('span', { class: 'pal-left' }, rowChip(row), h('span', { class: 'lbl', text: rowLabel(row) })),
@@ -270,13 +282,14 @@
     const nameLine = displayName(p.name, privacy()) + ' · …' + p.phone.slice(-4) + ' · ' + p.mrn;
     const dobInput = h('input', {
       class: 'input pal-dob', type: 'text', inputmode: 'numeric', autocomplete: 'off', maxlength: '10',
-      testid: 'palette.confirm.dob', id: 'palette-dob', placeholder: 'MM/DD/YYYY', 'aria-label': 'Date of birth, MM/DD/YYYY',
-      'aria-describedby': 'palette-dob-hint',
-      onInput: (ev) => { st.dob = ev.target.value; if (st.dobTouched) validateDob(false); },
-      onBlur: () => { st.dobTouched = true; validateDob(false); },
+      testid: 'palette.confirm.dob', id: 'palette-dob', placeholder: 'MM/DD/YYYY',
+      // No aria-label and no blur check: the field is named by its visible label, and what is typed is judged
+      // when the person presses, not when they leave the box (INT-keep-data-and-gate-on-press).
+      onInput: (ev) => { st.dob = ev.target.value; if (st.dobTouched && parseDob(ev.target.value)) clearDobError(); },
     });
     st.dobInput = dobInput;
-    st.dobHint = h('p', { class: 'hint', id: 'palette-dob-hint', text: 'Second identifier. Ask the patient, or read it from the appointment card.' });
+    st.dobField = Proto.ui.field('Date of birth', dobInput, { required: true, hint: 'MM/DD/YYYY, for example 04/12/1978. The second identifier: ask the patient, or read it from the appointment card.' });
+    st.errors = h('div', { class: 'pal-errors', hidden: true });
     st.gate = h('div', { class: 'pal-gate' });
     st.go = btn('Open chart', { testid: 'palette.confirm.go', kind: 'reversible', onClick: confirmDob });
     st.body.replaceChildren(
@@ -284,30 +297,51 @@
         h('h2', { class: 'pal-title', text: 'Confirm date of birth' }),
         btn('Close', { testid: 'palette.close', kind: 'quiet', class: 'compact', ariaLabel: 'Close search (Escape)', onClick: close })),
       h('div', { class: 'pal-who' }, chip('info', 'Patient'), h('span', { class: 'lbl', text: nameLine })),
-      h('div', { class: 'field' }, h('label', { for: 'palette-dob', text: 'Date of birth' }), dobInput, st.dobHint),
+      st.errors,
+      st.dobField,
       st.gate,
       h('div', { class: 'btnrow' },
         st.go,
+        /* The audit's INT-verb-labels row asks for "Return to results" here, but the wave-1 glossary — and the
+           check that ships with it (beta/audit/screens-palette-2.mjs A-screens-palette-2-7) — reserves
+           "Back to <place>" for leaving a place and fails any `.back` control that does not read it. The two
+           registered rules disagree; the label stays as the shipped check requires and the conflict is recorded. */
         btn('Back to results', { testid: 'palette.confirm.back', kind: 'quiet', onClick: () => { st.sel = -1; renderSearch(); } })),
     );
     dobInput.focus();
   }
 
-  function validateDob(loud) {
+  function clearDobError() {
+    st.dobInput.classList.remove('invalid');
+    if (st.dobField) st.dobField._setError(null);
+    if (st.errors) { st.errors.replaceChildren(); st.errors.hidden = true; }
+  }
+
+  /* A refused press answers twice: once at the field, between the hint and the box, in the error colour and
+     opened by a hidden "Error:"; and once as a summary before the form, with role="alert", a heading and a link
+     that puts the keyboard on the field it names (ui.js field/errorSummary; CDS-ERR-message-prefix, -summary-top). */
+  function refuseDob(msg) {
+    st.dobInput.classList.add('invalid');
+    st.dobField._setError(msg);
+    const sum = Proto.ui.errorSummary([{ id: 'palette-dob', message: msg }], { testid: 'palette.error' });
+    // The summary's links are controls like any other, so they stand at the 44 px floor.
+    for (const a of sum.querySelectorAll('a')) { a.style.display = 'inline-flex'; a.style.alignItems = 'center'; a.style.minHeight = 'var(--target)'; }
+    st.errors.replaceChildren(sum); st.errors.hidden = false;
+    sum.focus();
+  }
+
+  function validateDob() {
     const v = st.dob.trim();
-    const ok = !v || !!parseDob(v);
-    st.dobInput.classList.toggle('invalid', !ok);
-    st.dobInput.setAttribute('aria-invalid', ok ? 'false' : 'true');
-    if (!ok) st.dobHint.textContent = 'Use MM/DD/YYYY, for example 04/12/1978.';
-    else if (!st.refused) st.dobHint.textContent = 'Second identifier. Ask the patient, or read it from the appointment card.';
-    if (loud && !v) st.dobHint.textContent = 'Enter the date of birth to open the chart.';
-    return ok && !!v;
+    if (!v) { refuseDob('Enter the date of birth to open the chart.'); return false; }
+    if (!parseDob(v)) { refuseDob('Use MM/DD/YYYY, for example 04/12/1978.'); return false; }
+    clearDobError();
+    return true;
   }
 
   function confirmDob() {
     if (!st || st.step !== 'confirm') return;
     st.dobTouched = true;
-    if (!validateDob(true)) { st.dobInput.focus(); return; }
+    if (!validateDob()) return;
     const iso = parseDob(st.dob);
     const p = st.patient; const r = st.r; const row = st.row;
     if (iso === p.dob) {
@@ -324,9 +358,10 @@
     }
     // Mismatch: one verb line, one control; the primary switches to Held. Each miss is its own refusal (fresh).
     st.refused = true;
+    // The gate leaves what was typed on screen; the way out is the control, and it says that it clears the box.
     st.gate.replaceChildren(refusal({
-      code: 'second_identifier', verb: 'Check the date of birth', control: 'Try again', fresh: true,
-      onControl: () => { st.refused = false; st.dob = ''; st.dobInput.value = ''; st.dobInput.classList.remove('invalid'); st.gate.replaceChildren(); swapGo(false); st.dobHint.textContent = 'Second identifier. Ask the patient, or read it from the appointment card.'; st.dobInput.focus(); },
+      code: 'second_identifier', verb: 'Check the date of birth', control: 'Clear and retype', fresh: true,
+      onControl: () => { st.refused = false; st.dob = ''; st.dobInput.value = ''; clearDobError(); st.gate.replaceChildren(); swapGo(false); st.dobInput.focus(); },
       why: 'The date of birth entered does not match this patient. Two identifiers before a chart opens; patient search never widens to phonetic matches.',
     }));
     swapGo(true);

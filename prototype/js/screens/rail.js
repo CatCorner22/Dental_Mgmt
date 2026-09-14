@@ -153,9 +153,12 @@
     const active = document.activeElement;
     const keepFocus = active && box.contains(active) ? active.getAttribute('data-testid') : null;
     const alertText = p.alerts.length ? 'Critical alerts: ' + p.alerts.join('; ') : 'No critical alerts';
-    const alertbar = h('div', { class: 'alertbar' + (p.alerts.length ? '' : ' rail-clear'), testid: 'rail.alert', role: 'button', tabindex: '0', 'aria-label': alertText + '. Read aloud', onClick: () => announce(alertText), onKeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); announce(alertText); } } },
+    /* The alert bar states a fact; it is not a button (CLT-chip-not-button, CLT-similarity-identity). The one act
+       it offers, reading the alerts aloud, is a real button beside the text. */
+    const alertbar = h('div', { class: 'alertbar' + (p.alerts.length ? '' : ' rail-clear'), testid: 'rail.alert' },
       h('span', { class: 'glyph', 'aria-hidden': 'true', text: p.alerts.length ? '■' : '●' }),
-      p.alerts.length ? h('ul', { class: 'rail-alerts' }, p.alerts.map((a) => h('li', { text: a }))) : h('span', { text: 'No critical alerts' }));
+      p.alerts.length ? h('ul', { class: 'rail-alerts' }, p.alerts.map((a) => h('li', { text: a }))) : h('span', { text: 'No critical alerts' }),
+      btn('Read aloud', { kind: 'quiet', class: 'compact', testid: 'rail.alert.read', ariaLabel: 'Read aloud: ' + alertText, onClick: () => announce(alertText) }));
     const tabs = h('div', { class: 'railtabs', role: 'navigation', 'aria-label': 'Patient sections' }, TABS.map(([code, label]) => { const cur = code === 'ledger' && r.route === 'ledger' && r.id === rail.pid; return btn(label, { kind: 'quiet', class: 'rail-tab', testid: 'rail.tab.' + code, onClick: () => tabGo(code) , ariaLabel: label + (cur ? ', current' : '') }); }));
     tabs.querySelectorAll('.btn').forEach((el) => { if (el.getAttribute('data-testid') === 'rail.tab.ledger' && r.route === 'ledger' && r.id === rail.pid) el.setAttribute('aria-current', 'page'); });
     // An Explain with no rows says why it is empty, in the same words as the Ledger's own Explain.
@@ -194,7 +197,9 @@
 
   function ledgerTable(rows, st) {
     const head = ['Posted', 'Effective', 'Kind', 'Reason'].concat(st.patientVoice ? [] : ['Actor']).concat(['Amount']);
-    const tbl = h('table', { class: 'data ledger-table' }, h('thead', null, h('tr', null, head.map((t) => h('th', { class: t === 'Amount' ? 'num' : null, scope: 'col', text: t })))),
+    // The table names itself (WCAG 1.3.1); the caption is for a screen reader, since the Rows heading already prints it.
+    const tbl = h('table', { class: 'data ledger-table' }, h('caption', { class: 'sr-only', text: 'Ledger rows, newest first by posted date' }),
+      h('thead', null, h('tr', null, head.map((t) => h('th', { class: t === 'Amount' ? 'num' : null, scope: 'col', text: t })))),
       h('tbody', null, rows.length ? rows.map((e) => h('tr', { id: 'row-' + e.id, testid: 'ledger.row.' + e.id, class: st.hi && st.hi.includes(e.id) ? 'ledger-hi' : null },
         h('td', { class: 'num', text: shortDate(e.posted) }), h('td', { class: 'num', text: shortDate(e.effective) }),
         h('td', null, KIND_WORD[e.kind] || humanize(e.kind), e.postedAfterClose ? [' ', chip('info', 'After close')] : null),
@@ -213,7 +218,7 @@
     return h('div', { class: 'explain', 'aria-live': 'polite' },
       st.patientVoice ? h('p', { class: 'small muted', text: 'Patient view: no reason codes, no poster names; estimate lines are labelled estimate. Turn the screen or print (this is recorded as a disclosure).' }) : null,
       rows.map((x) => h('div', { class: 'ledger-sentence' }, h('p', { class: 'sentence' }, boldAmounts(st.patientVoice ? x.patientVoice : x.sentence)),
-        st.patientVoice ? null : btn('Rows', { kind: 'quiet', class: 'compact', testid: 'ledger.explain.rows.' + x.chargeId, ariaLabel: 'Highlight the ledger rows behind this sentence', onClick: () => { const ch = S().ledger.find((e) => e.id === x.chargeId); st.hi = S().ledger.filter((e) => e.patientId === pid && (e.id === ch.id || (e.kind !== 'charge' && e.effective >= ch.effective))).map((e) => e.id); rerender(r, 'ledger.explain.rows.' + x.chargeId); const el = document.getElementById('row-' + x.chargeId); if (el) el.scrollIntoView({ block: 'center' }); } }))));
+        st.patientVoice ? null : btn('Show rows', { kind: 'quiet', class: 'compact', testid: 'ledger.explain.rows.' + x.chargeId, ariaLabel: 'Show rows: highlight the ledger rows behind this sentence', onClick: () => { const ch = S().ledger.find((e) => e.id === x.chargeId); st.hi = S().ledger.filter((e) => e.patientId === pid && (e.id === ch.id || (e.kind !== 'charge' && e.effective >= ch.effective))).map((e) => e.id); rerender(r, 'ledger.explain.rows.' + x.chargeId); const el = document.getElementById('row-' + x.chargeId); if (el) el.scrollIntoView({ block: 'center' }); } }))));
   }
 
   /* Money Desk is where the biller works an account: a navigation, not a posting, so it claims nothing. Every gate
@@ -240,6 +245,15 @@
   /* The Ledger sends the row Money Desk raised; with none open it asks the store to raise one first, and the store's
      reasons for not raising (a claim still out, nothing due) are the gate. The Ledger used to word those holds itself and
      to send an account with a balance and no row to a tab with nothing to press. */
+  const PIN_WHY = 'Shared desk: the PIN mints your own session, so the statement carries your name and not the last person\'s.';
+  /* The first press of Send statement reads the desk before it asks for a second: an empty PIN on a shared desk is a
+     refusal at the field, not a read-back to confirm. Returns true when it raised a gate. */
+  function precheckStatement(r, st) {
+    // Under an outage the store refuses before it looks at a PIN, so the first press asks it first and shows its gate in its own words.
+    if (S().outage) { sendStatement(r, route().id, st); return true; }
+    if (shared() && !String(st.pin || '').trim()) { st.gate = { code: 'pin_required', verb: 'Enter your PIN to send', control: 'Enter PIN', why: PIN_WHY, onControl: focusPin }; rerender(r, 'ledger.errors'); return true; }
+    return false;
+  }
   function sendStatement(r, pid, st) {
     const extras = { pin: st.pin || null };
     // A row already sent is the store's to refuse (already_decided), not a reason to raise a second one on the same balance.
@@ -267,15 +281,16 @@
   function asOfBlock(pid, st, r, allRows) {
     const S0 = S(); const stmts = S0.statementsDue.filter((x) => x.patientId === pid);
     const later = st.asof ? allRows.filter((e) => e.posted > st.asof).sort((a, b) => a.posted.localeCompare(b.posted)) : [];
-    const input = h('input', { class: 'input ledger-date', type: 'date', id: 'ledger-asof-date', testid: 'ledger.asof.date', value: st.asof || S0.tenant.closedDay, min: '2026-06-01', max: today(), 'aria-describedby': 'ledger-asof-hint' });
-    const hint = h('p', { class: 'hint', id: 'ledger-asof-hint', text: 'Rows posted on or before this date, by posted date; the effective date stays visible in the table.' });
+    const input = h('input', { class: 'input ledger-date', type: 'date', id: 'ledger-asof-date', testid: 'ledger.asof.date', value: st.asof || S0.tenant.closedDay, min: '2026-06-01', max: today() });
+    // The range is stated before the pick; a date past today is an error between the label and the input, not a hint that changed colour.
+    const dateField = Proto.ui.field('Show the ledger as it stood at the end of', input, { hint: 'A date from 6/1/2026 up to today, ' + longDate(today()) + '. Rows posted on or before it, by posted date; the effective date stays in the table.' });
     /* Validation is silent until the value is committed (change fires on blur or picker close). */
-    input.addEventListener('change', () => { const v = input.value; if (!v || v > today()) { input.classList.add('invalid'); hint.textContent = 'Pick a date up to today (' + longDate(today()) + ').'; return; } input.classList.remove('invalid'); st.asof = v; st.hi = null; const n = allRows.filter((e) => e.posted <= v).length; announce('As of ' + shortDate(v) + ': ' + n + (n === 1 ? ' row' : ' rows') + ' by posted date'); rerender(r, 'ledger.asof.back'); });
+    input.addEventListener('change', () => { const v = input.value; if (!v || v > today()) { input.classList.add('invalid'); dateField._setError('Pick a date up to today (' + longDate(today()) + ').'); return; } input.classList.remove('invalid'); dateField._setError(null); st.asof = v; st.hi = null; const n = allRows.filter((e) => e.posted <= v).length; announce('As of ' + shortDate(v) + ': ' + n + (n === 1 ? ' row' : ' rows') + ' by posted date'); rerender(r, 'ledger.asof.back'); });
     return h('div', { class: 'ledger-asof stack' },
-      h('div', { class: 'ledger-asof-row' }, h('div', { class: 'field' }, h('label', { for: 'ledger-asof-date', text: 'Show the ledger as it stood at the end of' }), input),
-        stmts.length ? h('div', { class: 'field' }, h('span', { class: 'small muted', text: 'or the statement the patient is holding' }), h('div', { class: 'btnrow' }, stmts.map((s) => btn('Statement ' + s.id + ' · ' + shortDate(s.created), { kind: 'quiet', testid: 'ledger.asof.statement.' + s.id, onClick: () => { st.asof = s.created; st.hi = null; rerender(r, 'ledger.asof.back'); } })))) : null,
-        st.asof ? btn('Back to today', { kind: 'reversible', testid: 'ledger.asof.back', onClick: () => { st.asof = null; st.hi = null; announce('Back to today'); rerender(r, 'ledger.asof'); } }) : null),
-      hint,
+      h('div', { class: 'ledger-asof-row' }, dateField,
+        // The statement is named by its date, never by its storage id, and the label leads with what the press does.
+        stmts.length ? h('div', { class: 'field' }, h('span', { class: 'small muted', text: 'or the statement the patient is holding' }), h('div', { class: 'btnrow' }, stmts.map((s) => btn('Show the ' + shortDate(s.created) + ' statement', { kind: 'quiet', testid: 'ledger.asof.statement.' + s.id, onClick: () => { st.asof = s.created; st.hi = null; rerender(r, 'ledger.asof.back'); } })))) : null,
+        st.asof ? btn('Return to today', { kind: 'reversible', testid: 'ledger.asof.back', onClick: () => { st.asof = null; st.hi = null; announce('Back to today'); rerender(r, 'ledger.asof'); } }) : null),
       st.asof ? h('div', { class: 'ledger-changed' }, h('h3', { text: 'What changed since ' + shortDate(st.asof) }), later.length ? h('ul', { class: 'ledger-list' }, later.map((e) => h('li', null, shortDate(e.posted) + ' ', KIND_WORD[e.kind] || humanize(e.kind), ' ', h('b', { text: money(e.amountCents) }), ' · ' + reasonText(e, false) + ' · ' + actorText(e)))) : h('p', { class: 'muted', text: 'Nothing posted after this date' })) : null);
   }
 
@@ -294,27 +309,52 @@
     const b = Proto.store.balances(pid, st.asof);
     const gateNode = st.gate ? refusal(Object.assign({ onControl: () => { st.gate = null; rerender(r, 'ledger.statement.send'); } }, st.gate)) : null;
     if (st.gate) st.gate.fresh = false;                  // the first draw after the press logged it; a redraw does not
-    const pinField = shared() ? h('div', { class: 'field' }, h('label', { for: 'ledger-pin', text: 'Your PIN' }), h('input', { class: 'input co-pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', id: 'ledger-pin', testid: 'ledger.pin', value: st.pin, onInput: (ev) => { st.pin = ev.target.value; if (st.gate && /^pin_/.test(st.gate.code)) { st.gate = null; rerender(r, 'ledger.pin'); const el = document.querySelector('[data-testid="ledger.pin"]'); if (el) el.setSelectionRange(el.value.length, el.value.length); } } }), h('p', { class: 'hint', text: 'Shared desk: the PIN makes you the frozen sender of this statement.' })) : null;
+    // The PIN field is the shared one: requirement and format stated before typing, and a PIN the store refused is an
+    // error between the label and the input (WCAG 3.3.1, 3.3.2). One error summary stands before it and takes the keyboard.
+    const pinGate = st.gate && /^pin_/.test(st.gate.code) ? st.gate : null;
+    let pinField = null;
+    if (shared()) {
+      const pinInput = h('input', { class: 'input co-pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', id: 'ledger-pin', testid: 'ledger.pin', value: st.pin, onInput: (ev) => { st.pin = ev.target.value; if ((st.gate && /^pin_/.test(st.gate.code)) || document.querySelector('[data-testid="ledger.statement.send.confirm"]')) { st.gate = null; rerender(r, 'ledger.pin'); const el = document.querySelector('[data-testid="ledger.pin"]'); if (el) el.setSelectionRange(el.value.length, el.value.length); } } });
+      pinField = Proto.ui.field('Your PIN', pinInput, { hint: '6 digits; three misses lock this device. Shared desk: the PIN makes you the frozen sender of this statement.', required: true });
+      if (pinGate) pinField._setError(pinGate.verb);
+    }
+    const errors = pinGate ? Proto.ui.errorSummary([{ id: 'ledger-pin', message: 'Your PIN: ' + pinGate.verb.toLowerCase() }], { testid: 'ledger.errors' }) : null;
+    // The summary's link is a target: it takes the target height here until components.css gives .errsummary a the rule (needs_shared).
+    if (errors) errors.querySelectorAll('a').forEach((a) => { a.style.display = 'inline-flex'; a.style.alignItems = 'center'; a.style.minHeight = 'var(--target)'; });
+    const name = displayName(p.name, priv);
+    // Send statement cannot be recalled, so its first press is a read-back with an equal-size Cancel; nothing is written
+    // until the second press (WCAG 3.3.4, INT-irreversible-identity). Preview, the reversible sibling, comes first, and
+    // the finish control is the region's last (CLT-serial-position). ui.btn owns the held name ("Held: Send statement").
+    let send;
+    if (st.gate) send = btn('Send statement', { kind: 'held', testid: 'ledger.statement.send', onClick: () => sendStatement(r, pid, st) });
+    else {
+      const opts = { testid: 'ledger.statement.send', confirmLabel: 'Send statement', severity: 'required', readback: 'Mail a ' + money(b.patientDue) + ' statement to ' + name + '; it freezes with an id and a disclosure row is written. This cannot be undone.', onConfirm: () => sendStatement(r, pid, st) };
+      send = Proto.ui.confirmable('Send statement', opts);
+      send.addEventListener('click', (ev) => { if (ev.target.closest && ev.target.closest('[data-testid="ledger.statement.send"]') && precheckStatement(r, st)) { ev.stopPropagation(); ev.preventDefault(); } }, true);
+    }
     const page = h('div', { class: 'stack ledger-page' },
-      pageHead('Ledger', displayName(p.name, priv) + ' · ' + identLine(p, priv) + ' · ' + p.mrn,
-        btn('Explain', { kind: 'reversible', testid: 'ledger.explain', pressed: pressed(st.explain), onClick: () => { st.explain = !st.explain; rerender(r, 'ledger.explain'); } }),
-        btn('Show patient', { kind: 'reversible', testid: 'ledger.showpatient', pressed: pressed(st.patientVoice), ariaLabel: st.patientVoice ? 'Patient view on. Switch back to the staff view' : 'Show the patient view: same rows, plain words, no reason codes or poster names', onClick: () => { st.patientVoice = !st.patientVoice; if (st.patientVoice) st.explain = true; rerender(r, 'ledger.showpatient'); } }),
+      // Two controls in the head: what the account needs next and the date the ledger is read as of. Explain and Show
+      // patient sit with the Balance they explain, as they do on Checkout (WCAG 3.2.4).
+      pageHead('Ledger', name + ' · ' + identLine(p, priv) + ' · ' + p.mrn,
         btn('Open Money Desk', { kind: 'quiet', testid: 'ledger.sendbiller', ariaLabel: 'Open Money Desk to work this account', onClick: () => openMoneyDesk(r, st) }),
-        btn(st.asof ? 'As of ' + shortDate(st.asof) + ' · by posted date' : 'As of today · by posted date', { kind: 'quiet', testid: 'ledger.asof', pressed: pressed(st.asofOpen), ariaLabel: (st.asof ? 'Showing the ledger as of ' + longDate(st.asof) : 'Showing the ledger as of today') + ', by posted date. Choose another date', onClick: () => { st.asofOpen = !st.asofOpen; rerender(r, st.asofOpen ? 'ledger.asof.date' : 'ledger.asof'); } })),
+        // Three printed words; the basis (posted date) is stated in the Rows heading line and the As-of hint.
+        btn(st.asof ? 'As of ' + shortDate(st.asof) : 'As of today', { kind: 'quiet', testid: 'ledger.asof', pressed: pressed(st.asofOpen), ariaLabel: (st.asof ? 'As of ' + longDate(st.asof) : 'As of today') + ': choose another date', onClick: () => { st.asofOpen = !st.asofOpen; rerender(r, st.asofOpen ? 'ledger.asof.date' : 'ledger.asof'); } })),
       st.asof ? h('p', { class: 'ledger-asofline', role: 'status', text: 'As of ' + shortDate(st.asof) + ': ' + rows.length + ' of ' + all.length + ' rows, posted on or before ' + longDate(st.asof) + '. Waiting on insurance reflects today\'s claims.' }) : null,
       section('Balance', threeNum(b, st.patientVoice ? ['You owe', 'Waiting on insurance', 'Credit'] : null),
-        st.explain ? explainBlock(pid, st, r) : h('p', { class: 'small muted', text: 'Explain renders one sentence per open procedure from the rows below; Show patient says the same thing in the patient\'s words.' })),
+        h('div', { class: 'btnrow' },
+          btn('Explain', { kind: 'reversible', testid: 'ledger.explain', pressed: pressed(st.explain), onClick: () => { st.explain = !st.explain; rerender(r, 'ledger.explain'); } }),
+          // The accessible name leads with the printed words and stays under twelve (CLT-label-words); the same name as Checkout's.
+          btn('Show patient', { kind: 'reversible', testid: 'ledger.showpatient', pressed: pressed(st.patientVoice), ariaLabel: st.patientVoice ? 'Show patient: on; press to return to the staff view' : 'Show patient: the same rows in plain words', onClick: () => { st.patientVoice = !st.patientVoice; if (st.patientVoice) st.explain = true; rerender(r, 'ledger.showpatient'); } })),
+        st.explain ? explainBlock(pid, st, r) : null),
       st.asofOpen ? section('As of', asOfBlock(pid, st, r, all)) : null,
       section('Rows', h('p', { class: 'small muted', text: 'Newest first by posted date. Reversals and reposts name the row they correct; nothing is edited in place.' }), ledgerTable(rows, st)),
       section('Statement',
         st.sent ? h('div', { class: 'ledger-sent row', id: 'ledger-sent', tabindex: '-1' }, chip('clear', 'Statement sent'), h('span', { text: 'Frozen and sent by ' + st.sent.channel + ' on ' + longDate(today()) + '; disclosure row written' })) : null,
+        errors,
         pinField,
         gateNode,
-        h('div', { class: 'btnrow' },
-          // A held primary renders the word Held from ui.btn; the label passed in becomes its accessible name.
-          btn('Send statement', { kind: st.gate ? 'held' : 'irreversible', testid: 'ledger.statement.send', ariaLabel: st.gate ? 'Send statement is held: ' + st.gate.verb : 'Send the statement by mail; this freezes it with an id', onClick: () => sendStatement(r, pid, st) }),
-          btn('Preview', { kind: 'reversible', testid: 'ledger.statement.preview', onClick: () => previewStatement(pid, st) })),
-        h('details', { class: 'ledger-details' }, h('summary', { testid: 'ledger.statement.why' }, 'Why this statement'), h('p', { class: 'muted', text: 'The patient-voice sentences under three numbers; pending claims listed under Waiting on insurance with no patient dollar figure; family members by first name. Send freezes the statement with an id and writes a disclosure row per channel. A balance still waiting on insurance holds for a stated reason.' }))));
+        h('details', { class: 'ledger-details' }, h('summary', { testid: 'ledger.statement.why' }, 'Why this statement'), h('p', { class: 'muted', text: 'Patient-voice sentences under three numbers; pending claims listed with no patient figure; family by first name. Send freezes it with an id and writes a disclosure row. A balance waiting on insurance holds.' })),
+        h('div', { class: 'btnrow' }, btn('Preview', { kind: 'reversible', testid: 'ledger.statement.preview', onClick: () => previewStatement(pid, st) }), send)));
     Proto.screens.shell.mount(page);
   }
   function rerender(r, focus) {

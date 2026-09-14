@@ -1,19 +1,25 @@
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 body {
-  font-family: var(--font); font-size: var(--fs-2); line-height: 1.45; color: var(--ink);
+  font-family: var(--font); font-size: var(--fs-2); line-height: var(--lh-prose); color: var(--ink);
   background: var(--bg); -webkit-font-smoothing: antialiased;
   display: flex; flex-direction: column; min-height: 100vh;
+  /* Money, times, counts and ids line up column to column wherever they are printed. */
+  font-variant-numeric: tabular-nums;
 }
-h1, h2, h3, h4 { margin: 0; font-weight: 600; text-wrap: balance; line-height: 1.2; }
+h1, h2, h3, h4 { margin: 0; font-weight: var(--weight-bold); text-wrap: balance; line-height: var(--lh-tight); }
 h1 { font-size: var(--fs-5); } h2 { font-size: var(--fs-4); } h3 { font-size: var(--fs-3); } h4 { font-size: var(--fs-2); }
-p { margin: 0; }
+/* Prose stops at a readable measure; a paragraph that is a layout cell says so with .grow. */
+p { margin: 0; max-width: var(--measure); }
+p.grow, .row > p, .between > p { max-width: none; }
 a { color: var(--link); }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
+/* A placeholder is a hint, never a label; it still has to be readable (WCAG 1.4.3). */
+::placeholder { color: var(--ink-3); opacity: 1; }
 [hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-.skip { position: absolute; left: var(--space-3); top: -60px; background: var(--surface); color: var(--ink); padding: 10px 14px; border: 2px solid var(--focus); border-radius: var(--radius); z-index: 50; min-height: var(--target); display: inline-flex; align-items: center; }
+.skip { position: absolute; left: var(--space-3); top: -60px; background: var(--surface); color: var(--ink); padding: var(--space-2) var(--space-4); border: 2px solid var(--focus); border-radius: var(--radius); z-index: 50; min-height: var(--target); display: inline-flex; align-items: center; }
 .skip:focus { top: var(--space-2); }
 
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
@@ -21,11 +27,16 @@ button:focus-visible, [role="button"]:focus-visible, input:focus-visible, select
 
 .topbar { display: flex; align-items: center; gap: var(--gap); padding: var(--space-2) var(--space-3); background: var(--surface); border-bottom: 1px solid var(--line); min-height: 60px; position: sticky; top: 0; z-index: 20; flex-wrap: wrap; }
 .andon:empty { display: none; }
-.andon { display: flex; align-items: center; gap: var(--gap); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); background: var(--surface-2); min-height: 52px; }
+.andon { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); background: var(--surface-2); min-height: 52px; }
+.andon .grow { flex: 1 1 12rem; min-width: 0; }  /* the sentence takes its own row on a narrow phone instead of a zero-width column (WCAG 1.4.10) */
 .shell { display: flex; flex: 1; min-height: 0; }
 .rail { width: 320px; flex: 0 0 320px; border-right: 1px solid var(--line); background: var(--surface); padding: var(--space-3); overflow: auto; display: flex; flex-direction: column; gap: var(--space-3); }
 .canvas { flex: 1; min-width: 0; padding: var(--space-4); overflow: auto; }
 .canvas:focus { outline: none; }
+/* When the browser scrolls a newly focused control into view, keep it clear of the
+   sticky gate column and of the sticky top bar above it (WCAG 2.4.11). Screens that
+   float a gate raise --gate-clearance. */
+.canvas { scroll-padding-top: var(--space-4); scroll-padding-bottom: var(--gate-clearance, var(--space-4)); }
 @media (max-width: 1023px) {
   .shell { flex-direction: column; }
   .rail { width: auto; flex: 0 0 auto; border-right: 0; border-bottom: 1px solid var(--line); }
@@ -34,7 +45,9 @@ button:focus-visible, [role="button"]:focus-visible, input:focus-visible, select
 .mono, .num { font-variant-numeric: tabular-nums; }
 .muted { color: var(--ink-2); }
 .small { font-size: var(--fs-1); }
-.stack { display: flex; flex-direction: column; gap: var(--space-3); }
+/* A stack separates groups; a row separates controls inside one. The first gap is
+   twice the second, so the eye reads the group without a border doing the work. */
+.stack { display: flex; flex-direction: column; gap: var(--gap-group); }
 .row { display: flex; align-items: center; gap: var(--gap); flex-wrap: wrap; }
 .between { justify-content: space-between; }
 .grow { flex: 1; min-width: 0; }

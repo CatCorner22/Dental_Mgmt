@@ -3,7 +3,7 @@
    write-off with dual release (held, never silently allowed), desk PIN on Post for shared desks,
    Explain in two voices. Route: checkout/<apptId>. Features 1, 23, 24, 25, 30. */
 (function () {
-  const Proto = window.Proto; const { h, btn, chip, refusal, money, section, pageHead, displayName } = Proto.ui;
+  const Proto = window.Proto; const { h, btn, chip, refusal, money, section, pageHead, displayName, field, confirmable, errorSummary } = Proto.ui;
   Proto.screens = Proto.screens || {};
 
   /* The same list the Board's queue row asks: a filed D7210 cannot read "Needs: attachment" there and
@@ -26,8 +26,11 @@
   const cents = (s) => { const t = String(s == null ? '' : s).trim().replace(/[$,\s]/g, '').replace(/−/g, '-'); return MONEY_RE.test(t) ? Math.round(Number(t) * 100) : NaN; };
   const pressed = (b) => (b ? 'true' : 'false');
 
+  /* The commonest answer is chosen before anyone presses: card is the tender the window takes most, and courtesy is the
+     reason the store used to write silently when none was pressed (CLT-tesler-defaults). The screen and the record now
+     say the same thing; the person overrides or confirms. */
   function fresh(patientCents) {
-    return { decision: patientCents > 0 ? 'collect' : 'zero_due', tender: null, amountStr: dollars(patientCents), cardStr: '', selfPay: new Set(), writeoffOpen: false, writeoffStr: '', writeoffReason: null, cadence: 'monthly', pin: '', explainOpen: false, patientVoice: false, receipt: false, refusalNode: null, heldReq: null, requested: false, posted: null };
+    return { decision: patientCents > 0 ? 'collect' : 'zero_due', tender: 'card', amountStr: dollars(patientCents), cardStr: '', selfPay: new Set(), writeoffOpen: false, writeoffStr: '', writeoffReason: 'courtesy', cadence: 'monthly', pin: '', explainOpen: false, patientVoice: false, receipt: false, refusalNode: null, errors: {}, heldReq: null, requested: false, posted: null };
   }
 
   /* Per-line estimate: the appointment-level patient portion spread by fee so the column sums to it. */
@@ -48,8 +51,12 @@
     if (focus) { const el = document.querySelector(focus[0] === '#' ? focus : '[data-testid="' + focus + '"]'); if (el && el.focus) el.focus(); }
   }
   const focusPin = () => { const el = document.querySelector('[data-testid="checkout.pin"]'); if (el) el.focus(); };
-  const removeWriteoff = (r, st, focus) => { st.writeoffOpen = false; st.writeoffStr = ''; st.writeoffReason = null; st.refusalNode = null; rerender(r, focus || 'checkout.writeoff.add'); };
+  const removeWriteoff = (r, st, focus) => { st.writeoffOpen = false; st.writeoffStr = ''; st.writeoffReason = 'courtesy'; st.refusalNode = null; rerender(r, focus || 'checkout.writeoff.add'); };
   const focusField = (t) => () => { const el = document.querySelector('[data-testid="' + t + '"]'); if (el && el.focus) el.focus(); };
+  // A repaint puts a fresh input under the keyboard; the caret goes back to the end of what was typed.
+  const caretEnd = (t) => { const el = document.querySelector('[data-testid="' + t + '"]'); if (el && el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length); };
+  // A read-back that is waiting for its second press is cancelled by any edit to the form it describes.
+  const confirmPending = () => !!document.querySelector('[data-testid="checkout.post.confirm"]');
   const openRoles = () => { location.hash = '#/owner/roles'; };   // the seat that issues a pass, not the pass-less temp's own Roles
 
   /* Every gate has one control, and the control does what the store's word says. The store leaves a few controls
@@ -85,6 +92,45 @@
   function gate(r, st, v, focusTestid) {
     st.refusalNode = refusal(Object.assign({}, v, { onControl: () => { const el = document.querySelector('[data-testid="' + focusTestid + '"]'); if (el && el.focus) el.focus(); } }));
     rerender(r, 'refusal.control');
+  }
+  /* A gate whose cause is one field marks that field as well: aria-invalid, an "Error:" message between the label and
+     the input, and one error summary before the form with a link to the field, which takes the keyboard (WCAG 3.3.1,
+     3.3.3; CDS-ERR-message-prefix, CDS-ERR-summary-top). The refusal beside Post keeps the contract's verb, control and
+     Why; the field error and the summary fall with it, on the keystroke or press that removes the cause. */
+  const FIELD_IDS = { amount: 'co-amount', writeoff: 'co-wo-amount', pin: 'co-pin', tender: 'co-tender' };
+  function fieldGate(r, st, v, key, focusTestid) {
+    st.errors = {}; st.errors[key] = v.verb;
+    st.refusalNode = refusal(Object.assign({ onControl: focusField(focusTestid) }, v));
+    rerender(r, 'checkout.errors');
+  }
+  const PIN_WHY = 'Shared desk: the PIN mints your own session, so the posting carries your name and not the last person\'s.';
+  const TENDER_WHY = 'The tender is what the day sheet reconciles against the bank, so a payment cannot post without one.';
+  /* The first press of Post reads the form before it asks for a second: a blank amount, a missing tender or an empty PIN
+     is a refusal at the field, not a read-back to confirm. Returns true when it raised a gate. */
+  function precheck(r, a, st) {
+    const approved = st.heldReq && st.heldReq.status === 'approved';
+    if (st.decision === 'collect') {
+      if (!st.tender) { fieldGate(r, st, { code: 'tender_required', verb: 'Choose a tender', control: 'Choose card', why: TENDER_WHY, onControl: () => { st.tender = 'card'; st.refusalNode = null; rerender(r, 'checkout.card.number'); } }, 'tender', 'checkout.tender.card'); return true; }
+      if (!(cents(st.amountStr) > 0)) { fieldGate(r, st, { code: 'amount_required', verb: 'Type an amount above zero', control: 'Go to amount', why: AMOUNT_WHY }, 'amount', 'checkout.amount'); return true; }
+    }
+    const woTyped = !approved && st.writeoffOpen && String(st.writeoffStr).trim() !== '';
+    if (woTyped && !(cents(st.writeoffStr) > 0)) { fieldGate(r, st, { code: 'amount_required', verb: 'Type an amount above zero', control: 'Go to amount', why: WRITEOFF_WHY }, 'writeoff', 'checkout.writeoff.amount'); return true; }
+    // Under an outage the store refuses before it looks at a PIN, so the first press asks it first and shows its gate in its own words.
+    if (Proto.store.get().outage) { doPost(r, a, st); return true; }
+    if (window.__proto.device === 'shared' && !String(st.pin || '').trim()) { fieldGate(r, st, { code: 'pin_required', verb: 'Enter your PIN to post', control: 'Enter PIN', why: PIN_WHY }, 'pin', 'checkout.pin'); return true; }
+    return false;
+  }
+  /* What the second press will write, in the clinic's words, for the read-back row (WCAG 3.3.4). */
+  function readback(a, st, est, name) {
+    const approved = st.heldReq && st.heldReq.status === 'approved';
+    const wo = !approved && st.writeoffOpen ? cents(st.writeoffStr) : 0;
+    const woText = wo > 0 ? ' and a ' + money(wo) + ' ' + (REASONS.find((x) => x[0] === (st.writeoffReason || 'courtesy')) || [null, 'courtesy'])[1].toLowerCase() + ' write-off' : '';
+    const who = ' for ' + name + '.';
+    const unfiled = !(Proto.store.encounter(a.encounterId) || {}).noteFiled;
+    if (st.decision === 'collect') return 'Post a ' + money(cents(st.amountStr)) + ' ' + st.tender + ' payment' + woText + who + (unfiled ? ' It waits as credit until the note is filed.' : '') + ' This cannot be undone.';
+    if (st.decision === 'send_statement') return 'Post the decision to send a ' + money(afterWriteoff(st, est)) + ' statement' + woText + who + ' This cannot be undone.';
+    if (st.decision === 'payment_plan') return 'Post a ' + (CADENCES.find((c) => c[0] === st.cadence) || [null, 'monthly'])[1].toLowerCase() + ' payment plan for ' + money(afterWriteoff(st, est)) + woText + who + ' This cannot be undone.';
+    return 'Post nothing due today' + woText + who + ' This cannot be undone.';
   }
   /* A restriction posts only with the payment that covers its fee (docs/13 feature 1). The toggle hides when the
      tender stops covering it, but st.selfPay kept the id, so Send statement posted a restriction with no payment. */
@@ -143,6 +189,8 @@
       rerender(r, 'refusal.control');
       return;
     }
+    // A PIN the store would not accept marks the PIN field as well as raising the gate.
+    if (/^pin_/.test(res.code)) { st.errors = { pin: res.verb }; }
     st.refusalNode = refusal(withControl(res, r, a, st));
     rerender(r, 'refusal.control');
   }
@@ -160,7 +208,8 @@
       const name = (S.cdt[p.cdt] || [p.cdt])[0];
       const pre = p.selfPayRestricted ? chip('info', 'Restricted — no claim') : needsAttachment(p) ? chip('review', 'Needs: attachment') : chip('clear', 'Ready');
       const on = st.selfPay.has(p.id);
-      const toggle = btn('Paid in full — don\'t send to insurance', { kind: 'reversible', class: 'compact co-selfpay', testid: 'checkout.line.' + p.id + '.selfpay', pressed: pressed(on), ariaLabel: 'Paid in full, do not send ' + name + ' to insurance', onClick: () => { if (on) st.selfPay.delete(p.id); else st.selfPay.add(p.id); rerender(null, 'checkout.line.' + p.id + '.selfpay'); } });
+      // Four printed words (CLT-label-words); the accessible name leads with them and adds the procedure.
+      const toggle = btn('Don\'t send to insurance', { kind: 'reversible', class: 'compact co-selfpay', testid: 'checkout.line.' + p.id + '.selfpay', pressed: pressed(on), ariaLabel: 'Don\'t send to insurance: ' + name + ', paid in full', onClick: () => { if (on) st.selfPay.delete(p.id); else st.selfPay.add(p.id); rerender(null, 'checkout.line.' + p.id + '.selfpay'); } });
       toggle.dataset.fee = p.feeCents; toggle.hidden = !coversNow(p.feeCents) || !!p.selfPayRestricted;
       return h('tr', { testid: 'checkout.line.' + p.id },
         h('td', null, h('div', { text: name }), h('div', { class: 'small muted', text: p.cdt.toUpperCase() })),
@@ -170,10 +219,15 @@
         h('td', null, pre),
         h('td', null, toggle));
     });
+    // Every column header carries scope; the footer's numbers and note are data cells, not headers; the table names
+    // itself with a caption (WCAG 1.3.1, axe th-has-data-cells). The caption repeats the region's name for a screen
+    // reader only: the card's heading already prints it.
+    const th = (text, cls) => h('th', { scope: 'col', class: cls, text });
     const table = Proto.ui.scrollRegion('Completed procedures', 'checkout.lines', h('table', { class: 'data co-lines' },
-      h('thead', null, h('tr', null, h('th', { text: 'Procedure' }), h('th', { class: 'num', text: 'Tooth' }), h('th', { class: 'num', text: 'Fee' }), h('th', { class: 'num co-est', text: 'Patient portion (estimate)' }), h('th', { text: 'Pre-flight' }), h('th', { text: 'Self-pay' }))),
+      h('caption', { class: 'sr-only', text: 'Completed procedures: fee, patient portion estimate, claim pre-flight and self-pay' }),
+      h('thead', null, h('tr', null, th('Procedure'), th('Tooth', 'num'), th('Fee', 'num'), th('Patient portion (estimate)', 'num co-est'), th('Pre-flight'), th('Self-pay'))),
       h('tbody', null, ...rows),
-      h('tfoot', null, h('tr', null, h('th', { scope: 'row', text: 'Totals' }), h('td'), h('td', { class: 'num', text: money(feeTotal) }), h('th', { class: 'num co-est', text: money(est.patientCents) + ' est.' }), h('th', { colspan: '2', class: 'small muted', text: 'Estimate is separate from the balance above; it never enters the ledger.' })))));
+      h('tfoot', null, h('tr', null, h('th', { scope: 'row', text: 'Totals' }), h('td'), h('td', { class: 'num', text: money(feeTotal) }), h('td', { class: 'num co-est', text: money(est.patientCents) + ' est.' }), h('td', { colspan: '2', class: 'small muted', text: 'Estimate is separate from the balance above; it never enters the ledger.' })))));
     const why = h('details', null, h('summary', { class: 'co-summary', testid: 'checkout.estimate.why' }, 'Why this estimate'),
       h('p', { class: 'hint', text: (est.note || 'No plan estimate on file.') + (est.insuranceCents ? ' Insurance est. ' + money(est.insuranceCents) + '.' : '') + (est.writeoffCents ? ' PPO write-off est. ' + money(est.writeoffCents) + '.' : '') }));
     // An empty state says why it is empty and what to do next: with nothing charted there is nothing to bill,
@@ -184,90 +238,127 @@
     return section('Completed today', procs.length ? table : empty, why);
   }
 
-  function field(label, input, hint) {
-    const id = input.id || (input.id = 'f-' + Math.random().toString(36).slice(2, 8));
-    const hintEl = h('p', { class: 'hint', id: id + '-hint', text: hint || '' });
-    input.setAttribute('aria-describedby', hintEl.id);
-    return { node: h('div', { class: 'field' }, h('label', { for: id, text: label }), input, hintEl), hint: hintEl, input };
-  }
+  /* A group of three or more controls carries its name inside its own region, visibly, the way the perio path row does:
+     a printed label beside the row and role=group pointing at it (CLT-common-region). */
+  function labelledRow(id, label, group) { group.setAttribute('role', 'group'); group.setAttribute('aria-labelledby', id); return h('div', { class: 'row' }, h('span', { id, text: label }), group); }
 
+  /* The Payment region is not one card of a dozen controls: its groups are bounded and named one at a time — the
+     decision row, the tender row, the two amount fields, the write-off — and none holds more than four (CLT-chunk-4).
+     Why sits in the heading row, so the region's last control is the one that finishes it (CLT-serial-position). */
   function paymentCard(r, a, st, est, procs, finishRow) {
     const S = Proto.store.get();
     const policy = [];   // policy sentences live behind Why, never on the finish path (C6)
     const zero = est.patientCents <= 0;
+    const errors = st.refusalNode ? st.errors || {} : (st.errors = {});   // a field error lives exactly as long as its gate
     // At $0 the decision is Nothing due today: a statement or a plan is a money object, and there is no money.
     const segs = zero ? [['zero-due', 'Nothing due today']] : [['collect', 'Collect'], ['send-statement', 'Send statement'], ['payment-plan', 'Set up payment plan']];
-    const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Collection decision' }, ...segs.map(([code, label]) => btn(label, { testid: 'checkout.collect.seg.' + code, pressed: pressed(st.decision === SEG[code]), onClick: () => { st.decision = SEG[code]; st.refusalNode = null; rerender(r, 'checkout.collect.seg.' + code); } })));
+    const seg = h('div', { class: 'seg' }, ...segs.map(([code, label]) => btn(label, { testid: 'checkout.collect.seg.' + code, pressed: pressed(st.decision === SEG[code]), onClick: () => { st.decision = SEG[code]; st.refusalNode = null; rerender(r, 'checkout.collect.seg.' + code); } })));
     const body = h('div', { class: 'stack' });
     if (st.decision === 'collect') {
-      const tenders = h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Tender' }, ...['card', 'cash', 'check'].map((t) => btn(t[0].toUpperCase() + t.slice(1), { testid: 'checkout.tender.' + t, pressed: pressed(st.tender === t), onClick: () => { st.tender = t; st.refusalNode = null; rerender(r, t === 'card' ? 'checkout.card.number' : 'checkout.tender.' + t); } })));
-      body.append(tenders);
+      const tenders = h('div', { class: 'btnrow', id: FIELD_IDS.tender, tabindex: '-1' }, ...['card', 'cash', 'check'].map((t) => btn(t[0].toUpperCase() + t.slice(1), { testid: 'checkout.tender.' + t, pressed: pressed(st.tender === t), onClick: () => { st.tender = t; st.refusalNode = null; rerender(r, t === 'card' ? 'checkout.card.number' : 'checkout.tender.' + t); } })));
+      body.append(labelledRow('co-tender-lab', 'Tender (required)', tenders));
+      const fields = h('div', { class: 'co-two' });
       if (st.tender === 'card') {
-        const card = h('input', { class: 'input co-hosted', type: 'text', inputmode: 'numeric', autocomplete: 'off', testid: 'checkout.card.number', value: st.cardStr, placeholder: '•••• •••• •••• ••••', onInput: (ev) => { st.cardStr = ev.target.value; } });
-        const cf = field('Card (hosted field, never stored here)', card, 'Processor vault, PCI SAQ-A. Any digits are accepted in the prototype.');
-        card.addEventListener('blur', () => { const d = st.cardStr.replace(/\D/g, ''); const bad = d.length > 0 && d.length < 12; card.classList.toggle('invalid', bad); cf.hint.textContent = bad ? 'That looks short for a card number; the hosted field will confirm before Post.' : 'Processor vault, PCI SAQ-A. Any digits are accepted in the prototype.'; });
-        body.append(cf.node);
+        const card = h('input', { class: 'input co-hosted', type: 'text', inputmode: 'numeric', autocomplete: 'off', testid: 'checkout.card.number', value: st.cardStr, placeholder: '•••• •••• •••• ••••', onInput: (ev) => { st.cardStr = ev.target.value; if (confirmPending()) { rerender(r, 'checkout.card.number'); caretEnd('checkout.card.number'); } } });
+        const cf = field('Card (hosted, never stored)', card, { hint: '12 to 19 digits (processor vault).' });
+        card.addEventListener('blur', () => { const d = st.cardStr.replace(/\D/g, ''); const bad = d.length > 0 && d.length < 12; card.classList.toggle('invalid', bad); cf._setError(bad ? 'That looks short for a card number; the hosted field will confirm before Post.' : null); });
+        fields.append(cf);
       }
-      const amt = h('input', { class: 'input co-amount', type: 'text', inputmode: 'decimal', testid: 'checkout.amount', value: st.amountStr, onInput: (ev) => { st.amountStr = ev.target.value; if (st.refusalNode) { st.refusalNode = null; rerender(r, 'checkout.amount'); return; } const c = cents(st.amountStr); document.querySelectorAll('.co-selfpay').forEach((b) => { const restricted = b.closest('tr') && b.closest('tr').querySelector('.chip.info'); b.hidden = !(c >= Number(b.dataset.fee)) || !!restricted; }); } });
-      const af = field('Amount', amt, 'Prefilled with the patient portion estimate.');
-      amt.addEventListener('blur', () => { const c = cents(st.amountStr); const bad = !(c > 0); amt.classList.toggle('invalid', bad); af.hint.textContent = bad ? 'Enter an amount above $0, or choose Nothing due today.' : 'Prefilled with the patient portion estimate.'; });
+      // The requirement and the floor are in the label and the standing hint, before anyone types (WCAG 3.3.2).
+      const amt = h('input', { class: 'input co-amount', id: FIELD_IDS.amount, type: 'text', inputmode: 'decimal', testid: 'checkout.amount', value: st.amountStr, onInput: (ev) => { st.amountStr = ev.target.value; if (st.refusalNode || confirmPending()) { st.refusalNode = null; rerender(r, 'checkout.amount'); caretEnd('checkout.amount'); return; } af._setError(null); const c = cents(st.amountStr); document.querySelectorAll('.co-selfpay').forEach((b) => { const restricted = b.closest('tr') && b.closest('tr').querySelector('.chip.info'); b.hidden = !(c >= Number(b.dataset.fee)) || !!restricted; }); } });
+      const af = field('Amount', amt, { hint: 'Above $0.00; prefilled with the estimate.', required: true });
+      if (errors.amount) af._setError(errors.amount);
+      amt.addEventListener('blur', () => { const c = cents(st.amountStr); const bad = !(c > 0); amt.classList.toggle('invalid', bad); if (bad) af._setError('Enter an amount above $0.00, or choose Nothing due today.'); else if (!errors.amount) af._setError(null); });
+      fields.append(af);
+      body.append(fields);
       const unfiled = procs.length && !(Proto.store.encounter(a.encounterId) || {}).noteFiled;
-      body.append(h('div', { class: 'co-two' }, af.node, unfiled ? h('p', { class: 'hint co-alloc', text: 'The note is not filed yet: this payment waits as credit until the charges post.' }) : null));
-      policy.push('Allocates to oldest open charge first' + (unfiled ? '; until the note is filed the payment waits as credit rather than landing on a charge.' : '.'));
+      policy.push('Allocates to the oldest open charge first' + (unfiled ? '; until the note is filed, the payment waits as credit.' : '.'));
     } else if (st.decision === 'send_statement') {
       body.append(h('p', { class: 'muted', text: 'No ledger entry today. A statement-due row for ' + money(afterWriteoff(st, est)) + ' appears on Money Desk → Statements due.' }));
       policy.push('The window defers the balance to a statement, and the decision is reversible until the statement job runs.');
     } else if (st.decision === 'payment_plan') {
-      body.append(h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Cadence' }, ...CADENCES.map(([code, label]) => btn(label, { testid: 'checkout.plan.cadence.' + code, pressed: pressed(st.cadence === code), onClick: () => { st.cadence = code; st.refusalNode = null; rerender(r, 'checkout.plan.cadence.' + code); } }))));
+      body.append(labelledRow('co-cadence-lab', 'Cadence', h('div', { class: 'btnrow' }, ...CADENCES.map(([code, label]) => btn(label, { testid: 'checkout.plan.cadence.' + code, pressed: pressed(st.cadence === code), onClick: () => { st.cadence = code; st.refusalNode = null; rerender(r, 'checkout.plan.cadence.' + code); } })))));
       body.append(h('p', { class: 'muted', text: 'Plan for ' + money(afterWriteoff(st, est)) + ', ' + CADENCES.find((c) => c[0] === st.cadence)[1].toLowerCase() + ', on the processor token.' }));
       policy.push('Only patient-due charges are eligible; charges waiting on insurance are greyed.');
     } else {
       body.append(h('p', { class: 'muted', text: 'Nothing due today; there is nothing to collect at the window.' }));
       policy.push('Post still writes the typed decision, so the day\'s "Not collected at window" line stays honest.');
     }
-    const wo = writeoffBlock(r, st, policy);
+    const wo = writeoffBlock(r, st, policy, errors);
     // Why: the same sentences, one tap away, off the path between the decision and Post (C6).
     const why = h('details', null, h('summary', { class: 'co-summary', testid: 'checkout.payment.why' }, 'Why this decision'),
       ...policy.map((t) => h('p', { class: 'hint', text: t })));
-    return section('Payment', seg, body, wo, finishRow, why);
+    // The summary stands before the first field, names each field in error and links to it; it takes the keyboard.
+    const MESSAGE = { amount: 'Amount: type an amount above $0.00', writeoff: 'Write-off amount: type an amount above $0.00', pin: 'Your PIN: enter your PIN to post', tender: 'Tender: choose card, cash or check' };
+    const summary = errorSummary(Object.keys(errors).map((k) => ({ id: FIELD_IDS[k], message: MESSAGE[k] || errors[k] })), { testid: 'checkout.errors' });
+    // The shared summary's links are text-height; a link is a target like any other, so it takes the target height here
+    // until components.css gives .errsummary a the rule (needs_shared).
+    if (summary) summary.querySelectorAll('a').forEach((a) => { a.style.display = 'inline-flex'; a.style.alignItems = 'center'; a.style.minHeight = 'var(--target)'; });
+    return h('section', { class: 'stack co-payment', 'aria-labelledby': 'co-pay-head' },
+      h('div', { class: 'row between' }, h('h2', { id: 'co-pay-head', text: 'Payment' }), why),
+      summary, labelledRow('co-decision-lab', 'Decision', seg), body, wo, finishRow);
   }
 
-  function writeoffBlock(r, st, policy) {
+  function writeoffBlock(r, st, policy, errors) {
     const S = Proto.store.get();
     // What posted, not what was asked: the store settles min(amount, due) when the approval lands.
     if (st.heldReq && st.heldReq.status === 'approved') return h('div', { class: 'row' }, chip('clear', 'Write-off ' + money(st.heldReq.postedCents != null ? st.heldReq.postedCents : st.heldReq.amountCents) + ' approved by ' + st.heldReq.decidedBy), h('span', { class: 'small muted', text: 'Already on the ledger; Post writes the rest.' }));
     if (!st.writeoffOpen) return h('div', null, btn('Add write-off or adjustment', { kind: 'reversible', testid: 'checkout.writeoff.add', onClick: () => { st.writeoffOpen = true; st.refusalNode = null; rerender(r, 'checkout.writeoff.amount'); } }));
-    policy.push('At or above ' + money(S.tenant.dualReleaseThresholdCents) + ' a second approver is needed; the posting is held, never silently allowed.');
-    const amt = h('input', { class: 'input co-amount', type: 'text', inputmode: 'decimal', testid: 'checkout.writeoff.amount', value: st.writeoffStr, onInput: (ev) => { st.writeoffStr = ev.target.value; if (st.refusalNode) { st.refusalNode = null; rerender(r, 'checkout.writeoff.amount'); } } });
-    const wf = field('Write-off amount', amt, 'The dollar amount to write off this account.');
-    amt.addEventListener('blur', () => { const bad = st.writeoffStr.trim() !== '' && !(cents(st.writeoffStr) > 0); amt.classList.toggle('invalid', bad); if (bad) wf.hint.textContent = 'Enter a dollar amount, or remove the write-off.'; });
-    const reasons = h('div', { class: 'btnrow', role: 'group', 'aria-label': 'Reason code' }, ...REASONS.map(([code, label]) => btn(label, { testid: 'checkout.writeoff.reason.' + code, pressed: pressed(st.writeoffReason === code), onClick: () => { st.writeoffReason = code; st.refusalNode = null; rerender(r, 'checkout.writeoff.reason.' + code); } })));
+    policy.push('At or above ' + money(S.tenant.dualReleaseThresholdCents) + ' a second approver is needed; the posting is held.');
+    const amt = h('input', { class: 'input co-amount', id: FIELD_IDS.writeoff, type: 'text', inputmode: 'decimal', testid: 'checkout.writeoff.amount', value: st.writeoffStr, onInput: (ev) => { st.writeoffStr = ev.target.value; if (st.refusalNode || confirmPending()) { st.refusalNode = null; rerender(r, 'checkout.writeoff.amount'); caretEnd('checkout.writeoff.amount'); } else wf._setError(null); } });
+    // The floor and the ceiling are stated before typing; a blank write-off is no write-off, so the field is not required.
+    const wf = field('Write-off amount', amt, { hint: 'Above $0.00, up to the balance; blank means none.' });
+    if (errors && errors.writeoff) wf._setError(errors.writeoff);
+    amt.addEventListener('blur', () => { const bad = st.writeoffStr.trim() !== '' && !(cents(st.writeoffStr) > 0); amt.classList.toggle('invalid', bad); if (bad) wf._setError('Enter a dollar amount above $0.00, or remove the write-off.'); else if (!(errors && errors.writeoff)) wf._setError(null); });
+    // Courtesy starts pressed: the store wrote it whenever nothing was chosen, so the screen now says so (CLT-tesler-defaults).
+    const reasons = h('div', { class: 'btnrow', role: 'group', 'aria-labelledby': 'co-reason-lab' }, ...REASONS.map(([code, label]) => btn(label, { testid: 'checkout.writeoff.reason.' + code, pressed: pressed(st.writeoffReason === code), onClick: () => { st.writeoffReason = code; st.refusalNode = null; rerender(r, 'checkout.writeoff.reason.' + code); } })));
     // One id, one verb: the control that removes the write-off is not the control that adds it.
     const remove = btn('Remove write-off', { kind: 'quiet', class: 'compact', testid: 'checkout.writeoff.remove', onClick: () => removeWriteoff(r, st) });
-    return h('div', { class: 'stack co-writeoff', role: 'group', 'aria-label': 'Write-off or adjustment' }, h('div', { class: 'co-two' }, wf.node, h('div', { class: 'field' }, h('label', { text: 'Reason code' }), reasons)), remove);
+    return h('div', { class: 'stack co-writeoff', role: 'group', 'aria-labelledby': 'co-writeoff-lab' }, h('span', { id: 'co-writeoff-lab', text: 'Write-off or adjustment' }),
+      h('div', { class: 'co-two' }, wf, h('div', { class: 'field' }, h('label', { id: 'co-reason-lab', text: 'Reason code' }), reasons)), remove);
   }
 
-  function postRow(r, a, st) {
+  /* The finish row. Post cannot be undone, so it is never alone and never writes on its first press: the shared
+     confirmable puts a read-back and an equal-size Cancel between the first press and the write (WCAG 3.3.4,
+     INT-irreversible-identity), and Return to Board stands beside it as the reversible way out (CLT-neutral-irreversible). */
+  function postRow(r, a, st, est, name) {
     const P = window.__proto;
     const held = st.heldReq && st.heldReq.status === 'pending';
     // While a gate is on screen the primary never keeps the irreversible identity: it switches to Held, and the
     // verb line beside it says what to do next (CONTRACTS §6).
     const gated = !held && !!st.refusalNode;
+    const errors = st.refusalNode ? st.errors || {} : {};
     const row = h('div', { class: 'co-postrow' });
     if (P.device === 'shared') {
       // Typing the PIN dissolves the gate that asked for it, as typing an amount does; Post is live again.
-      const pin = h('input', { class: 'input co-pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', testid: 'checkout.pin', value: st.pin, onInput: (ev) => { st.pin = ev.target.value; if (st.refusalNode) { st.refusalNode = null; rerender(r, 'checkout.pin'); const el = document.querySelector('[data-testid="checkout.pin"]'); if (el) el.setSelectionRange(el.value.length, el.value.length); } } });
+      const pin = h('input', { class: 'input co-pin', id: FIELD_IDS.pin, type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', testid: 'checkout.pin', value: st.pin, onInput: (ev) => { st.pin = ev.target.value; if (st.refusalNode || confirmPending()) { st.refusalNode = null; rerender(r, 'checkout.pin'); caretEnd('checkout.pin'); } } });
       pin.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); const b = document.querySelector('[data-testid="checkout.post"]'); if (b) b.click(); } });
-      row.append(field('Your PIN', pin, 'Shared desk: the PIN makes you the frozen poster for this posting.').node);
+      const pf = field('Your PIN', pin, { hint: '6 digits; three misses lock this device. Shared desk: the PIN makes you the frozen poster for this posting.', required: true });
+      if (errors.pin) pf._setError(errors.pin);
+      row.append(pf);
     }
+    const back = () => btn('Return to Board', { kind: 'reversible', testid: 'checkout.back', onClick: () => Proto.router.go(r.persona, 'board') });
     if (held) {
-      row.append(btn('Post', { kind: 'held', testid: 'checkout.post', ariaLabel: 'Held: waiting on a second approver', onClick: () => Proto.router.announce('Waiting on ' + ((st.heldReq.eligible || []).slice(0, 2).join(' or ') || 'a second approver')) }));
-      if (st.requested) row.append(h('span', { class: 'row', id: 'co-requested', tabindex: '-1' }, chip('review', 'Request ' + st.heldReq.id + ' waiting'), h('span', { class: 'small muted', text: ((st.heldReq.eligible || []).join(' or ') || 'The approver') + ' will see it on their phone; this screen flips to Post when they approve.' })));
+      // ui.btn owns the held name ("Held: Post"); the request stamp beside it says who is being waited on.
+      const stamp = st.requested ? h('span', { class: 'row', id: 'co-requested', tabindex: '-1' }, chip('review', 'Request ' + st.heldReq.id + ' waiting'), h('span', { class: 'small muted', text: ((st.heldReq.eligible || []).join(' or ') || 'The approver') + ' will see it on their phone; this screen flips to Post when they approve.' })) : null;
+      row.append(back(), btn('Post', { kind: 'held', testid: 'checkout.post', describedby: stamp ? 'co-requested' : null, onClick: () => Proto.router.announce('Waiting on ' + ((st.heldReq.eligible || []).slice(0, 2).join(' or ') || 'a second approver')) }));
+      if (stamp) row.append(stamp);
     } else if (gated) {
-      // A press on Held re-evaluates first: a gate whose cause is gone has fallen on the render, and the press posts.
-      row.append(btn('Post', { kind: 'held', testid: 'checkout.post', ariaLabel: 'Held: Post', onClick: () => { render(r); const el = document.querySelector('[data-testid="refusal.control"]'); if (el) el.focus(); else if (!st.refusalNode) doPost(r, a, st); } }));
+      // A press on Held re-evaluates first: a gate whose cause is gone has fallen on the render, and the keyboard
+      // lands on the live Post — whose own press asks for the read-back. Nothing writes straight through Held.
+      row.append(back(), btn('Post', { kind: 'held', testid: 'checkout.post', onClick: () => { render(r); const el = document.querySelector('[data-testid="refusal.control"]'); if (el) el.focus(); else rerender(r, 'checkout.post'); } }));
     } else {
-      row.append(btn('Post', { kind: 'irreversible', testid: 'checkout.post', onClick: () => doPost(r, a, st) }));
+      const opts = { testid: 'checkout.post', confirmLabel: 'Post', severity: 'required', readback: readback(a, st, est, name), onConfirm: () => doPost(r, a, st) };
+      const slot = confirmable('Post', opts);
+      // The first press reads the form before it asks (precheck): a refusal at the field stops here, and the read-back
+      // is composed from what is in the fields at this moment, not at the last repaint.
+      slot.addEventListener('click', (ev) => {
+        if (!ev.target.closest || !ev.target.closest('[data-testid="checkout.post"]')) return;
+        if (precheck(r, a, st)) { ev.stopPropagation(); ev.preventDefault(); return; }
+        opts.readback = readback(a, st, est, name);
+      }, true);
+      // The reversible way out first, the finish last (CLT-serial-position).
+      row.append(back(), slot);
       // Send back carries the approver's one line to the requester (docs/13 feature 24), not the chip alone.
       if (st.heldReq && st.heldReq.status !== 'approved') row.append(h('span', { class: 'row' }, chip('info', 'Write-off ' + st.heldReq.status.replace(/_/g, ' ') + ' by ' + (st.heldReq.decidedBy || 'approver')), st.heldReq.decisionReason ? h('span', { class: 'small muted', text: '“' + st.heldReq.decisionReason + '”' }) : null));
     }
@@ -327,7 +418,7 @@
       btn('Explain', { kind: 'reversible', testid: 'checkout.explain', pressed: pressed(st.explainOpen), onClick: () => { st.explainOpen = !st.explainOpen; rerender(r, 'checkout.explain'); } }),
       // One toggle, one label, on Checkout and on the Ledger alike: the press mark and aria-pressed carry the
       // state, and the accessible name says how to get back.
-      st.explainOpen ? btn('Show patient', { kind: 'reversible', testid: 'checkout.showpatient', pressed: pressed(st.patientVoice), ariaLabel: st.patientVoice ? 'Patient view on. Switch back to the staff view' : 'Show the patient view: same rows, plain words, no reason codes or poster names', onClick: () => { st.patientVoice = !st.patientVoice; rerender(r, 'checkout.showpatient'); } }) : null), panel);
+      st.explainOpen ? btn('Show patient', { kind: 'reversible', testid: 'checkout.showpatient', pressed: pressed(st.patientVoice), ariaLabel: st.patientVoice ? 'Show patient: on; press to return to the staff view' : 'Show patient: the same rows in plain words', onClick: () => { st.patientVoice = !st.patientVoice; rerender(r, 'checkout.showpatient'); } }) : null), panel);
   }
 
   /* --- screen --- */
@@ -367,7 +458,10 @@
     // The same clock and the same type word as the Board card for this visit (ui.js time, typeWord).
     const sub = Proto.ui.time(a.time) + ' · ' + Proto.ui.typeWord(a.type) + ' · ' + (S.users.find((u) => u.id === a.providerId) || {}).short + ' · ' + (pt.primary ? Proto.store.carrierName(pt.primary) + (pt.secondary ? ' + ' + Proto.store.carrierName(pt.secondary) : '') : 'Self-pay');
     const railBtn = Proto.screens.rail ? Proto.screens.rail.button(a.patientId, r, 'checkout.rail') : null;
-    const head = pageHead('Checkout · ' + name, sub, railBtn, btn('Back to Board', { kind: 'reversible', testid: 'checkout.back', onClick: () => Proto.router.go(r.persona, 'board') }));
+    // Return to Board stands beside Post while the form is open (the reversible way out, next to the irreversible one);
+    // once the visit is posted there is no Post, so it returns to the head. One id, one control, in either state.
+    const decided = st.posted || S.collectionDecisions.some((d) => d.encounterId === a.encounterId);
+    const head = pageHead('Checkout · ' + name, sub, railBtn, decided ? btn('Return to Board', { kind: 'reversible', testid: 'checkout.back', onClick: () => Proto.router.go(r.persona, 'board') }) : null);
     const status = h('div', { class: 'row' },
       enc && enc.noteFiled ? chip('clear', 'Note filed') : chip('review', 'Note unfiled — Filed later'),
       procs.some((p) => needsAttachment(p)) ? chip('review', 'Claim needs pre-flight') : chip('clear', 'Claim ready'),
@@ -376,8 +470,8 @@
     // scrolling at 1280×900, 1024×768 and 420×860; the completed procedures read below it.
     const page = h('div', { class: 'stack co-page' }, head, threeNumbers(bal), status);
     // One typed decision per visit: a visit already decided shows its record, not a form whose only outcome is a refusal.
-    if (st.posted || S.collectionDecisions.some((d) => d.encounterId === a.encounterId)) page.append(postedCard(r, a, st, pt));
-    else page.append(paymentCard(r, a, st, est, procs, postRow(r, a, st)));
+    if (decided) page.append(postedCard(r, a, st, pt));
+    else page.append(paymentCard(r, a, st, est, procs, postRow(r, a, st, est, name)));
     page.append(proceduresCard(S, a, st, procs, est, covers), explainCard(r, a, st));
     Proto.screens.shell.mount(page);
   }

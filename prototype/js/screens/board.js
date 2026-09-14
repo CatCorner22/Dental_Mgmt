@@ -1,8 +1,9 @@
 /* Board: front-desk and temp home. Readiness strip before open, chair strip (author initials only),
-   one column per chair, checkout queue with Note/Claim chips, the Filed later lane,
-   read-only outage rendering, and the A / S / C keyboard accelerators while mounted. */
+   one column per chair, checkout queue with the note and claim state in words, the Filed later lane,
+   read-only outage rendering, and the A / S / C accelerators — off unless the reader has turned
+   single-key shortcuts on, and printed on the three controls they act on rather than in a legend. */
 (function () {
-  const Proto = window.Proto; const { h, btn, chip, refusal, money, displayName, initials, shortDate, pageHead, support, STATUS, TYPE, ELIG } = Proto.ui;
+  const Proto = window.Proto; const { h, btn, chip, refusal, money, displayName, initials, shortDate, pageHead, support, STATUS } = Proto.ui;
   Proto.screens = Proto.screens || {};
 
   const IN_CHAIR = ['seated', 'in_chart', 'ready_for_exam'];
@@ -21,9 +22,8 @@
   let stripGate = null; // the readiness strip's own gate
   let pings = {};     // apptId -> {node} refusal or {text} stamp
   let expanded = {};  // apptId -> boolean
-  let chairOpen = {}; // op -> boolean
-  let boardUi = {};   // userId -> {collapsed, labCalled, deviceReset, eligRerun}; a shared desk is not a person
-  let keysOn = false;
+  let boardUi = {};   // userId -> {collapsed, labCalled, deviceReset, eligRerun, undo}; a shared desk is not a person
+  let keysBound = false;
 
   const S = () => Proto.store.get();
   const P = () => window.__proto;
@@ -46,13 +46,35 @@
   const windowWord = (a) => (paidAtWindow(a) ? 'Paid at the window' : WINDOW_WORD[(windowDecision(a) || {}).decision] || 'Checked out');
   /* The strip is one person's working state, so it is keyed by the user reading it and never written to a
      store table: a mark the front desk makes on a shared desk is not the temp's mark and records nothing. */
-  const uiState = () => { const uid = Proto.store.currentUser().id; return (boardUi[uid] = boardUi[uid] || { collapsed: false, labCalled: null, deviceReset: null, eligRerun: 0 }); };
+  const uiState = () => { const uid = Proto.store.currentUser().id; return (boardUi[uid] = boardUi[uid] || { collapsed: false, labCalled: null, deviceReset: null, eligRerun: 0, undo: null }); };
+  /* Single-key accelerators are a preference, not a default: with `shortcuts` off (the shipped value) a key
+     pressed on the page body does nothing at all, and with it on the letter is printed on the one control it
+     acts on — never only in a legend the reader has to carry down the page (CUST-2.1.4, CLT-recognition-keys). */
+  const shortcutsOn = () => Proto.store.prefsFor().shortcuts === 'on';
+  function withKey(b, key) {
+    if (!b) return b;
+    b.setAttribute('aria-keyshortcuts', key.toUpperCase());
+    b.append(h('kbd', { class: 'small', 'aria-hidden': 'true', text: key.toUpperCase() }));  // the name is already spoken; the print is for the eye
+    return b;
+  }
+  const withKeyIf = (on, key, b) => (on ? withKey(b, key) : b);
+  /* Which card each key would act on, so the marker sits on that card and nowhere else. Read once per
+     render and held here, because every card asks. */
+  let keyMarks = {};
+  function keyTargets() {
+    if (!shortcutsOn()) return {};
+    const list = todays().sort(byTime);
+    const a = list.find((x) => ARRIVABLE.includes(x.status));
+    const s = list.find((x) => x.status === 'arrived');
+    const c = list.find((x) => CHECKOUTABLE.includes(x.status));
+    return { a: a && a.id, s: s && s.id, c: c && c.id };
+  }
   /* Tomorrow's front-desk cover is a front-desk pass at this location, not any pass at any location. */
   const frontDeskCover = () => S().dayPasses.some((d) => d.role === 'frontdesk' && d.locationId === 'loc-1');
   const weekday = (iso) => { const p = String(iso == null ? '' : iso).trim().split('-').map(Number); return p.length === 3 && p.every((x) => Number.isFinite(x)) ? WEEKDAY[new Date(Date.UTC(p[0], p[1] - 1, p[2])).getUTCDay()] : null; };
   const outageRefusal = (what) => Proto.store.refuse('outage', 'Wait for the server — ' + what, 'Support line', OUTAGE_WHY);
 
-  function syncStore() { const s = S(); if (s !== lastStore) { lastStore = s; gates = {}; rowGates = {}; stripGate = null; pings = {}; expanded = {}; chairOpen = {}; boardUi = {}; } }
+  function syncStore() { const s = S(); if (s !== lastStore) { lastStore = s; gates = {}; rowGates = {}; stripGate = null; pings = {}; expanded = {}; boardUi = {}; } }
   /* A gate outlives its reason only if nobody clears it: once the connection is back (or the pass is issued) the
      gates that cause raised go and every primary returns to its own identity, so Held is never a dead end. */
   const stale = (g) => (g.code === 'outage' && !P().outage) || (g.code === 'entitlement' && !Proto.store.currentUser().noPass);
@@ -144,6 +166,9 @@
   function holdStrip(r, res, testid) { dropGates(res.code); stripGate = gateFor(res, r); stripGate.testid = testid; render(r); focusGate(); }
 
   // ---- Readiness strip ---------------------------------------------------------------------
+  /* A mark made on this strip is this reader's own, so the way out of it is this reader's own too: the act
+     leaves an Undo beside the line it wrote, and pressing it puts the row back (INT-exit-and-undo). */
+  function markUndo(ui, testid, done, label, run, announce) { ui.undo = { testid, done, label, run, announce }; }
   /* Every row's id segment is the seed id of the thing the row is about (CONTRACTS §4). */
   function readinessRows(r) {
     const s = S(); const ui = uiState(); const rows = [];
@@ -155,13 +180,13 @@
       ui.eligRerun += ok;
       after(r, 'Re-ran ' + ok + ' eligibility check' + (ok > 1 ? 's' : '') + ': all active.', 'board.readiness.toggle');
     };
-    if (amber.length) rows.push({ id: amber[0].id, time: amber[0].time, sev: 'review', word: 'Eligibility', line: amber.length + ' insured patient' + (amber.length > 1 ? 's' : '') + ' came back amber at 6 am — first at ' + fmtTime(amber[0].time), control: 'Re-verify all', testid: 'board.readiness.row.' + amber[0].id + '.reverify-all', act: () => reverifyAll('board.readiness.row.' + amber[0].id + '.reverify-all') });
+    if (amber.length) rows.push({ id: amber[0].id, time: amber[0].time, word: 'Eligibility', line: amber.length + ' insured patient' + (amber.length > 1 ? 's' : '') + ' came back amber at 6 am — first at ' + fmtTime(amber[0].time), control: 'Re-verify all', testid: 'board.readiness.row.' + amber[0].id + '.reverify-all', act: () => reverifyAll('board.readiness.row.' + amber[0].id + '.reverify-all') });
     const lab = todays().find((a) => a.labCase && a.labCase.status === 'not_back');
-    if (lab && !ui.labCalled) rows.push({ id: lab.labCase.id, time: lab.time, sev: 'review', word: 'Lab', line: 'Lab case for ' + fmtTime(lab.time) + ' chair ' + lab.op + ' not back — ' + lab.labCase.vendor + ', due ' + shortDate(lab.labCase.due), control: 'Call lab', testid: 'board.readiness.row.' + lab.labCase.id + '.call', act: () => { ui.labCalled = s.clock.time; after(r, 'Called ' + lab.labCase.vendor + ' at ' + clock12(s.clock.time) + ' — marked on your readiness strip.', 'board.readiness.toggle'); } });
+    if (lab && !ui.labCalled) rows.push({ id: lab.labCase.id, time: lab.time, word: 'Lab', line: 'Lab case for ' + fmtTime(lab.time) + ' chair ' + lab.op + ' not back — ' + lab.labCase.vendor + ', due ' + shortDate(lab.labCase.due), control: 'Call lab', testid: 'board.readiness.row.' + lab.labCase.id + '.call', act: () => { ui.labCalled = s.clock.time; markUndo(ui, 'board.readiness.row.' + lab.labCase.id + '.undo', 'Called ' + lab.labCase.vendor + ' · ' + clock12(s.clock.time), 'Undo the lab call', () => { ui.labCalled = null; }, 'Lab call taken back — the row is back on the strip.'); after(r, 'Called ' + lab.labCase.vendor + ' at ' + clock12(s.clock.time) + ' — marked on your readiness strip. Undo sits beside it.', 'board.readiness.toggle'); } });
     const stale = Proto.store.user(STALE_DEVICE.userId);
-    if (stale && !ui.deviceReset) rows.push({ id: stale.id, time: '09:00', sev: 'required', word: 'Device', line: 'Shared tablet chair ' + STALE_DEVICE.op + ' still signed in as ' + initials(stale.name) + ' from yesterday', control: 'Sign out', testid: 'board.readiness.row.' + stale.id + '.reset', act: () => { ui.deviceReset = s.clock.time; after(r, 'Tablet chair ' + STALE_DEVICE.op + ' signed out — marked on your readiness strip; the next author enters a PIN.', 'board.readiness.toggle'); } });
+    if (stale && !ui.deviceReset) rows.push({ id: stale.id, time: '09:00', word: 'Device', line: 'Shared tablet chair ' + STALE_DEVICE.op + ' still signed in as ' + initials(stale.name) + ' from yesterday', control: 'Sign out the tablet', testid: 'board.readiness.row.' + stale.id + '.reset', act: () => { ui.deviceReset = s.clock.time; markUndo(ui, 'board.readiness.row.' + stale.id + '.undo', 'Tablet chair ' + STALE_DEVICE.op + ' signed out · ' + clock12(s.clock.time), 'Undo the sign-out', () => { ui.deviceReset = null; }, 'Sign-out taken back — the row is back on the strip.'); after(r, 'Tablet chair ' + STALE_DEVICE.op + ' signed out — marked on your readiness strip; the next author enters a PIN.', 'board.readiness.toggle'); } });
     const fd = s.roleTemplates.find((t) => t.code === 'frontdesk');
-    if (fd && !frontDeskCover()) rows.push({ id: fd.code, time: '99:99', sev: 'info', word: 'Tomorrow', line: 'Tomorrow: front desk has no coordinator', control: 'Add day pass', testid: 'board.readiness.row.' + fd.code + '.add', act: openRoles });
+    if (fd && !frontDeskCover()) rows.push({ id: fd.code, time: '99:99', word: 'Tomorrow', line: 'Tomorrow: front desk has no coordinator', control: 'Add day pass', testid: 'board.readiness.row.' + fd.code + '.add', act: openRoles });
     rows.sort((x, y) => (x.time < y.time ? -1 : 1));
     return rows;
   }
@@ -174,9 +199,11 @@
     return out;
   }
   function renderReadiness(r) {
-    const rows = readinessRows(r); const ui = uiState(); const outage = P().outage; const bodyId = 'board-readiness-body';
+    const rows = readinessRows(r); const ui = uiState(); const bodyId = 'board-readiness-body';
     const toggle = btn(ui.collapsed ? 'Show' : 'Hide', { kind: 'quiet', class: 'compact', testid: 'board.readiness.toggle', ariaLabel: (ui.collapsed ? 'Show' : 'Hide') + ' the readiness strip', onClick: () => { ui.collapsed = !ui.collapsed; render(r); const t = document.querySelector('[data-testid="board.readiness.toggle"]'); if (t) t.focus(); } });
     toggle.setAttribute('aria-expanded', String(!ui.collapsed)); toggle.setAttribute('aria-controls', bodyId);
+    // One chip on the strip's face: the row words themselves are text, so six severity fills no longer
+    // compete for the same glance (CLT-chip-vocab, CDS-STATUS-roles-max).
     const head = h('div', { class: 'row between' },
       h('div', { class: 'row' }, h('h2', { text: 'Before open' }), rows.length ? chip('review', rows.length + ' to handle') : chip('clear', 'Ready', { big: true })),
       toggle);
@@ -185,11 +212,12 @@
     else if (rows.length) {
       for (const row of rows) {
         // Under the outage every control holds; a refusal of one row's own verb holds that row (CONTRACTS §6).
+        // A held control takes its name from btn(): "Held", named "Held: <what>", one wording everywhere (WCAG 3.2.4).
         const held = !!stripGate && (stripGate.code === 'outage' || stripGate.testid === row.testid);
         const control = held
-          ? btn(row.control, { kind: 'held', testid: row.testid, ariaLabel: row.control + ' held: ' + stripGate.verb, onClick: () => { render(r); if (stripGate) focusGate(); else { const b = document.querySelector('[data-testid="' + row.testid + '"]'); if (b) b.click(); } } })
+          ? btn(row.control, { kind: 'held', testid: row.testid, onClick: () => { render(r); if (stripGate) focusGate(); else { const b = document.querySelector('[data-testid="' + row.testid + '"]'); if (b) b.click(); } } })
           : btn(row.control, { kind: 'reversible', testid: row.testid, onClick: () => (P().outage ? holdStrip(r, outageRefusal('readiness is read-only'), row.testid) : row.act()) });
-        body.append(h('div', { class: 'rdrow', role: 'group', 'aria-label': row.line }, chip(row.sev, row.word), h('span', { class: 'line', text: row.line }), control));
+        body.append(h('div', { class: 'rdrow', role: 'group', 'aria-label': row.line }, h('span', { class: 'line' }, h('b', { text: row.word }), ' · ' + row.line), control));
       }
       if (stripGate) body.append(h('div', { class: 'gate' }, stripGate.node));
     } else {
@@ -197,7 +225,15 @@
       body.append(h('p', { class: 'small muted', text: 'Nothing blocks a chair today or tomorrow.' }));
       if (done.length) body.append(h('details', null, h('summary', { class: 'small', testid: 'board.readiness.handled' }, 'What was handled'), h('ul', { class: 'small muted' }, ...done.map((t) => h('li', { text: t })))));
     }
-    return h('section', { class: 'readiness card flat', 'aria-label': 'Readiness before open' }, head, body);
+    if (!ui.collapsed && ui.undo) {
+      const u = ui.undo;
+      body.append(h('div', { class: 'rdrow', role: 'group', 'aria-label': u.done },
+        h('span', { class: 'line small muted', text: u.done }),
+        btn(u.label, { kind: 'quiet', class: 'compact', testid: u.testid, onClick: () => { ui.undo = null; u.run(); after(r, u.announce, 'board.readiness.toggle'); } })));
+    }
+    /* The strip is a region of rows, not one card: each row is its own bounded group with its own control, so
+       a reader holds one row at a time rather than five controls inside one panel (CLT-chunk-4). */
+    return h('section', { class: 'readiness', 'aria-label': 'Readiness before open' }, head, body);
   }
 
   // ---- Chair strip (initials and chair only; never patient data) ----------------------------
@@ -206,12 +242,16 @@
     for (let n = 1; n <= loc.operatories; n++) {
       const seated = todays().find((a) => a.op === n && IN_CHAIR.includes(a.status));
       const prov = seated ? Proto.store.user(seated.providerId) : null;
-      const b = h('button', { type: 'button', class: 'chair', testid: 'board.chair.' + n, 'aria-expanded': String(!!chairOpen[n]), 'aria-label': 'Chair ' + n + (prov ? ', author ' + prov.name + (prov.licence ? ', ' + prov.licence : '') : ', empty') + '. Show device author', onClick: () => { chairOpen[n] = !chairOpen[n]; render(r); const el = document.querySelector('[data-testid="board.chair.' + n + '"]'); if (el) el.focus(); } },
+      /* The strip states a fact — who is charting where — so it is written as one, not as three disclosures
+         whose only content was the name they were hiding. The author's full name and licence sit in the line
+         itself, which costs nothing to read and three controls less on the first screen
+         (INT-temp-first-screenful, INT-verb-labels, CLT-label-words). */
+      const who = prov ? prov.name + (prov.licence ? ', ' + prov.licence : '') : 'No author yet';
+      const fact = h('span', { class: 'chair', testid: 'board.chair.' + n },
         h('span', { text: 'Chair ' + n + ' · ' + provInitials(prov) }),
-        prov && prov.licence ? h('span', { class: 'small muted', text: prov.licence }) : null,
+        prov && prov.licence ? h('span', { class: 'small muted', text: ' · ' + prov.licence }) : null,
         seated && seated.status === 'ready_for_exam' ? chip('review', 'Exam requested') : null);
-      const detail = chairOpen[n] ? h('div', { class: 'stamp', text: prov ? prov.name + (prov.licence ? ', ' + prov.licence : '') + ' is the author on the chair ' + n + ' device' : 'No author on the chair ' + n + ' device; the next PIN opens a session' }) : null;
-      strip.append(h('div', { class: 'chairwrap', role: 'listitem' }, b, detail));
+      strip.append(h('div', { class: 'chairwrap', role: 'listitem' }, fact, h('div', { class: 'stamp', text: who })));
     }
     return strip;
   }
@@ -231,38 +271,53 @@
     if (a.labCase) rows.push(h('div', { text: 'Lab case at ' + a.labCase.vendor + ' · ' + (a.labCase.status === 'not_back' ? 'not back' : a.labCase.status) + ' · due ' + shortDate(a.labCase.due) }));
     return h('div', { class: 'details', id: 'board-details-' + a.id }, ...rows);
   }
+  /* The words the card's face used to say in four more chips. The chip stays for the one thing that changes
+     hour by hour — the visit's status — and the standing facts are read as a line (CLT-chip-vocab). */
+  // The eligibility word is ui.js ELIG's, the one Chairs and the rail print, so an amber visit reads the same everywhere (WCAG 3.2.4).
+  const ELIG_LINE = Object.fromEntries(Object.entries(Proto.ui.ELIG).map(([k, v]) => [k, v[1]]));
+  function metaWords(a, pt) {
+    const out = [Proto.ui.typeWord(a.type), ELIG_LINE[a.eligibility] || ELIG_LINE.none];
+    if (pt.alerts.length) out.push(pt.alerts.length + ' alert' + (pt.alerts.length > 1 ? 's' : ''));
+    if (a.labCase && a.labCase.status === 'not_back') out.push('Case not back');
+    if (a.referral) out.push('Referred in');
+    return out.join(' · ');
+  }
   function card(a, r, inLane) {
     const priv = P().privacy; const outage = P().outage; const s = S();
     const pt = Proto.store.patient(a.patientId); const name = displayName(pt.name, priv);
-    const [ssev, sword] = STATUS[a.status] || ['info', a.status]; const [tsev, tword] = TYPE[a.type] || ['info', a.type]; const [esev, eword] = ELIG[a.eligibility] || ELIG.none;
+    const [ssev, sword] = STATUS[a.status] || ['info', a.status]; const tword = Proto.ui.typeWord(a.type);
     const el = h('article', { class: 'card appt ' + a.type, testid: 'board.card.' + a.id, 'aria-label': fmtTime(a.time) + ' ' + name + ', ' + tword + ', ' + sword });
     el.append(h('div', { class: 'who' }, h('span', { text: fmtTime(a.time) + ' · ' + name }), chip(ssev, sword)));
-    const meta = h('div', { class: 'meta' }, chip(tsev, tword), chip(esev, eword));
+    const meta = h('div', { class: 'meta' }, h('span', { class: 'grow', text: metaWords(a, pt) }));
     const g = gates[a.id]; const scope = 'board.card.' + a.id;
     const held = (act) => () => heldPress(r, gates, a.id, scope, act);
     // Under the outage this control keeps its place too: the store refuses it, the gate says why, and it
     // switches to Held like every other control on the card (CONTRACTS §6).
-    if (a.eligibility === 'amber') meta.append(btn('Re-verify', { kind: g ? 'held' : 'reversible', class: 'compact', testid: scope + '.reverify', ariaLabel: g ? 'Re-verify held: ' + g.verb : 'Re-verify eligibility for ' + name, onClick: g ? held(() => doReverify(a.id, r)) : () => doReverify(a.id, r) }));
-    if (pt.alerts.length) meta.append(chip('required', pt.alerts.length + ' alert' + (pt.alerts.length > 1 ? 's' : '')));
-    if (a.labCase && a.labCase.status === 'not_back') meta.append(chip('review', 'Case not back'));
-    if (a.referral) meta.append(chip('info', 'Referred in'));
+    if (a.eligibility === 'amber') meta.append(btn('Re-verify', { kind: g ? 'held' : 'reversible', class: 'compact', testid: scope + '.reverify', ariaLabel: g ? null : 'Re-verify eligibility for ' + name, onClick: g ? held(() => doReverify(a.id, r)) : () => doReverify(a.id, r) }));
     el.append(meta);
     if (inLane) el.append(h('div', { class: 'stamp', text: windowWord(a) + ' · charges and claim release when ' + (Proto.store.user(a.providerId) || {}).short + ' files the note' }));
     // The arrived stamp is where the keyboard lands after Arrive (focusable, not a control), so Seat is a choice.
     if (a.status === 'arrived' && a.arrivedAt) el.append(h('div', { class: 'stamp', id: 'board-arrived-' + a.id, tabindex: '-1', text: 'Arrived ' + clock12(a.arrivedAt) + ' · Seat is the next step' }));
     if (outage) el.append(h('div', { class: 'stamp', text: 'As of ' + clock12(CACHE_TIME) + ' · ' + minutesBetween(CACHE_TIME, s.clock.time) + ' min old · read-only' }));
     // The primary keeps its place under the outage and switches to Held when the gate is raised (CONTRACTS §6).
+    /* One action and one way to see more: the row's verb, and the disclosure that holds everything the verb
+       does not need. The patient rail opens from inside that disclosure rather than from a third button on
+       every card face, which is what put 34 controls on the first screen (INT-temp-first-screenful). */
+    const kt = keyMarks;
     const actions = h('div', { class: 'actions' });
-    if (ARRIVABLE.includes(a.status)) actions.append(btn('Arrive', { kind: g ? 'held' : 'reversible', testid: scope + '.arrive', ariaLabel: g ? 'Arrive held: ' + g.verb : 'Arrive ' + name, onClick: g ? held(() => doArrive(a.id, r)) : () => doArrive(a.id, r) }));
-    else if (a.status === 'arrived') actions.append(btn('Seat', { kind: g ? 'held' : 'reversible', testid: scope + '.seat', ariaLabel: g ? 'Seat held: ' + g.verb : 'Seat ' + name + ' in chair ' + a.op, onClick: g ? held(() => doSeat(a.id, r)) : () => doSeat(a.id, r) }));
-    else if (CHECKOUTABLE.includes(a.status)) actions.append(btn('Checkout', { kind: g ? 'held' : 'reversible', testid: scope + '.checkout', ariaLabel: g ? 'Checkout held: ' + g.verb : 'Checkout ' + name, onClick: g ? held(() => goCheckout(a.id, r, 'card')) : () => goCheckout(a.id, r, 'card') }));
-    const ex = btn(expanded[a.id] ? 'Less' : 'Details', { kind: 'quiet', class: 'compact', testid: 'board.card.' + a.id + '.expand', ariaLabel: (expanded[a.id] ? 'Hide' : 'Show') + ' forms and balance for ' + name, onClick: () => { expanded[a.id] = !expanded[a.id]; render(r); const b = document.querySelector('[data-testid="board.card.' + a.id + '.expand"]'); if (b) b.focus(); } });
+    if (ARRIVABLE.includes(a.status)) actions.append(withKeyIf(kt.a === a.id, 'a', btn('Arrive', { kind: g ? 'held' : 'reversible', testid: scope + '.arrive', ariaLabel: g ? null : 'Arrive ' + name, onClick: g ? held(() => doArrive(a.id, r)) : () => doArrive(a.id, r) })));
+    else if (a.status === 'arrived') actions.append(withKeyIf(kt.s === a.id, 's', btn('Seat', { kind: g ? 'held' : 'reversible', testid: scope + '.seat', ariaLabel: g ? null : 'Seat ' + name + ' in chair ' + a.op, onClick: g ? held(() => doSeat(a.id, r)) : () => doSeat(a.id, r) })));
+    else if (CHECKOUTABLE.includes(a.status)) actions.append(withKeyIf(kt.c === a.id, 'c', btn('Check out', { kind: g ? 'held' : 'reversible', testid: scope + '.checkout', ariaLabel: g ? null : 'Check out ' + name, onClick: g ? held(() => goCheckout(a.id, r, 'card')) : () => goCheckout(a.id, r, 'card') })));
+    const ex = btn(expanded[a.id] ? 'Hide details' : 'Show details', { kind: 'quiet', class: 'compact', testid: 'board.card.' + a.id + '.expand', ariaLabel: (expanded[a.id] ? 'Hide' : 'Show') + ' details for ' + name, onClick: () => { expanded[a.id] = !expanded[a.id]; render(r); const b = document.querySelector('[data-testid="board.card.' + a.id + '.expand"]'); if (b) b.focus(); } });
     ex.setAttribute('aria-expanded', String(!!expanded[a.id])); ex.setAttribute('aria-controls', 'board-details-' + a.id);
     actions.append(ex);
-    if (Proto.screens.rail) actions.append(Proto.screens.rail.button(a.patientId, r, 'board.card.' + a.id + '.rail'));
     el.append(actions);
     if (g) el.append(h('div', { class: 'gate' }, g.node));
-    if (expanded[a.id]) el.append(details(a));
+    if (expanded[a.id]) {
+      const d = details(a);
+      if (Proto.screens.rail) d.append(h('div', { class: 'row' }, Proto.screens.rail.button(a.patientId, r, 'board.card.' + a.id + '.rail')));
+      el.append(d);
+    }
     return el;
   }
 
@@ -271,8 +326,11 @@
     const loc = S().locations[0]; const board = h('div', { class: 'board' });
     for (let n = 1; n <= loc.operatories; n++) {
       const list = todays().filter((a) => a.op === n && a.status !== 'checked_out_unfiled').sort(byTime);
+      /* The column is a named region, and its name is written on it — but not as a heading: three column
+         headings plus the strip's own put five headings on the first screen, where four is the budget
+         (CLT-one-task). The region name is what a screen reader lands on either way. */
       board.append(h('div', { class: 'opcol', role: 'region', 'aria-label': 'Chair ' + n },
-        h('div', { class: 'ophead' }, h('h2', { text: 'Chair ' + n }), h('span', { class: 'small muted', text: list.length + ' today' })),
+        h('div', { class: 'ophead' }, h('b', { text: 'Chair ' + n }), h('span', { class: 'small muted', text: list.length + ' today' })),
         ...list.map((a) => card(a, r, false))));
     }
     return board;
@@ -282,7 +340,7 @@
     if (!unfiled.length) return null;
     const paid = unfiled.some(paidAtWindow);
     return h('section', { class: 'lane stack', 'aria-label': 'Filed later' },
-      h('div', { class: 'row' }, h('h2', { text: 'Filed later' }), chip('review', unfiled.length + ' waiting on a note'), h('span', { class: 'small muted', text: 'Checked out before the note filed; charges and the claim release when it does' + (paid ? ', and a window payment sits as unapplied credit with an allocation intent.' : '.') })),
+      h('div', { class: 'row' }, h('h2', { text: 'Filed later' }), h('span', { class: 'small muted', text: unfiled.length + ' waiting on a note · checked out before the note filed; charges and the claim release when it does' + (paid ? ', and a window payment sits as unapplied credit with an allocation intent.' : '.') })),
       h('div', { class: 'board' }, ...unfiled.map((a) => card(a, r, true))));
   }
 
@@ -290,20 +348,27 @@
   function queueRow(a, r) {
     const priv = P().privacy;
     const pt = Proto.store.patient(a.patientId); const name = displayName(pt.name, priv); const prov = Proto.store.user(a.providerId) || { short: '—', name: '—' };
-    const filed = noteFiled(a); const [ssev, sword] = STATUS[a.status] || ['info', a.status];
-    const noteChip = filed ? chip('clear', 'Filed') : chip('review', 'Open · ' + provInitials(prov));
+    const filed = noteFiled(a); const [, sword] = STATUS[a.status] || ['info', a.status];
+    /* Note and claim are read as a sentence, not as four more fills: the queue held sixteen chips of its own,
+       a third of every chip on the screen, and the words are what the front desk repeats down the phone. */
+    const noteWord = filed ? 'Note filed' : 'Note open · ' + provInitials(prov);
+    // The claim keeps its chip — it is the one thing on this row the front desk cannot fix, and Checkout
+    // prints the same word for the same visit (WCAG 3.2.4). Everything else on the row is read as a line.
     const claimChip = !filed ? chip('info', 'Waiting on note') : needsAttachment(a) ? chip('review', 'Needs: attachment') : chip('clear', 'Ready');
     const row = h('div', { class: 'qrow', testid: 'board.queue.row.' + a.id, role: 'group', 'aria-label': 'Checkout queue: ' + name + ', note ' + (filed ? 'filed' : 'open') });
-    row.append(h('div', { class: 'head' }, h('span', { text: fmtTime(a.time) + ' · ' + name }), chip(ssev, sword)));
-    row.append(h('div', { class: 'row' }, h('span', { class: 'small muted', text: 'Note' }), noteChip, h('span', { class: 'small muted', text: 'Claim' }), claimChip));
+    row.append(h('div', { class: 'head' }, h('span', { text: fmtTime(a.time) + ' · ' + name }), h('span', { class: 'small muted', text: sword })));
+    row.append(h('div', { class: 'row' }, h('span', { class: 'small muted', text: noteWord + ' · Claim' }), claimChip));
     if (!filed) {
-      row.append(h('div', { class: 'row' }, h('span', { class: 'grow', text: 'Note not filed — ' + prov.short }), btn('Ping chair', { kind: 'reversible', class: 'compact', testid: 'board.queue.row.' + a.id + '.ping', ariaLabel: 'Ping chair ' + a.op + ' about the open note', onClick: () => doPing(a.id, r) })));
+      // The line above already says the note is open and whose it is; the control says what to do about it.
+      row.append(h('div', { class: 'row' }, btn('Ping chair', { kind: 'reversible', class: 'compact', testid: 'board.queue.row.' + a.id + '.ping', ariaLabel: 'Ping chair ' + a.op + ' about the open note', onClick: () => doPing(a.id, r) })));
       const p = pings[a.id]; if (p) row.append(p.node || h('div', { class: 'stamp', text: p.text }));
     }
     const rg = rowGates[a.id];
-    const checkout = (ariaLabel) => btn('Checkout', { kind: rg ? 'held' : 'reversible', testid: 'board.queue.row.' + a.id + '.checkout', ariaLabel: rg ? 'Checkout held: ' + rg.verb : ariaLabel, onClick: rg ? () => heldPress(r, rowGates, a.id, 'board.queue.row.' + a.id, () => goCheckout(a.id, r, 'queue')) : () => goCheckout(a.id, r, 'queue') });
-    if (a.status === 'checked_out_unfiled') row.append(h('div', { class: 'row' }, checkout('Open checkout for ' + name + ' (' + (paidAtWindow(a) ? 'already paid; ' : 'decision typed; ') + 'charges post when the note files)'), h('span', { class: 'small muted', text: windowWord(a) + ' · in the Filed later lane until ' + prov.short + ' files' })));
-    else row.append(h('div', { class: 'row' }, checkout('Checkout ' + name), filed ? null : h('span', { class: 'small muted', text: 'Checkout works now; charges post when the note files.' })));
+    // The name says what the control does to whom; why it is worth doing is the line beside it, not twelve
+    // more words inside the button's name (CLT-label-words).
+    const checkout = (ariaLabel) => btn('Check out', { kind: rg ? 'held' : 'reversible', testid: 'board.queue.row.' + a.id + '.checkout', ariaLabel: rg ? null : ariaLabel, onClick: rg ? () => heldPress(r, rowGates, a.id, 'board.queue.row.' + a.id, () => goCheckout(a.id, r, 'queue')) : () => goCheckout(a.id, r, 'queue') });
+    if (a.status === 'checked_out_unfiled') row.append(h('div', { class: 'row' }, checkout('Check out ' + name), h('span', { class: 'small muted', text: windowWord(a) + ' · in the Filed later lane until ' + prov.short + ' files; charges post then' })));
+    else row.append(h('div', { class: 'row' }, checkout('Check out ' + name), filed ? null : h('span', { class: 'small muted', text: 'Checkout works now; charges post when the note files.' })));
     if (rg) row.append(h('div', { class: 'gate' }, rg.node));
     return row;
   }
@@ -315,10 +380,12 @@
     const empty = done
       ? done + (done === 1 ? ' patient has' : ' patients have') + ' left the chair today and every one is checked out with the note filed' + (toCome ? ' — ' + toCome + ' still to arrive; Arrive them from the chair column.' : '. Nothing is waiting at the window; the day closes from Daily Close.')
       : 'Nobody has left the chair yet' + (toCome ? ' — the queue fills as patients are seated; Arrive the first one from the chair column.' : ' and nobody is scheduled to.');
-    return h('section', { class: 'card flat stack queue', 'aria-label': 'Checkout queue' },
-      h('div', { class: 'row' }, h('h2', { text: 'Checkout queue' }), chip('info', rows.length + ' in chair-out order')),
+    /* Like the readiness strip, a region of rows rather than one card: each row is the group a reader holds,
+       and the panel that used to wrap eight controls and sixteen chips is gone (CLT-chunk-4, CLT-chip-vocab). */
+    return h('section', { class: 'flat stack queue', 'aria-label': 'Checkout queue' },
+      h('div', { class: 'row' }, h('h2', { text: 'Checkout queue' }), h('span', { class: 'small muted', text: rows.length + ' in chair-out order' })),
       rows.length ? h('div', { class: 'worklist' }, ...rows.map((a) => queueRow(a, r))) : h('p', { class: 'small muted', text: empty }),
-      h('details', null, h('summary', { class: 'small', testid: 'board.queue.why' }, 'Why these chips'), h('p', { class: 'small muted', text: 'Note reads the filed-note row on the encounter; Claim reads the claim state. No front-desk control can flip either. The ping is an in-app event to that chair only, one per encounter per 15 minutes.' })));
+      h('details', null, h('summary', { class: 'small', testid: 'board.queue.why' }, 'Why these words'), h('p', { class: 'small muted', text: 'Note reads the filed-note row on the encounter; Claim reads the claim state. No front-desk control can flip either. The ping is an in-app event to that chair only, one per encounter per 15 minutes.' })));
   }
 
   /* The practice line counts the notes this day actually filed, and the median arrive → filed span of the
@@ -338,10 +405,15 @@
     return filed.length + (filed.length === 1 ? ' note' : ' notes') + ' filed today' + (mid != null ? ' · median arrive → filed ' + mid + ' min' : '');
   }
 
-  // ---- Keyboard accelerators (active only while the Board is the current route) -------------
+  // ---- Keyboard accelerators (only while the Board is mounted and the reader asked for them) ----
+  /* A bare letter that arrives a patient, seats one or opens checkout is an accelerator nobody asked for:
+     pressed on the page body it wrote to the record with no opt-in and no off switch. The handler now asks
+     the reader's own preference first — `shortcuts` ships 'off' and lives in Settings — and every key it
+     honours is printed on the control it acts on (CUST-2.1.4 / WCAG 2.1.4). */
   function onKey(ev) {
     const r = Proto.router.current();
-    if (r.route !== 'board') { document.removeEventListener('keydown', onKey); keysOn = false; return; }
+    if (r.route !== 'board') { document.removeEventListener('keydown', onKey); keysBound = false; return; }
+    if (!shortcutsOn()) return;
     if (ev.ctrlKey || ev.metaKey || ev.altKey || ev.repeat) return;
     const t = ev.target; if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
     if (document.querySelector('#dialogs .overlay')) return;
@@ -357,25 +429,28 @@
 
   // ---- Screen ------------------------------------------------------------------------------
   function render(r) {
-    syncStore(); pruneStaleGates();
+    syncStore(); pruneStaleGates(); keyMarks = keyTargets();
     const s = S(); const loc = s.locations[0]; const outage = P().outage;
     const day = weekday(s.tenant.today);
-    const sub = clock12(s.clock.time) + ' · ' + loc.operatories + ' chairs · ' + todays().length + ' appointments' + (outage ? ' · read-only from the ' + clock12(CACHE_TIME) + ' cache' : '') + ' · keys: A arrive, S seat, C checkout';
+    /* The heading names the screen; the day, the clock and the shape of the day are the line under it. The
+       key legend is gone from here: a letter is printed on the control it presses, 546 px closer to the eye
+       (CLT-scent-heading, CLT-split-attention, CLT-recognition-keys). */
+    const sub = clock12(s.clock.time) + ' · ' + (day ? day + ' ' : '') + shortDate(s.tenant.today) + ' · ' + loc.operatories + ' chairs · ' + todays().length + ' appointments' + (outage ? ' · read-only from the ' + clock12(CACHE_TIME) + ' cache' : '');
     const lane = renderLane(r);
     // The chair columns come first: Arrive is the control this screen exists for (CONTRACTS §7 flow 1),
     // so the readiness strip and the queue share the side column rather than pushing it below the fold.
     const page = h('div', { class: 'stack boardpage' },
-      pageHead('Board · ' + loc.name + ' · ' + (day ? day + ' ' : '') + shortDate(s.tenant.today), sub),
+      pageHead('Board · ' + loc.name, sub),
       renderChairs(r),
       h('div', { class: 'board-layout' },
         h('div', { class: 'stack' }, renderColumns(r), lane),
         h('div', { class: 'stack' }, renderReadiness(r), renderQueue(r))),
       h('p', { class: 'small muted practice-line', text: practiceLine() }));
     Proto.screens.shell.mount(page);
-    if (!keysOn) { document.addEventListener('keydown', onKey); keysOn = true; }
+    if (!keysBound) { document.addEventListener('keydown', onKey); keysBound = true; }
   }
 
-  window.addEventListener('hashchange', () => { if (keysOn && Proto.router.current().route !== 'board') { document.removeEventListener('keydown', onKey); keysOn = false; } });
+  window.addEventListener('hashchange', () => { if (keysBound && Proto.router.current().route !== 'board') { document.removeEventListener('keydown', onKey); keysBound = false; } });
 
   Proto.screens.board = { render, arrive: doArrive, seat: doSeat, reverify: doReverify, ping: doPing };
   Proto.router.on('board', (r) => Proto.screens.board.render(r));

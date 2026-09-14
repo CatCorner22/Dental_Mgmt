@@ -2,13 +2,28 @@
    Features 18 (independence-graded Tied tile), 19 (variance sentence with proposed match), 20 (sealed
    closed day: changed-after-close pairs and postings into closed days), 21 (decision review with measured
    effect), 25 (hours scope line). Flow 5: close.closeday (1) → close.closeday.confirm (2).
-   Copy describes hands, never the person; every count is practice-level. Keys while mounted: T toggles the tile. */
+   Copy describes hands, never the person; every count is practice-level. T toggles the tile while mounted, but
+   only for a reader who has turned single-key shortcuts on; the key is then printed on the tile itself. */
 (function () {
   // One date format for this screen: shortDate, in the card, the list and the close read-back alike.
-  const Proto = window.Proto; const { h, btn, chip, refusal, money, section, pageHead, displayName, shortDate } = Proto.ui;
+  const Proto = window.Proto; const { h, btn, chip, refusal, money, section, pageHead, displayName, shortDate, time, confirmable, field, errorSummary, scrollRegion } = Proto.ui;
   Proto.screens = Proto.screens || {};
 
   const TENDERS = [['cash', 'Cash'], ['check', 'Check'], ['card', 'Card']];
+  /* Clearing a gap without saying why is not clearing it with a reason. The label names a reason, so the
+     control collects one before it can commit, from the words the clinic already uses on a ledger row. */
+  const CLEAR_REASONS = [
+    ['card_settlement_timing', 'Card settlement lands the next banking day'],
+    ['bank_fee', 'Bank fee taken off the deposit'],
+    ['deposit_split', 'Deposit split across two bank rows'],
+    ['posted_to_wrong_account', 'Posted to the wrong account'],
+    ['duplicate', 'Duplicate posting'],
+    ['wrong_amount', 'Wrong amount'],
+    ['wrong_tender', 'Wrong tender'],
+  ];
+  const clearWords = (code) => (CLEAR_REASONS.find((x) => x[0] === code) || [null, 'not given'])[1];
+  // A stored row id is a key, not a word: the row a person reads is "ledger row 4504".
+  const rowWords = (id) => 'ledger row ' + String(id == null ? '' : id).replace(/^[a-z]+-/, '');
   // grade -> [css class, glyph, word, chip severity]
   const GRADE = { tied: ['tied', '●', 'Tied · independent', 'clear'], second: ['second', '◐', 'Tied · needs a second look', 'review'], variance: ['variance', '▲', 'variances', 'required'] };
   const REASON = { posted_to_wrong_account: 'posted to wrong account', duplicate: 'duplicate posting', wrong_amount: 'wrong amount', wrong_tender: 'wrong tender' };
@@ -23,13 +38,26 @@
   const WROTE = { ledger: 'appended a ledger row', approvals: 'created an approval request', approvalsLog: 'decided an approval request', dayCloses: 'closed a business day', deposits: 'prepared a deposit slip', reconciliationMatches: 'matched or cleared a variance', controlDecisions: 'reviewed a control decision', appointmentEvents: 'moved an appointment', eligibilityChecks: 're-ran eligibility', messages: 'pinged a chair', perioExams: 'saved a perio exam', tags: 'tagged a tooth for the dentist', chartEvents: 'painted the chart', planItems: 'added a plan item', notes: 'edited the note', filedNotes: 'filed a note', claims: 'changed a claim', claimEvents: 'recorded a claim event', appealPackets: 'built an appeal packet', disclosures: 'disclosed records (logged)', statementsDue: 'queued a statement', collectionDecisions: 'recorded a collection decision', allocations: 'allocated a payment', dayPasses: 'issued a day pass', userEntitlements: 'changed entitlements', firstRunState: 'retired a first-shift chip', sessions: 'switched author with a PIN' };
 
   let st = null, lastStore = null, lastRoute = null, keysOn = false;
-  const fresh = () => ({ tileOpen: false, locOpen: null, invOpen: {}, changedOpen: false, lateOpen: false, varRefusal: {}, closeStep: 'idle', closeRefusal: null, dayClose: null, decisionResult: {}, decisionRefusal: {}, riskDone: {}, logOpen: false, pin: '', device: null });
+  const fresh = () => ({ tileOpen: null, locOpen: null, invOpen: {}, changedOpen: false, lateOpen: false, varRefusal: {}, closeStep: 'idle', closeRefusal: null, dayClose: null, decisionResult: {}, decisionRefusal: {}, riskDone: {}, logOpen: false, pin: '', pinShown: false, device: null, clearReason: {}, clearError: {}, varStamps: {} });
+  // Single-key accelerators are opt-in per user and off by default; the key is printed on the control it triggers.
+  const keysAllowed = () => { try { return Proto.store.prefsFor().shortcuts === 'on'; } catch (e) { return false; } };
   const priv = () => !!(window.__proto && window.__proto.privacy);
   const shared = () => !!(window.__proto && window.__proto.device === 'shared');
   // Shared desk: every posting verb here carries the PIN the field holds; the store matches it and names the poster.
   const extras = () => ({ pin: st.pin || null });
   const posted = () => { st.pin = ''; };
   const bool = (b) => (b ? 'true' : 'false');
+  /* A chip keeps its own ink and its own glyph size wherever it is placed: dropped inside a location row it
+     used to inherit that row's 22 px severity fill, which reads at 3.07:1 and misses the enhanced bar. */
+  const rowChip = (sev, word) => { const c = chip(sev, word); const g = c.querySelector('.glyph'); if (g) { g.style.fontSize = 'var(--glyph)'; g.style.color = 'inherit'; } return c; };
+  /* "Tied" is the state with nothing to do in it, so it is stated in words and a shape on the card's own
+     ground rather than in a sixth coloured fill: the severity ladder stays for the states that need hands. */
+  const gradeMark = (sev, word) => { if (sev !== 'clear') return rowChip(sev, word);
+    const g = h('span', { class: 'glyph', 'aria-hidden': 'true', text: '●' }); g.style.fontSize = 'var(--glyph)'; g.style.color = 'inherit';
+    return h('span', { class: 'small' }, g, ' ' + word); };
+  /* The warning mark beside an irreversible question is an icon, not a punctuation glyph: it is set at a
+     box big enough to survive grayscale and forced colours (GOV.UK's warning circle is 35 px). */
+  const warnGlyph = () => { const g = h('span', { class: 'glyph', 'aria-hidden': 'true', text: '▲' }); g.style.fontSize = 'var(--fs-5)'; g.style.lineHeight = '1'; return g; };
   const say = (t) => Proto.router.announce(t);
   const pname = (S, pid) => { const p = S.patients.find((x) => x.id === pid); return displayName(p ? p.name : pid, priv()); };
   const shortName = (S, name) => { const u = S.users.find((x) => x.name === name); return u ? u.short : name; };
@@ -74,6 +102,16 @@
   const stale = (g) => !!g && !!g.res && ((g.res.code === 'outage' && !Proto.store.get().outage) || (g.res.code === 'entitlement' && g.who !== Proto.store.currentUser().id) || (/^pin_/.test(g.res.code) && (!shared() || g.pin !== st.pin)));
   const heldGate = (by, res, node) => ({ by, res, node, who: Proto.store.currentUser().id, pin: st.pin });
   const live = (slot, key) => { if (stale(slot[key])) slot[key] = null; return slot[key] || {}; };
+  // A refused PIN is answered where the PIN is typed: the summary before the field takes the keyboard.
+  const gateFocus = (res) => (shared() && res && /^pin_/.test(res.code) ? 'close.pin.errors' : 'refusal.control');
+  /* Escape leaves a pending read-back exactly where Cancel does: on the control that raised it. The pending
+     confirm names itself (<testid>.confirm), so the card does not have to remember which verb was pressed. */
+  function escapeConfirm(r, card) {
+    const c = card.querySelector('.confirmrow [data-testid$=".confirm"]');
+    if (!c) return false;
+    rerender(r, String(c.getAttribute('data-testid')).replace(/\.confirm$/, ''));
+    return true;
+  }
   const heldPress = (r, slot, key, act) => { if (stale(slot[key])) { slot[key] = null; act(); } else rerender(r, 'refusal.control'); };
   // A name shown on expansion is a logged read; the store owns the row, the screen only asks for it.
   const disclose = (patientId, recordIds) => { if (Proto.store.disclose) Proto.store.disclose({ patientId, purpose: 'payment', recordIds }); };
@@ -106,7 +144,7 @@
   function pairSentence(S, p) {
     const o = p.orig || {}; const rev = p.rev || p.repost; const rp = p.repost || p.rev;
     const what = (o.tender ? o.tender + ' ' : '') + (KIND[o.kind] || 'entry');
-    return shortName(S, rev.actor) + ' reversed ' + what + ' #' + (o.id || rev.correctsEntryId) + ' from ' + shortDate(o.effective || rev.effective) + ' and reposted it to ' + pname(S, rp.patientId) + ' on ' + shortDate(rp.posted) + ', reason: ' + (REASON[rev.reason] || rev.reason || 'not given');
+    return shortName(S, rev.actor) + ' reversed ' + what + ' (' + rowWords(o.id || rev.correctsEntryId) + ') from ' + shortDate(o.effective || rev.effective) + ' and reposted it to ' + pname(S, rp.patientId) + ' on ' + shortDate(rp.posted) + ', reason: ' + (REASON[rev.reason] || rev.reason || 'not given');
   }
   function lateSentence(S, e) {
     const what = money(Math.abs(e.amountCents)) + ' ' + (KIND[e.kind] || e.kind);
@@ -142,19 +180,28 @@
     return { findings, exceptions };
   }
 
-  /* ---- Tied tile ---- */
+  /* ---- Tied tile ----
+     The status word, the day's sub-line and the severity chip are facts, so they sit in the tile itself;
+     only the disclosure is a control, and it carries a verb, the button identity and — when the reader has
+     turned single-key shortcuts on — the key that also works, printed on the control it triggers.
+     A day that is out opens itself: the amount and its three controls should not need a press to be read. */
+  const tileOpen = (S) => (st.tileOpen == null ? overall(S).grade !== 'tied' : st.tileOpen);
   function tile(r, S) {
-    const o = overall(S); const g = GRADE[o.grade];
+    const o = overall(S); const g = GRADE[o.grade]; const open = tileOpen(S);
     const lag = Math.max(...S.reconciliation.map((x) => x.lagDays));
-    const sub = 'Yesterday ' + shortDate(S.tenant.yesterday) + ' · ' + S.locations.length + ' locations · detection lag ' + plural(lag, 'day') + ' · ' + (S.reconciliation.some((x) => x.source === 'feed') ? 'bank feed' : 'statement import');
-    return h('button', { type: 'button', class: 'tile dc-tile ' + g[0], testid: 'close.tied.tile', 'aria-expanded': bool(st.tileOpen), 'aria-controls': 'dc-tile-detail', onClick: () => toggleTile(r) },
+    const sub = 'Yesterday ' + shortDate(S.tenant.yesterday) + ' · ' + plural(S.locations.length, 'location') + ' · lag ' + plural(lag, 'day');
+    const toggle = btn(open ? 'Hide the day' : 'Open the day', { kind: 'quiet', testid: 'close.tied.tile', class: 'dc-tiletoggle', describedby: 'dc-tile-sub', onClick: () => toggleTile(r) });
+    toggle.setAttribute('aria-expanded', bool(open));
+    toggle.setAttribute('aria-controls', 'dc-tile-detail');
+    if (keysAllowed()) { toggle.setAttribute('aria-keyshortcuts', 't'); toggle.append(h('kbd', { 'aria-hidden': 'true', text: 'T' })); }
+    return h('div', { class: 'tile dc-tile ' + g[0] },
       h('span', { class: 'glyph', 'aria-hidden': 'true', text: g[1] }),
-      h('span', { class: 'tilebody' }, h('span', { class: 'word', text: o.word }), h('span', { class: 'sub', text: sub })),
-      h('span', { class: 'caret', 'aria-hidden': 'true', text: st.tileOpen ? '▴' : '▾' }));
+      h('span', { class: 'tilebody' }, h('span', { class: 'word', text: o.word }), h('span', { class: 'sub', id: 'dc-tile-sub', text: sub })),
+      toggle);
   }
   function toggleTile(r) {
     const S = Proto.store.get();
-    st.tileOpen = !st.tileOpen;
+    st.tileOpen = !tileOpen(S);
     if (st.tileOpen && !st.locOpen) {
       // open the location that needs hands first: variance, then second look, then the first
       const order = { variance: 0, second: 1, tied: 2 };
@@ -162,26 +209,56 @@
     }
     rerender(r, 'close.tied.tile');
   }
+  // The location that is out opens with the tile: its gap and its controls are the task, not a second press.
+  function locOpenFor(S, rr) {
+    if (st.locOpen != null) return st.locOpen === rr.locationId;
+    const order = { variance: 0, second: 1, tied: 2 };
+    const first = S.reconciliation.slice().sort((a, b) => order[grade(a)] - order[grade(b)])[0];
+    return !!first && first.locationId === rr.locationId && grade(first) !== 'tied';
+  }
   function locationRow(r, S, rr) {
     const g = grade(rr); const G = GRADE[g]; const loc = locOf(S, rr.locationId);
     const n = openVariances(S, rr.locationId).length;
     const word = g === 'variance' ? plural(Math.max(n, 1), 'variance') : G[2];
-    const open = st.locOpen === rr.locationId;
-    const row = h('button', { type: 'button', class: 'dc-loc ' + G[0], testid: 'close.location.' + rr.locationId, 'aria-expanded': bool(open), 'aria-controls': 'dc-loc-' + rr.locationId, onClick: () => { st.locOpen = open ? null : rr.locationId; rerender(r, 'close.location.' + rr.locationId); } },
-      h('span', { class: 'glyph', 'aria-hidden': 'true', text: G[1] }), h('span', { class: 'name', text: loc.name }), chip(G[3], word),
-      h('span', { class: 'small muted grow', text: (rr.source === 'feed' ? 'Bank feed' : 'Statement import') + ' · lag ' + plural(rr.lagDays, 'day') + ' · closed ' + shortDate(rr.date) }));
+    const open = locOpenFor(S, rr);
+    // The grade mark and the basis line are facts the row states; neither is clickable. The disclosure is.
+    const toggle = btn(open ? 'Hide tenders' : 'Show tenders', { kind: 'quiet', class: 'compact', testid: 'close.location.' + rr.locationId, ariaLabel: (open ? 'Hide tenders' : 'Show tenders') + ' for ' + loc.name, onClick: () => { st.locOpen = open ? '' : rr.locationId; rerender(r, 'close.location.' + rr.locationId); } });
+    toggle.setAttribute('aria-expanded', bool(open));
+    toggle.setAttribute('aria-controls', 'dc-loc-' + rr.locationId);
+    toggle.style.flex = '0 0 auto';
+    // The grade is stated once, by its own glyph and word; the row no longer repeats it in a second colour
+    // (one more hue on the screen, and a 22 px coloured mark that missed the enhanced contrast bar).
+    const row = h('div', { class: 'dc-loc ' + G[0] + (open ? ' open' : '') },
+      h('span', { class: 'name', text: loc.name }), gradeMark(G[3], word),
+      h('span', { class: 'small grow', text: (rr.source === 'feed' ? 'Bank feed' : 'Statement import') + ' · lag ' + plural(rr.lagDays, 'day') + ' · closed ' + shortDate(rr.date) }),
+      toggle);
     return [row, open ? locationDetail(r, S, rr, g) : null];
   }
+  /* The tender read-back is a table, so it is built out of table elements: a caption that names it, a column
+     header per column with scope, and data cells underneath. It used to be a div wearing role="table" over
+     children that carried no cell role at all, which is five critical axe nodes and nothing a screen reader
+     can walk. Everything that is not a row of the table — the EFT line, the basis sentence, the variance
+     cards — is a sibling of the table, never a child of it. */
+  function tenderTable(label, cols, rows, testid) {
+    const tbl = h('table', { class: 'data dc-tender' },
+      h('caption', { class: 'sr-only', text: label }),
+      h('thead', null, h('tr', null, ...cols.map((c) => h('th', { scope: 'col', class: c[1] || null, text: c[0] })))),
+      h('tbody', null, ...rows));
+    return scrollRegion(label, testid, tbl);
+  }
   function locationDetail(r, S, rr, g) {
+    const loc = locOf(S, rr.locationId);
     const rows = TENDERS.map(([t, label]) => {
       const exp = rr.expected[t] || 0, bank = rr.bank[t] || 0, gap = bank - exp;
-      return h('div', { class: 'tender', testid: 'close.tender.' + t, role: 'row' }, h('span', { text: label }), h('span', { class: 'num', text: money(exp) }), h('span', { class: 'num', text: money(bank) }), gap === 0 ? chip('clear', 'Tied') : chip('required', 'Gap ' + money(gap)));
+      return h('tr', { testid: 'close.tender.' + t },
+        h('td', { text: label }), h('td', { class: 'num', text: money(exp) }), h('td', { class: 'num', text: money(bank) }),
+        h('td', null, gap === 0 ? gradeMark('clear', 'Tied') : rowChip('required', 'Gap ' + money(gap))));
     });
-    const detail = h('div', { class: 'dc-detail', id: 'dc-loc-' + rr.locationId, role: 'table', 'aria-label': locOf(S, rr.locationId).name + ' tenders' },
-      h('div', { class: 'tender head', role: 'row' }, h('span', { text: 'Tender' }), h('span', { class: 'num', text: 'Expected' }), h('span', { class: 'num', text: 'Bank' }), h('span', { text: 'Gap' })), ...rows);
-    if (rr.eft) detail.append(h('p', { class: 'small', text: rr.eft.payer + ' EFT ' + money(rr.eft.amountCents) + (rr.eft.matched ? ' matched by ' + rr.eft.trn : ' not yet matched') }));
-    if (g === 'second') detail.append(h('p', { class: 'small muted', text: 'Tied to the bank, but the same hands posted and closed that day. A second look here means a different pair of hands confirms the deposit; nothing is owed.' }));
-    if (g === 'tied') detail.append(h('p', { class: 'small muted', text: 'Every deposit line matched a bank row from the feed; whoever closed did not post or prepare the deposit that day.' }));
+    const detail = h('div', { class: 'dc-detail', id: 'dc-loc-' + rr.locationId },
+      tenderTable(loc.name + ' tenders', [['Tender'], ['Expected', 'num'], ['Bank', 'num'], ['Gap']], rows, 'close.tenders.' + rr.locationId));
+    if (rr.eft) detail.append(h('p', { class: 'small', text: rr.eft.payer + ' EFT ' + money(rr.eft.amountCents) + (rr.eft.matched ? ' matched to the deposit' : ' not yet matched') }));
+    if (g === 'second') detail.append(h('p', { class: 'small', text: 'Tied to the bank, but the same hands posted and closed that day. A different pair of hands confirms the deposit; nothing is owed.' }));
+    (st.varStamps[rr.locationId] || []).forEach((s) => detail.append(h('p', { class: 'row', id: s.id, tabindex: '-1' }, chip('clear', s.word), h('span', { text: s.text }))));
     openVariances(S, rr.locationId).forEach((v) => detail.append(varianceCard(r, S, rr, v)));
     return detail;
   }
@@ -195,51 +272,98 @@
     const pm = v.proposedMatch || {};
     const candidates = () => S.ledger.filter((e) => e.locationId === v.locationId && e.kind === 'patient_payment' && e.tender === v.tender && e.posted === rr.date).slice(-(pm.ledgerEntries || 2));
     const held = live(st.varRefusal, v.id);
+    const locName = locOf(S, v.locationId).name;
     // One gate per card, raised by the control that pressed it; that control carries the Held identity.
-    const refuse = (by, res, fallback) => { st.varRefusal[v.id] = heldGate(by, res, gate(r, res, null, fallback)); rerender(r, 'refusal.control'); };
-    const card = h('div', { class: 'card flat stack', role: 'group', 'aria-label': 'Variance ' + v.id },
-      h('div', { class: 'row' }, chip('required', 'Variance ' + money(v.amountCents)), h('span', { class: 'small muted', text: v.tender + ' · ' + locOf(S, v.locationId).name + ' · ' + shortDate(rr.date) })),
+    const refuse = (by, res, fallback) => { st.varRefusal[v.id] = heldGate(by, res, gate(r, res, null, fallback)); rerender(r, gateFocus(res)); };
+    // What the commit did stays on the day in the same words it was announced in, in the place the card
+    // stood — so the location it belongs to stays open to hold the stamp.
+    const stamp = (word, text) => { const id = 'dc-varstamp-' + v.id; (st.varStamps[v.locationId] = st.varStamps[v.locationId] || []).push({ id, word, text }); st.locOpen = v.locationId; say(text); return id; };
+    const card = h('div', { class: 'card flat stack', role: 'group', 'aria-label': 'Variance of ' + money(v.amountCents) + ' at ' + locName },
+      h('div', { class: 'row' }, chip('required', 'Variance ' + money(v.amountCents)), h('span', { class: 'small', text: v.tender + ' · ' + locName + ' · ' + shortDate(rr.date) })),
       h('p', { class: 'explain sentence', text: v.sentence }),
       h('p', null, h('b', { text: 'Proposed match: ' }), pm.bankLine + ' ↔ ' + plural(pm.ledgerEntries || 0, 'ledger entry').replace('entrys', 'entries')));
     const doMatch = () => {
       const res = Proto.store.matchVariance(v.id, extras());
-      if (res.ok) { st.varRefusal[v.id] = null; posted(); say('Matched ' + money(v.amountCents) + ' at ' + locOf(S, v.locationId).name); rerender(r, 'close.tied.tile'); return; }
+      if (res.ok) { st.varRefusal[v.id] = null; posted(); const id = stamp('Matched', 'Matched ' + money(v.amountCents) + ' at ' + locName + '. The day is tied; nothing more is owed here.'); rerender(r, '#' + id); return; }
       refuse('match', res);
     };
+    const matchTid = 'close.variance.' + v.id + '.match';
     const controls = h('div', { class: 'btnrow' },
-      btn('Match these', { kind: held.by === 'match' ? 'held' : 'irreversible', testid: 'close.variance.' + v.id + '.match', onClick: () => (held.by === 'match' ? heldPress(r, st.varRefusal, v.id, doMatch) : doMatch()) }),
-      btn(st.invOpen[v.id] ? 'Hide rows' : 'Investigate', { kind: 'reversible', testid: 'close.variance.' + v.id + '.investigate', pressed: !!st.invOpen[v.id], onClick: () => {
+      held.by === 'match'
+        ? btn('Match these', { kind: 'held', testid: matchTid, onClick: () => heldPress(r, st.varRefusal, v.id, doMatch) })
+        : confirmable('Match these', { testid: matchTid, confirmLabel: 'Match these',
+          readback: 'Matching writes ' + money(v.amountCents) + ' onto the ' + locName + ' bank line and ties the day. This cannot be undone.',
+          onConfirm: doMatch }),
+      btn(st.invOpen[v.id] ? 'Hide rows' : 'Show candidate rows', { kind: 'reversible', testid: 'close.variance.' + v.id + '.investigate', pressed: !!st.invOpen[v.id], onClick: () => {
         st.invOpen[v.id] = !st.invOpen[v.id];
         if (st.invOpen[v.id]) candidates().forEach((e) => disclose(e.patientId, [e.id]));
         rerender(r, 'close.variance.' + v.id + '.investigate');
       } }));
     const doClear = () => {
-      const res = Proto.store.clearVariance(v.id, extras());
-      if (res.ok) { st.varRefusal[v.id] = null; posted(); say('Cleared with reason'); rerender(r, 'close.tied.tile'); return; }
+      const reason = st.clearReason[v.id] || '';
+      const res = Proto.store.clearVariance(v.id, Object.assign(extras(), { reason }));
+      if (res.ok) {
+        st.varRefusal[v.id] = null; st.clearError[v.id] = null; posted();
+        const id = stamp('Cleared with reason', 'Cleared with reason: ' + clearWords(reason).toLowerCase() + '. ' + locName + ' stays at a second look until a different pair of hands confirms the deposit.');
+        rerender(r, '#' + id); return;
+      }
       // The rows are what an independent seat would be handed, so the way out of a who-may-clear gate opens them.
       refuse('clear', res, () => { st.invOpen[v.id] = true; rerender(r, 'close.variance.' + v.id + '.investigate'); });
     };
-    if (mayClear) controls.append(btn('Clear with reason', { kind: held.by === 'clear' ? 'held' : 'quiet', testid: 'close.variance.' + v.id + '.clear', onClick: () => (held.by === 'clear' ? heldPress(r, st.varRefusal, v.id, doClear) : doClear()) }));
     card.append(controls);
-    if (!mayClear) card.append(h('p', { class: 'small muted', text: (isCloser ? 'Same hands closed ' + locOf(S, rr.locationId).name + ' on ' + shortDate(rr.date) + '. ' : 'Clearing belongs to a seat that reconciles the bank or closes the books. ') + (clearers.length ? orList(clearers) + ' can clear. ' : '') + 'Match these and Investigate stay open to you.' }));
+    /* "Clear with reason" now collects the reason its own label names, before it can commit: a required
+       select stated before anyone chooses, an error summary and a field message when it is empty, and the
+       chosen reason read back inside the confirm step. */
+    if (mayClear) {
+      const selId = 'dc-clear-' + v.id;
+      const sel = h('select', { class: 'input', id: selId, testid: 'close.variance.' + v.id + '.reason', onChange: (ev) => { st.clearReason[v.id] = ev.target.value; st.clearError[v.id] = null; rerender(r, 'close.variance.' + v.id + '.reason'); } },
+        h('option', { value: '', text: 'Choose a reason' }), ...CLEAR_REASONS.map(([code, word]) => h('option', { value: code, selected: st.clearReason[v.id] === code, text: word })));
+      const wrap = field('Reason this gap is explained', sel, { required: true, hint: 'Required. Clearing records this reason against the gap; the bank line does not move.' });
+      const clearTid = 'close.variance.' + v.id + '.clear';
+      const reason = st.clearReason[v.id] || '';
+      const clearNode = held.by === 'clear'
+        ? btn('Clear with reason', { kind: 'held', testid: clearTid, onClick: () => heldPress(r, st.varRefusal, v.id, doClear) })
+        : reason
+          ? confirmable('Clear with reason', { testid: clearTid, confirmLabel: 'Clear with reason',
+            readback: 'Clearing records “' + clearWords(reason) + '” against the ' + money(v.amountCents) + ' gap at ' + locName + '. This cannot be undone.',
+            onConfirm: doClear })
+          : btn('Clear with reason', { kind: 'irreversible', testid: clearTid, describedby: selId + '-hint', onClick: () => { st.clearError[v.id] = 'Choose the reason before clearing.'; rerender(r, 'close.variance.' + v.id + '.errors'); } });
+      const group = h('div', { class: 'stack' });
+      if (st.clearError[v.id]) { group.append(errorSummary([{ id: selId, message: st.clearError[v.id] }], { testid: 'close.variance.' + v.id + '.errors' })); wrap._setError(st.clearError[v.id]); }
+      // The irreversible half is never alone: the real alternative — leave the gap open — sits beside it.
+      group.append(wrap, h('div', { class: 'btnrow' }, clearNode,
+        btn('Leave the gap open', { kind: 'reversible', testid: 'close.variance.' + v.id + '.keepopen', onClick: () => { st.clearReason[v.id] = ''; st.clearError[v.id] = null; rerender(r, 'close.variance.' + v.id + '.reason'); } })));
+      card.append(group);
+    } else {
+      card.append(h('p', { class: 'small', text: (isCloser ? 'Same hands closed ' + locName + ' on ' + shortDate(rr.date) + '. ' : 'Clearing belongs to a seat that reconciles the bank or closes the books. ') + (clearers.length ? orList(clearers) + ' can clear. ' : '') + 'Match these and the candidate rows stay open to you.' }));
+    }
     if (held.node) card.append(held.node);
+    card.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && escapeConfirm(r, card)) ev.stopPropagation(); });
     if (st.invOpen[v.id]) {
       const rows = candidates();
-      card.append(h('div', { class: 'stack' }, h('p', { class: 'small muted', text: 'Candidate rows (same tender, two-day window; names shown on expansion and logged as a payment-purpose read):' }),
-        h('ul', { class: 'dc-sentences' }, ...rows.map((e) => h('li', { text: pname(S, e.patientId) + ' · ' + e.tender + ' payment ' + money(-e.amountCents) + ' · posted ' + shortDate(e.posted) + ' after 6 pm · #' + e.id }))),
-        h('p', { class: 'small muted', text: 'Investigate opens a control finding with these rows attached, routed to Money Desk → Variances.' })));
+      card.append(h('div', { class: 'stack' }, h('p', { class: 'small', text: 'Candidate rows (same tender, two-day window; names shown on expansion and logged as a payment-purpose read):' }),
+        h('ul', { class: 'dc-sentences' }, ...rows.map((e) => h('li', { text: pname(S, e.patientId) + ' · ' + e.tender + ' payment ' + money(-e.amountCents) + ' · posted ' + shortDate(e.posted) + ' after 6 pm · ' + rowWords(e.id) }))),
+        h('p', { class: 'small', text: 'Investigate opens a control finding with these rows attached, routed to Money Desk → Variances.' })));
     }
     return card;
   }
   function practiceLines(r, S) {
     const pairs = changedPairs(S); const late = lateRows(S);
-    const line = (testid, label, n, open, onClick, items) => [
-      h('button', { type: 'button', class: 'dc-line', testid, 'aria-expanded': bool(open), onClick }, h('span', { text: label }), h('span', { class: 'count', text: String(n) }), h('span', { class: 'sr-only', text: n === 1 ? ' row' : ' rows' }), h('span', { class: 'muted', 'aria-hidden': 'true', text: open ? '▴' : '▾' })),
-      open ? h('ul', { class: 'dc-sentences' }, ...(items.length ? items.map((s) => h('li', { text: s })) : [h('li', { text: 'None.' })])) : null];
+    // The count is a fact the line states; the disclosure beside it is the control, and it carries the verb,
+    // the button identity and an accessible name that says what it opens.
+    const line = (testid, label, n, open, onClick, items) => {
+      const id = 'dc-' + testid.replace(/\./g, '-');
+      const toggle = btn(open ? 'Hide rows' : 'Show rows', { kind: 'quiet', class: 'compact', testid, ariaLabel: (open ? 'Hide rows' : 'Show rows') + ': ' + label, onClick });
+      toggle.setAttribute('aria-expanded', bool(open));
+      toggle.setAttribute('aria-controls', id);
+      toggle.style.flex = '0 0 auto';
+      return [h('div', { class: 'dc-line' + (open ? ' open' : '') }, h('span', { text: label }), h('span', { class: 'count' }, String(n), h('span', { class: 'sr-only', text: n === 1 ? ' row' : ' rows' })), toggle),
+        open ? h('ul', { class: 'dc-sentences', id }, ...(items.length ? items.map((s) => h('li', { text: s })) : [h('li', { text: 'None.' })])) : h('div', { id, hidden: true })];
+    };
     return h('div', { class: 'stack' },
       ...line('close.changed', 'Yesterday changed after close', pairs.length, st.changedOpen, () => { st.changedOpen = !st.changedOpen; rerender(r, 'close.changed'); }, pairs.map((p) => pairSentence(S, p))),
       ...line('close.late', 'Postings into closed days', late.length, st.lateOpen, () => { st.lateOpen = !st.lateOpen; rerender(r, 'close.late'); }, late.map((e) => lateSentence(S, e))),
-      h('details', null, h('summary', { class: 'small', testid: 'close.counts.why' }, 'Why these counts'), h('p', { class: 'small muted', text: 'A correction is a reversal plus a repost, both linked to the original row; pairs by human actors are counted. A late first posting has nothing to correct and posts today marked after close; worker rows from an overnight 835 or import are excluded from both counts. Both counts are practice-level.' })));
+      h('details', null, h('summary', { class: 'small', testid: 'close.counts.why' }, 'Why these counts'), h('p', { class: 'small', text: 'A correction is a reversal plus a repost, both linked to the original row; pairs by human actors are counted. A late first posting has nothing to correct and posts today marked after close; worker rows from an overnight import are excluded. Both counts are practice-level.' })));
   }
 
   /* ---- Decisions due, approvals, exceptions ---- */
@@ -252,7 +376,7 @@
       const held = live(st.decisionRefusal, d.id);
       const review = (action) => {
         const res = Proto.store.reviewDecision(d.id, action, extras());
-        if (!res.ok) { st.decisionRefusal[d.id] = heldGate(action, res, gate(r, res, 'A decision is reviewed on the server so the threshold it moves is the one every posting reads.')); rerender(r, 'refusal.control'); return; }
+        if (!res.ok) { st.decisionRefusal[d.id] = heldGate(action, res, gate(r, res, 'A decision is reviewed on the server so the threshold it moves is the one every posting reads.')); rerender(r, gateFocus(res)); return; }
         st.decisionRefusal[d.id] = null; posted();
         // The store sets the next review date when a decision is kept or tightened; printing a second
         // computation of it here is how the sentence and the row underneath it come to disagree.
@@ -262,18 +386,29 @@
         st.decisionResult[d.id] = action === 'keep' ? 'Kept 90 more days; review on ' + next + '.'
           : action === 'tighten' ? 'Tightened: write-off threshold back to ' + threshold + '; review on ' + next + '.'
             : 'Retired: write-off threshold back to ' + threshold + '. Nothing auto-renews.';
-        say(action === 'keep' ? 'Kept 90 more days' : action === 'tighten' ? 'Tightened the write-off threshold' : 'Retired the raised threshold');
+        // What is announced is what the screen prints, word for word, in the place the controls stood.
+        say(st.decisionResult[d.id]);
         // Focus lands on the stamp that replaced the control, never on the next primary: a repeated Enter must not close the day.
         rerender(r, '#dc-reviewed-' + d.id);
       };
-      const act = (action, label, kind) => btn(label, { kind: held.by === action ? 'held' : kind, testid: 'close.decision.' + d.id + '.' + action, onClick: () => (held.by === action ? heldPress(r, st.decisionRefusal, d.id, () => review(action)) : review(action)) });
-      return h('div', { class: 'card flat stack', role: 'group', 'aria-label': 'Decision ' + d.id },
-        h('div', { class: 'row' }, chip('review', 'Review ' + (late > 0 ? 'was due ' + shortDate(d.reviewBy) + ' (' + plural(late, 'day') + ' ago)' : 'due ' + shortDate(d.reviewBy))), h('span', { class: 'small muted', text: 'Decided ' + shortDate(d.decidedAt) + ' by ' + shortName(S, d.decidedBy) })),
-        h('p', null, h('b', { text: d.text })),
+      const tid = (action) => 'close.decision.' + d.id + '.' + action;
+      const act = (action, label, kind) => btn(label, { kind: held.by === action ? 'held' : kind, testid: tid(action), onClick: () => (held.by === action ? heldPress(r, st.decisionRefusal, d.id, () => review(action)) : review(action)) });
+      // Retire ends the exception and moves the threshold every posting reads, so it asks again before it writes.
+      const retire = held.by === 'retire'
+        ? act('retire', 'Retire', 'held')
+        : confirmable('Retire', { testid: tid('retire'), confirmLabel: 'Retire', ariaLabel: 'Retire this raised threshold',
+          readback: 'Retiring puts the write-off threshold back to ' + money(d.fromCents || 10000) + ' and nothing auto-renews. This cannot be undone.',
+          onConfirm: () => review('retire') });
+      const gid = 'dc-decision-' + d.id;
+      const dcard = h('div', { class: 'card flat stack', role: 'group', 'aria-labelledby': gid },
+        h('div', { class: 'row' }, chip('review', 'Review ' + (late > 0 ? 'was due ' + shortDate(d.reviewBy) + ' (' + plural(late, 'day') + ' ago)' : 'due ' + shortDate(d.reviewBy))), h('span', { class: 'small', text: 'Decided ' + shortDate(d.decidedAt) + ' by ' + shortName(S, d.decidedBy) })),
+        h('p', { id: gid }, h('b', { text: d.text })),
         h('p', { class: 'row' }, h('span', { text: 'Since this raise: ' + d.measuredEffect + '.' }), chip('info', 'Directional')),
-        h('div', { class: 'btnrow' }, act('keep', 'Keep 90 more days', 'reversible'), act('tighten', 'Tighten', 'reversible'), act('retire', 'Retire', 'irreversible')),
+        h('div', { class: 'btnrow' }, act('keep', 'Keep 90 more days', 'reversible'), act('tighten', 'Tighten', 'reversible'), retire),
         held.node || null,
-        h('details', null, h('summary', { class: 'small', testid: 'close.decision.' + d.id + '.why' }, 'Why directional'), h('p', { class: 'small muted', text: 'Under the digest minimum sample the effect sentence is computed from domain events since the decision and labelled directional. An unreviewed decision stops applying at midnight of its review date and becomes a finding; neglect tightens, never loosens.' })));
+        h('details', null, h('summary', { class: 'small', testid: 'close.decision.' + d.id + '.why' }, 'Why directional'), h('p', { class: 'small', text: 'Under the digest minimum sample the effect sentence is computed from domain events since the decision and labelled directional. An unreviewed decision stops applying at midnight of its review date and becomes a finding; neglect tightens, never loosens.' })));
+      dcard.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && escapeConfirm(r, dcard)) ev.stopPropagation(); });
+      return dcard;
     });
     return section('Decisions due for review' + (due.length ? ': ' + due.length : ''), ...rows, ...results.map((id) => {
       const d = S.decisions.find((x) => x.id === id);
@@ -288,14 +423,14 @@
       mine.length ? h('div', { class: 'worklist' }, ...mine.map((a) => h('div', { class: 'dc-row' }, chip('review', 'Waiting'), h('span', { class: 'text', text: Proto.store.approvalSentence(a, { redact: true }) }), btn('Open approvals', { kind: 'reversible', testid: 'close.approval.' + a.id + '.open', onClick: () => { location.hash = '#/phone/approvals'; } })))) : h('p', { class: 'muted', text: 'None waiting. A posting that needs a second approver appears here, and on your phone, the moment someone asks.' }),
       // Policy is what a person reads when they ask why, not what stands between them and the work.
       h('details', null, h('summary', { class: 'small', testid: 'close.approvals.why' }, 'Why these need a second approver'),
-        h('p', { class: 'small muted', text: 'After-hours hold is on: a refund, adjustment or write-off outside ' + S.tenant.businessHours.open + '–' + S.tenant.businessHours.close + ' needs a second approver regardless of amount.' })));
+        h('p', { class: 'small', text: 'After-hours hold is on: a refund, adjustment or write-off outside ' + time(S.tenant.businessHours.open) + ' to ' + time(S.tenant.businessHours.close) + ' needs a second approver regardless of amount.' })));
   }
   function exceptions(r, S) {
     const v = sodView(S);
     return section('Expiring exceptions and open SoD findings',
       ...v.exceptions.map((x) => h('div', { class: 'dc-row' }, chip('review', 'Expires ' + shortDate(x.reviewBy)), h('span', { class: 'text', text: (x.kind === 'compensate' ? 'Compensated exception' : 'Accepted exception') + ': one seat ' + pairWords(x.rule.pair) + ' · ' + plural(days(S.tenant.today, x.reviewBy), 'day') + ' left · compensating: ' + x.rule.compensating }))),
       ...v.findings.map((f) => h('div', { class: 'dc-row' }, chip(f.rule.severity === 'critical' ? 'stop' : 'required', cap(f.rule.severity)), h('span', { class: 'text', text: 'Open finding: one seat ' + pairWords(f.rule.pair) + ' · ' + f.rule.fraudPath + ' Compensating: ' + f.rule.compensating }))),
-      h('div', { class: 'row' }, h('span', { class: 'small muted grow', text: plural(v.findings.length, 'open finding') + ', ' + plural(v.exceptions.length, 'accepted exception') + ' · practice-level; remediate, compensate, or accept on the Roles screen.' }), btn('Roles', { kind: 'quiet', testid: 'close.sod.roles', onClick: () => Proto.router.go(r.persona, 'roles') })));
+      h('div', { class: 'row' }, h('span', { class: 'small grow', text: plural(v.findings.length, 'open finding') + ', ' + plural(v.exceptions.length, 'accepted exception') + ' · practice-level; remediate, compensate, or accept on the Roles screen.' }), btn('Open Roles', { kind: 'quiet', testid: 'close.sod.roles', onClick: () => Proto.router.go(r.persona, 'roles') })));
   }
 
   /* ---- Close day ---- */
@@ -303,7 +438,8 @@
     const loc = locOf(S, 'loc-1'); const today = S.tenant.today;
     const done = S.dayCloses.find((d) => d.locationId === 'loc-1' && d.date === today);
     const kids = [];
-    if (done) kids.push(h('p', { class: 'row', id: 'dc-closed', tabindex: '-1' }, h('span', { class: 'dc-lock', 'aria-hidden': 'true', text: '🔒' }), chip('clear', 'Closed'), h('span', { text: 'Closed ' + shortDate(done.date) + ' at ' + done.closedAt + ' by ' + shortName(S, done.closedBy) + ' · chain head ' + done.chainHeadHash + ' · deposit slip prepared; day sheet frozen.' })));
+    if (done) kids.push(h('p', { class: 'row', id: 'dc-closed', tabindex: '-1' }, h('span', { class: 'dc-lock', 'aria-hidden': 'true', text: '🔒' }), chip('clear', 'Closed'),
+      h('span', { text: 'Day closed — the deposit slip is prepared. Closed ' + shortDate(done.date) + ' at ' + time(done.closedAt) + ' by ' + shortName(S, done.closedBy) + '; the day sheet is frozen. Anything dated today from here posts into tomorrow.' })));
     const closeGate = live(st, 'closeRefusal');
     // One label for the control; the held identity supplies the word Held and keeps "Close day" as its name.
     const primary = btn('Close day', { kind: closeGate.node || done ? 'held' : 'irreversible', testid: 'close.closeday', onClick: () => {
@@ -313,30 +449,38 @@
       // The confirm group opens with focus on its question, not on the irreversible control: a repeated Enter must not close the day.
       confirm();
     } });
-    kids.push(h('div', { class: 'btnrow' }, primary, h('span', { class: 'small muted', text: loc.name + ' · ' + shortDate(today) + ' · totals by tender, deposit slip, day sheet frozen atomically' })));
+    // The irreversible half is never alone in its row: the reversible way to read the day first sits beside it,
+    // at the same size, and it is the one the keyboard can reach without committing anything.
+    kids.push(h('div', { class: 'btnrow' }, primary,
+      btn('Open the day', { kind: 'reversible', testid: 'close.closeday.open', ariaLabel: 'Open the day before closing it', onClick: () => openDay(r) }),
+      h('span', { class: 'small', text: loc.name + ' · ' + shortDate(today) })));
     if (closeGate.node) kids.push(closeGate.node);
     if (st.closeStep === 'confirm' && !done) {
       const tot = todayTotals(S, 'loc-1'); const sum = tot.cash + tot.check + tot.card;
-      kids.push(h('div', { class: 'card flat stack', role: 'group', 'aria-label': 'Confirm close day' },
-        h('h3', { id: 'dc-close-confirm', tabindex: '-1', text: 'Close ' + loc.name + ' for ' + shortDate(today) + '?' }),
-        h('div', { class: 'tender head', role: 'row' }, h('span', { text: 'Tender' }), h('span', { class: 'num', text: 'Collected today' }), h('span'), h('span')),
-        ...TENDERS.map(([t, label]) => h('div', { class: 'tender', role: 'row' }, h('span', { text: label }), h('span', { class: 'num', text: money(tot[t]) }), h('span'), h('span'))),
-        h('div', { class: 'tender', role: 'row' }, h('span', null, h('b', { text: 'Total' })), h('span', { class: 'num' }, h('b', { text: money(sum) })), h('span'), h('span')),
+      const cancel = () => { st.closeStep = 'idle'; rerender(r, 'close.closeday'); };
+      const rows = TENDERS.map(([t, label]) => h('tr', null, h('td', { text: label }), h('td', { class: 'num', text: money(tot[t]) })))
+        .concat([h('tr', null, h('td', null, h('b', { text: 'Total' })), h('td', { class: 'num' }, h('b', { text: money(sum) })))]);
+      const group = h('div', { class: 'card flat stack', role: 'group', 'aria-labelledby': 'dc-close-confirm' },
+        h('h3', { id: 'dc-close-confirm', tabindex: '-1' }, warnGlyph(), ' Close ' + loc.name + ' for ' + shortDate(today) + '?'),
+        tenderTable('Collected today at ' + loc.name, [['Tender'], ['Collected today', 'num']], rows, 'close.closeday.totals'),
         // The finish path carries the read-back of what the press does; the correction policy sits behind Why.
-        h('p', { text: 'Deposit slip prepared; day sheet frozen with chain head.' }),
+        h('p', { class: 'sentence' }, h('b', { text: 'This cannot be undone: the deposit slip prints and the day sheet freezes.' })),
         h('details', null, h('summary', { class: 'small', testid: 'close.closeday.why' }, 'Why a closed day never changes'),
-          h('p', { class: 'small muted', text: 'Later postings dated today go into tomorrow as a reversal-and-repost pair or a marked late posting; nothing here changes in place.' })),
+          h('p', { class: 'small', text: 'Later postings dated today go into tomorrow as a pair; nothing changes in place.' })),
         h('div', { class: 'btnrow' },
+          btn('Cancel', { kind: 'reversible', testid: 'close.closeday.cancel', onClick: cancel }),
           btn('Close day', { kind: 'irreversible', testid: 'close.closeday.confirm', onClick: () => {
             const res = Proto.store.closeDay('loc-1', extras());
             // Focus lands on the Closed stamp, never back on the (now held) primary: a repeated Enter raises no second gate.
-            if (res.ok) { st.closeStep = 'done'; st.closeRefusal = null; posted(); say('Day closed — deposit slip prepared'); rerender(r, '#dc-closed'); return; }
+            if (res.ok) { st.closeStep = 'done'; st.closeRefusal = null; posted(); say('Day closed — the deposit slip is prepared.'); rerender(r, '#dc-closed'); return; }
             st.closeStep = 'idle';
             // The gate's own words, and its control goes where the control says: the screen adds neither.
             st.closeRefusal = heldGate('close', res, gate(r, res, 'Closing freezes totals and prepares the deposit, so only the seats that carry it can close.'));
-            rerender(r, 'refusal.control');
-          } }),
-          btn('Cancel', { kind: 'quiet', testid: 'close.closeday.cancel', onClick: () => { st.closeStep = 'idle'; rerender(r, 'close.closeday'); } }))));
+            rerender(r, gateFocus(res));
+          } })));
+      // Escape leaves the confirm step, like every other way out on this product.
+      group.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { ev.stopPropagation(); cancel(); } });
+      kids.push(group);
     }
     return section('Close day', ...kids);
   }
@@ -362,6 +506,7 @@
   /* ---- keys: active only while mounted on close ---- */
   function onKey(ev) {
     if (Proto.router.current().route !== 'close') { detachKeys(); return; }
+    if (!keysAllowed()) return;                        // single-key accelerators are off until this reader turns them on
     const el = document.activeElement; if (!el || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || ev.ctrlKey || ev.metaKey || ev.altKey) return;
     if (document.querySelector('#dialogs .overlay')) return;
     if (ev.key === 't' || ev.key === 'T') { ev.preventDefault(); toggleTile(lastRoute || Proto.router.current()); }
@@ -370,12 +515,23 @@
   function detachKeys() { if (keysOn) { document.removeEventListener('keydown', onKey); keysOn = false; } }
 
   /* ---- shared desk: the PIN that names the poster, once per screen, beside the controls every posting verb lives in ---- */
-  const pinGates = () => [st.closeRefusal, ...Object.values(st.varRefusal), ...Object.values(st.decisionRefusal)].some((g) => g && g.res && /^pin_/.test(g.res.code));
+  const pinGate = () => [st.closeRefusal, ...Object.values(st.varRefusal), ...Object.values(st.decisionRefusal)].find((g) => g && g.res && /^pin_/.test(g.res.code)) || null;
+  const pinGates = () => !!pinGate();
   function pinField(r) {
     if (!shared()) return null;
     // Editing the PIN drops a PIN gate (stale()); the field is redrawn only then, so the caret survives ordinary typing.
-    const pin = h('input', { class: 'input co-pin', type: 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', id: 'dc-pin', testid: 'close.pin', value: st.pin, onInput: (ev) => { st.pin = ev.target.value; if (pinGates()) focusPin(r); } });
-    return h('div', { class: 'field' }, h('label', { for: 'dc-pin', text: 'Your PIN' }), pin, h('p', { class: 'hint', text: 'Shared desk: the PIN makes you the frozen poster for every posting here.' }));
+    const pin = h('input', { class: 'input co-pin', type: st.pinShown ? 'text' : 'password', inputmode: 'numeric', autocomplete: 'off', maxlength: '6', id: 'dc-pin', testid: 'close.pin', value: st.pin, onInput: (ev) => { st.pin = ev.target.value; if (pinGates()) focusPin(r); } });
+    // A PIN pad on a shared desk is pure recall with no way to check what was typed. One assist, and it is
+    // the reader's choice: show the digits back. Nothing is re-authenticated to turn it on.
+    const show = btn(st.pinShown ? 'Hide digits' : 'Show digits', { kind: 'quiet', class: 'compact', testid: 'close.pin.show', pressed: st.pinShown, onClick: () => { st.pinShown = !st.pinShown; rerender(r, 'close.pin.show'); } });
+    const wrap = field('Your PIN', pin, { required: true, hint: 'Required. 6 digits; three misses lock this device. The PIN makes you the frozen poster for every posting here.' });
+    wrap.append(h('div', { class: 'btnrow' }, show));
+    /* A PIN that was refused is said where the PIN is typed, not only at the control 900 px below that
+       raised it: one summary before the field, and the message between the hint and the box. */
+    const g = pinGate();
+    if (!g) return wrap;
+    wrap._setError(g.res.verb);
+    return h('div', { class: 'stack' }, errorSummary([{ id: 'dc-pin', message: g.res.verb }], { testid: 'close.pin.errors' }), wrap);
   }
 
   /* ---- render: close ---- */
@@ -385,10 +541,13 @@
     // A PIN typed for one device never carries to another: the field empties when the device flips.
     const device = window.__proto && window.__proto.device; if (st.device !== device) { st.device = device; st.pin = ''; }
     lastRoute = r; attachKeys();
+    /* The page heading comes first, because the keyboard starts on it: one Tab from a fresh load used to land
+       on "Keep 90 more days" — a control that writes — because the h1 sat below the tile and its detail.
+       The first stop is now the tile's own disclosure, which changes nothing. */
     const page = h('div', { class: 'stack dc-page' },
+      pageHead('Daily Close and Controls', 'Is yesterday’s money in the bank? Controls below; nothing here ranks people.' + (keysAllowed() ? ' Key: T opens the day.' : '')),
       tile(r, S),
-      st.tileOpen ? h('div', { class: 'stack', id: 'dc-tile-detail' }, h('div', { class: 'dc-locs' }, ...S.reconciliation.map((rr) => locationRow(r, S, rr))), practiceLines(r, S)) : h('div', { id: 'dc-tile-detail', hidden: true }),
-      pageHead('Daily Close and Controls', 'Home: is yesterday’s money in the bank? Tap the tile or press T. Controls live below; nothing here ranks people.'),
+      tileOpen(S) ? h('div', { class: 'stack', id: 'dc-tile-detail' }, h('div', { class: 'dc-locs' }, ...S.reconciliation.map((rr) => locationRow(r, S, rr))), practiceLines(r, S)) : h('div', { id: 'dc-tile-detail', hidden: true }),
       pinField(r),
       decisions(r, S), approvals(r, S), exceptions(r, S), closeDaySection(r, S), health(S));
     Proto.screens.shell.mount(page);
@@ -403,72 +562,107 @@
     if (e.table === 'approvals' && first && first.seq !== e.seq) { const a = table(S, 'approvals').find((x) => x.id === e.id) || {}; return DECIDED[a.status] || 'changed an approval request'; }
     return WROTE[e.table] || 'wrote a record';
   }
+  // The log reads as sentences, so it uses the screen's own words: the seat, the verb and the screen it
+  // happened on. The row id and the event number are how the record is stored, not what a person reads
+  // (INT-real-world-words).
+  const SEAT_WORD = { frontdesk: 'front desk', biller: 'billing', hygienist: 'hygiene', assistant: 'assisting', dentist: 'the dentist chair', surgeon: 'surgery', owner: 'the owner seat', compliance: 'compliance', temp: 'a day pass' };
+  const ROUTE_WORD = { board: 'the Board', chairs: 'Chairs', exams: 'Exams to sign', encounter: 'an encounter', perio: 'a perio exam', checkout: 'Checkout', money: 'Money Desk', ledger: 'a patient ledger', close: 'Daily Close', roles: 'Roles', risk: 'Practice risk', phone: 'the approvals card', signin: 'sign-in' };
   function auditSentences(S) {
     const all = (window.__events || []).filter((e) => e.kind === 'write');
     return all.slice(-8).reverse().map((e) => {
       const uid = S.personaUser[e.persona]; const u = S.users.find((x) => x.id === uid);
-      const who = e.persona === 'temp' ? 'The day-pass seat' : u ? u.short + ' (' + e.persona + ')' : 'Someone signed in as ' + e.persona;
-      return who + ' ' + wroteWords(S, all, e) + ' #' + e.id + ' at +' + Math.round(e.t / 1000) + ' s on ' + e.route + ' (event ' + e.seq + ').';
+      const who = e.persona === 'temp' ? 'The day-pass seat' : u ? u.short + ' (' + (SEAT_WORD[e.persona] || e.persona) + ')' : 'Someone at the ' + (SEAT_WORD[e.persona] || e.persona) + ' seat';
+      const secs = Math.round(e.t / 1000);
+      const where = ROUTE_WORD[String(e.route || '').split('/').filter(Boolean).pop()] || 'this practice';
+      return who + ' ' + wroteWords(S, all, e) + ' on ' + where + ', ' + secs + (secs === 1 ? ' second' : ' seconds') + ' into this session.';
     });
   }
   function renderRisk(r) {
     const S = Proto.store.get();
     if (lastStore !== S) { lastStore = S; st = fresh(); }
     lastRoute = r; detachKeys();
-    // Each row carries its own Why (risk.row.<id>.why, CONTRACTS §4): the rule behind the row, read on demand.
+    /* Each row carries its own Why (risk.row.<id>.why, CONTRACTS §4): the rule behind the row, read on demand.
+       A closed <details> still lays its answer out, so four unread rules counted as 104 words of standing
+       prose on the first screenful; the answer is hidden until the disclosure is open (CLT-prose-budget). */
+    const whyBlock = (id, text) => {
+      const body = h('p', { class: 'small muted', hidden: true, text: text });
+      const d = h('details', null, h('summary', { class: 'small', testid: 'risk.row.' + id + '.why' }, 'Why'), body);
+      d.addEventListener('toggle', () => { body.hidden = !d.open; });
+      return d;
+    };
     const row = (id, action, sev, word, text, label, kind, onClick, extra, why) => h('div', { class: 'dc-row' }, chip(sev, word),
       h('span', { class: 'text' }, h('span', { text: text }), extra ? h('span', { class: 'small muted', text: ' ' + extra }) : null,
-        why ? h('details', null, h('summary', { class: 'small', testid: 'risk.row.' + id + '.why' }, 'Why'), h('p', { class: 'small muted', text: why })) : null),
+        why ? whyBlock(id, why) : null),
       btn(label, { kind, testid: 'risk.row.' + id + '.' + action, onClick }));
     const due = S.decisions.filter((d) => d.status === 'review_due');
     const items = [];
-    /* A standing row's control marks the task for this session only: nothing here has a store verb to write
-       through yet, so a repeat press is a visible no-op that says it was already done, never the completed
-       action announced a second time. */
-    const standing = (key, id, action, sev, word, text, label, doneLabel, firstSay, againSay, doneExtra, why) => {
-      const done = !!st.riskDone[key]; const tid = 'risk.row.' + id + '.' + action;
-      return row(id, action, sev, word, text, done ? doneLabel : label, done ? 'quiet' : 'reversible', () => {
-        if (st.riskDone[key]) { say(againSay); rerender(r, tid); return; }
-        st.riskDone[key] = true; say(firstSay); rerender(r, tid);
-      }, done ? doneExtra : null, why);
+    /* A standing row's control marks the task for this session only. Pressing it again used to announce
+       "Already requested today" — words no one could see (WCAG 1.3.2) — and left the mark with no way back
+       (INT-exit-and-undo). The done row now offers the inverse, and every announcement is a line on the row. */
+    st.riskUndone = st.riskUndone || {};
+    const standing = (o) => {
+      const done = !!st.riskDone[o.key]; const undone = !done && !!st.riskUndone[o.key];
+      const tid = 'risk.row.' + o.id + '.' + o.action;
+      return row(o.id, o.action, done ? 'clear' : o.sev, done ? o.doneWord : o.word, o.text, done ? o.undoLabel : o.label, 'reversible', () => {
+        if (st.riskDone[o.key]) { st.riskDone[o.key] = false; st.riskUndone[o.key] = true; say(o.undoSay); rerender(r, tid); return; }
+        st.riskDone[o.key] = true; st.riskUndone[o.key] = false; say(o.doneSay); rerender(r, tid);
+      }, done ? o.doneExtra : undone ? o.undoneExtra : null, o.why);
     };
-    due.forEach((d) => items.push(row(d.id, 'open', 'required', 'Past review', d.text + ': past review date (review was ' + shortDate(d.reviewBy) + ').', 'Open', 'reversible', () => Proto.router.go(r.persona, 'close'), null,
+    // Both controls go to the same place, so they read the same: "open" carried two labels on one screen
+    // (WCAG 3.2.4).
+    due.forEach((d) => items.push(row(d.id, 'open', 'required', 'Past review', d.text + ': past review date (review was ' + shortDate(d.reviewBy) + ').', 'Open Daily Close', 'reversible', () => Proto.router.go(r.persona, 'close'), null,
       'An unreviewed decision stops applying at midnight of its review date and becomes a finding; neglect tightens, never loosens. Keep, Tighten or Retire it on Daily Close.')));
     if (!due.length) items.push(h('div', { class: 'dc-row' }, chip('clear', 'Nothing due'), h('span', { class: 'text', text: 'No decisions past their review date.' })));
     // Countdowns and counts are read against today and the practice's own records, so the list moves with them.
     const baaExpires = '2026-09-24';
     const baaLeft = days(S.tenant.today, baaExpires);
     const baaWord = baaLeft >= 0 ? plural(baaLeft, 'day') : 'Expired';
-    items.push(standing('baa', 'baa-lab', 'renew', 'review', baaWord,
-      'BAA: Ridge Dental Lab ' + (baaLeft >= 0 ? 'expires in ' + plural(baaLeft, 'day') : 'expired ' + plural(-baaLeft, 'day') + ' ago') + ' (' + shortDate(baaExpires) + ').',
-      'Renew', 'Renewal sent', 'Renewal requested', 'Already requested today', 'Renewal requested today; the row stays until the countersigned copy is filed.',
-      'A business associate agreement that lapses leaves PHI flowing to a vendor with no signed terms. The countdown reads the practice calendar against today.'));
+    // The agreement is named in the words staff use before the initials (INT-real-world-words).
+    items.push(standing({ key: 'baa', id: 'baa-lab', action: 'renew', sev: 'review', word: baaWord, doneWord: 'Requested',
+      text: 'Business associate agreement (BAA): Ridge Dental Lab ' + (baaLeft >= 0 ? 'expires in ' + plural(baaLeft, 'day') : 'expired ' + plural(-baaLeft, 'day') + ' ago') + ' (' + shortDate(baaExpires) + ').',
+      label: 'Renew', undoLabel: 'Undo renewal', doneSay: 'Renewal requested', undoSay: 'Renewal request undone',
+      doneExtra: 'Renewal requested today; the row stays until the countersigned copy is filed.',
+      undoneExtra: 'Renewal request undone; the row is open again.',
+      why: 'A business associate agreement that lapses leaves patient records flowing to a vendor with no signed terms. The countdown reads the practice calendar against today.' }));
     const withCred = new Set(table(S, 'credentials').filter((c) => c.userId && c.verifiedBy).map((c) => c.userId));
     const untrained = table(S, 'users').filter((u) => u.licence && !withCred.has(u.id)).length;
-    items.push(standing('training', 'training', 'assign', 'review', 'Due',
-      'Training due: ' + plural(untrained, 'clinical seat') + ' with no verified credential on file (practice).',
-      'Assign', 'Assigned', 'Training assigned', 'Already assigned today', 'Assigned today; this row shows the practice count only.',
-      'A clinical seat charts and records perio under its own licence, so a seat with no verified credential row is a finding. The count is practice-level; nobody is named here.'));
+    items.push(standing({ key: 'training', id: 'training', action: 'assign', sev: 'review', word: 'Due', doneWord: 'Assigned',
+      text: 'Training due: ' + plural(untrained, 'clinical seat') + ' with no verified credential on file (practice).',
+      label: 'Assign', undoLabel: 'Undo assignment', doneSay: 'Training assigned', undoSay: 'Training assignment undone',
+      doneExtra: 'Training assigned today; this row shows the practice count only.',
+      undoneExtra: 'Training assignment undone; the row is open again.',
+      why: 'A clinical seat charts and records perio under its own licence, so a seat with no verified credential row is a finding. The count is practice-level; nobody is named here.' }));
     const logDue = monthlyDue(S.tenant.today, 5);
     const ev = window.__events || [];
     const seen = plural(ev.filter((e) => e.kind === 'write').length, 'write') + ' and ' + plural(ev.filter((e) => e.kind === 'refusal').length, 'refusal');
-    items.push(standing('log', 'logreview', 'start', 'review', 'Due ' + shortDate(logDue),
-      'Monthly log review: due ' + shortDate(logDue) + '.',
-      'Start', 'Opened', 'Audit log opened', 'Already opened today', 'Opened: ' + seen + ' this session, below; the chain head is verified nightly.',
-      'The monthly review reads the audit log as sentences and checks the chain head; it falls due on the 5th of each month.'));
+    const logItem = standing({ key: 'log', id: 'logreview', action: 'start', sev: 'review', word: 'Due ' + shortDate(logDue), doneWord: 'Opened',
+      text: 'Monthly log review: due ' + shortDate(logDue) + '.',
+      label: 'Start', undoLabel: 'Undo start', doneSay: 'Audit log opened', undoSay: 'Audit log review undone',
+      doneExtra: 'Audit log opened: ' + seen + ' this session, below.',
+      undoneExtra: 'Audit log review undone; the row is open again.',
+      why: 'The monthly review reads the audit log as sentences and checks the chain head; it falls due on the 5th of each month.' });
     const sentences = auditSentences(S);
+    /* One card per kind of work, each within four controls: "Due now" carried all four rows at once, eight
+       controls in one bounded region (CLT-chunk-4). The monthly review sits with the log it reviews. */
     const page = h('div', { class: 'stack dc-page' },
-      pageHead('Practice risk', 'Open decisions past review, BAAs expiring, training due, the monthly log review. Practice-level; nothing here ranks people.'),
-      section('Due now', h('div', { class: 'worklist' }, ...items)),
+      pageHead('Practice risk', 'Practice-level only; nothing here ranks people.'),
+      section('Decisions past review', h('div', { class: 'worklist' }, ...items.slice(0, due.length || 1))),
+      section('Agreements and training', h('div', { class: 'worklist' }, ...items.slice(due.length || 1))),
       section('Audit log (sentences)',
-        h('p', { class: 'small muted', text: 'The last ' + sentences.length + ' writes this session, as sentences. Every row is append-only; the chain head is verified nightly.' }),
+        h('div', { class: 'worklist' }, logItem),
+        h('p', { class: 'small muted', text: 'The last ' + sentences.length + ' writes this session, as sentences.' }),
         sentences.length ? h('ul', { class: 'dc-sentences' }, ...sentences.map((s) => h('li', { text: s }))) : h('p', { class: 'muted', text: 'No writes yet this session.' }),
         h('div', { class: 'btnrow' }, btn('Refresh', { kind: 'quiet', testid: 'risk.row.audit.refresh', onClick: () => rerender(r, 'risk.row.audit.refresh') }), btn('Open Daily Close', { kind: 'quiet', testid: 'risk.row.close.open', onClick: () => Proto.router.go(r.persona, 'close') }))));
     Proto.screens.shell.mount(page);
   }
 
   // The confirm step and the typed PIN belong to the visit that made them: a hash change ends both (docs/01 principle 9).
-  window.addEventListener('hashchange', () => { if (st) st.pin = ''; if (Proto.router.current().route !== 'close') { detachKeys(); if (st && st.closeStep === 'confirm') st.closeStep = 'idle'; } });
+  // A confirmation belongs to the visit that earned it: the record is the ledger row and the table row, so the
+  // stamps clear on a route change rather than greeting the next arrival as news.
+  window.addEventListener('hashchange', () => {
+    if (st) { st.pin = ''; st.varStamps = {}; st.decisionResult = {}; }
+    if (Proto.router.current().route !== 'close') { detachKeys(); if (st && st.closeStep === 'confirm') st.closeStep = 'idle'; }
+  });
 
   Proto.screens.dailyclose = { render: renderClose, renderRisk, grade, overall, changedPairs, lateRows };
   Proto.screens.risk = { render: renderRisk };

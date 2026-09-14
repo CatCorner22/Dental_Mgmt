@@ -411,7 +411,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         // Reversibility in fact: sign in, then sign out; the persona is still selected.
         await tap(p, 'signin.persona.owner'); await tap(p, 'signin.go');
         const landed = await p.evaluate(() => location.hash);
-        await tap(p, 'topbar.signout');
+        await tap(p, 'topbar.settings'); await tap(p, 'topbar.signout');
         const back = await p.evaluate(() => ({ hash: location.hash, ownerPressed: (document.querySelector('[data-testid="signin.persona.owner"]') || {}).getAttribute ? document.querySelector('[data-testid="signin.persona.owner"]').getAttribute('aria-pressed') : null }));
         // Comparator: the Andon strip's "Open approvals" once a request is pending.
         await go(p, '#/biller/money');

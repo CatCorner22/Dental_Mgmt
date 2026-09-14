@@ -1,0 +1,208 @@
+[
+  {
+    "id": "AXE-2.4.1-bypass-verified",
+    "verdict": "declined",
+    "measured_now": "Declined-and-still-failing. Fresh page per leg, 14 routes x 1280/1024/420 x light+dark = 84 legs, 0 probe errors. Arrival focus is the canvas H1 on 84/84; one Tab from arrival lands on the first canvas control on 84/84 (signin.persona.frontdesk, board.chair.1, money.tab.era, chairs.card.a-1050.expand, exams.row.enc-9003.open, close.tied.tile, risk.row.d-1.why, roles.daypass.add, perio.full, enc.rail, checkout.rail, ledger.explain, phone.simulate); skipIsFirstTab = false on 42/42 route x width legs (0%). The link itself is sound: focused directly it is visible at top 8 px, Enter puts focus in #canvas with the hash unchanged on 84/84. axe 4.13.0 bypass + skip-link on 10 routes at 1280 light: 0 violations, 0 incomplete, both rules pass.",
+    "screens": {
+      "board": "fail: skipIsFirstTab 0/6 legs (first Tab = board.chair.1)",
+      "checkout-ledger": "fail: 0/12 legs (checkout.rail, ledger.explain)",
+      "close": "fail: 0/6 legs (close.tied.tile)",
+      "compliance": "fail: 0/12 legs (risk.row.d-1.why, roles.daypass.add)",
+      "encounter": "fail: 0/12 legs (enc.rail, exams.row.enc-9003.open)",
+      "money": "fail: 0/6 legs (money.tab.era)",
+      "overlays": "fail: 0/6 legs (phone.simulate)",
+      "perio": "fail: 0/6 legs (perio.full)",
+      "signin": "fail: 0/6 legs (signin.persona.frontdesk)"
+    },
+    "how": "p01_bypass.js: open route, read document.activeElement, press Tab once, read activeElement testid; then focus a.skip, press Enter, check #canvas contains activeElement; axe runOnly bypass,skip-link."
+  },
+  {
+    "id": "WCAG-2.4.11",
+    "verdict": "fixed",
+    "measured_now": "Tab walk of every stop on #/dentist/encounter/enc-9002, light, resting state, max overlap of each focused rect against every non-ancestor position:sticky/fixed element. 1280x900 desk: 52 stops, 1 sticky (.topbar 0-61), 0 fully covered, 0 partially. 1024x900 operatory: 51 stops, stickies .topbar 0-61 and .enc-gate-col top 683; 0 fully covered, 0 partially (html scroll-padding-bottom 209 px; enc.proc.d2392 bottom 682 vs gate top 683, enc.temporality.* bottom 579, enc.note.field.plan bottom 654). 420x860 phone: 52 stops, .enc-gate-col top 582, html scroll-padding-bottom 270 px; 0 fully covered (enc.proc.d2392 bottom 242, enc.note.field.plan bottom 553), 9 partially covered by the gate column: enc.odontogram 0.037, enc.tooth.17-24 0.009 each — AA (0 fully covered) met at all three widths; AAA 'should' (0 partially) not met at 420.",
+    "screens": {
+      "encounter": "pass (AA): 1280 0/0, 1024 0 fully covered, 420 0 fully covered (9 partial, max 3.7%)"
+    },
+    "how": "p02_obscured.js / p02b_stops.js: press Tab until an element repeats, per stop compute intersection area of activeElement rect with every sticky/fixed non-ancestor rect."
+  },
+  {
+    "id": "WCAG-1.4.10-reflow-320",
+    "verdict": "partly fixed",
+    "measured_now": "Fresh page per leg, device=phone, light, 320x860 and 320x568. documentElement.scrollWidth = 320 on every route (board, temp-board, chairs, close, roles, risk, encounter, exams, money, perio, phone, checkout, ledger) and the [data-testid] set at 320 equals the 1280 set on all of them. Formerly disallowed scrollers are gone: chairs #canvas no longer overflows (0 scrollers); owner/close with the day tile, all three locations, Investigate and the Close-day read-back open: only close.tenders.loc-3 396/269 (tabindex 0, role region, 'Hillsboro tenders'; the Gap chip right edge 414.8 is inside it); biller/money after Post matched, its confirm and a line-confirm press: #canvas does not overflow. Allowed wrappers now built with scrollRegion(): perio.grid/.perio-wrap 905/262 at 320 and 905/362 at 420, enc.odontogram/.enc-odont-wrap 424/262 at 320 and 840/658 at 1280, roles.table/.rl-tablewrap 493/262, checkout.lines 596/262, ledger.rows 533/262 — all tabindex 0, role region, named. Step-up dialog on #/phone/approvals at 320: scrollWidth 320/320 (was 321). STILL FAILING on overlays: the andon strip on #/phone/approvals once a request is pending (after phone.simulate) squeezes .andon .grow to 0 px wide at 320 (20.5 px at 420); the 14-word sentence wraps onto 16 lines, the strip is 401 px tall and 2 text line-rects (159-190 and 159-241 x 283-326) sit under the 'Open approvals' button (167.2-308 x 283-327) — visible in phone320.png. Also .ph-amount '$410.00' overflows its 107 px box by 20.5 px at 320 (text to 208.5, box to 188) and touches the review chip glyph (205-217).",
+    "screens": {
+      "board": "pass: scrollWidth 320/320, 0 scrollers, testid set equal",
+      "chairs": "pass: 320/320, 0 scrollers (was #canvas 336/320)",
+      "close": "pass: 320/320 with tile+3 locations+investigate+readback; only close.tenders.loc-3 396/269 tabindex=0 region",
+      "compliance": "pass: roles.table 493/262 tabindex=0 region 'Roles and grants'; risk 0 scrollers",
+      "encounter": "pass: enc.odontogram 424/262 tabindex=0 region 'Teeth, upper and lower arch' (enc.proc.d2392 text 264/258, overflow visible, no page overflow)",
+      "money": "pass: 320/320 at rest, after first press, after confirm, after line-confirm; no canvas overflow",
+      "overlays": "fail: andon .grow width 0 px at 320 (20.5 at 420), 16 lines, 2 text lines under andon.control; .ph-amount overflow 20.5 px; step-up dialog 320/320 passes",
+      "perio": "pass: perio.grid 905/262 tabindex=0 region 'Perio grid'"
+    },
+    "how": "p03_reflow.js, p03b_close_phone.js, p18/p19/p20: scan every element with scrollWidth > clientWidth+1, read tabindex/role/aria-label, compare testid sets, measure .andon .grow / andon.control / .ph-amount rects after phone.simulate."
+  },
+  {
+    "id": "CUST-3.3.8-prefs-no-auth-cost",
+    "verdict": "fixed",
+    "measured_now": "1280x800 desk light. Preferences: topbar.settings opens the Settings dialog; pressing settings.theme.dark then topbar.privacy inside it flips data-theme to dark and data-privacy on with 0 PIN displays, 0 auth dialogs (only [role=dialog] is 'Settings') and 0 refusal/pin events (event kinds: focus, click, write). Author pad (topbar.author): pin.show 'Show digits' aria-pressed false->true, display reads '22' after two 2 keys; pad text now 'PIN (required) Four to six digits. Three misses lock this device for five minutes.' Step-up pad (#/phone/approvals after Simulate -> Approve): phone.stepup.show present, display reads '4' after a key. Shared-desk Daily Close: close.pin.show 'Show digits' inside the .field (1 button), pressing it flips type password->text.",
+    "screens": {
+      "close": "pass: 0 auth prompts on 2 preference changes; close.pin.show present (shared)",
+      "overlays": "pass: pin.show and phone.stepup.show present and working"
+    },
+    "how": "p04_prefs_pin.js: change two preferences and count dialogs/pin displays/non-click events; open each pad and press its show-digits toggle, read the display text."
+  },
+  {
+    "id": "WCAG-3.3.2",
+    "verdict": "fixed",
+    "measured_now": "1280 desk and 420 phone, light (border re-checked dark). palette.input: visible <label for> 'Search', aria-label null, border 2px solid rgb(138,130,114). pin.display: <label for> + aria-labelledby=pin-label 'PIN (required)', visible, border 2px solid rgb(138,130,114) light / rgb(110,128,170) dark on rgb(23,32,51). phone.stepup.display: label 'PIN (required)' via stepup-label, visible, same border. 0 of 3 fields named by placeholder or aria-label alone.",
+    "screens": {
+      "overlays": "pass: 3/3 fields with visible persistent label and 2px border"
+    },
+    "how": "p05_labels.js: open palette (topbar.search), author pad (topbar.author), step-up (simulate -> approve); read label[for], aria-labelledby target visibility, aria-label, computed border."
+  },
+  {
+    "id": "WCAG-2.5.3-label-in-name",
+    "verdict": "partly fixed",
+    "measured_now": "Fresh context per route, 1280x900 (phone 420), light and dark, axe-core 4.13.0 with label-content-name-mismatch enabled. Violation nodes: signin 0, board 0, temp-board 0, money 0 (and 0 in the read-back after Post matched + confirm), chairs 0, exams 0, close 0, risk 0, roles 0, encounter 0, checkout 0, ledger 0, phone 0 — perio 97 in both themes (was 99). Own contains/starts sweep over every visible aria-labelled control: 100% contain and 100% start on every route (board 61/61, chairs 27/27, roles 15/15, ledger 17/17, encounter 5/5, money read-back 9/9 with 'Confirm this line: Confirm line 14'). Perio: every gridcell prints its value ('—' with ghost prior, or the entered '3') but is named 'Tooth 2 site 1' with the value only in aria-description ('3 mm, bleeding, prior 3'), so axe reports 'Text inside the element is not included in the accessible name' on 97 td.pe-cell nodes, still 97 after entering a depth.",
+    "screens": {
+      "board": "pass: axe 0, 61/61 contain, 61/61 start",
+      "chairs": "pass: axe 0, 27/27",
+      "checkout-ledger": "pass: axe 0 / 0, 4/4 and 17/17",
+      "compliance": "pass: roles axe 0 15/15, risk axe 0 3/3",
+      "encounter": "pass: axe 0 (exams 0), 5/5",
+      "money": "pass: axe 0 at load and in read-back, 9/9",
+      "overlays": "pass: phone axe 0, 7/7",
+      "perio": "fail: 97 axe label-content-name-mismatch nodes (cell value in aria-description, not in the name)"
+    },
+    "how": "p06_labelinname.js, p21/p22: axe runOnly label-content-name-mismatch per route/theme; sweep computes name (labelledby > aria-label) vs visible text; inspect a perio cell before and after keying a depth."
+  },
+  {
+    "id": "WCAG-3.3.1",
+    "verdict": "fixed",
+    "measured_now": "Money Desk 1280 light: open money.writeoff.p-306, type '-50' into money.writeoff.amount, Tab out. Field gets aria-invalid='true' and aria-describedby='md-wo-amt-err md-wo-amt-hint'; #md-wo-amt-err is visible 4 px from the field and reads 'Error: Enter an amount above zero, like 410.00' (colour rgb(127,29,29)); label 'Write-off amount (required)'; 0 refusal nodes; error is text + aria, not colour alone. Perio 1024 light: open perio.tag.add, press perio.tag.save then perio.tag.save.confirm with an empty Observation: perio.tag.text aria-invalid='true', its own #pe-tag-text-err 4 px away reads 'Error: Observation: say what you saw.' (names the field), the shared #pe-tag-hint no longer exists, an error summary 'There is a problem — Observation: say what you saw.' takes focus (perio.tag.errors); Tooth field untouched (aria-invalid null).",
+    "screens": {
+      "money": "pass: blur -> visible text 4 px from field, aria-invalid + aria-describedby",
+      "perio": "pass: per-field error 4 px away naming 'Observation'; summary focused"
+    },
+    "how": "p07_errors.js: type/blur or submit-empty, then read aria-invalid, aria-describedby targets (text, visibility, distance), .refusal count and error summaries."
+  },
+  {
+    "id": "WCAG-4.1.3-status-messages",
+    "verdict": "partly fixed",
+    "measured_now": "Fresh page per leg, 1280x900 light unless noted; MutationObserver on body counting live-region (aria-live/role=status/alert/log) insertions, removals and #live text writes across one press. Board (Arrive): 1 live region at load (was 107; 0 role=status chips), 0 added/0 removed, 1 #live write at 102 ms. Close (Keep 90 more days): 1 at load, 0/0, 1 write at 54 ms. Roles (row expand roles.row.u-dr-1): 1 at load, 0/0, 0 #live writes (aria-expanded carries it). Checkout (checkout.tender.cash): 1 at load, 0/0, 0 writes. Perio 1024 operatory (site t2-s2 then key '3'): 2 #live mutations = clear at 18 ms + 'Depth 3 mm at tooth 2 site 2, next site' at 23 ms, 0 added/removed. Chairs: 1 live region at load (was 34). STILL FAILING: Money (Post matched confirm): #live clear+set 'Read back 3 lines that differ' at 34/37 ms AND an in-canvas <p class=sr-only aria-live=polite> re-mounted (1 added/1 removed) with the identical sentence (moneydesk.js:570) — two channels for one sentence. Encounter (two killers standing, press enc.tooth.30): 3 #live text mutations (clear 32 ms, 'Chart or dismiss tag #30' 37 ms, 'Add an assessment' 37 ms) + 2 live regions added/2 removed (#enc-selected aria-live and the role=alert Before-File block re-mounted) + 1 role=alert on a required-severity gate; the press re-announces both gates it did not raise and never announces the tooth through #live. Overlays (#/phone/approvals 420 phone, step-up submit with PIN 2468): #live 2 mutations 'Approved $410.00. Posted with your name as second approver.' + 2 live regions added/2 removed (.ph-done role=status inserted with text); .ph-done reads 'Approved $410.00 · posted with your name as second approver · the biller's write-off is on the ledger' (string equality false); on a hygienist seat Simulate adds 1 role=status region and announces 'Request ar-1 is waiting for you' while the card reads 'Nothing waiting for you'. 0 aria-live=assertive on every route; role=alert only from the encounter Before-File block and error summaries.",
+    "screens": {
+      "board": "pass: 1 live region at load, 0 added/removed, 1 #live write at 102 ms",
+      "checkout-ledger": "pass: 0 added/removed on tender press",
+      "close": "pass: 0/0, 1 write at 54 ms",
+      "compliance": "pass: 0 added/removed on row expand",
+      "encounter": "fail: 3 #live text mutations + 2 live regions added/2 removed + 1 role=alert on a required gate; tooth not announced",
+      "money": "fail: duplicate in-canvas aria-live copy re-mounted with the same sentence (1 added/1 removed)",
+      "overlays": "fail: .ph-done role=status inserted (2 added/2 removed), #live text != visible text, hygienist Simulate announces a request the card says is not waiting",
+      "perio": "pass: 2 #live mutations (clear + sentence at 23 ms), 0 added/removed"
+    },
+    "how": "p08_live.js: arm a MutationObserver (childList+characterData, subtree) before one press; count live-role nodes added/removed and #live writes with timestamps; compare #live to the visible sentence."
+  },
+  {
+    "id": "WCAG-3.3.4",
+    "verdict": "fixed",
+    "measured_now": "Money #/biller/money 1280 light, fresh page: ledger 119, eraLines {matched 37, delta 3, denied 1}. ONE press of money.era.era-1.postmatched -> ledger still 119, 0 dialogs, a role=group read-back 'Post 37 matched lines? It writes 37 ledger rows worth $20,423.00 ... cannot be undone.' with .confirm and .cancel, focus on .cancel; keyboard Enter once -> 119 + read-back, Enter again (on Cancel) -> 119 and the first button back. .confirm -> 156 (37 rows), {posted 37}. Line el-14: first press 156 + confirm.confirm row; second press -> 158. Write-off $20.00 (amount field cleared first): first press -> 119 + 'Post a $20.00 write-off on Lena Fischer's account? It writes one ledger row, and cannot be undone.', confirm -> 120. No undo/void/reverse control exists after any post (0 matches), so the satisfied leg is 'confirmed', not 'reversible'. Close #/owner/close: Match these -> reconciliationMatches 0 -> 0 with read-back 'Matching writes $312.40 onto the Hillsboro bank line and ties the day.', confirm present, 0 dialogs. Clear with reason: without a reason -> error summary 'Choose the reason before clearing.' and no write; with reason 'card_settlement_timing' -> read-back quoting the reason, then confirm -> rr-loc-3 variance -> second_look with clearedBy/clearedGap written (the reason text itself is passed to clearVariance but not persisted on the record; reconciliationMatches row carries basis 'cleared_with_reason'). Retire -> threshold 15000 -> 15000 on first press, confirm row present. Close day -> dayCloses 6 -> 6, close.closeday.confirm present. Reversible verbs are not burdened: Keep 90 more days writes without a confirm (0 confirm rows).",
+    "screens": {
+      "close": "pass: Match / Clear / Retire / Close day each hold on the first press (0 writes), confirm rows present; Keep asks nothing",
+      "money": "pass: Post matched 119->119->156, line 156->156->158, write-off 119->119->120, all behind a read-back"
+    },
+    "how": "p09_reversible.js, p18_followups.js: read window.__proto.state() counts before, after the first press and after .confirm; count [role=dialog]; scan button text for undo|void|revers|unpost."
+  },
+  {
+    "id": "INT-instructions-before-input",
+    "verdict": "fixed",
+    "measured_now": "Fresh page per screen at 1280 light, snapshot before any typing. Checkout: checkout.amount aria-required=true, label 'Amount (required)', hint 'Above $0.00; prefilled with the estimate.'; tender group labelled 'Tender (required)'; card field hint '12 to 19 digits (processor vault).'. Close (device=shared): close.pin aria-required=true, label 'Your PIN (required)', hint 'Required. 6 digits; three misses lock this device. ...'; close.variance.v-1.reason aria-required=true 'Reason this gap is explained (required)'. Compliance (#/compliance/roles as Noor Ali): standing text 'Only a seat that grants roles can issue a day pass.' before the press; the form opens with roles.daypass.name and .end aria-required=true, labels '(required)', and the primary is already Held ('Held: your seat does not grant roles; ask Dr. Reagan or Dana') — save with a name filled writes 0 passes and raises no refusal. Encounter: enc.note.field.assessment aria-required=true, label 'Assessment · required', hint 'Required. Your finding ... no dollar amounts.'. Money: money.writeoff.amount aria-required=true 'Write-off amount (required)' hint 'Dollars and cents above $0.00, like 410.00. $150.00 or more waits for a second approver.'; reason group 'Reason code (required)'. Overlays: author pad and step-up print 'PIN (required) Four to six digits. Three misses lock this device for five minutes.' before the first digit. Perio: perio.tag.tooth aria-required=true min 1 max 32 hint 'Required. A tooth number from 1 to 32 that is present in this mouth.'; perio.tag.text aria-required=true maxlength 140 hint 'Required. Say what you saw ... up to 140 characters.'. The word 'required' appears 2-4 times in each canvas before any press.",
+    "screens": {
+      "checkout-ledger": "pass: amount + tender marked required with format hints",
+      "close": "pass: PIN '6 digits; three misses lock this device' before typing",
+      "compliance": "pass: 'Only a seat that grants roles can issue a day pass.' + Held primary for the compliance seat; Name/Shift end required",
+      "encounter": "pass: Assessment required + hint",
+      "money": "pass: amount and reason code marked required",
+      "overlays": "pass: 'Four to six digits' on both pads before the first key",
+      "perio": "pass: Tooth 1-32 present, Observation up to 140, both required"
+    },
+    "how": "p10_instructions.js, p19_followups2.js: snapshot every input/textarea/select/role=textbox (required, aria-required, label[for], aria-describedby text) before typing; read the compliance seat's standing text and primary state."
+  },
+  {
+    "id": "AXE-RUN-all-contexts",
+    "verdict": "fixed",
+    "measured_now": "Vendored axe-core 4.13.0 injected fresh per context, runOnly tags wcag2a, wcag2aa, wcag21a, wcag21aa, wcag22aa, best-practice, any impact counted. #/owner/close 1280 light and dark: at rest (tile open, 'Hide the day') 0 violations; tile toggled closed 0; with the tile, all three locations, Investigate and the Close-day read-back open 0. 320 (device=phone) light and dark with everything open: 0 violations. 8 contexts, 0 errored. Both tender read-backs are now real <table> elements ('Hillsboro tenders', 'Collected today at Main Street'); aria-required-children / aria-required-parent: 0 nodes (was 1 violation/5 nodes at 1280 and 2 violations/15 nodes at 320). Incomplete: color-contrast 9-36 nodes per context (axe cannot decide gradients/overlaps), 0 violations.",
+    "screens": {
+      "close": "pass: 0 violations in 8/8 contexts, 0 errors"
+    },
+    "how": "p11_axe_close.js: addScriptTag(axe.min.js) then axe.run with the six tags, on rest / toggled / everything-open states at 1280 and 320, both themes."
+  },
+  {
+    "id": "INT-irreversible-identity",
+    "verdict": "fixed",
+    "measured_now": "Fresh page per leg, 1280 light unless noted; class, first press, state, confirm row. chairs (a-1042 arrived+seated from the Board, then #/hygienist/chairs): chairs.card.a-1042.ready 'btn irreversible'; one press -> status stays seated, appointmentEvents 2 -> 2, .ready.confirm/.cancel rendered, focus on .cancel, 0 dialogs; confirm -> ready_for_exam, events 3. checkout.post 'btn irreversible': one press -> ledger 119 -> 119, confirm/cancel present. ledger.statement.send 'btn irreversible': disclosures 0 -> 0, confirm present. close: match/clear/retire/closeday all 'btn irreversible' (clear was 'btn quiet'); match first press -> reconciliationMatches 0 -> 0, confirm present. roles.daypass.save 'btn irreversible': one press -> dayPasses 0 -> 0, confirm present; confirm -> 1. money.era.era-1.postmatched 'btn irreversible': one press -> ledger 119, confirm present. overlays (420 phone): phone.request.ar-1.decline is 'btn reversible' while it only opens the reason field, becomes 'btn irreversible' once the reason is open, and its press raises .decline.confirm/.cancel with status still pending; confirm -> declined. perio.tag.save 'btn irreversible': one press -> tags 1 -> 1, confirm present; confirm -> 2. Identity pair: irreversible = filled rgb(30,58,95) with white text and a '▮' ::before glyph; reversible = transparent fill, 2px rgb(15,118,110) outline, no glyph — fill and glyph differ, not hue only.",
+    "screens": {
+      "chairs": "pass: irreversible class + two-step, 0 writes on first press",
+      "checkout-ledger": "pass: checkout.post and ledger.statement.send held on first press",
+      "close": "pass: match/clear/retire/closeday irreversible + confirm rows",
+      "compliance": "pass: roles.daypass.save held (0 -> 0), confirm -> 1",
+      "money": "pass: postmatched held (119 -> 119)",
+      "overlays": "pass: Send back wears irreversible once armed and asks .decline.confirm",
+      "perio": "pass: perio.tag.save held (1 -> 1), confirm -> 2"
+    },
+    "how": "p12_irreversible.js: read className, press once, read window.__proto.state() counts and the presence of <testid>.confirm/.cancel and [role=dialog]; compare computed fill/border/::before of .btn.irreversible vs .btn.reversible."
+  },
+  {
+    "id": "CUST-2.1.4-shortcuts-optin",
+    "verdict": "fixed",
+    "measured_now": "Fresh page per screen, 1280x900 light, focus forced onto body, no dialog. With the shipped preference (prefs.shortcuts = 'off'): board a/s/c, chairs p/n/r, close t, money p/w/a, perio 3/Space/s each log only the raw 'key' event — 0 route changes, 0 focus moves, 0 store changes on 5/5 screens (before: every key acted). One switch: Settings (topbar.settings) -> settings.shortcuts.off (pressed) / settings.shortcuts.on; pressing On sets prefs.shortcuts 'on' and the same keys then act (board 'a' arrives a-1042, 'c' routes to checkout; chairs 'p' routes to perio; close 't' focuses close.tied.tile; money p/w/a focus postmatched/writeoff.amount/appeal; perio 3/Space/s act on the cursor cell). With shortcuts on each accelerator is printed on its control via <kbd> and aria-keyshortcuts: board Arrive A, Check out C; chairs Chart perio P, Write note N; close Hide the day T; money Post matched P, Write off W (A on the appeal); perio grid aria-keyshortcuts + Undo ⌫. Ctrl+K opens the palette on 5/5. Per user: switching On as frontdesk leaves the biller's preference 'off' in the same session (store.preferences[userId]); across a page reload the in-memory store resets and the preference reads 'off' again (localStorage empty — the prototype persists nothing across reloads).",
+    "screens": {
+      "board": "pass: a/s/c inert with prefs off (key log only); A and C printed when on",
+      "chairs": "pass: p/n/r inert when off; P and N printed when on",
+      "close": "pass: t inert when off; T printed when on",
+      "money": "pass: p/w/a inert when off; P, W, A printed when on",
+      "perio": "pass: 3/Space/s inert on body when off; grid carries aria-keyshortcuts and ⌫ on Undo"
+    },
+    "how": "p13_shortcuts.js, p19_followups2.js: focus body, press each key, diff events/hash/focus/store; open Settings, press settings.shortcuts.on, repeat; list [aria-keyshortcuts] with <kbd>; reload and switch persona to read prefs.shortcuts."
+  },
+  {
+    "id": "WCAG-1.4.3",
+    "verdict": "fixed",
+    "measured_now": "Perio, fresh page, dark theme at 1280x900 and 1024x768 (light re-checked). Drove the grid (cell t2-s1: 2, Space, s, then 6, Space) to make a shallow bleeding+suppuration site and a deep bleeding site; read getComputedStyle(el,'::after'/'::before') colour against the cell's composited fill. Dark: .psite.bleed::after '●' now 14px/600 rgb(248,113,113) (--stop-rail #F87171) on rgb(23,32,51) = 5.88:1; on the deep fill rgb(59,31,14) = 5.47:1; .psite.sup::before '◆' 14px rgb(196,181,253) (--style-rail #C4B5FD) on rgb(23,32,51) = 8.81:1. Identical at both widths. Light: 6.47:1, 6.09:1, 5.70:1. 0 glyphs below 4.5:1 in either theme (was 2.51 / 2.34 / 2.85 at 9px).",
+    "screens": {
+      "perio": "pass: dark 5.88 / 5.47 / 8.81, light 6.47 / 6.09 / 5.70, glyphs 14px"
+    },
+    "how": "p14_perio_glyphs.js: key the grid, then for every .psite.bleed/.sup read pseudo-element colour and size, composite the cell background up the ancestor chain, WCAG relative-luminance ratio."
+  },
+  {
+    "id": "WCAG-1.4.11",
+    "verdict": "fixed",
+    "measured_now": "getComputedStyle on live inputs at 1280x900, both themes. LIGHT: every .input border is 2px solid rgb(138,130,114) (--line-strong #8A8272) on its white fill = 3.81:1, and 3.37:1 against the cream page rgb(243,241,235) where the field sits on the page (checkout.amount, checkout.card.number, checkout.writeoff.amount, close.pin); 3.81 both sides for checkout.pin, ledger.pin, money.writeoff.amount, perio.tag.text, perio.tag.tooth, roles.daypass.name, palette.input, palette.confirm.dob. DARK: border rgb(110,128,170) (--line-strong #6E80AA) on fill rgb(23,32,51) = 4.13:1 and 4.53:1 against the page rgb(15,23,42); identical 4.13 on all twelve fields. PERIO dark: .psite.bleed border 2px rgb(248,113,113) (--stop-rail now #F87171 in dark) = 5.88:1 vs the plain cell fill and the page, 5.47:1 on a deep cell rgb(59,31,14); its 14px dot glyph carries the same ratios. Perio light 6.47 / 6.09. 0 cues below 3:1.",
+    "screens": {
+      "checkout-ledger": "pass: 3.81 light (3.37 vs cream page) / 4.13 dark (4.53 vs page) on checkout.amount, card.number, writeoff.amount, checkout.pin, ledger.pin",
+      "close": "pass: close.pin 3.81 / 3.37 light, 4.13 / 4.53 dark",
+      "money": "pass: money.writeoff.amount 3.81 light / 4.13 dark",
+      "perio": "pass: bleed border dark 5.88 (plain) / 5.47 (deep); inputs 3.81 / 4.13"
+    },
+    "how": "p15_nontext.js, p14_perio_glyphs.js: read borderTopColor, composite the element's own fill and the surrounding background, compute both ratios per field per theme."
+  },
+  {
+    "id": "WCAG-1.4.3-placeholder-hover-focus",
+    "verdict": "fixed",
+    "measured_now": "getComputedStyle(el,'::placeholder') on live fields, both themes at 1280. Light: rgb(86,97,122) on rgb(255,255,255) = 6.20:1 (checkout.card.number at rest and focused, palette.input, palette.confirm.dob, roles.daypass.name, perio.tag.text, phone.request.ar-1.reason). Dark: rgb(151,163,184) on rgb(23,32,51) = 6.39:1 on the same seven fields, unchanged when focused (was UA grey rgb(117,117,117) = 3.53:1). Hover and focus text: checkout.post 11.50:1 light / 14.28:1 dark, checkout.back 7.84:1 / 11.21:1, checkout.explain 7.84:1 / 11.21:1 — identical at rest, on hover and on focus, zero regressions.",
+    "screens": {
+      "checkout-ledger": "pass: placeholder 6.20 light / 6.39 dark at rest and focused; hover/focus text unchanged"
+    },
+    "how": "p16_placeholder.js: read ::placeholder colour vs composited fill at rest and after focus(); read button text colour vs fill at rest, after hover() and after focus()."
+  },
+  {
+    "id": "AXE-1.3.1-tables-resolved",
+    "verdict": "fixed",
+    "measured_now": "1280x900 light, fresh page per leg, axe-core 4.13.0 rules td-headers-attr, th-has-data-cells, scope-attr-valid, table-duplicate-name, table-fake-caption, empty-table-header, aria-required-children, aria-required-parent. Checkout table.data.co-lines: 7 th, 7 with scope (6 thead scope=col, tfoot 'Totals' scope=row; the two tfoot number/note cells are now td), caption 'Completed procedures: fee, patient portion estimate, claim pre-flight and self-pay', 6/6 header columns with 3 non-empty td, axe 0 violations / 0 incomplete (was 1 incomplete th-has-data-cells). Ledger table.data.ledger-table: 6/6 th scope=col, caption 'Ledger rows, newest first by posted date', 6/6 columns with 5 td, 0/0. Roles table.data.rl-table: 4/4 th scope=col, caption 'Seats, roles, entitlements and accepted SoD decisions', 4/4 columns with 11 td, 0/0. Close with the tile, three locations and the Close-day read-back open: two real <table class=data dc-tender> — 'Hillsboro tenders' 4/4 th scope=col, 4 columns x 3 td; 'Collected today at Main Street' 2/2 th scope=col, 2 columns x 4 td; 0 role=row divs, aria-required-children/parent 0, 0 violations / 0 incomplete. 4/4 tables named, 19/19 th with scope.",
+    "screens": {
+      "checkout-ledger": "pass: co-lines 7/7 scope + caption, 0/0; ledger 6/6 + caption, 0/0",
+      "close": "pass: both tender read-backs are <table> with th scope=col and a caption, 0/0",
+      "compliance": "pass: rl-table 4/4 scope + caption, 0/0"
+    },
+    "how": "p17_tables.js: axe runOnly the eight table/ARIA rules; script counts th, th[scope], caption/aria-label, non-empty td per header column, role=row rows without cell roles."
+  }
+]

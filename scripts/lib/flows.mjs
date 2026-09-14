@@ -13,11 +13,12 @@ export const FLOWS = [
     ],
   },
   {
-    id: 'perio', name: 'Perio, full mouth, one operator', budgetTaps: 2, budgetKeystrokes: 200, persona: 'hygienist', start: '#/hygienist/chairs',
+    id: 'perio', name: 'Perio, full mouth, one operator', budgetTaps: 3, budgetKeystrokes: 200, persona: 'hygienist', start: '#/hygienist/chairs',
     steps: [
       { press: 'chairs.card.a-1042.perio' },
       { keys: '323'.repeat(56) }, // 168 digits over 28 present teeth × 6 sites
       { press: 'perio.save' },
+      { press: 'perio.save.confirm' },   // the read-back: Save exam writes on the second press (docs/16, WCAG 3.3.4)
       { expect: (s) => (s.perioExams.some((e) => e.encounterId === 'enc-9001' && e.probed >= 160) || 'perio exam not saved with ≥160 sites') },
     ],
   },
@@ -43,16 +44,23 @@ export const FLOWS = [
       { press: 'checkout.tender.card' },
       { fill: ['checkout.card.number', '4242424242424242'] },
       { press: 'checkout.post' },
+      { press: 'checkout.post.confirm' }, // read-back confirm (CONTRACTS §7 flow 4, fourth and last tap of the budget)
       { expect: (s) => (s.collectionDecisions.some((d) => d.encounterId === 'enc-9003' && d.decision === 'collect') || 'no collect decision') },
       { expect: (s) => (s.ledger.some((e) => e.kind === 'patient_payment' && e.patientId === 'p-303' && e.amountCents === -4400) || 'payment not posted') },
     ],
   },
   {
-    id: 'eraClose', name: 'Post ERAs + close the day', budgetTaps: 6, persona: 'biller', start: '#/biller/money',
+    /* Every posting on this path now asks once before it writes (the batch post wrote 37 ledger rows on one press,
+       a line Confirm wrote two): each irreversible press is a read-back and a second press, as Close day already was.
+       The budget carries those three second presses. */
+    id: 'eraClose', name: 'Post ERAs + close the day', budgetTaps: 9, persona: 'biller', start: '#/biller/money',
     steps: [
       { press: 'money.era.era-1.postmatched' },
+      { press: 'money.era.era-1.postmatched.confirm' },
       { press: 'money.era.line.el-14.confirm' },
+      { press: 'money.era.line.el-14.confirm.confirm' },
       { press: 'money.era.line.el-22.confirm' },
+      { press: 'money.era.line.el-22.confirm.confirm' },
       { press: 'money.era.line.el-31.hold' },
       { route: '#/owner/close' },
       { press: 'close.closeday' },

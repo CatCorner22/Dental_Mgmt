@@ -42,7 +42,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
 
   return {
     // RC-48 · B1 · shell.js:28 renders nav.<route> buttons and :117 renders notfound.home, both with click handlers; CONTRACTS §4's
-    // Top bar row lists only topbar.location/search/theme/privacy/author/signout and andon.control, and no row names nav.* or notfound.*.
+    // Top bar row lists only topbar.location/search/author/settings and andon.control, and no row names nav.* or notfound.*.
     // Negative control: when §4 carries a pattern that matches every rendered id (nav.<route>, notfound.home) the unmatched list is empty and
     // the check reports false. skip.canvas (index.html:12) is measured and reported but is outside shell.js, so it alone never reproduces.
     async 'A-screens-shell-1'(b) {
@@ -143,10 +143,11 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const root = () => p.evaluate(() => ({ privacy: document.documentElement.hasAttribute('data-privacy'), theme: document.documentElement.getAttribute('data-theme'), privacyPressed: (document.querySelector('[data-testid="topbar.privacy"]') || {}).getAttribute && document.querySelector('[data-testid="topbar.privacy"]').getAttribute('aria-pressed'), privacyLabel: ((document.querySelector('[data-testid="topbar.privacy"]') || {}).textContent || '').trim(), themeLabel: ((document.querySelector('[data-testid="topbar.theme"]') || {}).textContent || '').trim() }));
         const seq0 = await lastSeq(p);
         const before = await root();
+        await click(p, 'topbar.settings'); await p.waitForTimeout(150);
         const focusBeforePrivacy = await (async () => { await p.focus('[data-testid="topbar.privacy"]'); return focused(p); })();
         await press(p, 'topbar.privacy'); await p.waitForTimeout(150);
         const afterPrivacy = await root(); const focusAfterPrivacy = await focused(p);
-        await press(p, 'topbar.theme'); await p.waitForTimeout(150);
+        await press(p, 'settings.theme.dark'); await p.waitForTimeout(150);
         const afterTheme = await root(); const focusAfterTheme = await focused(p);
         const ev = await after(p, seq0);
         const privacyWorked = before.privacy === false && afterPrivacy.privacy === true && afterPrivacy.privacyPressed === 'true';
@@ -344,7 +345,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         await go(p, '#/frontdesk/board?outage=1');
         const seq0 = await lastSeq(p);
         const out = [];
-        for (const tid of ['topbar.location', 'andon.control']) {
+        for (const tid of ['andon.control']) {
           const label = await txt(p, tid);
           const pressed = await click(p, tid); await p.waitForTimeout(200);
           const text = await live(p); const w = words(text);
@@ -369,13 +370,14 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         await go(p, '#/signin');
         const signin = { privacy: await read('signin.privacy'), themeLight: await read('signin.theme.light'), themeDark: await read('signin.theme.dark') };
         await go(p, '#/frontdesk/board');
-        const bar = { privacy: await read('topbar.privacy'), theme: await read('topbar.theme') };
+        await click(p, 'topbar.settings'); await p.waitForTimeout(150);
+        const bar = { privacy: await read('topbar.privacy'), theme: await read('settings.theme.dark') };
         await click(p, 'topbar.privacy'); await p.waitForTimeout(150);
         bar.privacyOn = await read('topbar.privacy');
-        await click(p, 'topbar.theme'); await p.waitForTimeout(150);
-        bar.themeAfterToggle = await read('topbar.theme');
+        await click(p, 'settings.theme.dark'); await p.waitForTimeout(150);
+        bar.themeAfterToggle = await read('settings.theme.dark');
         await click(p, 'topbar.signout'); await p.waitForTimeout(200);
-        const signedOut = { theme: await read('topbar.theme') };
+        const signedOut = { theme: await read('signin.theme.dark') };
         const norm = (s) => (s || '').toLowerCase().replace(/^switch to\s+/, '').replace(/:.*$/, '').replace(/\s+on$/, '').trim();
         const privacyTerms = [signin.privacy && signin.privacy.label, bar.privacy && bar.privacy.label, bar.privacy && bar.privacy.aria, bar.privacyOn && bar.privacyOn.label].filter(Boolean).map(norm);
         const themeTerms = [signin.themeDark && signin.themeDark.label, bar.theme && bar.theme.label, bar.theme && bar.theme.aria, bar.themeAfterToggle && bar.themeAfterToggle.label, bar.themeAfterToggle && bar.themeAfterToggle.aria, signedOut.theme && signedOut.theme.label].filter(Boolean).map(norm);

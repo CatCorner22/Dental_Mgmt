@@ -198,6 +198,9 @@ async function checkContrast(browser) {
 }
 
 async function badContrast(page) {
+  // Jump every running CSS transition to its end state before sampling: the check measures what the
+  // reader sees when the change has landed, not the colour half-way through a 140 ms transition.
+  await page.evaluate(() => { for (const a of document.getAnimations()) { try { a.finish(); } catch (e) { /* a transition already done */ } } });
   const samples = await page.evaluate(() => {
     const out = []; const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     let n; const seen = new Set();

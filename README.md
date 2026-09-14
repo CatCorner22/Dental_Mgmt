@@ -27,6 +27,7 @@ No application code lives here yet. Phase 0 scaffolding starts in a separate tas
 | 14 | `docs/12-implementation-and-verification.md` | How this repository was produced and how to check it |
 | 15 | `docs/14-beta-test-report.md` | The beta test of the clickable prototype: the falsifiable claim, thresholds pre-registered before any session, the 30-persona panel, declared constraints, what the exercise cannot prove, and the results |
 | 16 | `docs/15-function-audit.md` | The function-by-function audit of the prototype: the rules for operational, consistent, and clear registered before any agent ran, the 497-function inventory, the method, one row per function with its status and evidence, the 248 root causes fixed, and what the fix round found about the audit's own instruments |
+| 17 | `docs/16-ux-review.md` | The UI and UX review against the research on intuitive design and cognitive load: the method and 117 heuristics registered before any finding, the audit of every screen with each root cause re-measured by an adversarial verifier, the three waves of fixes, and the before-and-after numbers |
 
 ## Status of the open decisions
 
@@ -52,9 +53,10 @@ Of 127 statements checked: 62 confirmed (SECONDARY), 17 corrected, 1 refuted and
 
 `prototype/` is a static, dependency-free clickable prototype of the merged product built from `docs/04` and `docs/13`: the seven persona homes, the five daily flows, and the six signature moments, on synthetic data for one tenant with three locations. Open `prototype/index.html` directly or run `npx serve prototype -l 4173`. `prototype/CONTRACTS.md` names every route, `data-testid`, refusal code, and seed id, and defines the in-page event log (`window.__events`) that every check and every panel finding cites.
 
-The prototype needs nothing installed. The two browser-driven checks below need Playwright, the repository's only dependency: `npm run setup` installs it and its Chromium build (or `npm install && npx playwright install chromium`). Reports land under a gitignored `.scratch/` at the repository root unless `SCRATCH` or `--out`/`--json` says otherwise. `npm test` runs the syntax gate and then all three harnesses in turn.
+The prototype needs nothing installed. The two browser-driven checks below need Playwright, the repository's only dependency: `npm run setup` installs it and its Chromium build (or `npm install && npx playwright install chromium`). Reports land under a gitignored `.scratch/` at the repository root unless `SCRATCH` or `--out`/`--json` says otherwise. `npm test` runs the syntax gate and then all four harnesses in turn.
 
 - `node scripts/syntax-check.mjs` parses every `prototype/js` and `scripts` file with `node --check`. It exists because two merges concatenated both sides of the same JavaScript files and shipped a tree that could not boot; Playwright then timed out instead of naming the SyntaxError. It exits 0 only when every file parses.
+- `node scripts/a11y-check.mjs` (`npm run a11y`) runs axe-core 4.13.0, vendored under `scripts/vendor/axe-core/` (MPL-2.0), over 24 contexts per theme and width: every persona home, the deep screens, the surfaces that open over them, and the states a press opens (an expanded tile, an open write-off, a standing filing gate, the Settings dialog), with the WCAG 2.0, 2.1 and 2.2 A and AA rule sets plus axe's best-practice rules. It exits 1 on any serious or critical violation and lists what axe could not decide, which is never read as a pass. `docs/16-ux-review.md` holds the review it was built for.
 - `node scripts/proto-check.mjs` runs the UI stability checks (console errors, the five flows keyboard-only within their click budgets, 44 px targets with 8 px gaps, WCAG contrast in both themes, horizontal overflow at three widths, reduced motion, visible focus and no keyboard traps, test-id coverage, screenshots). It exits 0 only when every row passes.
 - `node scripts/gen-roster.mjs --seed 20260903` regenerates the 30-persona panel byte-identically into `knowledge/reviews/beta-panel-roster.json` and one card per persona under `knowledge/reviews/beta-panel/cards/`.
 - `scripts/beta/tasks/*.json` are the pre-registered task scripts per profession; `scripts/beta/validate-session.mjs` rejects a session file whose findings lack event-log `seq` ranges.
@@ -67,6 +69,8 @@ The prototype needs nothing installed. The two browser-driven checks below need 
 ```
 bash scripts/verify-docs.sh
 ```
+
+To run every gate at once before a tree goes live, `npm run review` (`scripts/final-review.sh`) runs the syntax gate, proto-check, the accessibility check, verify-docs and the full regression suite in that order, writes each report under `.scratch/final-review/`, prints one line per gate and exits 1 if any is red.
 
 The script checks that every relative link resolves, that `knowledge/INDEX.md` lists every source and review file exactly once, that the regulatory tables in `docs/06` carry a verification label on every row, that every repository path named in `docs/00` exists in a checkout of `dental` or `precog` (pass the checkout paths as arguments), that `docs/08` has six phases each with scope, exit criteria, and dependencies, and that the decision table in `docs/10` matches the ADR set.
 

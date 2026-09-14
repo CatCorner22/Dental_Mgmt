@@ -9,12 +9,12 @@
   const THEMES = ['light', 'dark'], DEVICES = ['desk', 'operatory', 'shared', 'phone'], MOTION = ['auto', 'reduced'];
   P.set = function (opts) {
     opts = opts || {};
-    if (THEMES.includes(opts.theme)) { P.theme = opts.theme; root.setAttribute('data-theme', opts.theme); }
+    if (THEMES.includes(opts.theme)) { P.theme = opts.theme; P.sessionTheme = opts.theme; root.setAttribute('data-theme', opts.theme); }
     if (DEVICES.includes(opts.device)) { P.device = opts.device; root.setAttribute('data-device', opts.device); }
     if (opts.outage != null) { P.outage = opts.outage === true || opts.outage === 1 || opts.outage === '1' || opts.outage === 'true'; Proto.store.get().outage = P.outage; }
     if (opts.privacy != null) { P.privacy = opts.privacy === true || opts.privacy === 1 || opts.privacy === '1' || opts.privacy === 'true'; root.toggleAttribute('data-privacy', P.privacy); }
-    if (opts.grayscale != null) { P.grayscale = opts.grayscale === true || opts.grayscale === 1 || opts.grayscale === '1' || opts.grayscale === 'true'; if (P.grayscale) root.setAttribute('data-grayscale', '1'); else root.removeAttribute('data-grayscale'); }
-    if (MOTION.includes(opts.motion)) { P.motion = opts.motion; if (opts.motion === 'reduced') root.setAttribute('data-motion', 'reduced'); else root.removeAttribute('data-motion'); }
+    if (opts.grayscale != null) { P.grayscale = opts.grayscale === true || opts.grayscale === 1 || opts.grayscale === '1' || opts.grayscale === 'true'; P.sessionGrayscale = P.grayscale; if (P.grayscale) root.setAttribute('data-grayscale', '1'); else root.removeAttribute('data-grayscale'); }
+    if (MOTION.includes(opts.motion)) { P.motion = opts.motion; P.sessionMotion = opts.motion; if (opts.motion === 'reduced') root.setAttribute('data-motion', 'reduced'); else root.removeAttribute('data-motion'); }
     if (Proto.router.PERSONAS.includes(opts.persona)) P.persona = opts.persona;
     if (opts.afterHours != null) Proto.store.get().clock.afterHours = opts.afterHours === true || opts.afterHours === 1 || opts.afterHours === '1' || opts.afterHours === 'true';
     // A scripted set() paints what the same flag on the hash paints: the Andon and the top bar at once, and the
@@ -30,15 +30,51 @@
     Proto.store.reset(seed); Proto.store.get().outage = P.outage; Proto.store.get().clock.afterHours = afterHours;
     Proto.events.reset(); if (Proto.ui.resetGates) Proto.ui.resetGates();
     if (Proto.ui.closeDialogs) Proto.ui.closeDialogs();
+    if (P.applyPrefs) P.applyPrefs();
     Proto.screens.shell.render(Proto.router.current()); repaintCanvas();
   };
+  /* Apply the signed-in person's preferences. A preference set to 'system' stamps nothing,
+     so the CSS media query answers it and the operating system wins — which is the point of
+     the tri-state: a reader who set dark mode or reduced motion for their whole machine
+     should not have to set it again here (docs/16 CUST-os-first-tristate). */
+  P.applyPrefs = function () {
+    if (!Proto.store.prefsFor) return;
+    const pr = Proto.store.prefsFor();
+    // P.themePref is what the person chose; P.theme is what is actually painted, which is
+    // what every event records and what the contract admits (light or dark, never 'system').
+    // A value set for this session — by the hash (?theme=dark), by the sign-in toggles or by a
+    // script through window.__proto.set — outranks a preference that says "System": the person or
+    // the test asked for it explicitly, and a re-render must not undo it. A preference the person
+    // chose in Settings is itself explicit, so it outranks the session value and clears it.
+    const theme = pr.theme === 'system' && P.sessionTheme ? P.sessionTheme : pr.theme;
+    P.themePref = pr.theme;
+    if (theme === 'system') { root.removeAttribute('data-theme'); P.theme = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light'; }
+    else { root.setAttribute('data-theme', theme); P.theme = theme; }
+    const motion = pr.motion === 'system' && P.sessionMotion ? P.sessionMotion : (pr.motion === 'reduced' ? 'reduced' : 'auto');
+    if (motion === 'reduced') root.setAttribute('data-motion', 'reduced'); else root.removeAttribute('data-motion');
+    const grayscale = pr.colourAid === 'grayscale' || (pr.colourAid === 'off' && P.sessionGrayscale === true);
+    if (grayscale) root.setAttribute('data-grayscale', '1'); else root.removeAttribute('data-grayscale');
+    if (pr.contrast === 'more') root.setAttribute('data-contrast', 'more'); else root.removeAttribute('data-contrast');
+    root.setAttribute('data-text-size', pr.textSize);
+    root.setAttribute('data-density', pr.density);
+    P.motion = motion;
+    P.grayscale = grayscale;
+    P.prefs = pr;
+    return pr;
+  };
+  P.setPref = function (name, value) {
+    if (name === 'theme') P.sessionTheme = null; if (name === 'motion') P.sessionMotion = null; if (name === 'colourAid') P.sessionGrayscale = null;
+    const pr = Proto.store.setPref(name, value); P.applyPrefs(); if (P.ready && !rendering) { Proto.screens.shell.render(Proto.router.current()); repaintCanvas(); } return pr; };
   P.state = function () { return JSON.parse(JSON.stringify(Proto.store.get())); };
   P.events = function () { return Proto.events.all(); };
 
   Proto.store.reset();
 
+  const PRIVACY_BY_DEFAULT = ['operatory', 'shared'];
   function applyQuery(q) {
     const o = {};
+    // Privacy is a property of the device, not of the person (docs/16 CUST-privacy-per-device).
+    if (q.device && q.privacy == null && PRIVACY_BY_DEFAULT.includes(q.device)) o.privacy = true;
     for (const k of ['theme', 'device', 'outage', 'privacy', 'grayscale', 'motion', 'afterHours']) if (q[k] != null) o[k] = q[k];
     if (Object.keys(o).length) P.set(o);
   }
@@ -59,6 +95,9 @@
     rendering = true;
     try { applyQuery(r.query); } finally { rendering = false; }
     if (r.persona) P.persona = r.persona;
+    // The preferences belong to whoever is signed in now, so they are re-applied on every
+    // render: a PIN switch on a shared device is a different person (docs/16 CUST-3.3.7).
+    if (P.applyPrefs) P.applyPrefs();
     if (changed && Proto.ui.resetGates) Proto.ui.resetGates();   // a new screen starts with no gate already announced
     Proto.screens.shell.render(r);
     if (changed) {

@@ -28,8 +28,21 @@ async function ctx(browser, w = 1280, h = 900, opts = {}) {
 }
 async function go(p, hash) { await p.goto(FILE + hash); await p.waitForFunction(() => window.__proto && window.__proto.ready); await p.waitForTimeout(120); }
 async function hop(p, hash) { await p.evaluate((h) => { location.hash = h; }, hash); await p.waitForTimeout(150); }
-const press = async (p, tid) => { const s = `[data-testid="${tid}"]`; if (!(await p.$(s))) return false; await p.focus(s); await p.keyboard.press('Enter'); await p.waitForTimeout(90); return true; };
-const click = async (p, tid) => { const s = `[data-testid="${tid}"]`; if (!(await p.$(s))) return false; await p.click(s); await p.waitForTimeout(90); return true; };
+/* A press, the way a person completes one. Every verb that writes a record now asks once and writes
+   on the second press (docs/16, WCAG 3.3.4): the first press swaps in a read-back row whose confirm
+   carries `<testid>.confirm`. The harness's press model follows: if a read-back appears, it presses the
+   confirm, so a check written when the verb wrote on one press still measures the write it was written
+   for, and its assertion is untouched. A verb that does not ask is pressed once as before, and a check
+   that wants exactly one press — to look at the read-back itself — uses pressOnce / clickOnce. */
+const settle = async (p, tid) => { const c = `[data-testid="${tid}.confirm"]`; if (await p.$(c)) { await p.click(c); await p.waitForTimeout(150); } };
+const pressOnce = async (p, tid) => { const s = `[data-testid="${tid}"]`; if (!(await p.$(s))) return false; await p.focus(s); await p.keyboard.press('Enter'); await p.waitForTimeout(90); return true; };
+const clickOnce = async (p, tid) => { const s = `[data-testid="${tid}"]`; if (!(await p.$(s))) return false; await p.click(s); await p.waitForTimeout(90); return true; };
+const press = async (p, tid) => { const ok = await pressOnce(p, tid); if (ok) await settle(p, tid); return ok; };
+const click = async (p, tid) => { const ok = await clickOnce(p, tid); if (ok) await settle(p, tid); return ok; };
+// A verb that posts money now asks first and writes on the second press (docs/16, WCAG 3.3.4). A check that
+// drives such a verb presses the read-back's confirm when one appears, so it still measures the write it was
+// written for; a verb that does not ask is pressed once as before.
+const commit = click;   // the drivers that were switched by hand keep their name; it is the same press model
 const txt = (p, tid) => p.$eval(`[data-testid="${tid}"]`, (e) => e.textContent.trim()).catch(() => null);
 const box = (p, tid) => p.$eval(`[data-testid="${tid}"]`, (e) => { const b = e.getBoundingClientRect(); return { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) }; }).catch(() => null);
 const state = (p) => p.evaluate(() => window.__proto.state());
@@ -39,7 +52,7 @@ const CHECKS = {
   // ---------- store.js ----------
   async R1(b) { // dual-release names the wrong second approvers
     const { c, p } = await ctx(b); await go(p, '#/biller/money');
-    await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await click(p, 'money.writeoff.post');
+    await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await commit(p, 'money.writeoff.post');
     const verb = await txt(p, 'refusal.verb');
     const seedNames = await p.evaluate(() => window.__proto.state().users.filter((u) => u.entitlements.includes('approve_second')).map((u) => u.short));
     const namesDana = /Dana/.test(verb || '');
@@ -72,7 +85,7 @@ const CHECKS = {
     const { c, p } = await ctx(b); await go(p, '#/hygienist/perio/enc-9001');
     await click(p, 'perio.screening');
     for (const k of ['1', '2', '3', '2', '1', '0']) { await p.keyboard.press(k); await p.waitForTimeout(20); }
-    await click(p, 'perio.save'); await p.waitForTimeout(200);
+    await commit(p, 'perio.save'); await p.waitForTimeout(200);
     const note = await p.evaluate(() => (window.__proto.state().notes['enc-9001'] || {}).perioSummary || null);
     rec('R4', 'Saving the screening lane derives the hygiene note as "0 sites probed, deepest 0 mm, bleeding at 0 sites"', 'docs/13 feature 6: Save exam derives the note from what was recorded',
       !!note && /0 sites probed/.test(note), { perioSummary: note });
@@ -181,6 +194,8 @@ const CHECKS = {
   // ---------- perio.js ----------
   async R15(b) { // Space activates a focused button
     const { c, p } = await ctx(b); await go(p, '#/hygienist/perio/enc-9001');
+    // The single-key grammar ships off (docs/16 CUST-2.1.4); the risky case is a hygienist who turned it on.
+    await p.evaluate(() => window.__proto.setPref('shortcuts', 'on')); await p.waitForTimeout(200);
     await p.keyboard.type('3'.repeat(168), { delay: 0 }); await p.waitForTimeout(200);  // a chart ready to save is the risky case
     await p.focus('[data-testid="perio.save"]');
     await p.keyboard.press('Space'); await p.waitForTimeout(300);
@@ -207,7 +222,7 @@ const CHECKS = {
   },
   async R18(b) { // saved exam locks the encounter silently
     const { c, p } = await ctx(b); await go(p, '#/hygienist/perio/enc-9001');
-    await p.keyboard.type('3'.repeat(168), { delay: 0 }); await click(p, 'perio.save'); await p.waitForTimeout(250);
+    await p.keyboard.type('3'.repeat(168), { delay: 0 }); await commit(p, 'perio.save'); await p.waitForTimeout(250);
     await p.keyboard.press('4'); await p.waitForTimeout(120);
     const screening = await p.$('[data-testid="perio.screening"]');
     const refusal = await p.$('[data-testid="refusal.verb"]');
@@ -228,7 +243,7 @@ const CHECKS = {
     const { c, p } = await ctx(b); await go(p, '#/hygienist/perio/enc-9001');
     await p.keyboard.type('3'.repeat(20), { delay: 0 }); await p.keyboard.press('ArrowRight');
     await p.keyboard.type('3'.repeat(140), { delay: 0 });
-    await click(p, 'perio.save'); await p.waitForTimeout(200);
+    await commit(p, 'perio.save'); await p.waitForTimeout(200);
     const verb = await txt(p, 'refusal.verb');
     await click(p, 'refusal.control'); await p.waitForTimeout(120);
     // Choosing the reason saves: the separate Confirm step was collapsed by the fix round (§7 tap budget).
@@ -308,7 +323,7 @@ const CHECKS = {
   async R28(b) { // Send confirms only to a screen reader (strengthened after bp-09 round 2)
     const { c, p } = await ctx(b); await go(p, '#/biller/money');
     await click(p, 'money.tab.statements');
-    await click(p, 'money.statement.sd-1.send'); await p.waitForTimeout(250);
+    await commit(p, 'money.statement.sd-1.send'); await p.waitForTimeout(250);
     // A row that vanishes is not a confirmation. Require a VISIBLE node that says it went.
     const vis = await p.evaluate(() => {
       // A leaf node whose own words say the statement went. Substring matches inside unrelated copy do not count.
@@ -439,7 +454,7 @@ const CHECKS = {
   },
   async R40(b) { // the Held state is off-screen while its own refusal control stays live
     const { c, p } = await ctx(b, 420, 860); await go(p, '#/biller/money');
-    await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await click(p, 'money.writeoff.post'); await p.waitForTimeout(250);
+    await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await commit(p, 'money.writeoff.post'); await p.waitForTimeout(250);
     const o = await p.evaluate(() => {
       const held = [...document.querySelectorAll('.btn.held')][0];
       const ctl = document.querySelector('[data-testid="refusal.control"]');
@@ -465,7 +480,7 @@ const CHECKS = {
   },
   async R42(b) { // the amount being agreed to is only in an accessible name
     const { c, p } = await ctx(b); await go(p, '#/biller/money');
-    await click(p, 'money.era.era-1.postmatched'); await p.waitForTimeout(250);
+    await commit(p, 'money.era.era-1.postmatched'); await p.waitForTimeout(250);
     const o = await p.evaluate(() => {
       const row = document.querySelector('[data-testid="money.era.line.el-14.confirm"]');
       if (!row) return null;
@@ -480,7 +495,7 @@ const CHECKS = {
   },
   async R43(b) { // focus moves to a tab that does not become the selected tab
     const { c, p } = await ctx(b); await go(p, '#/biller/money');
-    await click(p, 'money.era.era-1.postmatched');
+    await commit(p, 'money.era.era-1.postmatched');
     await click(p, 'money.era.line.el-14.confirm'); await click(p, 'money.era.line.el-22.confirm'); await click(p, 'money.era.line.el-31.hold'); await p.waitForTimeout(300);
     const o = await p.evaluate(() => {
       const a = document.activeElement;
@@ -499,7 +514,7 @@ const CHECKS = {
    `default (helpers) => ({ [checkId]: async (browser) => {...} })` and uses the same helpers. */
 const AUDIT_DIR = path.join(ROOT, 'scripts', 'beta', 'audit');
 if (fs.existsSync(AUDIT_DIR)) {
-  const helpers = { ctx, go, hop, press, click, txt, box, state, events, rec, FILE };
+  const helpers = { ctx, go, hop, press, click, pressOnce, clickOnce, txt, box, state, events, rec, FILE };
   for (const f of fs.readdirSync(AUDIT_DIR).filter((x) => x.endsWith('.mjs')).sort()) {
     const mod = await import(pathToFileURL(path.join(AUDIT_DIR, f)).href);
     const extra = mod.default(helpers);
