@@ -18,6 +18,7 @@ const anchorSql = readFileSync(join(here, "../migrations/0008_chain_head_anchor.
 const patientsSql = readFileSync(join(here, "../migrations/0009_patients_accounts.sql"), "utf8");
 const ledgerSql = readFileSync(join(here, "../migrations/0010_ledger_core.sql"), "utf8");
 const ledgerViewsSql = readFileSync(join(here, "../migrations/0011_ledger_views.sql"), "utf8");
+const controlsSql = readFileSync(join(here, "../migrations/0012_controls.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -98,6 +99,16 @@ describe("Increment 1.1 ledger kernel", () => {
     expect(ledgerSql).toMatch(/GRANT SELECT ON ledger_entries, payment_allocations TO app_append/);
     expect(ledgerViewsSql).toMatch(/CREATE OR REPLACE VIEW account_balances/);
     expect(ledgerViewsSql).toMatch(/CREATE OR REPLACE VIEW ledger_explanations/);
+  });
+});
+
+describe("Increment 1.2 controls inbox", () => {
+  it("creates policy and approval tables with immutability grants", () => {
+    expect(controlsSql).toMatch(/CREATE TABLE control_policies\b/);
+    expect(controlsSql).toMatch(/CREATE TABLE approval_requests\b/);
+    expect(controlsSql).toMatch(/CREATE TABLE approvals_log\b/);
+    expect(controlsSql).toMatch(/approval_requester_ne_second/);
+    expect(controlsSql).toMatch(/GRANT SELECT, INSERT, UPDATE ON approval_requests TO app_rw/);
   });
 });
 

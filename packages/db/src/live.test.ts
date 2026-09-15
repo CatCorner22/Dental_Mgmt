@@ -125,6 +125,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [9, "patients_accounts", "app_migrate"],
         [10, "ledger_core", "app_migrate"],
         [11, "ledger_views", "app_migrate"],
+        [12, "controls", "app_migrate"],
       ]);
       const owners = await db.admin.query(
         "SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'"
@@ -135,7 +136,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
     it("is a no-op the second time", async () => {
       const result = await applyMigrations(db.admin);
       expect(result.applied).toEqual([]);
-      expect(result.alreadyApplied).toBe(11);
+      expect(result.alreadyApplied).toBe(12);
     });
 
     it("left domain_event with RLS forced after the seq backfill", async () => {
@@ -601,6 +602,31 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [uuidv7(3_007), ridgeview.id, payId, chargeId]
       );
       expect(over).toMatchObject({ code: "P0001" });
+    });
+  });
+
+  describe("controls inbox", () => {
+    it("stores a pending approval and refuses requester self-approval", async () => {
+      const requestId = uuidv7(4_000);
+      const insert = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO approval_requests (
+           id, tenant_id, status, channel, amount_cents, held_payload, evaluation,
+           requester_id, requester_name
+         ) VALUES ($1, $2, 'pending', 'writeoff', 30000, '{}'::jsonb, '{}'::jsonb, $3, 'Dana')`,
+        [requestId, ridgeview.id, ridgeview.user]
+      );
+      expect(insert).toEqual({ rows: [] });
+
+      const self = await attempt(
+        "app_rw",
+        ridgeview,
+        `UPDATE approval_requests SET status = 'approved', second_approver_id = $2
+         WHERE id = $1`,
+        [requestId, ridgeview.user]
+      );
+      expect(self).toMatchObject({ code: "23514" });
     });
   });
 

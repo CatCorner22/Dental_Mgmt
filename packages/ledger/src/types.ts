@@ -73,6 +73,8 @@ export type PostRefusal = {
   control: string;
   why: string;
   evaluation?: unknown;
+  /** True when dual release requires a second approver before posting. */
+  held?: boolean;
 };
 
 export type PostSuccess = {

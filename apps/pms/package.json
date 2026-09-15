@@ -17,6 +17,7 @@
     "@pms/clinical-kb": "workspace:*",
     "@pms/controls-engine": "workspace:*",
     "@pms/db": "workspace:*",
+    "@pms/ledger": "workspace:*",
     "@pms/verifier": "workspace:*",
     "bcryptjs": "^3.0.2",
     "drizzle-orm": "^0.45.2",

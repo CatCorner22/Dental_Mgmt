@@ -56,7 +56,7 @@ export const DEV_USERS: readonly SeedUserSpec[] = [
     displayName: "Finn Front",
     role: "user",
     clinicalRole: "unset",
-    entitlements: [],
+    entitlements: ["post_payments"],
     mfaEnrolled: true,
   },
   {
