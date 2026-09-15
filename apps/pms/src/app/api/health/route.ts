@@ -3,7 +3,7 @@ import { authStoreKind } from "@/lib/auth/resolveStore";
 export async function GET() {
   return Response.json({
     ok: true,
-    increment: "0.7",
+    increment: "0.8",
     bytestarDefault: "off",
     phiPatientRows: false,
     authStore: authStoreKind(),

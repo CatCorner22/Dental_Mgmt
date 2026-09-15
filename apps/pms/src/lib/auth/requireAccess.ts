@@ -1,3 +1,4 @@
+import { isDisclosureChannel, isDisclosurePurpose } from "@pms/db";
 import { meetsRole } from "./roles";
 import { IDLE_MS } from "./ports";
 import type { AuthPorts } from "./ports";
@@ -54,6 +55,31 @@ export async function requireAccess(
       purpose: opts.phiRead.purpose,
       recordKind: opts.phiRead.kind,
       recordIds: opts.phiRead.ids,
+      at: now,
+    });
+  }
+
+  if (opts.disclosure) {
+    const { disclosure } = opts;
+    if (!isDisclosureChannel(disclosure.channel)) {
+      return deny(400, "Disclosure channel is not allowed.");
+    }
+    if (!isDisclosurePurpose(disclosure.purpose)) {
+      return deny(400, "Disclosure purpose is not allowed.");
+    }
+    if (!disclosure.recordIds.length) {
+      return deny(400, "Disclosure must name at least one record.");
+    }
+    await ports.recordDisclosure({
+      tenantId: user.tenantId,
+      patientId: disclosure.patientId,
+      channel: disclosure.channel,
+      recipient: disclosure.recipient.trim(),
+      recordIds: disclosure.recordIds,
+      purpose: disclosure.purpose,
+      actorUserId: user.id,
+      actorName: user.displayName,
+      documentId: disclosure.documentId ?? null,
       at: now,
     });
   }

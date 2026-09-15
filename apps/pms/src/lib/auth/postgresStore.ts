@@ -172,6 +172,16 @@ export function createPostgresStore(
         return updated.length;
       }, env);
     },
+    async revokeSessionsForTenant(tenantId, at) {
+      return withTenantTransaction(tenantId, tenantId, async (db) => {
+        const updated = await db
+          .update(sessions)
+          .set({ revokedAt: at })
+          .where(and(eq(sessions.tenantId, tenantId), isNull(sessions.revokedAt)))
+          .returning({ id: sessions.id });
+        return updated.length;
+      }, env);
+    },
     async deactivateUser(userId, at) {
       const user = await this.getUserById(userId);
       if (!user) return;
