@@ -11,7 +11,7 @@ export interface StoredUser {
   clinicalRole: string;
   active: boolean;
   passwordHash: string;
-  mfaSecretEnc: EncryptedBlob;
+  mfaSecretEnc: EncryptedBlob | null;
   mfaEnrolledAt: Date | null;
   recoveryCodeHashes: string[];
   passwordChangedAt: Date;
@@ -43,6 +43,11 @@ export interface AuthStore {
   revokeSessionsForUser(userId: string, at: Date): Promise<number>;
   deactivateUser(userId: string, at: Date): Promise<void>;
   replaceRecoveryHashes(userId: string, hashes: string[]): Promise<void>;
+  setMfaPendingSecret(userId: string, secretEnc: EncryptedBlob): Promise<void>;
+  completeMfaEnrollment(
+    userId: string,
+    input: { secretEnc: EncryptedBlob; recoveryHashes: string[]; enrolledAt: Date }
+  ): Promise<void>;
   logPhiAccess(input: {
     tenantId: string;
     userId: string;

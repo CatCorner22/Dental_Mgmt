@@ -161,7 +161,7 @@ describe.skipIf(!adminUrl)("Postgres auth store (live)", () => {
 
   it("the runtime role cannot read another tenant's users even with a bound tenant", async () => {
     const store = createPostgresStore(env);
-    const other = await store.getUserByUsername(DEV_USERS[2].username);
+    const other = await store.getUserByUsername("oakridge-owner");
     expect(other?.tenantId).toBe(DEV_TENANTS[1].id);
     const { rows } = await db.admin.query("SELECT count(*)::int AS n FROM users");
     expect(rows[0].n).toBe(DEV_USERS.length);

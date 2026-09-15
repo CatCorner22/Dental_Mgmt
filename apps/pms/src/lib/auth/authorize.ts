@@ -14,6 +14,7 @@ export interface AuthorizeSuccess {
   pwAt: string;
   username: string;
   displayName: string;
+  needsMfaEnrollment?: boolean;
 }
 
 export type AuthorizeFailure = { ok: false; reason: "credentials" | "busy" | "throttled" };
@@ -46,6 +47,7 @@ function secondFactorOk(
   env: Record<string, string | undefined>,
   now: Date
 ): { totp: boolean; recoveryIndex: number } {
+  if (!user.mfaSecretEnc) return { totp: false, recoveryIndex: -1 };
   const secret = decryptSecret(user.mfaSecretEnc, cryptoEnv(env));
   const totp = verifyMfaCode(user.username, secret, totpCode, now.getTime());
   if (totp) return { totp: true, recoveryIndex: -1 };
@@ -92,8 +94,36 @@ export async function authorizeCredentials(
   }
 
   if (!user.mfaEnrolledAt) {
-    await chargeFailure(store, pairKey, ip, now);
-    return { ok: false, reason: "credentials" };
+    if (pairKey) await clearThrottle(store, pairKey);
+    const session = await store.createSession({
+      tenantId: user.tenantId,
+      userId: user.id,
+      deviceProfile: deviceProfile(request),
+      userAgent: request?.headers.get("user-agent") ?? null,
+      now,
+    });
+    try {
+      await store.appendDomainEvent({
+        tenantId: user.tenantId,
+        actorUserId: user.id,
+        kind: "auth.signin.pending_mfa",
+        payload: { username: user.username, sessionId: session.id },
+        at: now,
+      });
+    } catch {
+      // A missing audit row must not become a lockout.
+    }
+    return {
+      ok: true,
+      user: {
+        id: user.id,
+        sessionId: session.id,
+        pwAt: user.passwordChangedAt.toISOString(),
+        username: user.username,
+        displayName: user.displayName,
+        needsMfaEnrollment: true,
+      },
+    };
   }
 
   const factor = secondFactorOk(user, totpCode, env, now);
