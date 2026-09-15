@@ -1,9 +1,14 @@
 import { withGuard } from "@/lib/auth/withGuard";
 
-export const GET = withGuard(async () => {
+export const GET = withGuard(async (_req, ctx) => {
+  const { user, session } = ctx.access;
   return Response.json({
     ok: true,
-    increment: "0.1",
-    note: "Identity is returned once authorization ports are connected to Postgres.",
+    increment: "0.2",
+    username: user.username,
+    displayName: user.displayName,
+    role: user.role,
+    tenantId: user.tenantId,
+    sessionId: session.id,
   });
 }, { minRank: "user" });

@@ -2,7 +2,7 @@
 
 > Source: owner review of 2026-09-14. The owner asked for a comprehensive, beautiful, low-cognitive-load dental PMS with an industry-leading one-way SuperByte note advisor (twin deterministic and probabilistic knowledge bases; see Smile Notes) and a novel Precog risk-avoidance module. Two decisions lock this document: start Phase 0 of the real product, and keep SuperByte one-way (staff never prompt, chat, or rate). Evidence for market claims is the v3 knowledge base (`knowledge/dental-pms-and-risk-platforms-report-v3-2026-09-02.md`, `knowledge/semantic-memory.md`). Legal statements inherit the PRIMARY / SECONDARY / REPO / UNVERIFIED labels from `docs/11`.
 
-This repository remains a consolidation plan plus a clickable prototype. Increment 0.1, recorded here, is the first code foundation of the merged PMS. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) stay listed, not silently marked done.
+This repository remains a consolidation plan plus a clickable prototype. Increment 0.1, recorded here, is the first code foundation of the merged PMS. Increment 0.2 wires the sessions table and `/api/me`. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) stay listed, not silently marked done.
 
 ## Current state
 
@@ -104,6 +104,19 @@ Phase 0 as written is 8–10 weeks plus legal pack, budget, and D.8 interviews. 
 - Prototype and its harness stay green.
 
 **Not in Increment 0.1.** Ledger UI, claims, Board, imaging, hosting/WAF, real KMS, Object Lock, legal pack, D.8 interviews, product name, clearinghouse contract.
+
+## Increment 0.2
+
+Wires the Increment 0.1 sessions table so sign-in is real.
+
+- `authorizeCredentials` against an `AuthStore`: password, mandatory TOTP, one-time recovery codes, pair-keyed throttle, process-wide hash gate.
+- Successful sign-in inserts a `sessions` row. The JWT carries only that opaque id. `withGuard` / `requireAccess` re-read the row on every call.
+- Deactivating a user revokes every live session. `/api/me` returns identity once ports are configured.
+- `AUTH_DEV_MEMORY=1` seeds two synthetic tenants (Ridgeview, Oakridge) with no patient rows. Forbidden in production.
+- `POSTGRES_URL` selects the Drizzle store. Login reads users through `auth_lookup_user` (SECURITY DEFINER) so FORCE RLS does not hide the row before tenant context exists. Writes use `SET LOCAL` (`set_config(..., true)`).
+- The sign-in form is a server action (pre-hydration POST still authenticates). Failure copy never names the reason.
+
+**Not in Increment 0.2.** Two-admin recovery ceremony UI, real KMS, Object Lock, ledger UI, PHI patient rows, legal pack, D.8 interviews.
 
 ## Risks that stay visible
 

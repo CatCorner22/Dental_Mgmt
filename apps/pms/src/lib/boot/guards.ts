@@ -18,6 +18,7 @@ export function productionBootErrors(
   if (!env.BACKUP_TARGET) missing.push("BACKUP_TARGET");
   if (!env.OBJECT_STORAGE_URL) missing.push("OBJECT_STORAGE_URL");
   if (!env.APPEND_ROLE_DSN && !env.POSTGRES_URL) missing.push("append-only role DSN");
+  if (env.AUTH_DEV_MEMORY === "1") missing.push("AUTH_DEV_MEMORY is forbidden in production");
   return missing;
 }
 

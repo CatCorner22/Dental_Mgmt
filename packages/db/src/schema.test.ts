@@ -8,9 +8,11 @@ import { encryptSecret, decryptSecret } from "./crypto";
 import { GENESIS_HASH, hashDomainEvent } from "./chain";
 import { uuidv7 } from "./ids";
 import { DB_ROLES } from "./roles";
+import { SET_LOCAL_TENANT_SQL } from "./tenant-context";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sql = readFileSync(join(here, "../migrations/0001_init.sql"), "utf8");
+const authSql = readFileSync(join(here, "../migrations/0002_auth_lookup.sql"), "utf8");
 
 describe("Increment 0.1 schema", () => {
   it("names the three DB roles", () => {
@@ -130,5 +132,20 @@ describe("uuidv7", () => {
     expect(a).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
     );
+  });
+});
+
+describe("Increment 0.2 auth lookup", () => {
+  it("binds tenant context with SET LOCAL (is_local true)", () => {
+    expect(SET_LOCAL_TENANT_SQL).toMatch(/set_config\('app\.tenant_id', \$1, true\)/);
+    expect(SET_LOCAL_TENANT_SQL).toMatch(/set_config\('app\.user_id', \$2, true\)/);
+  });
+
+  it("looks up users and sessions without a tenant setting", () => {
+    expect(authSql).toMatch(/CREATE OR REPLACE FUNCTION auth_lookup_user\(/);
+    expect(authSql).toMatch(/CREATE OR REPLACE FUNCTION auth_lookup_user_by_id\(/);
+    expect(authSql).toMatch(/CREATE OR REPLACE FUNCTION auth_lookup_session\(/);
+    expect(authSql).toMatch(/SECURITY DEFINER/);
+    expect(authSql).toMatch(/users_username_lower_uidx/);
   });
 });
