@@ -13,7 +13,7 @@ export default async function SignInPage({
 
   return (
     <main className="mx-auto max-w-md px-6 py-16">
-      <p className="mb-3 text-sm font-semibold tracking-wide text-teal">Increment 0.2</p>
+      <p className="mb-3 text-sm font-semibold tracking-wide text-teal">Increment 0.3</p>
       <h1 className="mb-3 text-navy">Sign in</h1>
       <p className="mb-8 max-w-prose text-[var(--ink-2)]">
         Authenticator codes are required. Recovery codes work in the same field.
