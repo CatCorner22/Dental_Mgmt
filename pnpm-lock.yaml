@@ -29,6 +29,9 @@ importers:
       '@pms/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@pms/import':
+        specifier: workspace:*
+        version: link:../../packages/import
       '@pms/ledger':
         specifier: workspace:*
         version: link:../../packages/ledger
@@ -152,6 +155,25 @@ importers:
       drizzle-kit:
         specifier: ^0.31.5
         version: 0.31.10
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.13
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.1.4
+        version: 3.2.7(@types/node@22.20.2)(jiti@1.21.7)(tsx@4.23.13)
+
+  packages/import:
+    dependencies:
+      '@pms/db':
+        specifier: workspace:*
+        version: link:../db
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.0
+        version: 22.20.2
       tsx:
         specifier: ^4.19.0
         version: 4.23.13

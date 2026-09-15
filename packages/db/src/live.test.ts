@@ -126,6 +126,9 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [10, "ledger_core", "app_migrate"],
         [11, "ledger_views", "app_migrate"],
         [12, "controls", "app_migrate"],
+        [13, "import_staging", "app_migrate"],
+        [14, "bank_reconciliation", "app_migrate"],
+        [15, "day_close_deposits", "app_migrate"],
       ]);
       const owners = await db.admin.query(
         "SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'"
@@ -136,7 +139,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
     it("is a no-op the second time", async () => {
       const result = await applyMigrations(db.admin);
       expect(result.applied).toEqual([]);
-      expect(result.alreadyApplied).toBe(12);
+      expect(result.alreadyApplied).toBe(15);
     });
 
     it("left domain_event with RLS forced after the seq backfill", async () => {
