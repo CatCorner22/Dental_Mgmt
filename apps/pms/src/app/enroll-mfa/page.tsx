@@ -5,7 +5,7 @@ export const metadata = { title: "Enroll authenticator" };
 export default function EnrollMfaPage() {
   return (
     <main className="mx-auto max-w-md px-6 py-16">
-      <p className="mb-3 text-sm font-semibold tracking-wide text-teal">Increment 0.8</p>
+      <p className="mb-3 text-sm font-semibold tracking-wide text-teal">Increment 0.11</p>
       <h1 className="mb-3 text-navy">Set up your authenticator</h1>
       <p className="mb-8 max-w-prose text-[var(--ink-2)]">
         MFA is required before you can use the practice shell. Save your recovery codes when

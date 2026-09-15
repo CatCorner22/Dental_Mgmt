@@ -156,6 +156,18 @@ importers:
         specifier: ^3.1.4
         version: 3.2.7(@types/node@22.20.2)(jiti@1.21.7)(tsx@4.23.13)
 
+  packages/metrics:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.15.0
+        version: 22.20.2
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.1.4
+        version: 3.2.7(@types/node@22.20.2)(jiti@1.21.7)(tsx@4.23.13)
+
   packages/verifier:
     dependencies:
       pg:

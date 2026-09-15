@@ -486,9 +486,11 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         null,
         "SELECT tenant_id, kind FROM domain_event WHERE kind = 'backup.restore_drill' ORDER BY tenant_id"
       );
+      expect(read).toMatchObject({ rows: expect.any(Array) });
+      if (!("rows" in read)) throw new Error("expected rows");
       expect(read.rows).toHaveLength(2);
-      expect(read.rows?.every((row) => row.kind === "backup.restore_drill")).toBe(true);
-      expect(read.rows?.map((row) => row.tenant_id).sort()).toEqual(
+      expect(read.rows.every((row) => row.kind === "backup.restore_drill")).toBe(true);
+      expect(read.rows.map((row) => row.tenant_id).sort()).toEqual(
         [ridgeview.id, oakridge.id].sort()
       );
       await append.end();
