@@ -38,9 +38,17 @@ export default function LedgerPage() {
     <main>
       <p className="mb-2 text-sm font-semibold tracking-wide text-teal">Money Desk</p>
       <h1 className="mb-2">Ledger</h1>
-      <p className="mb-8 max-w-prose text-[var(--ink-2)]">
+      <p className="mb-4 max-w-prose text-[var(--ink-2)]">
         Open guarantor accounts with the three labeled balance numbers: patient due,
         insurance pending, and unapplied credit.
+      </p>
+      <p className="mb-8">
+        <Link
+          className="text-sm font-semibold text-[var(--link)] underline-offset-2 hover:underline"
+          href="/ledger/post"
+        >
+          Post payment or adjustment
+        </Link>
       </p>
 
       {state.status === "loading" && <p className="text-sm text-[var(--ink-2)]">Loading accounts…</p>}
