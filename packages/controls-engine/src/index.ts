@@ -16,10 +16,12 @@ export {
 } from "./controls/dual-release";
 export type {
   DualReleasePolicy,
+  ReleaseChannel,
   ReleaseEvaluation,
   ReleaseRequest,
   ThresholdException,
 } from "./controls/dual-release";
+export type { Person, StaffComposition } from "./types";
 
 export { assessCoso } from "./coso";
 export type { CosoComponentAssessment } from "./coso";

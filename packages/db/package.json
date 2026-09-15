@@ -24,6 +24,7 @@
     "db:restore-drill": "tsx src/cli.ts restore-drill"
   },
   "dependencies": {
+    "@pms/controls-engine": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.16.3"
   },

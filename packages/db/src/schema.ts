@@ -209,6 +209,153 @@ export const recoveryCeremonies = pgTable(
   (t) => [index("recovery_ceremonies_target_idx").on(t.tenantId, t.targetUserId, t.initiatedAt)]
 );
 
+export const patients = pgTable(
+  "patients",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    mrn: text("mrn").notNull(),
+    firstName: text("first_name").notNull(),
+    lastName: text("last_name").notNull(),
+    dateOfBirth: date("date_of_birth").notNull(),
+    primaryLocationId: uuid("primary_location_id").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    createdById: uuid("created_by_id").notNull(),
+    createdByName: text("created_by_name").notNull(),
+  },
+  (t) => [
+    index("patients_tenant_idx").on(t.tenantId),
+    uniqueIndex("patients_tenant_mrn_uidx").on(t.tenantId, t.mrn),
+  ]
+);
+
+export const guarantorAccounts = pgTable(
+  "guarantor_accounts",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    displayName: text("display_name").notNull(),
+    statementHold: boolean("statement_hold").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    createdById: uuid("created_by_id").notNull(),
+    createdByName: text("created_by_name").notNull(),
+  },
+  (t) => [index("guarantor_accounts_tenant_idx").on(t.tenantId)]
+);
+
+export const ledgerEntries = pgTable(
+  "ledger_entries",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    accountId: uuid("account_id").notNull(),
+    patientId: uuid("patient_id").notNull(),
+    locationId: uuid("location_id").notNull(),
+    kind: text("kind").notNull(),
+    glBucket: text("gl_bucket").notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    currency: text("currency").notNull().default("USD"),
+    reasonCode: text("reason_code"),
+    effectiveDate: date("effective_date").notNull(),
+    postedAt: timestamp("posted_at", { withTimezone: true }).notNull(),
+    createdById: uuid("created_by_id").notNull(),
+    createdByName: text("created_by_name").notNull(),
+    encounterId: uuid("encounter_id"),
+    procedureId: uuid("procedure_id"),
+    claimId: uuid("claim_id"),
+    coverageId: uuid("coverage_id"),
+    reversesEntryId: uuid("reverses_entry_id"),
+    approvalRequestId: uuid("approval_request_id"),
+    tender: text("tender"),
+    memo: text("memo"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    insuranceExpectedCents: bigint("insurance_expected_cents", { mode: "number" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("ledger_entries_tenant_account_idx").on(t.tenantId, t.accountId, t.postedAt),
+    index("ledger_entries_tenant_patient_idx").on(t.tenantId, t.patientId, t.effectiveDate),
+    uniqueIndex("ledger_entries_tenant_idempotency_uidx").on(t.tenantId, t.idempotencyKey),
+  ]
+);
+
+export const paymentAllocations = pgTable(
+  "payment_allocations",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    paymentEntryId: uuid("payment_entry_id").notNull(),
+    chargeEntryId: uuid("charge_entry_id").notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("payment_allocations_payment_idx").on(t.paymentEntryId),
+    index("payment_allocations_charge_idx").on(t.chargeEntryId),
+  ]
+);
+
+export const controlPolicies = pgTable(
+  "control_policies",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    version: integer("version").notNull(),
+    rulebookVersion: text("rulebook_version").notNull(),
+    policy: jsonb("policy").notNull(),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    createdById: uuid("created_by_id").notNull(),
+    createdByName: text("created_by_name").notNull(),
+  },
+  (t) => [
+    index("control_policies_tenant_effective_idx").on(t.tenantId, t.effectiveFrom),
+    uniqueIndex("control_policies_tenant_version_uidx").on(t.tenantId, t.version),
+  ]
+);
+
+export const approvalRequests = pgTable(
+  "approval_requests",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    status: text("status").notNull().default("pending"),
+    channel: text("channel").notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    currency: text("currency").notNull().default("USD"),
+    subjectKind: text("subject_kind").notNull().default("ledger_post"),
+    subjectId: uuid("subject_id"),
+    heldPayload: jsonb("held_payload").notNull(),
+    evaluation: jsonb("evaluation").notNull(),
+    eligibleSecondRoles: text("eligible_second_roles").array().notNull().default([]),
+    requesterId: uuid("requester_id").notNull(),
+    requesterName: text("requester_name").notNull(),
+    secondApproverId: uuid("second_approver_id"),
+    secondApproverName: text("second_approver_name"),
+    decisionReason: text("decision_reason"),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    resultingEntryId: uuid("resulting_entry_id"),
+  },
+  (t) => [index("approval_requests_tenant_status_idx").on(t.tenantId, t.status, t.requestedAt)]
+);
+
+export const approvalsLog = pgTable(
+  "approvals_log",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    requestId: uuid("request_id").notNull(),
+    decision: text("decision").notNull(),
+    actorId: uuid("actor_id").notNull(),
+    actorName: text("actor_name").notNull(),
+    reason: text("reason"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("approvals_log_request_idx").on(t.requestId)]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "users",
@@ -220,4 +367,11 @@ export const TENANT_SCOPED_TABLES = [
   "audit_chain_checks",
   "disclosures",
   "recovery_ceremonies",
+  "patients",
+  "guarantor_accounts",
+  "ledger_entries",
+  "payment_allocations",
+  "control_policies",
+  "approval_requests",
+  "approvals_log",
 ] as const;

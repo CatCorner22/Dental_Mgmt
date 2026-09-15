@@ -1,5 +1,10 @@
+import {
+  CONTROL_RULEBOOK_VERSION,
+  mergeDualReleasePolicy,
+} from "@pms/controls-engine";
 import type { EncryptedBlob } from "./crypto";
 import { encryptSecret } from "./crypto";
+import { uuidv7 } from "./ids";
 import type { Queryable } from "./migrate";
 import {
   DEV_LOCATIONS,
@@ -102,6 +107,31 @@ export async function seedDatabase(
         [u.tenantId, u.id, entitlement, now]
       );
     }
+  }
+
+  for (const t of DEV_TENANTS) {
+    const owner = DEV_USERS.find((u) => u.tenantId === t.id && u.role === "admin");
+    if (!owner) continue;
+    const policy = mergeDualReleasePolicy({
+      enabled: true,
+      hardBlockWithoutSecond: false,
+    });
+    await db.query(
+      `INSERT INTO control_policies (
+         id, tenant_id, version, rulebook_version, policy, effective_from, created_at,
+         created_by_id, created_by_name
+       ) VALUES ($1, $2, 1, $3, $4::jsonb, $5, $5, $6, $7)
+       ON CONFLICT (tenant_id, version) DO NOTHING`,
+      [
+        uuidv7(now.getTime()),
+        t.id,
+        CONTROL_RULEBOOK_VERSION,
+        JSON.stringify(policy),
+        now,
+        owner.id,
+        owner.displayName,
+      ]
+    );
   }
 
   return { tenants: DEV_TENANTS.length, users: DEV_USERS.length };
