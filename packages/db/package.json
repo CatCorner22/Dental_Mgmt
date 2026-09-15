@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Drizzle schema, RLS policies, and Increment 0.1 migrations. No PHI patient rows.",
+  "description": "Drizzle schema, RLS policies, and Increment 0.1–0.2 migrations. No PHI patient rows.",
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema.ts",

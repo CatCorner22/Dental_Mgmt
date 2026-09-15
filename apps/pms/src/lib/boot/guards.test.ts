@@ -23,4 +23,17 @@ describe("production boot guards", () => {
       })
     ).toEqual([]);
   });
+
+  it("refuse production with the memory auth store", () => {
+    const errors = productionBootErrors({
+      NODE_ENV: "production",
+      POSTGRES_URL: "postgres://db?sslmode=verify-full",
+      KMS_KEY_ID: "kms-1",
+      BACKUP_TARGET: "s3://backups",
+      OBJECT_STORAGE_URL: "s3://objects",
+      APPEND_ROLE_DSN: "postgres://append?sslmode=verify-full",
+      AUTH_DEV_MEMORY: "1",
+    });
+    expect(errors.some((e) => e.includes("AUTH_DEV_MEMORY"))).toBe(true);
+  });
 });
