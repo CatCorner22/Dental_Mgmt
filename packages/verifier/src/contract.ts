@@ -16,6 +16,12 @@ export interface PipelineStep {
 
 export const CHAIN_STEPS: readonly PipelineStep[] = [
   {
+    id: "verifier-admitted",
+    promise: "The verifying connection holds app_verify, so row-level security shows it every tenant.",
+    evidence: "pg_has_role(current_user, 'app_verify', 'USAGE') is true before any chain is read.",
+    ifAbsent: "An ordinary role sees zero rows under RLS and an empty result would pass as a clean chain.",
+  },
+  {
     id: "genesis-known",
     promise: "The first event in a tenant chain follows a published genesis hash.",
     evidence: "prev_hash on the first row is 64 ASCII zeros.",

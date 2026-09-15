@@ -1,4 +1,5 @@
-import { verifyChain, type ChainEvent, type ChainVerdict } from "./chain";
+import { verifyChain, type ChainEvent, type ChainVerdict, type Objection } from "./chain";
+import { CHAIN_STEPS } from "./contract";
 
 /**
  * Reads every tenant's event chain from a live database and verifies each.
@@ -19,6 +20,14 @@ SELECT tenant_id, kind, payload, prev_hash, hash, occurred_at, seq
   FROM domain_event
  ORDER BY tenant_id, seq`;
 
+/**
+ * Under FORCE RLS an ordinary role sees zero rows and an empty result would
+ * pass as a clean chain. Refuse to read unless the connection holds
+ * app_verify (directly, by inheritance, or as a superuser).
+ */
+export const VERIFIER_ROLE = "app_verify";
+export const ADMITTED_QUERY = `SELECT current_user AS role, pg_has_role(current_user, '${VERIFIER_ROLE}', 'USAGE') AS admitted`;
+
 export interface TenantChainVerdict extends ChainVerdict {
   tenantId: string;
   events: number;
@@ -26,9 +35,43 @@ export interface TenantChainVerdict extends ChainVerdict {
 
 export interface DatabaseVerdict {
   publish: boolean;
+  role: string | null;
+  objections: Objection[];
   tenants: TenantChainVerdict[];
   events: number;
   checkedAt: string;
+}
+
+async function checkAdmitted(db: Queryable): Promise<{ role: string | null; objections: Objection[] }> {
+  const step = CHAIN_STEPS.find((s) => s.id === "verifier-admitted")!;
+  try {
+    const { rows } = await db.query(ADMITTED_QUERY);
+    const role = rows[0] ? String(rows[0].role) : null;
+    if (rows[0]?.admitted === true) return { role, objections: [] };
+    return {
+      role,
+      objections: [
+        {
+          stepId: step.id,
+          severity: "refuse",
+          says: `Connection role ${role ?? "unknown"} does not hold ${VERIFIER_ROLE}.`,
+          because: step.ifAbsent,
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      role: null,
+      objections: [
+        {
+          stepId: step.id,
+          severity: "refuse",
+          says: `Could not establish the connection's role: ${error instanceof Error ? error.message : String(error)}`,
+          because: step.ifAbsent,
+        },
+      ],
+    };
+  }
 }
 
 function toIso(value: unknown): string {
@@ -56,6 +99,11 @@ export function groupByTenant(rows: Record<string, unknown>[]): Map<string, Chai
 }
 
 export async function verifyDatabaseChains(db: Queryable): Promise<DatabaseVerdict> {
+  const checkedAt = new Date().toISOString();
+  const admitted = await checkAdmitted(db);
+  if (admitted.objections.length) {
+    return { publish: false, role: admitted.role, objections: admitted.objections, tenants: [], events: 0, checkedAt };
+  }
   const { rows } = await db.query(CHAIN_QUERY);
   const tenants: TenantChainVerdict[] = [];
   for (const [tenantId, events] of groupByTenant(rows)) {
@@ -63,8 +111,10 @@ export async function verifyDatabaseChains(db: Queryable): Promise<DatabaseVerdi
   }
   return {
     publish: tenants.every((t) => t.publish),
+    role: admitted.role,
+    objections: [],
     tenants,
     events: rows.length,
-    checkedAt: new Date().toISOString(),
+    checkedAt,
   };
 }

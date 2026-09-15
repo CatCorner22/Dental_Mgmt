@@ -5,15 +5,17 @@ import { verifyDatabaseChains } from "./database";
 /**
  * pnpm --filter @pms/verifier verify:chain
  *
- * Connection: VERIFY_ROLE_DSN, else POSTGRES_URL. PMS_VERIFY_ROLE, when set,
- * is SET ROLE'd first so a shared local superuser still reads as app_verify.
- * Prints one JSON verdict and exits 1 when any tenant's chain refuses.
- * Meant for a nightly job; it writes nothing.
+ * Connection: VERIFY_ROLE_DSN. PMS_VERIFY_ROLE, when set, is SET ROLE'd
+ * first so a shared local superuser still reads as app_verify; only then is
+ * POSTGRES_URL accepted as the connection. The application's own DSN is
+ * never used silently: an app_rw connection sees zero rows under RLS, and
+ * verifyDatabaseChains refuses a connection that does not hold app_verify.
+ * Prints one JSON verdict and exits 1 on any refusal. Writes nothing.
  */
 export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number> {
-  const url = env.VERIFY_ROLE_DSN ?? env.POSTGRES_URL;
+  const url = env.VERIFY_ROLE_DSN ?? (env.PMS_VERIFY_ROLE ? env.POSTGRES_URL : undefined);
   if (!url) {
-    console.error("Set VERIFY_ROLE_DSN or POSTGRES_URL.");
+    console.error("Set VERIFY_ROLE_DSN (an app_verify login), or PMS_VERIFY_ROLE together with POSTGRES_URL.");
     return 2;
   }
   const client = new Client({ connectionString: url });

@@ -186,6 +186,30 @@ describe.skipIf(!adminUrl)("Postgres auth store (live)", () => {
     expect(ridgeview.objections.map((o) => o.stepId)).toContain("hash-agrees");
   });
 
+  it("concurrent appends for one tenant serialize into a dense chain with no lost event", async () => {
+    const store = createPostgresStore(env);
+    const tenant = DEV_TENANTS[1];
+    const at = new Date();
+    await Promise.all(
+      Array.from({ length: 8 }, (_, i) =>
+        store.appendDomainEvent({
+          tenantId: tenant.id,
+          actorUserId: DEV_USERS[2].id,
+          kind: "test.concurrent",
+          payload: { i },
+          at,
+        })
+      )
+    );
+    const { rows } = await db.admin.query(
+      "SELECT seq FROM domain_event WHERE tenant_id = $1 AND kind = 'test.concurrent' ORDER BY seq",
+      [tenant.id]
+    );
+    expect(rows.map((r) => Number(r.seq))).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    const verdict = await verifyDatabaseChains(verifier);
+    expect(verdict.tenants.find((t) => t.tenantId === tenant.id)?.publish).toBe(true);
+  });
+
   it("the boot guard accepts app_rw and refuses the administrator connection", async () => {
     const runtime = await readRuntimeRole(getPool(env));
     expect(runtime).toMatchObject({ superuser: false, bypassRls: false, ownedTables: [] });

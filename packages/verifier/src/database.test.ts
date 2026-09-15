@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { expectedHash } from "./chain";
-import { CHAIN_QUERY, groupByTenant, verifyDatabaseChains } from "./database";
+import { ADMITTED_QUERY, CHAIN_QUERY, groupByTenant, verifyDatabaseChains } from "./database";
+
+/** Fake connection: answers the admission probe, then serves chain rows. */
+function fakeDb(rows: Record<string, unknown>[], admitted: boolean | "error" = true, role = "app_verify") {
+  return {
+    query: async (text: string) => {
+      if (text === ADMITTED_QUERY) {
+        if (admitted === "error") throw new Error('role "app_verify" does not exist');
+        return { rows: [{ role, admitted }] };
+      }
+      return { rows };
+    },
+  };
+}
 
 const GENESIS = "0".repeat(64);
 
@@ -30,13 +43,13 @@ describe("database chain verifier", () => {
 
   it("refuses a gap in the sequence", async () => {
     const t1c = row("t1", 4, t1b.hash, "auth.signin", { s: 4 }, new Date("2026-09-15T00:02:00Z"));
-    const verdict = await verifyDatabaseChains({ query: async () => ({ rows: [t1a, t1b, t1c] }) });
+    const verdict = await verifyDatabaseChains(fakeDb([t1a, t1b, t1c]));
     expect(verdict.publish).toBe(false);
     expect(verdict.tenants[0].objections.map((o) => o.stepId)).toEqual(["sequence-dense"]);
   });
 
   it("verifies each tenant separately and passes an intact database", async () => {
-    const verdict = await verifyDatabaseChains({ query: async () => ({ rows: [t1a, t1b, t2a] }) });
+    const verdict = await verifyDatabaseChains(fakeDb([t1a, t1b, t2a]));
     expect(verdict.publish).toBe(true);
     expect(verdict.events).toBe(3);
     expect(verdict.tenants.map((t) => [t.tenantId, t.events, t.publish])).toEqual([
@@ -47,9 +60,7 @@ describe("database chain verifier", () => {
 
   it("names the tenant whose row was rewritten", async () => {
     const tampered = { ...t1b, payload: { s: 99 } };
-    const verdict = await verifyDatabaseChains({
-      query: async () => ({ rows: [t1a, tampered, t2a] }),
-    });
+    const verdict = await verifyDatabaseChains(fakeDb([t1a, tampered, t2a]));
     expect(verdict.publish).toBe(false);
     const t1 = verdict.tenants.find((t) => t.tenantId === "t1")!;
     expect(t1.publish).toBe(false);
@@ -62,8 +73,22 @@ describe("database chain verifier", () => {
     expect(chains.get("t1")![0]).toMatchObject({ occurredAt: "2026-09-15T00:00:00.000Z", seq: 1 });
   });
 
+  it("refuses a connection that does not hold app_verify instead of passing its empty view", async () => {
+    const verdict = await verifyDatabaseChains(fakeDb([], false, "app_rw"));
+    expect(verdict.publish).toBe(false);
+    expect(verdict.role).toBe("app_rw");
+    expect(verdict.objections.map((o) => o.stepId)).toEqual(["verifier-admitted"]);
+    expect(verdict.tenants).toEqual([]);
+  });
+
+  it("refuses when the admission probe itself fails", async () => {
+    const verdict = await verifyDatabaseChains(fakeDb([t1a], "error"));
+    expect(verdict.publish).toBe(false);
+    expect(verdict.objections[0].says).toMatch(/does not exist/);
+  });
+
   it("passes an empty database", async () => {
-    const verdict = await verifyDatabaseChains({ query: async () => ({ rows: [] }) });
+    const verdict = await verifyDatabaseChains(fakeDb([]));
     expect(verdict).toMatchObject({ publish: true, events: 0, tenants: [] });
   });
 });
