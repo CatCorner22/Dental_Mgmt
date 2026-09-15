@@ -140,6 +140,16 @@ export async function createMemoryStore(
       }
       return n;
     },
+    async revokeSessionsForTenant(tenantId, at) {
+      let n = 0;
+      for (const [id, session] of sessions) {
+        if (session.tenantId === tenantId && !session.revokedAt) {
+          sessions.set(id, { ...session, revokedAt: at });
+          n += 1;
+        }
+      }
+      return n;
+    },
     async deactivateUser(userId, at) {
       const user = users.get(userId);
       if (user) users.set(userId, { ...user, active: false });

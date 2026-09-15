@@ -80,4 +80,24 @@ describe("requireAccess", () => {
     expect(ports.tenantSets).toEqual(["t1:u1"]);
     expect(ports.phiLog).toHaveLength(1);
   });
+
+  it("records a disclosure when PHI egress is declared", async () => {
+    const ports = memoryPorts({ session, user, sessionId: "s1" });
+    const result = await requireAccess(
+      req(),
+      {
+        disclosure: {
+          patientId: "p1",
+          channel: "export",
+          recipient: "patient@example.com",
+          recordIds: ["doc-1"],
+          purpose: "patient_request",
+        },
+      },
+      ports,
+      now
+    );
+    expect(result.ok).toBe(true);
+    expect(ports.disclosureLog).toHaveLength(1);
+  });
 });

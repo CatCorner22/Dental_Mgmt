@@ -30,11 +30,23 @@ export interface PhiRead {
   purpose: string;
 }
 
+/** Accounting-of-disclosures row written when PHI leaves the practice. */
+export interface PhiDisclosure {
+  patientId: string;
+  channel: string;
+  recipient: string;
+  recordIds: string[];
+  purpose: string;
+  documentId?: string | null;
+}
+
 export interface AccessOpts {
   minRank?: Role;
   entitlements?: string[];
   locationScope?: string;
   phiRead?: PhiRead;
+  /** When set, appends a disclosure row in the same request as the guarded handler. */
+  disclosure?: PhiDisclosure;
   requireMfa?: boolean;
 }
 

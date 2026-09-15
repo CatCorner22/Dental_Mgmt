@@ -41,6 +41,7 @@ export interface AuthStore {
   createSession(input: CreateSessionInput): Promise<SessionRow>;
   touchSession(id: string, lastSeenAt: Date, idleExpiresAt: Date): Promise<void>;
   revokeSessionsForUser(userId: string, at: Date): Promise<number>;
+  revokeSessionsForTenant(tenantId: string, at: Date): Promise<number>;
   deactivateUser(userId: string, at: Date): Promise<void>;
   replaceRecoveryHashes(userId: string, hashes: string[]): Promise<void>;
   setMfaPendingSecret(userId: string, secretEnc: EncryptedBlob): Promise<void>;

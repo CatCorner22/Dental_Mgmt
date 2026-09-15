@@ -14,6 +14,18 @@ export interface AuthPorts {
     recordIds: string[];
     at: Date;
   }): Promise<void>;
+  recordDisclosure(input: {
+    tenantId: string;
+    patientId: string;
+    channel: string;
+    recipient: string;
+    recordIds: string[];
+    purpose: string;
+    actorUserId: string;
+    actorName: string;
+    documentId: string | null;
+    at: Date;
+  }): Promise<string>;
 }
 
 export const IDLE_MS = {
@@ -27,14 +39,16 @@ export function memoryPorts(seed?: {
   session?: SessionRow;
   user?: FreshUser;
   sessionId?: string;
-}): AuthPorts & { phiLog: unknown[]; tenantSets: string[] } {
+}): AuthPorts & { phiLog: unknown[]; disclosureLog: unknown[]; tenantSets: string[] } {
   const phiLog: unknown[] = [];
+  const disclosureLog: unknown[] = [];
   const tenantSets: string[] = [];
   let session = seed?.session ?? null;
   const user = seed?.user ?? null;
   const sessionId = seed?.sessionId ?? session?.id ?? null;
   return {
     phiLog,
+    disclosureLog,
     tenantSets,
     async getSessionId() {
       return sessionId;
@@ -55,6 +69,10 @@ export function memoryPorts(seed?: {
     },
     async logPhiAccess(input) {
       phiLog.push(input);
+    },
+    async recordDisclosure(input) {
+      disclosureLog.push(input);
+      return "disclosure-test-id";
     },
   };
 }
