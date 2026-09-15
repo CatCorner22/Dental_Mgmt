@@ -29,6 +29,9 @@ importers:
       '@pms/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@pms/ledger':
+        specifier: workspace:*
+        version: link:../../packages/ledger
       '@pms/verifier':
         specifier: workspace:*
         version: link:../../packages/verifier
@@ -127,6 +130,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@pms/controls-engine':
+        specifier: workspace:*
+        version: link:../controls-engine
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@types/pg@8.23.1)(pg@8.23.0)

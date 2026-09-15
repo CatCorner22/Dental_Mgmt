@@ -46,6 +46,7 @@ function refusalFromEvaluation(evaluation: ReleaseEvaluation): PostRefusal {
     control: evaluation.eligibleSeconds[0]?.name ?? "Controls",
     why: evaluation.reasons[0] ?? "Posting refused by dual-release policy.",
     evaluation,
+    held: evaluation.status === "needs_second",
   };
 }
 
@@ -83,7 +84,7 @@ export async function postGuarded(
     input.people
   );
 
-  if (!evaluation.ok) {
+  if (!evaluation.ok || evaluation.status === "needs_second") {
     return refusalFromEvaluation(evaluation);
   }
 

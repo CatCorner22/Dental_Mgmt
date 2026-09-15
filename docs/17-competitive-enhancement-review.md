@@ -215,6 +215,12 @@ Phase 1 starts with the ledger kernel before any UI. This increment adds patient
 
 **Not in Increment 1.1.** Ledger UI, `approval_requests` inbox, report-import ETL, bank reconciliation, card processing, day close, statements.
 
+## Increment 1.2
+
+Dual-release approvals are persisted and actionable without UI. This increment adds `control_policies`, `approval_requests`, and `approvals_log`; seeds an active policy per tenant (`hardBlockWithoutSecond: false`); teaches `postGuarded` to return `needs_second` as a held refusal; and exposes `GET /api/approvals/inbox`, `POST /api/approvals/[id]/decide`, and `GET /api/controls/policy`.
+
+**Not in Increment 1.2.** Push notifications, walk-over PIN sessions, policy/exceptions editor UI, denial-suppression, BEFORE INSERT approval trigger on `ledger_entries`, hosted posting HTTP route.
+
 ## Risks that stay visible
 
 - Lifting Smile Notes tests while inverting the PHI premise will fail some of those tests; they become a tracked rewrite list, not a reason to leave PHI-blocking rules in place.
