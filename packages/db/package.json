@@ -3,22 +3,36 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Drizzle schema, RLS policies, and Increment 0.1–0.2 migrations. No PHI patient rows.",
+  "description": "Drizzle schema, RLS policies, role grants, and the Increment 0.1–0.3 migration runner. No PHI patient rows.",
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema.ts",
-    "./crypto": "./src/crypto.ts"
+    "./crypto": "./src/crypto.ts",
+    "./migrate": "./src/migrate.ts",
+    "./testing": "./src/testing/liveDatabase.ts",
+    "./seed-data": "./src/seed-data.ts"
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "test:live": "PMS_TEST_POSTGRES_REQUIRED=1 vitest run src/live.test.ts",
+    "typecheck": "tsc --noEmit",
+    "db:roles": "tsx src/cli.ts roles",
+    "db:migrate": "tsx src/cli.ts migrate",
+    "db:status": "tsx src/cli.ts status",
+    "db:reset": "tsx src/cli.ts reset",
+    "db:seed": "tsx src/cli.ts seed",
+    "db:restore-drill": "tsx src/cli.ts restore-drill"
   },
   "dependencies": {
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.2",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
+    "@types/pg": "^8.15.5",
+    "bcryptjs": "^3.0.2",
     "drizzle-kit": "^0.31.5",
+    "tsx": "^4.19.0",
     "typescript": "^5.8.3",
     "vitest": "^3.1.4"
   }

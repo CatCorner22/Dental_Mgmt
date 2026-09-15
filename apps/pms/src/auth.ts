@@ -43,6 +43,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           name: result.user.username,
           sessionId: result.user.sessionId,
           pwAt: result.user.pwAt,
+          needsMfaEnrollment: result.user.needsMfaEnrollment ?? false,
         };
       },
     }),

@@ -1,22 +1,28 @@
 import { and, eq, isNull, lt, or, sql } from "drizzle-orm";
 import {
   authThrottle,
+  disclosures,
   domainEvent,
   GENESIS_HASH,
   hashDomainEvent,
   phiAccessLog,
+  recoveryCeremonies,
   sessions,
   userEntitlements,
   users,
   uuidv7,
 } from "@pms/db";
 import type { EncryptedBlob } from "@pms/db/crypto";
-import { getDb, getPool, withTenantTransaction } from "../db/client";
+import { getDb, getPool, withTenantAppendTransaction, withTenantTransaction } from "../db/client";
 import { ABSOLUTE_MS, IDLE_MS } from "./ports";
 import { isRole } from "./roles";
 import { parseRecoveryHashes } from "./recovery";
 import type { AuthStore, StoredUser } from "./store";
 import type { SessionRow } from "./types";
+
+/** Transaction-scoped advisory lock keyed on the tenant; released at COMMIT/ROLLBACK. */
+export const TENANT_CHAIN_LOCK_SQL = (tenantId: string) =>
+  sql`SELECT pg_advisory_xact_lock(hashtext('domain_event'), hashtext(${tenantId}))`;
 
 interface LookupUserRow {
   id: string;
@@ -27,7 +33,7 @@ interface LookupUserRow {
   role: string;
   clinical_role: string;
   active: boolean;
-  mfa_secret_enc: EncryptedBlob;
+  mfa_secret_enc: EncryptedBlob | null;
   mfa_enrolled_at: Date | null;
   recovery_codes_hash: string | null;
   password_changed_at: Date;
@@ -166,6 +172,16 @@ export function createPostgresStore(
         return updated.length;
       }, env);
     },
+    async revokeSessionsForTenant(tenantId, at) {
+      return withTenantTransaction(tenantId, tenantId, async (db) => {
+        const updated = await db
+          .update(sessions)
+          .set({ revokedAt: at })
+          .where(and(eq(sessions.tenantId, tenantId), isNull(sessions.revokedAt)))
+          .returning({ id: sessions.id });
+        return updated.length;
+      }, env);
+    },
     async deactivateUser(userId, at) {
       const user = await this.getUserById(userId);
       if (!user) return;
@@ -187,8 +203,29 @@ export function createPostgresStore(
           .where(eq(users.id, userId));
       }, env);
     },
+    async setMfaPendingSecret(userId, secretEnc) {
+      const user = await this.getUserById(userId);
+      if (!user) return;
+      await withTenantTransaction(user.tenantId, userId, async (db) => {
+        await db.update(users).set({ mfaSecretEnc: secretEnc }).where(eq(users.id, userId));
+      }, env);
+    },
+    async completeMfaEnrollment(userId, input) {
+      const user = await this.getUserById(userId);
+      if (!user) return;
+      await withTenantTransaction(user.tenantId, userId, async (db) => {
+        await db
+          .update(users)
+          .set({
+            mfaSecretEnc: input.secretEnc,
+            mfaEnrolledAt: input.enrolledAt,
+            recoveryCodesHash: JSON.stringify(input.recoveryHashes),
+          })
+          .where(eq(users.id, userId));
+      }, env);
+    },
     async logPhiAccess(input) {
-      await withTenantTransaction(input.tenantId, input.userId, async (db) => {
+      await withTenantAppendTransaction(input.tenantId, input.userId, async (db) => {
         await db.insert(phiAccessLog).values({
           id: uuidv7(input.at.getTime()),
           tenantId: input.tenantId,
@@ -201,14 +238,20 @@ export function createPostgresStore(
       }, env);
     },
     async appendDomainEvent(input) {
-      await withTenantTransaction(input.tenantId, input.actorUserId ?? input.tenantId, async (db) => {
+      await withTenantAppendTransaction(input.tenantId, input.actorUserId ?? input.tenantId, async (db) => {
+        // Serialize appends per tenant for the rest of this transaction so two
+        // writers cannot read the same last row. UNIQUE (tenant_id, seq) stays
+        // as the backstop that turns any remaining race into a failed insert
+        // rather than a silent fork.
+        await db.execute(TENANT_CHAIN_LOCK_SQL(input.tenantId));
         const [last] = await db
-          .select({ hash: domainEvent.hash })
+          .select({ hash: domainEvent.hash, seq: domainEvent.seq })
           .from(domainEvent)
           .where(eq(domainEvent.tenantId, input.tenantId))
-          .orderBy(sql`${domainEvent.occurredAt} desc`)
+          .orderBy(sql`${domainEvent.seq} desc`)
           .limit(1);
         const prevHash = last?.hash ?? GENESIS_HASH;
+        const seq = (last?.seq ?? 0) + 1;
         const occurredAt = input.at;
         const hash = hashDomainEvent({
           prevHash,
@@ -226,6 +269,7 @@ export function createPostgresStore(
           prevHash,
           hash,
           occurredAt,
+          seq,
         });
       }, env);
     },
@@ -301,8 +345,119 @@ export function createPostgresStore(
           )
         );
     },
+    async recordDisclosure(input) {
+      const id = uuidv7(input.at.getTime());
+      await withTenantAppendTransaction(input.tenantId, input.actorUserId, async (db) => {
+        await db.insert(disclosures).values({
+          id,
+          tenantId: input.tenantId,
+          patientId: input.patientId,
+          at: input.at,
+          channel: input.channel,
+          recipient: input.recipient,
+          recordIds: input.recordIds,
+          purpose: input.purpose,
+          actorUserId: input.actorUserId,
+          actorName: input.actorName,
+          documentId: input.documentId,
+        });
+      }, env);
+      return id;
+    },
+    async createRecoveryCeremony(input) {
+      const id = uuidv7(input.initiatedAt.getTime());
+      await withTenantTransaction(input.tenantId, input.initiatedBy, async (db) => {
+        await db.insert(recoveryCeremonies).values({
+          id,
+          tenantId: input.tenantId,
+          targetUserId: input.targetUserId,
+          initiatedBy: input.initiatedBy,
+          initiatedAt: input.initiatedAt,
+          expiresAt: input.expiresAt,
+        });
+      }, env);
+      return id;
+    },
+    async getRecoveryCeremony(id) {
+      const pool = getPool(env);
+      const { rows } = await pool.query(
+        `SELECT id, tenant_id, target_user_id, initiated_by, approved_by,
+                initiated_at, approved_at, expires_at, consumed_at, reset_token_hash
+           FROM auth_lookup_recovery_ceremony($1::uuid)`,
+        [id]
+      );
+      return rows[0] ? mapCeremonyRow(rows[0]) : null;
+    },
+    async getRecoveryCeremonyByTokenHash(resetToken) {
+      const dot = resetToken.indexOf(".");
+      if (dot <= 0) return null;
+      const ceremonyId = resetToken.slice(0, dot);
+      const pool = getPool(env);
+      const { rows } = await pool.query(
+        `SELECT id, tenant_id, target_user_id, initiated_by, approved_by,
+                initiated_at, approved_at, expires_at, consumed_at, reset_token_hash
+           FROM auth_lookup_recovery_ceremony($1::uuid)`,
+        [ceremonyId]
+      );
+      const row = rows[0];
+      if (!row) return null;
+      const mapped = mapCeremonyRow(row);
+      const { createHash } = await import("node:crypto");
+      const digest = createHash("sha256").update(resetToken).digest("hex");
+      if (mapped.resetTokenHash !== digest) return null;
+      return mapped;
+    },
+    async approveRecoveryCeremony(input) {
+      const ceremony = await this.getRecoveryCeremony(input.id);
+      if (!ceremony) return;
+      await withTenantTransaction(ceremony.tenantId, input.approvedBy, async (db) => {
+        await db
+          .update(recoveryCeremonies)
+          .set({
+            approvedBy: input.approvedBy,
+            approvedAt: input.approvedAt,
+            resetTokenHash: input.resetTokenHash,
+          })
+          .where(eq(recoveryCeremonies.id, input.id));
+      }, env);
+    },
+    async consumeRecoveryCeremony(id, consumedAt) {
+      const ceremony = await this.getRecoveryCeremony(id);
+      if (!ceremony) return;
+      await withTenantTransaction(ceremony.tenantId, ceremony.targetUserId, async (db) => {
+        await db
+          .update(recoveryCeremonies)
+          .set({ consumedAt })
+          .where(eq(recoveryCeremonies.id, id));
+      }, env);
+    },
+    async setPassword(userId, passwordHash, passwordChangedAt) {
+      const user = await this.getUserById(userId);
+      if (!user) return;
+      await withTenantTransaction(user.tenantId, userId, async (db) => {
+        await db
+          .update(users)
+          .set({ passwordHash, passwordChangedAt })
+          .where(eq(users.id, userId));
+      }, env);
+    },
     async setTenantContext() {
       // Tenant binding is applied inside withTenantTransaction on each write.
     },
+  };
+}
+
+function mapCeremonyRow(row: Record<string, unknown>) {
+  return {
+    id: String(row.id),
+    tenantId: String(row.tenant_id),
+    targetUserId: String(row.target_user_id),
+    initiatedBy: String(row.initiated_by),
+    approvedBy: row.approved_by ? String(row.approved_by) : null,
+    initiatedAt: new Date(String(row.initiated_at)),
+    approvedAt: row.approved_at ? new Date(String(row.approved_at)) : null,
+    expiresAt: new Date(String(row.expires_at)),
+    consumedAt: row.consumed_at ? new Date(String(row.consumed_at)) : null,
+    resetTokenHash: row.reset_token_hash ? String(row.reset_token_hash) : null,
   };
 }

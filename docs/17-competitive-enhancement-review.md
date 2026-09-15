@@ -2,7 +2,7 @@
 
 > Source: owner review of 2026-09-14. The owner asked for a comprehensive, beautiful, low-cognitive-load dental PMS with an industry-leading one-way SuperByte note advisor (twin deterministic and probabilistic knowledge bases; see Smile Notes) and a novel Precog risk-avoidance module. Two decisions lock this document: start Phase 0 of the real product, and keep SuperByte one-way (staff never prompt, chat, or rate). Evidence for market claims is the v3 knowledge base (`knowledge/dental-pms-and-risk-platforms-report-v3-2026-09-02.md`, `knowledge/semantic-memory.md`). Legal statements inherit the PRIMARY / SECONDARY / REPO / UNVERIFIED labels from `docs/11`.
 
-This repository remains a consolidation plan plus a clickable prototype. Increment 0.1, recorded here, is the first code foundation of the merged PMS. Increment 0.2 wires the sessions table and `/api/me`. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) stay listed, not silently marked done.
+This repository remains a consolidation plan plus a clickable prototype. Increment 0.1, recorded here, is the first code foundation of the merged PMS. Increment 0.2 wires the sessions table and `/api/me`. Increment 0.3 makes the database real: migrations that apply, roles that exist, and a verifier that reads a live chain. Increment 0.4 forces MFA enrollment on first login and seeds two Postgres tenants without `AUTH_DEV_MEMORY`. Increment 0.5 splits ledger appends to `app_append`, records nightly chain checks, and schedules the verifier. Increment 0.6 adds the `disclosures` schema and a two-admin recovery ceremony. Increment 0.7 anchors signed chain heads to Object Lock storage. Increment 0.8 wires the disclosure egress pattern and tenant-wide session revoke for incident response. Increment 0.9 adds golden snapshot tests for every exported controls-engine scorer. Increment 0.10 adds the restore drill CLI. Increment 0.11 refuses `DEV_MFA_KEY` in production boot and adds the PHI-free usage-metrics package. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) stay listed, not silently marked done.
 
 ## Current state
 
@@ -117,6 +117,97 @@ Wires the Increment 0.1 sessions table so sign-in is real.
 - The sign-in form is a server action (pre-hydration POST still authenticates). Failure copy never names the reason.
 
 **Not in Increment 0.2.** Two-admin recovery ceremony UI, real KMS, Object Lock, ledger UI, PHI patient rows, legal pack, D.8 interviews.
+
+## Increment 0.3
+
+Increments 0.1 and 0.2 left the database as SQL files nobody applied, roles that existed only as comments, and an RLS test that read migration text. This increment runs all of it against PostgreSQL 16, in CI and locally, and keeps what the live database disproved.
+
+- `packages/db` gains a plain-SQL migration runner: `schema_migrations` with SHA-256 checksums, an advisory lock, one transaction per file, refusal on a rewritten historical file or a numbering gap. `pnpm db:roles | db:migrate | db:status | db:reset`. drizzle-kit stays for schema diffing only.
+- `sql/roles.sql` creates the cluster roles once per database. Migration 0003 grants them: `app_rw` reads, inserts, and updates mutable tables and may never DELETE users or sessions; `app_rw` and `app_append` may INSERT into `domain_event` and `phi_access_log` and no role may UPDATE or DELETE a row there; `app_verify` holds SELECT on `domain_event` alone, admitted across tenants by a role-scoped policy.
+- The SECURITY DEFINER auth lookups are handed to `app_auth_lookup`, a role that owns nothing else, with role-scoped SELECT policies on `users` and `sessions`. FORCE RLS binds table owners, so a migrator-owned lookup returned no rows; a superuser-owned one would have passed CI and failed in production.
+- Migration 0004 adds a per-tenant `seq` to `domain_event` with `UNIQUE (tenant_id, seq)`. Chain order is `seq`, not `occurred_at`: two events in one millisecond have no time order, and two concurrent appends could otherwise fork the chain with nothing firing.
+- `packages/verifier` gains `verifyDatabaseChains` and a `verify:chain` CLI that connects as `app_verify`, verifies each tenant's chain (genesis, hash, links, dense sequence), prints one JSON verdict, and exits 1 on any refusal. It writes nothing. It first proves the connection holds `app_verify`: an ordinary role sees zero rows under RLS, and an empty view must not pass as a clean chain.
+- Appends take a transaction-scoped advisory lock per tenant before reading the last row, so concurrent writers serialize; the unique `seq` index stays as the backstop.
+- `apps/pms/src/instrumentation.ts` calls the boot guard that 0.1 defined and never invoked. Production also asks its live connection who it is and refuses a superuser, BYPASSRLS, or table-owning role.
+- CI runs a Postgres 16 service: roles and migrations apply from empty as `app_migrate`, the verifier runs as `app_verify`, and the live suites are mandatory (`PMS_TEST_POSTGRES_REQUIRED=1`). Locally they skip without `PMS_TEST_POSTGRES_URL`.
+
+**What the live tests caught that text tests could not.** The migrator inherited the lookup role's open policy through a plain `GRANT` (fixed with `INHERIT FALSE`). `REVOKE ... FROM PUBLIC` issued after `ALTER FUNCTION ... OWNER TO` was a silent no-op, leaving the lookups callable by every role (fixed by ordering). Two sign-ins in one millisecond verified or failed by coin flip (fixed by `seq`).
+
+**Phase 0 exit criteria now met in code.** Two tenants seeded in test; a deliberately missing WHERE clause returns only the bound tenant, as `app_rw` and as the table owner; deactivating a user denies the next guarded call; the chain verifies and detects a planted tamper against a live database; a connector with no BAA row is refused by the trigger under `app_rw`; production refuses to boot without the listed controls or with a connection that could bypass RLS.
+
+**Not in Increment 0.3.** A separate `app_append` connection in the app process (the runtime still inserts audit rows as `app_rw`; the grants for the split exist), nightly scheduling of the verifier, daily chain head to Object Lock, `disclosures`, MFA enrollment flow, two-admin recovery ceremony, real KMS, PHI patient rows, legal pack, D.8 interviews.
+
+## Increment 0.4
+
+Increment 0.3 left MFA half-wired: `requireAccess` refused unenrolled users, but `authorizeCredentials` also refused them, so provisioned staff could not sign in and had no enrollment path. This increment closes the Phase 0 exit criterion.
+
+- Migration `0005_mfa_enrollment.sql` makes `mfa_secret_enc` nullable until enrollment completes.
+- `authorizeCredentials` accepts password-only sign-in when `mfa_enrolled_at` is null, creates a session, appends `auth.signin.pending_mfa`, and sets `needsMfaEnrollment` on the JWT. Enrolled accounts still require TOTP or a recovery code.
+- `/enroll-mfa` plus `/api/enroll-mfa` (`requireMfa: false`): begin generates a secret and otpauth URI; complete verifies the first TOTP, writes recovery-code hashes, sets `mfa_enrolled_at`, appends `auth.mfa_enrolled`, shows recovery codes once, revokes the session, and sends the user back to sign in with their authenticator.
+- Middleware redirects every signed-in route to `/enroll-mfa` until enrollment finishes.
+- `pnpm db:seed` idempotently loads Ridgeview and Oakridge with four staff rows, including `ridgeview-newhire` (unenrolled). Seed data lives in `packages/db/src/seed-data.ts` and is re-exported by `apps/pms` dev seed.
+- Production runtime-role probing moved from `instrumentation.ts` to the first database pool use so the Next.js build does not bundle `pg` into edge middleware.
+
+**Phase 0 exit criterion met.** MFA enrollment is forced on first login: unenrolled users cannot reach guarded routes, must enroll before the app opens, and must sign in again with TOTP once enrolled.
+
+**Not in Increment 0.4.** Two-admin recovery ceremony, `disclosures`, separate `app_append` connection, nightly verifier scheduling, Object Lock chain head, real KMS, PHI patient rows, legal pack, D.8 interviews.
+
+## Increment 0.5
+
+Increment 0.4 closed MFA enrollment but audit rows still flowed through the runtime `app_rw` connection, and the verifier only printed a JSON verdict. This increment splits append traffic and records nightly chain checks.
+
+- Migration `0006_audit_chain_checks.sql` adds `audit_chain_checks` (one row per tenant per UTC day, append-only triggers) and grants `app_append` SELECT on `domain_event` so the append role can read the chain tip inside a tenant-scoped transaction.
+- `APPEND_ROLE_DSN` selects a second pool. `appendDomainEvent` and `logPhiAccess` use `withTenantAppendTransaction`; production boot requires `APPEND_ROLE_DSN` and probes that the connection holds `app_append` and cannot UPDATE `domain_event`.
+- `pnpm --filter @pms/verifier verify:chain:record` verifies as `app_verify`, then inserts into `audit_chain_checks` as `app_append` (idempotent on `(tenant_id, day)`). CI exercises it; `.github/workflows/nightly-verifier.yml` is the production schedule template (secrets `VERIFY_ROLE_DSN`, `APPEND_ROLE_DSN`).
+
+**Not in Increment 0.5.** Object Lock chain head, `disclosures`, two-admin recovery ceremony, real KMS, PHI patient rows, legal pack, D.8 interviews.
+
+## Increment 0.6
+
+Increment 0.5 split ledger appends and recorded nightly chain checks but left two Phase 0 compliance gaps: no accounting-of-disclosures table and no replacement for a single-admin password reset. This increment adds both.
+
+- Migration `0007_disclosures_recovery.sql` creates `disclosures` (append-only, INSERT via `app_append`) and `recovery_ceremonies` (two distinct admins, 15-minute expiry, one-time reset token). A SECURITY DEFINER `auth_lookup_recovery_ceremony` admits password reset before tenant context exists.
+- `recordDisclosure` validates channel and purpose enums and writes through the append pool.
+- Two-admin recovery: `POST /api/recovery-ceremony` (initiate + TOTP), `POST /api/recovery-ceremony/approve` (second admin + TOTP, returns `resetToken`), `POST /api/recovery-ceremony/reset` (token + new password, no session).
+
+**Not in Increment 0.6.** Object Lock chain head, egress paths that call `recordDisclosure`, real KMS, PHI patient rows, legal pack, D.8 interviews.
+
+## Increment 0.7
+
+Increment 0.6 added disclosures and recovery ceremonies but nightly verification still stopped at `audit_chain_checks` rows in Postgres. This increment anchors signed chain heads to Object Lock storage.
+
+- Migration `0008_chain_head_anchor.sql` adds `object_lock_key` to `audit_chain_checks` and permits `app_append` to set it once after insert; all other updates remain refused.
+- `packages/verifier` gains `anchor.ts`: HMAC-signed chain-head documents, a `file://` sink for dev/CI, and `anchorRecordedHeads` called from `verify:chain:record` when `OBJECT_STORAGE_URL` and `CHAIN_HEAD_SIGN_KEY` are set. Production will swap the dev HMAC signer for KMS ECDSA P-256.
+- CI writes anchored heads under `file:///tmp/pms-audit-heads`; the nightly workflow template passes through the production secrets.
+
+**Not in Increment 0.7.** Real KMS signing, S3 Object Lock compliance mode, egress paths that call `recordDisclosure`, PHI patient rows, legal pack, D.8 interviews.
+
+## Increment 0.8
+
+Increment 0.7 anchored chain heads but disclosures were still only reachable through a standalone helper. This increment establishes the egress accounting pattern and the incident-response revoke-all path.
+
+- `requireAccess` accepts an optional `disclosure` option; when set it validates channel/purpose enums and appends a `disclosures` row through the append pool in the same request as the guarded handler.
+- `revokeAllSessionsForTenant` revokes every live session in the tenant, appends `auth.sessions_revoked_all` to `domain_event`, and is exposed at `POST /api/admin/revoke-all-sessions` (admin rank).
+
+**Not in Increment 0.8.** Live export/print/fax routes that call the disclosure option (no patient rows yet), real KMS, restore drill, usage-metrics pipeline, PHI patient rows, legal pack, D.8 interviews.
+
+## Increment 0.9
+
+Increment 0.8 closed the disclosure and revoke-all gaps but Phase 0 exit criteria still required golden tests for every lifted scoring function. This increment adds SHA-256 snapshot hashes for the frozen `ridgeviewPractice()` fixture across all exported `controls-engine` scorers (knowledge risks, precog scenario, COSO, residual portfolio, leading indicators, SoD detection, dual release, counterfactuals, beam search).
+
+**Not in Increment 0.9.** Restore drill, usage-metrics pipeline, production KMS, PHI patient rows, legal pack, D.8 interviews.
+
+## Increment 0.10
+
+Phase 0 exit criteria require a restore drill that verifies `BACKUP_TARGET` and writes its own audit row. This increment adds `pnpm db:restore-drill`: it checks `file://` reachability (or validates `s3://` format), then appends `backup.restore_drill` to `domain_event` for every tenant through `app_append`. CI runs it against `file:///tmp/pms-backups`.
+
+**Not in Increment 0.10.** Real S3 restore verification, usage-metrics pipeline, production KMS, PHI patient rows, legal pack, D.8 interviews.
+
+## Increment 0.11
+
+Phase 0 non-code deliverables include a first-party usage-metrics pipeline derived from `domain_event` and passed through a redactor. This increment adds `@pms/metrics` (`redactEventPayload`, `aggregateDailyMetrics`) and refuses `DEV_MFA_KEY` when `NODE_ENV=production`.
+
+**Not in Increment 0.11.** Scheduled metrics worker, production KMS, real S3 restore verification, PHI patient rows, legal pack, D.8 interviews.
 
 ## Risks that stay visible
 

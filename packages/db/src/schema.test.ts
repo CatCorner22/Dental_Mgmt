@@ -2,21 +2,34 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TENANT_SCOPED_TABLES } from "./schema";
 import { baaIsLive, canEnableIntegration, refuseEnabledWithoutBaa } from "./baa";
 import { encryptSecret, decryptSecret } from "./crypto";
 import { GENESIS_HASH, hashDomainEvent } from "./chain";
 import { uuidv7 } from "./ids";
-import { DB_ROLES } from "./roles";
+import { DB_ROLES, PROCESS_ROLES } from "./roles";
 import { SET_LOCAL_TENANT_SQL } from "./tenant-context";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sql = readFileSync(join(here, "../migrations/0001_init.sql"), "utf8");
 const authSql = readFileSync(join(here, "../migrations/0002_auth_lookup.sql"), "utf8");
+const auditSql = readFileSync(join(here, "../migrations/0006_audit_chain_checks.sql"), "utf8");
+const complianceSql = readFileSync(join(here, "../migrations/0007_disclosures_recovery.sql"), "utf8");
+const anchorSql = readFileSync(join(here, "../migrations/0008_chain_head_anchor.sql"), "utf8");
+const increment01TenantTables = [
+  "locations",
+  "users",
+  "sessions",
+  "user_entitlements",
+  "domain_event",
+  "phi_access_log",
+  "integration_registry",
+  "auth_throttle",
+] as const;
 
 describe("Increment 0.1 schema", () => {
-  it("names the three DB roles", () => {
-    expect(Object.keys(DB_ROLES)).toEqual(["app_rw", "app_append", "app_migrate"]);
+  it("names the three process roles", () => {
+    expect(PROCESS_ROLES).toEqual(["app_rw", "app_append", "app_migrate"]);
+    for (const role of PROCESS_ROLES) expect(Object.keys(DB_ROLES)).toContain(role);
     expect(sql).toMatch(/app_rw/);
     expect(sql).toMatch(/app_append/);
     expect(sql).toMatch(/app_migrate/);
@@ -44,11 +57,38 @@ describe("Increment 0.1 schema", () => {
     expect(sql).not.toMatch(/CREATE TABLE notes\b/);
   });
 
-  it("enables and forces RLS on every tenant-scoped table", () => {
-    for (const name of ["tenants", ...TENANT_SCOPED_TABLES]) {
+  it("enables and forces RLS on every tenant-scoped table from Increment 0.1", () => {
+    for (const name of ["tenants", ...increment01TenantTables]) {
       expect(sql, name).toMatch(new RegExp(`ALTER TABLE ${name} ENABLE ROW LEVEL SECURITY`));
       expect(sql, name).toMatch(new RegExp(`ALTER TABLE ${name} FORCE ROW LEVEL SECURITY`));
     }
+  });
+});
+
+describe("Increment 0.5 audit chain checks", () => {
+  it("creates an append-only daily check table with RLS", () => {
+    expect(auditSql).toMatch(/CREATE TABLE audit_chain_checks/);
+    expect(auditSql).toMatch(/ALTER TABLE audit_chain_checks ENABLE ROW LEVEL SECURITY/);
+    expect(auditSql).toMatch(/audit_chain_checks_immutable/);
+    expect(auditSql).toMatch(/GRANT INSERT ON audit_chain_checks TO app_append/);
+  });
+});
+
+describe("Increment 0.6 disclosures and recovery", () => {
+  it("creates append-only disclosures and a two-admin recovery table", () => {
+    expect(complianceSql).toMatch(/CREATE TABLE disclosures/);
+    expect(complianceSql).toMatch(/CREATE TABLE recovery_ceremonies/);
+    expect(complianceSql).toMatch(/recovery_ceremonies_distinct_admins/);
+    expect(complianceSql).toMatch(/auth_lookup_recovery_ceremony/);
+    expect(complianceSql).toMatch(/GRANT INSERT ON disclosures TO app_append/);
+  });
+});
+
+describe("Increment 0.7 chain head anchor", () => {
+  it("stores the Object Lock key and allows a one-time anchor update", () => {
+    expect(anchorSql).toMatch(/object_lock_key/);
+    expect(anchorSql).toMatch(/GRANT SELECT, UPDATE ON audit_chain_checks TO app_append/);
+    expect(anchorSql).toMatch(/OLD\.object_lock_key IS NULL/);
   });
 });
 

@@ -1,5 +1,12 @@
-# Local Postgres for Increment 0.1. Uses a single role until a vault exists.
-# Production uses app_rw / app_append / app_migrate as documented in packages/db.
+# Local Postgres. The container's `pms` user is an administrator; use it only
+# to bootstrap. Then:
+#
+#   POSTGRES_URL=postgres://pms:pms@localhost:5432/pms pnpm db:roles
+#   POSTGRES_URL=postgres://pms:pms@localhost:5432/pms PMS_MIGRATE_ROLE=app_migrate pnpm db:migrate
+#
+# and point the app at a LOGIN role that inherits app_rw (see
+# packages/db/sql/roles.sql). Production connects the same way; the boot
+# guard refuses a superuser, BYPASSRLS, or table-owning connection.
 services:
   postgres:
     image: postgres:16

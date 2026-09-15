@@ -5,3 +5,4 @@ export * from "./crypto";
 export * from "./baa";
 export * from "./chain";
 export * from "./tenant-context";
+export * from "./disclosures";

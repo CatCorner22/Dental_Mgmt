@@ -3,16 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Byteaudit retargeted: restated promises for the event chain and RLS. Never imports the promises it verifies.",
+  "description": "Byteaudit retargeted: restated promises for the event chain and RLS, plus the nightly chain verifier. Never imports the promises it verifies.",
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify:chain": "tsx src/cli.ts",
+    "verify:chain:record": "tsx src/record-cli.ts"
+  },
+  "dependencies": {
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
+    "@types/pg": "^8.15.5",
+    "tsx": "^4.19.0",
     "typescript": "^5.8.3",
     "vitest": "^3.1.4"
   }

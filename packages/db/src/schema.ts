@@ -1,5 +1,7 @@
 import {
+  bigint,
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -49,8 +51,8 @@ export const users = pgTable(
     role: text("role").notNull(),
     clinicalRole: text("clinical_role").notNull().default("unset"),
     active: boolean("active").notNull().default(true),
-    /** Envelope-encrypted TOTP secret. MFA is mandatory. */
-    mfaSecretEnc: jsonb("mfa_secret_enc").notNull(),
+    /** Envelope-encrypted TOTP secret. Null until MFA enrollment completes. */
+    mfaSecretEnc: jsonb("mfa_secret_enc"),
     mfaEnrolledAt: timestamp("mfa_enrolled_at", { withTimezone: true }),
     recoveryCodesHash: text("recovery_codes_hash"),
     passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }).notNull(),
@@ -108,10 +110,13 @@ export const domainEvent = pgTable(
     prevHash: text("prev_hash").notNull(),
     hash: text("hash").notNull(),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    /** Per-tenant position in the chain, from 1. Defines order; forbids forks. */
+    seq: bigint("seq", { mode: "number" }).notNull(),
   },
   (t) => [
     index("domain_event_tenant_occurred_idx").on(t.tenantId, t.occurredAt),
     uniqueIndex("domain_event_tenant_hash_uidx").on(t.tenantId, t.hash),
+    uniqueIndex("domain_event_tenant_seq_uidx").on(t.tenantId, t.seq),
   ]
 );
 
@@ -155,6 +160,55 @@ export const authThrottle = pgTable("auth_throttle", {
   lockedUntil: timestamp("locked_until", { withTimezone: true }),
 });
 
+export const auditChainChecks = pgTable(
+  "audit_chain_checks",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    day: date("day").notNull(),
+    ok: boolean("ok").notNull(),
+    headHash: text("head_hash").notNull(),
+    eventCount: integer("event_count").notNull(),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+    objectLockKey: text("object_lock_key"),
+  },
+  (t) => [index("audit_chain_checks_day_idx").on(t.day)]
+);
+
+export const disclosures = pgTable(
+  "disclosures",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    patientId: uuid("patient_id").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    channel: text("channel").notNull(),
+    recipient: text("recipient").notNull(),
+    recordIds: jsonb("record_ids").notNull(),
+    purpose: text("purpose").notNull(),
+    actorUserId: uuid("actor_user_id").notNull(),
+    actorName: text("actor_name").notNull(),
+    documentId: uuid("document_id"),
+  },
+  (t) => [index("disclosures_tenant_patient_at_idx").on(t.tenantId, t.patientId, t.at)]
+);
+
+export const recoveryCeremonies = pgTable(
+  "recovery_ceremonies",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    targetUserId: uuid("target_user_id").notNull(),
+    initiatedBy: uuid("initiated_by").notNull(),
+    approvedBy: uuid("approved_by"),
+    initiatedAt: timestamp("initiated_at", { withTimezone: true }).notNull(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    resetTokenHash: text("reset_token_hash"),
+  },
+  (t) => [index("recovery_ceremonies_target_idx").on(t.tenantId, t.targetUserId, t.initiatedAt)]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "users",
@@ -163,4 +217,7 @@ export const TENANT_SCOPED_TABLES = [
   "domain_event",
   "phi_access_log",
   "integration_registry",
+  "audit_chain_checks",
+  "disclosures",
+  "recovery_ceremonies",
 ] as const;

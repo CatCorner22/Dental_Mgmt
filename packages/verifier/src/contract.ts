@@ -16,6 +16,12 @@ export interface PipelineStep {
 
 export const CHAIN_STEPS: readonly PipelineStep[] = [
   {
+    id: "verifier-admitted",
+    promise: "The verifying connection holds app_verify, so row-level security shows it every tenant.",
+    evidence: "pg_has_role(current_user, 'app_verify', 'USAGE') is true before any chain is read.",
+    ifAbsent: "An ordinary role sees zero rows under RLS and an empty result would pass as a clean chain.",
+  },
+  {
     id: "genesis-known",
     promise: "The first event in a tenant chain follows a published genesis hash.",
     evidence: "prev_hash on the first row is 64 ASCII zeros.",
@@ -30,8 +36,14 @@ export const CHAIN_STEPS: readonly PipelineStep[] = [
   {
     id: "links-hold",
     promise: "Each event after the first names the previous event's hash as prev_hash.",
-    evidence: "event[n].prev_hash === event[n-1].hash, in occurred_at order.",
+    evidence: "event[n].prev_hash === event[n-1].hash, in seq order.",
     ifAbsent: "A link was inserted, deleted, or reordered after the fact.",
+  },
+  {
+    id: "sequence-dense",
+    promise: "A tenant's events are numbered 1, 2, 3 … with no gap, when a seq is present.",
+    evidence: "event[n].seq === n + 1 for every row read in seq order.",
+    ifAbsent: "A row was removed from the middle or the chain was rebuilt from two sources.",
   },
 ];
 
@@ -69,7 +81,8 @@ export const NAMED_TABLES = [
 ] as const;
 
 export const LIMITS = [
-  "The verifier reads artifacts (SQL text and event hashes). It does not connect to production.",
-  "It cannot prove a live cluster's role is non-owner. That is an operations check.",
+  "verify:chain reads SQL text and, as app_verify, the domain_event table alone. It writes nothing.",
+  "verify:chain:record additionally writes audit_chain_checks as app_append after a clean verify, then anchors signed heads to Object Lock storage when OBJECT_STORAGE_URL and CHAIN_HEAD_SIGN_KEY are set.",
+  "It cannot prove the application's live role is non-owner. That is an operations check.",
   "It does not judge clinical or financial correctness.",
 ] as const;

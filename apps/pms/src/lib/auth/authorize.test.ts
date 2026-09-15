@@ -94,6 +94,18 @@ describe("authorizeCredentials", () => {
     expect(wrong).toEqual({ ok: false, reason: "credentials" });
   });
 
+  it("rejects TOTP for an enrolled account when the code is wrong", async () => {
+    const store = await createMemoryStore({ now, env, password: DEV_PASSWORD, mfaSecret: DEV_MFA_SECRET });
+    const result = await authorizeCredentials(
+      store,
+      { username: "ridgeview-owner", password: DEV_PASSWORD, totp: "000000" },
+      loginReq(),
+      now,
+      env
+    );
+    expect(result).toEqual({ ok: false, reason: "credentials" });
+  });
+
   it("revokes live sessions when the account is deactivated", async () => {
     const store = await createMemoryStore({ now, env, password: DEV_PASSWORD, mfaSecret: DEV_MFA_SECRET });
     const code = currentCodeForTest("ridgeview-owner", DEV_MFA_SECRET, now.getTime());

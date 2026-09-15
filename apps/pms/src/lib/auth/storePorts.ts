@@ -47,5 +47,6 @@ export function storePorts(
       store.touchSession(id, lastSeenAt, idleExpiresAt),
     setTenantContext: (tenantId, userId) => store.setTenantContext(tenantId, userId),
     logPhiAccess: (input) => store.logPhiAccess(input),
+    recordDisclosure: (input) => store.recordDisclosure(input),
   };
 }
