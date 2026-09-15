@@ -8,6 +8,8 @@ import { DEV_MFA_SECRET, DEV_PASSWORD, DEV_TENANTS, DEV_USERS } from "./devSeed"
 import { hashPassword } from "./password";
 import { createPostgresStore } from "./postgresStore";
 import { hashRecoveryCodes } from "./recovery";
+import { readRuntimeRole, runtimeRoleErrors } from "../boot/runtimeRole";
+import { getPool } from "../db/client";
 import { requireAccess } from "./requireAccess";
 import { storePorts } from "./storePorts";
 import { currentCodeForTest } from "./totp";
@@ -182,6 +184,15 @@ describe.skipIf(!adminUrl)("Postgres auth store (live)", () => {
     expect(tampered.publish).toBe(false);
     const ridgeview = tampered.tenants.find((t) => t.tenantId === owner.tenantId)!;
     expect(ridgeview.objections.map((o) => o.stepId)).toContain("hash-agrees");
+  });
+
+  it("the boot guard accepts app_rw and refuses the administrator connection", async () => {
+    const runtime = await readRuntimeRole(getPool(env));
+    expect(runtime).toMatchObject({ superuser: false, bypassRls: false, ownedTables: [] });
+    expect(runtimeRoleErrors(runtime)).toEqual([]);
+
+    const admin = await readRuntimeRole(db.admin);
+    expect(runtimeRoleErrors(admin).length).toBeGreaterThan(0);
   });
 
   it("the verifier role sees nothing but domain_event", async () => {
