@@ -12,6 +12,10 @@ export const DEV_TENANTS = [
 ] as const;
 
 /** Stable ids for the Ridgeview demo ledger seeded in Increment 1.4. */
+export const SEED_APPROVAL = {
+  requestId: "0196b0a0-0000-7000-8000-000000000601",
+} as const;
+
 export const SEED_BANK = {
   tenantId: DEV_TENANTS[0].id,
   locationId: "0196b0a0-0000-7000-8000-000000000101",

@@ -21,9 +21,27 @@ export default function HomePage() {
         </a>
         <a
           className="inline-flex min-h-[var(--target)] items-center rounded-md border border-[var(--line-strong)] bg-[var(--surface)] px-4 py-2 font-semibold text-[var(--ink)]"
+          href="/ledger/post"
+        >
+          Post payment
+        </a>
+        <a
+          className="inline-flex min-h-[var(--target)] items-center rounded-md border border-[var(--line-strong)] bg-[var(--surface)] px-4 py-2 font-semibold text-[var(--ink)]"
           href="/reconciliation"
         >
           Bank reconciliation
+        </a>
+        <a
+          className="inline-flex min-h-[var(--target)] items-center rounded-md border border-[var(--line-strong)] bg-[var(--surface)] px-4 py-2 font-semibold text-[var(--ink)]"
+          href="/day-close"
+        >
+          Day close
+        </a>
+        <a
+          className="inline-flex min-h-[var(--target)] items-center rounded-md border border-[var(--line-strong)] bg-[var(--surface)] px-4 py-2 font-semibold text-[var(--ink)]"
+          href="/approvals"
+        >
+          Approvals inbox
         </a>
       </div>
       <div className="mt-6">
