@@ -173,6 +173,41 @@ export const auditChainChecks = pgTable(
   (t) => [index("audit_chain_checks_day_idx").on(t.day)]
 );
 
+export const disclosures = pgTable(
+  "disclosures",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    patientId: uuid("patient_id").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+    channel: text("channel").notNull(),
+    recipient: text("recipient").notNull(),
+    recordIds: jsonb("record_ids").notNull(),
+    purpose: text("purpose").notNull(),
+    actorUserId: uuid("actor_user_id").notNull(),
+    actorName: text("actor_name").notNull(),
+    documentId: uuid("document_id"),
+  },
+  (t) => [index("disclosures_tenant_patient_at_idx").on(t.tenantId, t.patientId, t.at)]
+);
+
+export const recoveryCeremonies = pgTable(
+  "recovery_ceremonies",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    targetUserId: uuid("target_user_id").notNull(),
+    initiatedBy: uuid("initiated_by").notNull(),
+    approvedBy: uuid("approved_by"),
+    initiatedAt: timestamp("initiated_at", { withTimezone: true }).notNull(),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    resetTokenHash: text("reset_token_hash"),
+  },
+  (t) => [index("recovery_ceremonies_target_idx").on(t.tenantId, t.targetUserId, t.initiatedAt)]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "users",
@@ -182,4 +217,6 @@ export const TENANT_SCOPED_TABLES = [
   "phi_access_log",
   "integration_registry",
   "audit_chain_checks",
+  "disclosures",
+  "recovery_ceremonies",
 ] as const;

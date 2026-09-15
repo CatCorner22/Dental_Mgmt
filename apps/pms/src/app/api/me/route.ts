@@ -4,7 +4,7 @@ export const GET = withGuard(async (_req, ctx) => {
   const { user, session } = ctx.access;
   return Response.json({
     ok: true,
-    increment: "0.5",
+    increment: "0.6",
     username: user.username,
     displayName: user.displayName,
     role: user.role,

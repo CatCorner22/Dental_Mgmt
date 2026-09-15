@@ -63,6 +63,57 @@ export interface AuthStore {
     payload: unknown;
     at: Date;
   }): Promise<void>;
+  recordDisclosure(input: {
+    tenantId: string;
+    patientId: string;
+    channel: string;
+    recipient: string;
+    recordIds: string[];
+    purpose: string;
+    actorUserId: string;
+    actorName: string;
+    documentId: string | null;
+    at: Date;
+  }): Promise<string>;
+  createRecoveryCeremony(input: {
+    tenantId: string;
+    targetUserId: string;
+    initiatedBy: string;
+    initiatedAt: Date;
+    expiresAt: Date;
+  }): Promise<string>;
+  getRecoveryCeremony(id: string): Promise<{
+    id: string;
+    tenantId: string;
+    targetUserId: string;
+    initiatedBy: string;
+    approvedBy: string | null;
+    initiatedAt: Date;
+    approvedAt: Date | null;
+    expiresAt: Date;
+    consumedAt: Date | null;
+    resetTokenHash: string | null;
+  } | null>;
+  getRecoveryCeremonyByTokenHash(resetToken: string): Promise<{
+    id: string;
+    tenantId: string;
+    targetUserId: string;
+    initiatedBy: string;
+    approvedBy: string | null;
+    initiatedAt: Date;
+    approvedAt: Date | null;
+    expiresAt: Date;
+    consumedAt: Date | null;
+    resetTokenHash: string | null;
+  } | null>;
+  approveRecoveryCeremony(input: {
+    id: string;
+    approvedBy: string;
+    approvedAt: Date;
+    resetTokenHash: string;
+  }): Promise<void>;
+  consumeRecoveryCeremony(id: string, consumedAt: Date): Promise<void>;
+  setPassword(userId: string, passwordHash: string, passwordChangedAt: Date): Promise<void>;
   getThrottle(key: string): Promise<ThrottleRow | null>;
   putThrottle(row: ThrottleRow): Promise<ThrottleRow>;
   applyLock(key: string, lockedUntil: Date, now: Date): Promise<ThrottleRow | null>;

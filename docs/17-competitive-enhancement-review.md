@@ -2,7 +2,7 @@
 
 > Source: owner review of 2026-09-14. The owner asked for a comprehensive, beautiful, low-cognitive-load dental PMS with an industry-leading one-way SuperByte note advisor (twin deterministic and probabilistic knowledge bases; see Smile Notes) and a novel Precog risk-avoidance module. Two decisions lock this document: start Phase 0 of the real product, and keep SuperByte one-way (staff never prompt, chat, or rate). Evidence for market claims is the v3 knowledge base (`knowledge/dental-pms-and-risk-platforms-report-v3-2026-09-02.md`, `knowledge/semantic-memory.md`). Legal statements inherit the PRIMARY / SECONDARY / REPO / UNVERIFIED labels from `docs/11`.
 
-This repository remains a consolidation plan plus a clickable prototype. Increment 0.1, recorded here, is the first code foundation of the merged PMS. Increment 0.2 wires the sessions table and `/api/me`. Increment 0.3 makes the database real: migrations that apply, roles that exist, and a verifier that reads a live chain. Increment 0.4 forces MFA enrollment on first login and seeds two Postgres tenants without `AUTH_DEV_MEMORY`. Increment 0.5 splits ledger appends to `app_append`, records nightly chain checks, and schedules the verifier. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) stay listed, not silently marked done.
+This repository remains a consolidation plan plus a clickable prototype. Increment 0.1, recorded here, is the first code foundation of the merged PMS. Increment 0.2 wires the sessions table and `/api/me`. Increment 0.3 makes the database real: migrations that apply, roles that exist, and a verifier that reads a live chain. Increment 0.4 forces MFA enrollment on first login and seeds two Postgres tenants without `AUTH_DEV_MEMORY`. Increment 0.5 splits ledger appends to `app_append`, records nightly chain checks, and schedules the verifier. Increment 0.6 adds the `disclosures` schema and a two-admin recovery ceremony. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) stay listed, not silently marked done.
 
 ## Current state
 
@@ -161,6 +161,16 @@ Increment 0.4 closed MFA enrollment but audit rows still flowed through the runt
 - `pnpm --filter @pms/verifier verify:chain:record` verifies as `app_verify`, then inserts into `audit_chain_checks` as `app_append` (idempotent on `(tenant_id, day)`). CI exercises it; `.github/workflows/nightly-verifier.yml` is the production schedule template (secrets `VERIFY_ROLE_DSN`, `APPEND_ROLE_DSN`).
 
 **Not in Increment 0.5.** Object Lock chain head, `disclosures`, two-admin recovery ceremony, real KMS, PHI patient rows, legal pack, D.8 interviews.
+
+## Increment 0.6
+
+Increment 0.5 split ledger appends and recorded nightly chain checks but left two Phase 0 compliance gaps: no accounting-of-disclosures table and no replacement for a single-admin password reset. This increment adds both.
+
+- Migration `0007_disclosures_recovery.sql` creates `disclosures` (append-only, INSERT via `app_append`) and `recovery_ceremonies` (two distinct admins, 15-minute expiry, one-time reset token). A SECURITY DEFINER `auth_lookup_recovery_ceremony` admits password reset before tenant context exists.
+- `recordDisclosure` validates channel and purpose enums and writes through the append pool.
+- Two-admin recovery: `POST /api/recovery-ceremony` (initiate + TOTP), `POST /api/recovery-ceremony/approve` (second admin + TOTP, returns `resetToken`), `POST /api/recovery-ceremony/reset` (token + new password, no session).
+
+**Not in Increment 0.6.** Object Lock chain head, egress paths that call `recordDisclosure`, real KMS, PHI patient rows, legal pack, D.8 interviews.
 
 ## Risks that stay visible
 
