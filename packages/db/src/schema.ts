@@ -169,6 +169,7 @@ export const auditChainChecks = pgTable(
     headHash: text("head_hash").notNull(),
     eventCount: integer("event_count").notNull(),
     checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+    objectLockKey: text("object_lock_key"),
   },
   (t) => [index("audit_chain_checks_day_idx").on(t.day)]
 );

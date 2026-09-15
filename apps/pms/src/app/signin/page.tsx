@@ -15,7 +15,7 @@ export default async function SignInPage({
 
   return (
     <main className="mx-auto max-w-md px-6 py-16">
-      <p className="mb-3 text-sm font-semibold tracking-wide text-teal">Increment 0.6</p>
+      <p className="mb-3 text-sm font-semibold tracking-wide text-teal">Increment 0.7</p>
       <h1 className="mb-3 text-navy">Sign in</h1>
       {ready ? (
         <p className="mb-4 rounded-[var(--radius)] bg-[var(--surface)] p-3 text-sm text-[var(--ink-2)] ring-1 ring-[var(--line)]">

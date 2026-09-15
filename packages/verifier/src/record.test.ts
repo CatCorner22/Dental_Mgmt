@@ -77,7 +77,9 @@ describe("recordDatabaseChains", () => {
       headHash: hash,
       eventCount: 1,
       inserted: true,
+      objectLockKey: null,
+      anchored: false,
     });
-    expect(inserts[0]).toEqual(["t1", "2026-09-15", true, hash, 1]);
+    expect(inserts[0]?.slice(0, 5)).toEqual(["t1", "2026-09-15", true, hash, 1]);
   });
 });

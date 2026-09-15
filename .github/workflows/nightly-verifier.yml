@@ -20,4 +20,6 @@ jobs:
         env:
           VERIFY_ROLE_DSN: ${{ secrets.VERIFY_ROLE_DSN }}
           APPEND_ROLE_DSN: ${{ secrets.APPEND_ROLE_DSN }}
+          OBJECT_STORAGE_URL: ${{ secrets.OBJECT_STORAGE_URL }}
+          CHAIN_HEAD_SIGN_KEY: ${{ secrets.CHAIN_HEAD_SIGN_KEY }}
         run: pnpm --filter @pms/verifier verify:chain:record

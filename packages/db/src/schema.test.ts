@@ -14,6 +14,7 @@ const sql = readFileSync(join(here, "../migrations/0001_init.sql"), "utf8");
 const authSql = readFileSync(join(here, "../migrations/0002_auth_lookup.sql"), "utf8");
 const auditSql = readFileSync(join(here, "../migrations/0006_audit_chain_checks.sql"), "utf8");
 const complianceSql = readFileSync(join(here, "../migrations/0007_disclosures_recovery.sql"), "utf8");
+const anchorSql = readFileSync(join(here, "../migrations/0008_chain_head_anchor.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -80,6 +81,14 @@ describe("Increment 0.6 disclosures and recovery", () => {
     expect(complianceSql).toMatch(/recovery_ceremonies_distinct_admins/);
     expect(complianceSql).toMatch(/auth_lookup_recovery_ceremony/);
     expect(complianceSql).toMatch(/GRANT INSERT ON disclosures TO app_append/);
+  });
+});
+
+describe("Increment 0.7 chain head anchor", () => {
+  it("stores the Object Lock key and allows a one-time anchor update", () => {
+    expect(anchorSql).toMatch(/object_lock_key/);
+    expect(anchorSql).toMatch(/GRANT SELECT, UPDATE ON audit_chain_checks TO app_append/);
+    expect(anchorSql).toMatch(/OLD\.object_lock_key IS NULL/);
   });
 });
 
