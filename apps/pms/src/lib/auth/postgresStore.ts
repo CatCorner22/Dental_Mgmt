@@ -18,6 +18,10 @@ import { parseRecoveryHashes } from "./recovery";
 import type { AuthStore, StoredUser } from "./store";
 import type { SessionRow } from "./types";
 
+/** Transaction-scoped advisory lock keyed on the tenant; released at COMMIT/ROLLBACK. */
+export const TENANT_CHAIN_LOCK_SQL = (tenantId: string) =>
+  sql`SELECT pg_advisory_xact_lock(hashtext('domain_event'), hashtext(${tenantId}))`;
+
 interface LookupUserRow {
   id: string;
   tenant_id: string;
@@ -202,13 +206,19 @@ export function createPostgresStore(
     },
     async appendDomainEvent(input) {
       await withTenantTransaction(input.tenantId, input.actorUserId ?? input.tenantId, async (db) => {
+        // Serialize appends per tenant for the rest of this transaction so two
+        // writers cannot read the same last row. UNIQUE (tenant_id, seq) stays
+        // as the backstop that turns any remaining race into a failed insert
+        // rather than a silent fork.
+        await db.execute(TENANT_CHAIN_LOCK_SQL(input.tenantId));
         const [last] = await db
-          .select({ hash: domainEvent.hash })
+          .select({ hash: domainEvent.hash, seq: domainEvent.seq })
           .from(domainEvent)
           .where(eq(domainEvent.tenantId, input.tenantId))
-          .orderBy(sql`${domainEvent.occurredAt} desc`)
+          .orderBy(sql`${domainEvent.seq} desc`)
           .limit(1);
         const prevHash = last?.hash ?? GENESIS_HASH;
+        const seq = (last?.seq ?? 0) + 1;
         const occurredAt = input.at;
         const hash = hashDomainEvent({
           prevHash,
@@ -226,6 +236,7 @@ export function createPostgresStore(
           prevHash,
           hash,
           occurredAt,
+          seq,
         });
       }, env);
     },
