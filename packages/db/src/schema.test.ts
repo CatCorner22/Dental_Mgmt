@@ -7,7 +7,7 @@ import { baaIsLive, canEnableIntegration, refuseEnabledWithoutBaa } from "./baa"
 import { encryptSecret, decryptSecret } from "./crypto";
 import { GENESIS_HASH, hashDomainEvent } from "./chain";
 import { uuidv7 } from "./ids";
-import { DB_ROLES } from "./roles";
+import { DB_ROLES, PROCESS_ROLES } from "./roles";
 import { SET_LOCAL_TENANT_SQL } from "./tenant-context";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -15,8 +15,9 @@ const sql = readFileSync(join(here, "../migrations/0001_init.sql"), "utf8");
 const authSql = readFileSync(join(here, "../migrations/0002_auth_lookup.sql"), "utf8");
 
 describe("Increment 0.1 schema", () => {
-  it("names the three DB roles", () => {
-    expect(Object.keys(DB_ROLES)).toEqual(["app_rw", "app_append", "app_migrate"]);
+  it("names the three process roles", () => {
+    expect(PROCESS_ROLES).toEqual(["app_rw", "app_append", "app_migrate"]);
+    for (const role of PROCESS_ROLES) expect(Object.keys(DB_ROLES)).toContain(role);
     expect(sql).toMatch(/app_rw/);
     expect(sql).toMatch(/app_append/);
     expect(sql).toMatch(/app_migrate/);
