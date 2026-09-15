@@ -181,12 +181,22 @@ describe("mode router", () => {
 describe("twin: verifyMeaning from clinical-core", () => {
   it("is exported from clinical-core and rejects a rewrite that changes a tooth number", () => {
     expect(typeof verifyMeaning).toBe("function");
-    const result = verifyMeaning(
+    const numeric = verifyMeaning(
       "Composite placed on tooth 19.",
       "Composite placed on tooth 14.",
       { mode: "rewrite" }
     );
-    expect(result.ok).toBe(false);
-    expect(result.rejections.some((r) => r.code === "teeth-changed")).toBe(true);
+    expect(numeric.ok).toBe(false);
+    // Numeric ADA designations are a digit multiset; letter primaries use teeth-changed.
+    expect(
+      numeric.rejections.some((r) => r.code === "digits-changed" || r.code === "teeth-changed")
+    ).toBe(true);
+    const letters = verifyMeaning(
+      "Sealants placed on teeth A and B.",
+      "Sealants placed on teeth A and C.",
+      { mode: "rewrite" }
+    );
+    expect(letters.ok).toBe(false);
+    expect(letters.rejections.some((r) => r.code === "teeth-changed")).toBe(true);
   });
 });
