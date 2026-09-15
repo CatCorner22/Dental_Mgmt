@@ -233,6 +233,35 @@ The readable ledger gets a minimal Money Desk UI before checkout or posting scre
 
 **Not in Increment 1.4.** Posting UI, checkout, approvals inbox UI, As-of date chip, CPA/patient explanation audiences, palette search, mobile approvals surface, patient self-scheduling (on the roadmap for Phase 5; see `docs/08-roadmap.md`).
 
+## Increment 1.5
+
+Phase 1 independent reconciliation starts with bank statement import, not aggregator feeds. This increment adds `bank_accounts`, append-only `bank_transactions`, `bank_statement_imports`, `reconciliation_runs`, and `reconciliation_variances`; extends `@pms/import` with a CSV bank-statement parser and fixture; seeds a Ridgeview operating account; exposes `POST /api/import/bank-statement`, `GET /api/bank/accounts`, and `GET /api/reconciliation/runs` (+ detail); and renders `/reconciliation` with a statement-import form and variance queue. Credits on the statement auto-match staged Curve Hero `deposit_slip` rows by date and amount; everything else lands as an open `unmatched_bank` variance. Every import appends `import.bank_statement.applied` to `domain_event`.
+
+**Not in Increment 1.5.** Aggregator feed, variance clearance / SoD runtime block, day close, ledger tie-out from bank lines, OFX parser, nightly scheduler, owner Tied tile.
+
+## Increment 1.6
+
+Location-scoped deposits and atomic day close land before month-end or CPA tooling. This increment adds `deposits` and `day_closes` (frozen rows are immutable), seeds Ridgeview demo deposits for 2026-09-14, exposes `GET /api/day-close`, `POST /api/day-close/freeze` (`bank_reconcile`), and `POST /api/deposits/apply-staged` (`post_payments`), and renders `/day-close` with deposit batch vs imported day-sheet payment totals and a freeze control. Freezing appends `day_close.frozen` to `domain_event` and marks deposits `closed`.
+
+**Not in Increment 1.6.** Prior-period lock, month close, inter-location transfers, deposit variance alerts, owner Tied tile, ledger posting from deposits.
+
+## Increment 1.7
+
+Dual-release approvals get a minimal inbox UI. This increment seeds a pending write-off request from the front-desk user and renders `/approvals` with approve/decline actions wired to the existing `GET /api/approvals/inbox` and `POST /api/approvals/[id]/decide` routes (`approve_writeoffs`). Approving executes the held posting via `executeHeldPosting`.
+
+**Not in Increment 1.7.** Push notifications, walk-over PIN sessions, policy/exceptions editor, mobile approvals surface, palette search.
+
+## Increment 1.8
+
+Validated Curve Hero day-sheet rows post to the shadow ledger. This increment adds `apps/pms/src/lib/import/apply.ts` (MRN and location resolution, day-sheet → charge / `patient_payment` mapping, idempotency keys `import:curve:{runId}:{rowNumber}`), a Postgres-backed `@pms/ledger` writer, `POST /api/import/curve/apply` behind `run_import`, `pnpm import:curve:apply` as an API-only stub, and `import.curve_hero.applied` on `domain_event`. `import_runs` move from `validated` to `applied` when processing completes.
+
+**Not in Increment 1.8.** AR aging / deposit-slip ledger apply, nightly scheduler, dry-run diff UI, insurance-payment mapping, Open Dental or Dentrix parsers.
+## Increment 1.9
+
+Money Desk posting gets a guarded HTTP route and a minimal form. This increment adds `apps/pms/src/lib/ledger/post.ts` (Postgres `LedgerWriter` plus `postGuarded` with held `approval_requests` when dual release requires a second approver), `POST /api/ledger/post` behind `post_payments`, `GET /api/ledger/post/procedures` for charge procedure pickers, and `/ledger/post` with guarantor account, kind, amount, effective date, and reason code. Nav and home link to the posting screen; success and `needs_second` responses link staff to `/approvals` or the account ledger.
+
+**Not in Increment 1.9.** Checkout, card processing, palette search, full posting wizard, tender capture, insurance payments, reversals, and ledger posting from bank deposits.
+
 ## Risks that stay visible
 
 - Lifting Smile Notes tests while inverting the PHI premise will fail some of those tests; they become a tracked rewrite list, not a reason to leave PHI-blocking rules in place.
