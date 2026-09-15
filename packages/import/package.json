@@ -3,14 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Curve Hero report-import ETL stub: parse, validate, and stage day sheets, AR aging, deposits, and patient headers.",
+  "description": "Report-import ETL stubs: Curve Hero day sheets and bank statement CSV parse, validate, and stage.",
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "import:curve": "tsx src/cli.ts"
+    "import:bank": "tsx src/bank-cli.ts",
+    "import:curve": "tsx src/cli.ts",
+    "import:curve:apply": "tsx src/apply-cli.ts"
   },
   "dependencies": {
     "@pms/db": "workspace:*"
