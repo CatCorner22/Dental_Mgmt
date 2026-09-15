@@ -1,0 +1,22 @@
+{
+  "name": "@pms/clinical-kb",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Deterministic Byte advise() over a versioned cited knowledge base, plus the SuperByte cage (one-way, default off).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pms/clinical-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}

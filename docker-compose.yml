@@ -1,0 +1,16 @@
+# Local Postgres for Increment 0.1. Uses a single role until a vault exists.
+# Production uses app_rw / app_append / app_migrate as documented in packages/db.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: pms
+      POSTGRES_PASSWORD: pms
+      POSTGRES_DB: pms
+    ports:
+      - "5432:5432"
+    volumes:
+      - pms-pg:/var/lib/postgresql/data
+
+volumes:
+  pms-pg:

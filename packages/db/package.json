@@ -1,0 +1,25 @@
+{
+  "name": "@pms/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Drizzle schema, RLS policies, and Increment 0.1 migrations. No PHI patient rows.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema.ts",
+    "./crypto": "./src/crypto.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "drizzle-kit": "^0.31.5",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}

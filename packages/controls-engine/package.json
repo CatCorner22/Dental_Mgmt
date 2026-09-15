@@ -1,0 +1,19 @@
+{
+  "name": "@pms/controls-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Precog SoD, dual-release, residual, COSO, and signals on PracticeState. Scores are directional until a CPA calibrates them.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}

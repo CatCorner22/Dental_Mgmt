@@ -1,6 +1,6 @@
 # Architecture decision records
 
-Generated from the decision table in `docs/10-decisions-for-owner.md`. Status **Proposed** means the recommendation stands until the owner confirms or changes it.
+Generated from the decision table in `docs/10-decisions-for-owner.md`. Status **Proposed** means the recommendation stands until the owner confirms or changes it. ADR-0002 is **Accepted**. ADR-0012 is **Accepted, amended** (one-way SuperByte; Byte, knowledge base, and cage in Phase 0; provider call still Phase 5). See `docs/17-competitive-enhancement-review.md`.
 
 | ADR | Decision | Recommendation (short) |
 |---|---|---|

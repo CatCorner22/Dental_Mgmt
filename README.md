@@ -5,7 +5,16 @@ This repository holds the **review and plan** for combining two existing product
 - `CatCorner22/dental` (**Smile Notes**): a de-identified clinical-note builder with a deterministic audit engine, a hardened authentication layer, and 201 test files.
 - `CatCorner22/precog` (**Precog Pioneer**): an internal-controls and residual-risk coach whose segregation-of-duties rulebook and dual-release evaluator become the PMS's enforced controls.
 
-No application code lives here yet. Phase 0 scaffolding starts in a separate task once the owner confirms or changes the recommendations in `docs/10-decisions-for-owner.md`.
+Phase 0 Increment 0.1 starts in this repository: a pnpm monorepo (`apps/pms`, `packages/*`) plus the planning corpus and clickable prototype. The owner confirmed the recommendations in `docs/10-decisions-for-owner.md` for ADR-0002 (money and controls first as GTM) and ADR-0012 (one-way SuperByte; Byte, knowledge base, and cage in Phase 0; LLM provider call still Phase 5). Remaining ADRs stay Proposed. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) are not done. See `docs/17-competitive-enhancement-review.md`.
+
+```
+pnpm install
+pnpm typecheck
+pnpm test:packages
+pnpm check:routes
+```
+
+`pnpm test` still runs the clickable prototype harness (syntax, docs, proto-check, axe, reproduce). `pnpm run ci` is the Increment 0.1 package gate.
 
 ## Read in this order
 
@@ -28,6 +37,7 @@ No application code lives here yet. Phase 0 scaffolding starts in a separate tas
 | 15 | `docs/14-beta-test-report.md` | The beta test of the clickable prototype: the falsifiable claim, thresholds pre-registered before any session, the 30-persona panel, declared constraints, what the exercise cannot prove, and the results |
 | 16 | `docs/15-function-audit.md` | The function-by-function audit of the prototype: the rules for operational, consistent, and clear registered before any agent ran, the 497-function inventory, the method, one row per function with its status and evidence, the 248 root causes fixed, and what the fix round found about the audit's own instruments |
 | 17 | `docs/16-ux-review.md` | The UI and UX review against the research on intuitive design and cognitive load: the method and 117 heuristics registered before any finding, the audit of every screen with each root cause re-measured by an adversarial verifier, the three waves of fixes, and the before-and-after numbers |
+| 18 | `docs/17-competitive-enhancement-review.md` | Owner review of 2026-09-14: competitive position, five public pillars (comprehensive PMS, beauty, cognitive load, one-way SuperByte with an expanded twin knowledge base, Precog as risk-avoidance), In / Later / Not, accepted ADRs 2 and 12, and Increment 0.1 |
 
 ## Status of the open decisions
 

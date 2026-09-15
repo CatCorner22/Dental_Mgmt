@@ -1,0 +1,19 @@
+import { defineConfig } from "vitest/config";
+import path from "node:path";
+
+export default defineConfig({
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.ts"],
+    exclude: [
+      "src/lib/vocab/reference-parity.test.ts",
+      "src/lib/audit/severity-style.test.ts"
+    ],
+    setupFiles: ["src/test/setup.ts"]
+  },
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "src")
+    }
+  }
+});
