@@ -16,6 +16,8 @@ import {
 } from "./seed-data";
 import { hashRecoveryCodes } from "./seed-recovery";
 import { seedBankAccount } from "./seed-bank";
+import { seedApprovalsDemo } from "./seed-approvals";
+import { seedDayCloseDemo } from "./seed-day-close";
 import { seedLedgerDemo } from "./seed-ledger";
 
 export interface SeedOptions {
@@ -138,6 +140,8 @@ export async function seedDatabase(
 
   await seedLedgerDemo(db, now);
   await seedBankAccount(db, now);
+  await seedDayCloseDemo(db, now);
+  await seedApprovalsDemo(db, now);
 
   return { tenants: DEV_TENANTS.length, users: DEV_USERS.length };
 }

@@ -239,6 +239,18 @@ Phase 1 independent reconciliation starts with bank statement import, not aggreg
 
 **Not in Increment 1.5.** Aggregator feed, variance clearance / SoD runtime block, day close, ledger tie-out from bank lines, OFX parser, nightly scheduler, owner Tied tile.
 
+## Increment 1.6
+
+Location-scoped deposits and atomic day close land before month-end or CPA tooling. This increment adds `deposits` and `day_closes` (frozen rows are immutable), seeds Ridgeview demo deposits for 2026-09-14, exposes `GET /api/day-close`, `POST /api/day-close/freeze` (`bank_reconcile`), and `POST /api/deposits/apply-staged` (`post_payments`), and renders `/day-close` with deposit batch vs imported day-sheet payment totals and a freeze control. Freezing appends `day_close.frozen` to `domain_event` and marks deposits `closed`.
+
+**Not in Increment 1.6.** Prior-period lock, month close, inter-location transfers, deposit variance alerts, owner Tied tile, ledger posting from deposits.
+
+## Increment 1.7
+
+Dual-release approvals get a minimal inbox UI. This increment seeds a pending write-off request from the front-desk user and renders `/approvals` with approve/decline actions wired to the existing `GET /api/approvals/inbox` and `POST /api/approvals/[id]/decide` routes (`approve_writeoffs`). Approving executes the held posting via `executeHeldPosting`.
+
+**Not in Increment 1.7.** Push notifications, walk-over PIN sessions, policy/exceptions editor, mobile approvals surface, palette search.
+
 ## Risks that stay visible
 
 - Lifting Smile Notes tests while inverting the PHI premise will fail some of those tests; they become a tracked rewrite list, not a reason to leave PHI-blocking rules in place.

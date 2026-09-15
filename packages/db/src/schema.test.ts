@@ -21,6 +21,7 @@ const ledgerViewsSql = readFileSync(join(here, "../migrations/0011_ledger_views.
 const controlsSql = readFileSync(join(here, "../migrations/0012_controls.sql"), "utf8");
 const importSql = readFileSync(join(here, "../migrations/0013_import_staging.sql"), "utf8");
 const bankSql = readFileSync(join(here, "../migrations/0014_bank_reconciliation.sql"), "utf8");
+const dayCloseSql = readFileSync(join(here, "../migrations/0015_day_close_deposits.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -131,6 +132,15 @@ describe("Increment 1.5 bank reconciliation", () => {
     expect(bankSql).toMatch(/CREATE TABLE reconciliation_variances\b/);
     expect(bankSql).toMatch(/bank_transactions_immutable/);
     expect(bankSql).toMatch(/GRANT SELECT, INSERT ON bank_transactions TO app_rw/);
+  });
+});
+
+describe("Increment 1.6 day close and deposits", () => {
+  it("creates deposits and frozen day close tables", () => {
+    expect(dayCloseSql).toMatch(/CREATE TABLE deposits\b/);
+    expect(dayCloseSql).toMatch(/CREATE TABLE day_closes\b/);
+    expect(dayCloseSql).toMatch(/day_closes_immutable_when_frozen/);
+    expect(dayCloseSql).toMatch(/GRANT SELECT, INSERT, UPDATE ON deposits, day_closes TO app_rw/);
   });
 });
 

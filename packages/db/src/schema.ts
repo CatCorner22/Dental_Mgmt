@@ -512,6 +512,54 @@ export const reconciliationVariances = pgTable(
   (t) => [index("reconciliation_variances_run_idx").on(t.runId)]
 );
 
+export const deposits = pgTable(
+  "deposits",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    locationId: uuid("location_id").notNull(),
+    bankAccountId: uuid("bank_account_id").notNull(),
+    businessDate: date("business_date").notNull(),
+    method: text("method").notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    currency: text("currency").notNull().default("USD"),
+    reference: text("reference"),
+    status: text("status").notNull().default("open"),
+    importStagedRowId: uuid("import_staged_row_id"),
+    dayCloseId: uuid("day_close_id"),
+    preparedById: uuid("prepared_by_id").notNull(),
+    preparedByName: text("prepared_by_name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("deposits_tenant_location_date_idx").on(t.tenantId, t.locationId, t.businessDate),
+    uniqueIndex("deposits_tenant_staged_row_uidx").on(t.tenantId, t.importStagedRowId),
+  ]
+);
+
+export const dayCloses = pgTable(
+  "day_closes",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    locationId: uuid("location_id").notNull(),
+    businessDate: date("business_date").notNull(),
+    status: text("status").notNull().default("open"),
+    depositTotalCents: bigint("deposit_total_cents", { mode: "number" }).notNull().default(0),
+    daySheetTotalCents: bigint("day_sheet_total_cents", { mode: "number" }).notNull().default(0),
+    varianceCents: bigint("variance_cents", { mode: "number" }).notNull().default(0),
+    summary: jsonb("summary").notNull().default({}),
+    frozenAt: timestamp("frozen_at", { withTimezone: true }),
+    frozenById: uuid("frozen_by_id"),
+    frozenByName: text("frozen_by_name"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("day_closes_tenant_location_date_idx").on(t.tenantId, t.locationId, t.businessDate),
+    uniqueIndex("day_closes_tenant_location_date_uidx").on(t.tenantId, t.locationId, t.businessDate),
+  ]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "users",
@@ -537,4 +585,6 @@ export const TENANT_SCOPED_TABLES = [
   "bank_transactions",
   "reconciliation_runs",
   "reconciliation_variances",
+  "deposits",
+  "day_closes",
 ] as const;
