@@ -2,7 +2,7 @@
   "name": "@pms/app",
   "version": "0.1.0",
   "private": true,
-  "description": "Next.js 15 PMS shell. Sign-in plus empty home. Increment 0.8 holds no PHI patient rows.",
+  "description": "Next.js 15 PMS shell. Sign-in plus empty home. Increment 0.11 holds no PHI patient rows.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

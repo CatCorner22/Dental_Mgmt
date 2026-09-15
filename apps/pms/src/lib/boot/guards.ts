@@ -12,8 +12,11 @@ export function productionBootErrors(
   if (url && !/sslmode=verify-full/i.test(url) && env.ALLOW_INSECURE_DB !== "1") {
     missing.push("POSTGRES_URL must use sslmode=verify-full");
   }
-  if (!env.KMS_KEY_ID && !env.DEV_MFA_KEY && !env.ENCRYPTION_KEY) {
-    missing.push("KMS_KEY_ID (or DEV_MFA_KEY in a documented exception)");
+  if (env.DEV_MFA_KEY) {
+    missing.push("DEV_MFA_KEY is forbidden in production");
+  }
+  if (!env.KMS_KEY_ID && !env.ENCRYPTION_KEY) {
+    missing.push("KMS_KEY_ID (or ENCRYPTION_KEY)");
   }
   if (!env.BACKUP_TARGET) missing.push("BACKUP_TARGET");
   if (!env.OBJECT_STORAGE_URL) missing.push("OBJECT_STORAGE_URL");

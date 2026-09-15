@@ -24,6 +24,18 @@ describe("production boot guards", () => {
     ).toEqual([]);
   });
 
+  it("refuses production with DEV_MFA_KEY", () => {
+    const errors = productionBootErrors({
+      NODE_ENV: "production",
+      POSTGRES_URL: "postgres://db?sslmode=verify-full",
+      DEV_MFA_KEY: "dev-only",
+      BACKUP_TARGET: "s3://backups",
+      OBJECT_STORAGE_URL: "s3://objects",
+      APPEND_ROLE_DSN: "postgres://append?sslmode=verify-full",
+    });
+    expect(errors.some((e) => e.includes("DEV_MFA_KEY"))).toBe(true);
+  });
+
   it("refuse production with the memory auth store", () => {
     const errors = productionBootErrors({
       NODE_ENV: "production",
