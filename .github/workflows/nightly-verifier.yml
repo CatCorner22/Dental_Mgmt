@@ -1,0 +1,23 @@
+name: nightly-verifier
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  record-chain-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install
+      - name: Verify and record chain heads
+        env:
+          VERIFY_ROLE_DSN: ${{ secrets.VERIFY_ROLE_DSN }}
+          APPEND_ROLE_DSN: ${{ secrets.APPEND_ROLE_DSN }}
+        run: pnpm --filter @pms/verifier verify:chain:record

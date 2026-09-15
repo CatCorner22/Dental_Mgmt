@@ -118,6 +118,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [3, "roles_grants", "app_migrate"],
         [4, "domain_event_seq", "app_migrate"],
         [5, "mfa_enrollment", "app_migrate"],
+        [6, "audit_chain_checks", "app_migrate"],
       ]);
       const owners = await db.admin.query(
         "SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'"
@@ -128,7 +129,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
     it("is a no-op the second time", async () => {
       const result = await applyMigrations(db.admin);
       expect(result.applied).toEqual([]);
-      expect(result.alreadyApplied).toBe(5);
+      expect(result.alreadyApplied).toBe(6);
     });
 
     it("left domain_event with RLS forced after the seq backfill", async () => {
@@ -295,6 +296,47 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
       expect(await attempt("app_rw", ridgeview, "DELETE FROM sessions")).toMatchObject({
         code: "42501",
       });
+    });
+  });
+
+  describe("audit chain checks", () => {
+    it("lets app_append insert a daily row and app_verify read it back", async () => {
+      const day = "2026-09-15";
+      const insert = await attempt(
+        "app_append",
+        ridgeview,
+        `INSERT INTO audit_chain_checks (tenant_id, day, ok, head_hash, event_count, checked_at)
+         VALUES ($1, $2::date, true, $3, 1, now())`,
+        [ridgeview.id, day, "abc123"]
+      );
+      expect(insert).toEqual({ rows: [] });
+
+      const read = await attempt(
+        "app_verify",
+        null,
+        "SELECT ok, head_hash, event_count FROM audit_chain_checks WHERE tenant_id = $1 AND day = $2::date",
+        [ridgeview.id, day]
+      );
+      expect(read).toEqual({ rows: [{ ok: true, head_hash: "abc123", event_count: 1 }] });
+
+      const rewrite = await attempt(
+        "app_append",
+        ridgeview,
+        "UPDATE audit_chain_checks SET ok = false WHERE tenant_id = $1",
+        [ridgeview.id]
+      );
+      expect(rewrite).toMatchObject({ code: "42501" });
+    });
+
+    it("lets app_append read the domain_event tip for chain extension", async () => {
+      const id = await appendEvent(ridgeview, "auth.signin", { sessionId: "append-read" });
+      const read = await attempt(
+        "app_append",
+        ridgeview,
+        "SELECT id FROM domain_event WHERE tenant_id = $1 ORDER BY seq DESC LIMIT 1",
+        [ridgeview.id]
+      );
+      expect(read).toEqual({ rows: [{ id }] });
     });
   });
 

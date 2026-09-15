@@ -10,7 +10,8 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "verify:chain": "tsx src/cli.ts"
+    "verify:chain": "tsx src/cli.ts",
+    "verify:chain:record": "tsx src/record-cli.ts"
   },
   "dependencies": {
     "pg": "^8.16.3"

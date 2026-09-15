@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TENANT_SCOPED_TABLES } from "./schema";
 import { baaIsLive, canEnableIntegration, refuseEnabledWithoutBaa } from "./baa";
 import { encryptSecret, decryptSecret } from "./crypto";
 import { GENESIS_HASH, hashDomainEvent } from "./chain";
@@ -13,6 +12,17 @@ import { SET_LOCAL_TENANT_SQL } from "./tenant-context";
 const here = dirname(fileURLToPath(import.meta.url));
 const sql = readFileSync(join(here, "../migrations/0001_init.sql"), "utf8");
 const authSql = readFileSync(join(here, "../migrations/0002_auth_lookup.sql"), "utf8");
+const auditSql = readFileSync(join(here, "../migrations/0006_audit_chain_checks.sql"), "utf8");
+const increment01TenantTables = [
+  "locations",
+  "users",
+  "sessions",
+  "user_entitlements",
+  "domain_event",
+  "phi_access_log",
+  "integration_registry",
+  "auth_throttle",
+] as const;
 
 describe("Increment 0.1 schema", () => {
   it("names the three process roles", () => {
@@ -45,11 +55,20 @@ describe("Increment 0.1 schema", () => {
     expect(sql).not.toMatch(/CREATE TABLE notes\b/);
   });
 
-  it("enables and forces RLS on every tenant-scoped table", () => {
-    for (const name of ["tenants", ...TENANT_SCOPED_TABLES]) {
+  it("enables and forces RLS on every tenant-scoped table from Increment 0.1", () => {
+    for (const name of ["tenants", ...increment01TenantTables]) {
       expect(sql, name).toMatch(new RegExp(`ALTER TABLE ${name} ENABLE ROW LEVEL SECURITY`));
       expect(sql, name).toMatch(new RegExp(`ALTER TABLE ${name} FORCE ROW LEVEL SECURITY`));
     }
+  });
+});
+
+describe("Increment 0.5 audit chain checks", () => {
+  it("creates an append-only daily check table with RLS", () => {
+    expect(auditSql).toMatch(/CREATE TABLE audit_chain_checks/);
+    expect(auditSql).toMatch(/ALTER TABLE audit_chain_checks ENABLE ROW LEVEL SECURITY/);
+    expect(auditSql).toMatch(/audit_chain_checks_immutable/);
+    expect(auditSql).toMatch(/GRANT INSERT ON audit_chain_checks TO app_append/);
   });
 });
 

@@ -6,3 +6,5 @@ export { verifyRlsSql, applicationWhereCanLeak, rlsWouldIsolate } from "./rls";
 export type { RlsVerdict } from "./rls";
 export { verifyDatabaseChains, groupByTenant, CHAIN_QUERY, ADMITTED_QUERY, VERIFIER_ROLE } from "./database";
 export type { DatabaseVerdict, TenantChainVerdict, Queryable } from "./database";
+export { recordDatabaseChains, APPEND_ROLE, APPEND_ADMITTED_QUERY } from "./record";
+export type { RecordVerdict, RecordedTenant } from "./record";
