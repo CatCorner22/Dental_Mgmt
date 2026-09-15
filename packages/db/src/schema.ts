@@ -1,6 +1,7 @@
 import {
   bigint,
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -159,6 +160,19 @@ export const authThrottle = pgTable("auth_throttle", {
   lockedUntil: timestamp("locked_until", { withTimezone: true }),
 });
 
+export const auditChainChecks = pgTable(
+  "audit_chain_checks",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    day: date("day").notNull(),
+    ok: boolean("ok").notNull(),
+    headHash: text("head_hash").notNull(),
+    eventCount: integer("event_count").notNull(),
+    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("audit_chain_checks_day_idx").on(t.day)]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "users",
@@ -167,4 +181,5 @@ export const TENANT_SCOPED_TABLES = [
   "domain_event",
   "phi_access_log",
   "integration_registry",
+  "audit_chain_checks",
 ] as const;

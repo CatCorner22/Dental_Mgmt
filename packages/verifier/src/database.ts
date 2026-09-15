@@ -31,7 +31,10 @@ export const ADMITTED_QUERY = `SELECT current_user AS role, pg_has_role(current_
 export interface TenantChainVerdict extends ChainVerdict {
   tenantId: string;
   events: number;
+  headHash: string;
 }
+
+const GENESIS_HASH = "0".repeat(64);
 
 export interface DatabaseVerdict {
   publish: boolean;
@@ -107,7 +110,12 @@ export async function verifyDatabaseChains(db: Queryable): Promise<DatabaseVerdi
   const { rows } = await db.query(CHAIN_QUERY);
   const tenants: TenantChainVerdict[] = [];
   for (const [tenantId, events] of groupByTenant(rows)) {
-    tenants.push({ tenantId, events: events.length, ...verifyChain(events) });
+    tenants.push({
+      tenantId,
+      events: events.length,
+      headHash: events.length ? events[events.length - 1].hash : GENESIS_HASH,
+      ...verifyChain(events),
+    });
   }
   return {
     publish: tenants.every((t) => t.publish),

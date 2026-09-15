@@ -11,7 +11,7 @@ import {
   uuidv7,
 } from "@pms/db";
 import type { EncryptedBlob } from "@pms/db/crypto";
-import { getDb, getPool, withTenantTransaction } from "../db/client";
+import { getDb, getPool, withTenantAppendTransaction, withTenantTransaction } from "../db/client";
 import { ABSOLUTE_MS, IDLE_MS } from "./ports";
 import { isRole } from "./roles";
 import { parseRecoveryHashes } from "./recovery";
@@ -213,7 +213,7 @@ export function createPostgresStore(
       }, env);
     },
     async logPhiAccess(input) {
-      await withTenantTransaction(input.tenantId, input.userId, async (db) => {
+      await withTenantAppendTransaction(input.tenantId, input.userId, async (db) => {
         await db.insert(phiAccessLog).values({
           id: uuidv7(input.at.getTime()),
           tenantId: input.tenantId,
@@ -226,7 +226,7 @@ export function createPostgresStore(
       }, env);
     },
     async appendDomainEvent(input) {
-      await withTenantTransaction(input.tenantId, input.actorUserId ?? input.tenantId, async (db) => {
+      await withTenantAppendTransaction(input.tenantId, input.actorUserId ?? input.tenantId, async (db) => {
         // Serialize appends per tenant for the rest of this transaction so two
         // writers cannot read the same last row. UNIQUE (tenant_id, seq) stays
         // as the backstop that turns any remaining race into a failed insert

@@ -43,6 +43,7 @@ describe.skipIf(!adminUrl)("Postgres auth store (live)", () => {
     await resetDbPoolForTests();
     env = {
       POSTGRES_URL: await db.loginAs("app_rw"),
+      APPEND_ROLE_DSN: await db.loginAs("app_append"),
       DEV_MFA_KEY,
       BCRYPT_COST: "4",
       TRUST_PROXY_HEADERS: "auto",

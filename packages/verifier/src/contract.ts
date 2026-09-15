@@ -81,7 +81,8 @@ export const NAMED_TABLES = [
 ] as const;
 
 export const LIMITS = [
-  "The verifier reads SQL text and, as app_verify, the domain_event table alone. It writes nothing.",
+  "verify:chain reads SQL text and, as app_verify, the domain_event table alone. It writes nothing.",
+  "verify:chain:record additionally writes audit_chain_checks as app_append after a clean verify.",
   "It cannot prove the application's live role is non-owner. That is an operations check.",
   "It does not judge clinical or financial correctness.",
 ] as const;
