@@ -238,3 +238,21 @@ export async function listPatientIdsForTenant(db: AppDb, tenantId: string): Prom
   `);
   return result.rows.map((row) => row.id);
 }
+
+export async function listPatientProcedures(
+  db: AppDb,
+  tenantId: string,
+  patientId: string
+): Promise<{ id: string; label: string }[]> {
+  const result = await db.execute<{ id: string; cdt_code: string; description: string }>(sql`
+    SELECT id, cdt_code, description
+    FROM procedures
+    WHERE tenant_id = ${tenantId}
+      AND patient_id = ${patientId}
+    ORDER BY description
+  `);
+  return result.rows.map((row) => ({
+    id: row.id,
+    label: `${row.cdt_code} — ${row.description}`,
+  }));
+}
