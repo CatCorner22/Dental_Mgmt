@@ -140,6 +140,9 @@ importers:
       '@types/pg':
         specifier: ^8.15.5
         version: 8.23.1
+      bcryptjs:
+        specifier: ^3.0.2
+        version: 3.0.3
       drizzle-kit:
         specifier: ^0.31.5
         version: 0.31.10

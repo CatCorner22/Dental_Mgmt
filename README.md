@@ -5,7 +5,7 @@ This repository holds the **review and plan** for combining two existing product
 - `CatCorner22/dental` (**Smile Notes**): a de-identified clinical-note builder with a deterministic audit engine, a hardened authentication layer, and 201 test files.
 - `CatCorner22/precog` (**Precog Pioneer**): an internal-controls and residual-risk coach whose segregation-of-duties rulebook and dual-release evaluator become the PMS's enforced controls.
 
-Phase 0 Increment 0.1 started the pnpm monorepo (`apps/pms`, `packages/*`) plus the planning corpus and clickable prototype. Increment 0.2 wires sign-in to the `sessions` table (`AUTH_DEV_MEMORY=1` for a synthetic two-tenant store; `POSTGRES_URL` for Drizzle). Increment 0.3 makes the database real: a migration runner with history, the cluster roles with grants, live RLS and tamper tests in CI, a chain-verifier CLI, and a production boot guard that refuses a connection able to bypass RLS. The owner confirmed the recommendations in `docs/10-decisions-for-owner.md` for ADR-0002 (money and controls first as GTM) and ADR-0012 (one-way SuperByte; Byte, knowledge base, and cage in Phase 0; LLM provider call still Phase 5). Remaining ADRs stay Proposed. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) are not done. See `docs/17-competitive-enhancement-review.md`.
+Phase 0 Increment 0.1 started the pnpm monorepo (`apps/pms`, `packages/*`) plus the planning corpus and clickable prototype. Increment 0.2 wires sign-in to the `sessions` table (`AUTH_DEV_MEMORY=1` for a synthetic two-tenant store; `POSTGRES_URL` for Drizzle). Increment 0.3 makes the database real: a migration runner with history, the cluster roles with grants, live RLS and tamper tests in CI, a chain-verifier CLI, and a production boot guard that refuses a connection able to bypass RLS. Increment 0.4 forces MFA enrollment on first login (`ridgeview-newhire` in the seed) and adds `pnpm db:seed` for Postgres dev without `AUTH_DEV_MEMORY`. The owner confirmed the recommendations in `docs/10-decisions-for-owner.md` for ADR-0002 (money and controls first as GTM) and ADR-0012 (one-way SuperByte; Byte, knowledge base, and cage in Phase 0; LLM provider call still Phase 5). Remaining ADRs stay Proposed. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) are not done. See `docs/17-competitive-enhancement-review.md`.
 
 ```
 pnpm install
@@ -25,7 +25,10 @@ POSTGRES_URL=postgres://pms:pms@localhost:5432/pms pnpm db:roles
 POSTGRES_URL=... PMS_MIGRATE_ROLE=app_migrate pnpm db:migrate
 POSTGRES_URL=... pnpm db:status
 POSTGRES_URL=... PMS_VERIFY_ROLE=app_verify pnpm verify:chain
+POSTGRES_URL=... pnpm db:seed
 ```
+
+After migrate and seed, point the app at an `app_rw` login. `ridgeview-newhire` / `Dev-password-0.2!` signs in with password only, enrolls at `/enroll-mfa`, then signs in again with TOTP. Enrolled seed users (`ridgeview-owner`, etc.) still need an authenticator or recovery code.
 
 The application connects as a LOGIN role that inherits `app_rw`. In production the boot guard refuses a superuser, BYPASSRLS, or table-owning connection. Live tests (`pnpm test:live`, or any `pnpm test` with `PMS_TEST_POSTGRES_URL` set to an administrator connection) build a throwaway database per suite, apply every migration as `app_migrate`, and prove the RLS negative case, the append-only grants, the BAA trigger, sign-in through the Postgres store, and tamper detection. CI runs them against a Postgres 16 service.
 
@@ -50,7 +53,7 @@ The application connects as a LOGIN role that inherits `app_rw`. In production t
 | 15 | `docs/14-beta-test-report.md` | The beta test of the clickable prototype: the falsifiable claim, thresholds pre-registered before any session, the 30-persona panel, declared constraints, what the exercise cannot prove, and the results |
 | 16 | `docs/15-function-audit.md` | The function-by-function audit of the prototype: the rules for operational, consistent, and clear registered before any agent ran, the 497-function inventory, the method, one row per function with its status and evidence, the 248 root causes fixed, and what the fix round found about the audit's own instruments |
 | 17 | `docs/16-ux-review.md` | The UI and UX review against the research on intuitive design and cognitive load: the method and 117 heuristics registered before any finding, the audit of every screen with each root cause re-measured by an adversarial verifier, the three waves of fixes, and the before-and-after numbers |
-| 18 | `docs/17-competitive-enhancement-review.md` | Owner review of 2026-09-14: competitive position, five public pillars (comprehensive PMS, beauty, cognitive load, one-way SuperByte with an expanded twin knowledge base, Precog as risk-avoidance), In / Later / Not, accepted ADRs 2 and 12, and Increments 0.1–0.3 |
+| 18 | `docs/17-competitive-enhancement-review.md` | Owner review of 2026-09-14: competitive position, five public pillars (comprehensive PMS, beauty, cognitive load, one-way SuperByte with an expanded twin knowledge base, Precog as risk-avoidance), In / Later / Not, accepted ADRs 2 and 12, and Increments 0.1–0.4 |
 
 ## Status of the open decisions
 

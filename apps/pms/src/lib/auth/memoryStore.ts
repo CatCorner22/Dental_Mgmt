@@ -43,16 +43,22 @@ export async function createMemoryStore(
   const users = new Map<string, StoredUser>();
   const issuedRecoveryCodes = new Map<string, string[]>();
   for (const seed of DEV_USERS) {
-    const codes = [DEV_RECOVERY_CODE, ...generateRecoveryCodes()];
-    issuedRecoveryCodes.set(seed.id, codes);
+    const enrolled = seed.mfaEnrolled;
+    const codes = enrolled ? [DEV_RECOVERY_CODE, ...generateRecoveryCodes()] : [];
+    if (enrolled) issuedRecoveryCodes.set(seed.id, codes);
     users.set(seed.id, {
-      ...seed,
+      id: seed.id,
+      tenantId: seed.tenantId,
+      username: seed.username,
+      displayName: seed.displayName,
+      role: seed.role,
+      clinicalRole: seed.clinicalRole,
       entitlements: [...seed.entitlements],
       active: true,
       passwordHash,
-      mfaSecretEnc,
-      mfaEnrolledAt: now,
-      recoveryCodeHashes: hashRecoveryCodes(codes, pepper),
+      mfaSecretEnc: enrolled ? mfaSecretEnc : null,
+      mfaEnrolledAt: enrolled ? now : null,
+      recoveryCodeHashes: enrolled ? hashRecoveryCodes(codes, pepper) : [],
       passwordChangedAt: now,
     });
   }
@@ -124,6 +130,21 @@ export async function createMemoryStore(
     async replaceRecoveryHashes(userId, hashes) {
       const user = users.get(userId);
       if (user) users.set(userId, { ...user, recoveryCodeHashes: [...hashes] });
+    },
+    async setMfaPendingSecret(userId, secretEnc) {
+      const user = users.get(userId);
+      if (!user) return;
+      users.set(userId, { ...user, mfaSecretEnc: secretEnc });
+    },
+    async completeMfaEnrollment(userId, input) {
+      const user = users.get(userId);
+      if (!user) return;
+      users.set(userId, {
+        ...user,
+        mfaSecretEnc: input.secretEnc,
+        mfaEnrolledAt: input.enrolledAt,
+        recoveryCodeHashes: [...input.recoveryHashes],
+      });
     },
     async logPhiAccess(input) {
       store.phiLog.push(input);

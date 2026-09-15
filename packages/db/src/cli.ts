@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { applyMigrations, migrationStatus } from "./migrate";
+import { seedDatabase } from "./seed";
 
 /**
  * pnpm --filter @pms/db db:<command>
@@ -12,6 +13,7 @@ import { applyMigrations, migrationStatus } from "./migrate";
  *   status   list each migration as applied / pending / drift
  *   reset    drop schema public, re-run roles and migrations
  *            (refuses unless PMS_ALLOW_DB_RESET=1)
+ *   seed     idempotent dev tenants/users (administrator connection)
  *
  * Connection: PMS_MIGRATE_URL, else POSTGRES_URL.
  * PMS_MIGRATE_ROLE, when set, is SET ROLE'd before migrating so CI applies
@@ -80,6 +82,13 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
       return drift ? 1 : 0;
     }
 
+    case "seed":
+      await withClient(env, async (client) => {
+        const result = await seedDatabase(client);
+        log(`seed: ${result.tenants} tenants, ${result.users} users`);
+      });
+      return 0;
+
     case "reset":
       if (env.PMS_ALLOW_DB_RESET !== "1") {
         console.error("reset drops every table. Set PMS_ALLOW_DB_RESET=1 to confirm.");
@@ -96,7 +105,7 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
       return 0;
 
     default:
-      console.error("usage: db <roles|migrate|status|reset>");
+      console.error("usage: db <roles|migrate|status|reset|seed>");
       return 2;
   }
 }

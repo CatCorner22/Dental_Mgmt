@@ -50,8 +50,8 @@ export const users = pgTable(
     role: text("role").notNull(),
     clinicalRole: text("clinical_role").notNull().default("unset"),
     active: boolean("active").notNull().default(true),
-    /** Envelope-encrypted TOTP secret. MFA is mandatory. */
-    mfaSecretEnc: jsonb("mfa_secret_enc").notNull(),
+    /** Envelope-encrypted TOTP secret. Null until MFA enrollment completes. */
+    mfaSecretEnc: jsonb("mfa_secret_enc"),
     mfaEnrolledAt: timestamp("mfa_enrolled_at", { withTimezone: true }),
     recoveryCodesHash: text("recovery_codes_hash"),
     passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }).notNull(),

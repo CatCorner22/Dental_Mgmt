@@ -8,16 +8,24 @@ export default async function SignInPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const raw = (await searchParams).callbackUrl;
+  const params = await searchParams;
+  const raw = params.callbackUrl;
   const callbackUrl = sanitizeCallbackPath(typeof raw === "string" ? raw : undefined);
+  const ready = params.ready === "1";
 
   return (
     <main className="mx-auto max-w-md px-6 py-16">
-      <p className="mb-3 text-sm font-semibold tracking-wide text-teal">Increment 0.3</p>
+      <p className="mb-3 text-sm font-semibold tracking-wide text-teal">Increment 0.4</p>
       <h1 className="mb-3 text-navy">Sign in</h1>
+      {ready ? (
+        <p className="mb-4 rounded-[var(--radius)] bg-[var(--surface)] p-3 text-sm text-[var(--ink-2)] ring-1 ring-[var(--line)]">
+          MFA enrollment is complete. Sign in with your password and the six-digit code from your
+          authenticator app.
+        </p>
+      ) : null}
       <p className="mb-8 max-w-prose text-[var(--ink-2)]">
-        Authenticator codes are required. Recovery codes work in the same field.
-        This shell holds no patient records.
+        Enrolled accounts need an authenticator or recovery code. New accounts enroll on first
+        sign-in. This shell holds no patient records.
       </p>
       <div className="rounded-[var(--radius-lg)] bg-[var(--surface)] p-8 shadow-[var(--shadow)] ring-1 ring-[var(--line)]">
         <span

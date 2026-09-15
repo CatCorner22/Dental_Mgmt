@@ -2,7 +2,7 @@
 
 > Source: owner review of 2026-09-14. The owner asked for a comprehensive, beautiful, low-cognitive-load dental PMS with an industry-leading one-way SuperByte note advisor (twin deterministic and probabilistic knowledge bases; see Smile Notes) and a novel Precog risk-avoidance module. Two decisions lock this document: start Phase 0 of the real product, and keep SuperByte one-way (staff never prompt, chat, or rate). Evidence for market claims is the v3 knowledge base (`knowledge/dental-pms-and-risk-platforms-report-v3-2026-09-02.md`, `knowledge/semantic-memory.md`). Legal statements inherit the PRIMARY / SECONDARY / REPO / UNVERIFIED labels from `docs/11`.
 
-This repository remains a consolidation plan plus a clickable prototype. Increment 0.1, recorded here, is the first code foundation of the merged PMS. Increment 0.2 wires the sessions table and `/api/me`. Increment 0.3 makes the database real: migrations that apply, roles that exist, and a verifier that reads a live chain. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) stay listed, not silently marked done.
+This repository remains a consolidation plan plus a clickable prototype. Increment 0.1, recorded here, is the first code foundation of the merged PMS. Increment 0.2 wires the sessions table and `/api/me`. Increment 0.3 makes the database real: migrations that apply, roles that exist, and a verifier that reads a live chain. Increment 0.4 forces MFA enrollment on first login and seeds two Postgres tenants without `AUTH_DEV_MEMORY`. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) stay listed, not silently marked done.
 
 ## Current state
 
@@ -136,6 +136,21 @@ Increments 0.1 and 0.2 left the database as SQL files nobody applied, roles that
 **Phase 0 exit criteria now met in code.** Two tenants seeded in test; a deliberately missing WHERE clause returns only the bound tenant, as `app_rw` and as the table owner; deactivating a user denies the next guarded call; the chain verifies and detects a planted tamper against a live database; a connector with no BAA row is refused by the trigger under `app_rw`; production refuses to boot without the listed controls or with a connection that could bypass RLS.
 
 **Not in Increment 0.3.** A separate `app_append` connection in the app process (the runtime still inserts audit rows as `app_rw`; the grants for the split exist), nightly scheduling of the verifier, daily chain head to Object Lock, `disclosures`, MFA enrollment flow, two-admin recovery ceremony, real KMS, PHI patient rows, legal pack, D.8 interviews.
+
+## Increment 0.4
+
+Increment 0.3 left MFA half-wired: `requireAccess` refused unenrolled users, but `authorizeCredentials` also refused them, so provisioned staff could not sign in and had no enrollment path. This increment closes the Phase 0 exit criterion.
+
+- Migration `0005_mfa_enrollment.sql` makes `mfa_secret_enc` nullable until enrollment completes.
+- `authorizeCredentials` accepts password-only sign-in when `mfa_enrolled_at` is null, creates a session, appends `auth.signin.pending_mfa`, and sets `needsMfaEnrollment` on the JWT. Enrolled accounts still require TOTP or a recovery code.
+- `/enroll-mfa` plus `/api/enroll-mfa` (`requireMfa: false`): begin generates a secret and otpauth URI; complete verifies the first TOTP, writes recovery-code hashes, sets `mfa_enrolled_at`, appends `auth.mfa_enrolled`, shows recovery codes once, revokes the session, and sends the user back to sign in with their authenticator.
+- Middleware redirects every signed-in route to `/enroll-mfa` until enrollment finishes.
+- `pnpm db:seed` idempotently loads Ridgeview and Oakridge with four staff rows, including `ridgeview-newhire` (unenrolled). Seed data lives in `packages/db/src/seed-data.ts` and is re-exported by `apps/pms` dev seed.
+- Production runtime-role probing moved from `instrumentation.ts` to the first database pool use so the Next.js build does not bundle `pg` into edge middleware.
+
+**Phase 0 exit criterion met.** MFA enrollment is forced on first login: unenrolled users cannot reach guarded routes, must enroll before the app opens, and must sign in again with TOTP once enrolled.
+
+**Not in Increment 0.4.** Two-admin recovery ceremony, `disclosures`, separate `app_append` connection, nightly verifier scheduling, Object Lock chain head, real KMS, PHI patient rows, legal pack, D.8 interviews.
 
 ## Risks that stay visible
 

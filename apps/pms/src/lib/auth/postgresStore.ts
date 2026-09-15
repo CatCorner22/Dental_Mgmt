@@ -31,7 +31,7 @@ interface LookupUserRow {
   role: string;
   clinical_role: string;
   active: boolean;
-  mfa_secret_enc: EncryptedBlob;
+  mfa_secret_enc: EncryptedBlob | null;
   mfa_enrolled_at: Date | null;
   recovery_codes_hash: string | null;
   password_changed_at: Date;
@@ -188,6 +188,27 @@ export function createPostgresStore(
         await db
           .update(users)
           .set({ recoveryCodesHash: JSON.stringify(hashes) })
+          .where(eq(users.id, userId));
+      }, env);
+    },
+    async setMfaPendingSecret(userId, secretEnc) {
+      const user = await this.getUserById(userId);
+      if (!user) return;
+      await withTenantTransaction(user.tenantId, userId, async (db) => {
+        await db.update(users).set({ mfaSecretEnc: secretEnc }).where(eq(users.id, userId));
+      }, env);
+    },
+    async completeMfaEnrollment(userId, input) {
+      const user = await this.getUserById(userId);
+      if (!user) return;
+      await withTenantTransaction(user.tenantId, userId, async (db) => {
+        await db
+          .update(users)
+          .set({
+            mfaSecretEnc: input.secretEnc,
+            mfaEnrolledAt: input.enrolledAt,
+            recoveryCodesHash: JSON.stringify(input.recoveryHashes),
+          })
           .where(eq(users.id, userId));
       }, env);
     },

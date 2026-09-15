@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Practice home",
-  description: "Increment 0.3 shell. No patient records are stored.",
+  description: "Increment 0.4 shell. No patient records are stored.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
