@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main, claude/dental-precog-consolidation-60ckgd]
+  pull_request:
+
+jobs:
+  packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm typecheck
+      - run: pnpm test:packages
+      - run: pnpm check:routes
+      - name: Version stamps
+        if: github.event_name == 'pull_request'
+        env:
+          VERSION_STAMP_BASE: origin/${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin ${{ github.base_ref }}
+          bash scripts/check-version-stamps.sh
+      - run: bash scripts/secret-scan.sh
+
+  prototype:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm exec playwright install chromium
+      - run: pnpm run syntax
+      - run: pnpm run verify-docs
+      - run: pnpm run check
+      - run: pnpm run a11y

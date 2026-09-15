@@ -1,0 +1,19 @@
+{
+  "name": "@pms/verifier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Byteaudit retargeted: restated promises for the event chain and RLS. Never imports the promises it verifies.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}

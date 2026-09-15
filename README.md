@@ -7,6 +7,15 @@ This repository holds the **review and plan** for combining two existing product
 
 Phase 0 Increment 0.1 starts in this repository: a pnpm monorepo (`apps/pms`, `packages/*`) plus the planning corpus and clickable prototype. The owner confirmed the recommendations in `docs/10-decisions-for-owner.md` for ADR-0002 (money and controls first as GTM) and ADR-0012 (one-way SuperByte; Byte, knowledge base, and cage in Phase 0; LLM provider call still Phase 5). Remaining ADRs stay Proposed. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) are not done. See `docs/17-competitive-enhancement-review.md`.
 
+```
+pnpm install
+pnpm typecheck
+pnpm test:packages
+pnpm check:routes
+```
+
+`pnpm test` still runs the clickable prototype harness (syntax, docs, proto-check, axe, reproduce). `pnpm run ci` is the Increment 0.1 package gate.
+
 ## Read in this order
 
 | Step | Document | What you get |

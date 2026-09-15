@@ -1,0 +1,35 @@
+@import "./tokens.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: var(--fs-2);
+  line-height: var(--lh-prose);
+}
+
+h1 {
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-weight: var(--weight-regular);
+  font-size: var(--fs-6);
+  line-height: var(--lh-tight);
+  letter-spacing: -0.02em;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+button,
+a.button,
+input,
+select {
+  min-height: var(--target);
+}
