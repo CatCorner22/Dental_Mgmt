@@ -39,6 +39,18 @@ describe("authorizeCredentials", () => {
     expect(store.events.some((e) => e.kind === "auth.signin")).toBe(true);
   });
 
+  it("accepts the documented memory-store recovery code", async () => {
+    const store = await createMemoryStore({ now, env, password: DEV_PASSWORD, mfaSecret: DEV_MFA_SECRET });
+    const result = await authorizeCredentials(
+      store,
+      { username: "ridgeview-owner", password: DEV_PASSWORD, totp: "dev0-aaaa" },
+      loginReq(),
+      now,
+      env
+    );
+    expect(result.ok).toBe(true);
+  });
+
   it("accepts a one-time recovery code in the TOTP field", async () => {
     const store = await createMemoryStore({ now, env, password: DEV_PASSWORD, mfaSecret: DEV_MFA_SECRET });
     const ownerId = DEV_USERS[0].id;

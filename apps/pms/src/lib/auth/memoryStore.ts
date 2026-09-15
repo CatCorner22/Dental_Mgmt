@@ -3,7 +3,7 @@ import { GENESIS_HASH, hashDomainEvent } from "@pms/db";
 import { uuidv7 } from "@pms/db";
 import { ABSOLUTE_MS, IDLE_MS } from "./ports";
 import { hashPassword } from "./password";
-import { DEV_MFA_SECRET, DEV_PASSWORD, DEV_USERS } from "./devSeed";
+import { DEV_MFA_SECRET, DEV_PASSWORD, DEV_RECOVERY_CODE, DEV_USERS } from "./devSeed";
 import { generateRecoveryCodes, hashRecoveryCodes } from "./recovery";
 import type { AuthStore, CreateSessionInput, StoredUser, ThrottleRow } from "./store";
 import type { SessionRow } from "./types";
@@ -43,7 +43,7 @@ export async function createMemoryStore(
   const users = new Map<string, StoredUser>();
   const issuedRecoveryCodes = new Map<string, string[]>();
   for (const seed of DEV_USERS) {
-    const codes = generateRecoveryCodes();
+    const codes = [DEV_RECOVERY_CODE, ...generateRecoveryCodes()];
     issuedRecoveryCodes.set(seed.id, codes);
     users.set(seed.id, {
       ...seed,

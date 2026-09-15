@@ -1,6 +1,8 @@
 /** Synthetic staff only. Loaded when AUTH_DEV_MEMORY=1. No patient rows. */
 export const DEV_PASSWORD = "Dev-password-0.2!";
 export const DEV_MFA_SECRET = "JBSWY3DPEHPK3PXP";
+/** Extra recovery code on every seeded user so a demo sign-in is not a TOTP race. */
+export const DEV_RECOVERY_CODE = "dev0-aaaa";
 
 export const DEV_TENANTS = [
   { id: "0196b0a0-0000-7000-8000-000000000001", name: "Ridgeview Family Dental", slug: "ridgeview" },
