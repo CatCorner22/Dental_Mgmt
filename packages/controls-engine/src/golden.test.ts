@@ -41,8 +41,8 @@ describe("ridgeview golden snapshots", () => {
           state.people
         )
       ),
-      runCounterfactuals: stableHash(runCounterfactuals(state, "sc-cash-sod-failure")),
-      beamSearchLevers: stableHash(beamSearchLevers(state, "sc-cash-sod-failure")),
+      runCounterfactuals: stableHash(runCounterfactuals(state)),
+      beamSearchLevers: stableHash(beamSearchLevers(state)),
     };
     expect(actual).toEqual(expected);
   });
