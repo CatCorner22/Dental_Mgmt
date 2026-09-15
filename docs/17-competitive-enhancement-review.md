@@ -233,6 +233,12 @@ The readable ledger gets a minimal Money Desk UI before checkout or posting scre
 
 **Not in Increment 1.4.** Posting UI, checkout, approvals inbox UI, As-of date chip, CPA/patient explanation audiences, palette search, mobile approvals surface, patient self-scheduling (on the roadmap for Phase 5; see `docs/08-roadmap.md`).
 
+## Increment 1.5
+
+Phase 1 independent reconciliation starts with bank statement import, not aggregator feeds. This increment adds `bank_accounts`, append-only `bank_transactions`, `bank_statement_imports`, `reconciliation_runs`, and `reconciliation_variances`; extends `@pms/import` with a CSV bank-statement parser and fixture; seeds a Ridgeview operating account; exposes `POST /api/import/bank-statement`, `GET /api/bank/accounts`, and `GET /api/reconciliation/runs` (+ detail); and renders `/reconciliation` with a statement-import form and variance queue. Credits on the statement auto-match staged Curve Hero `deposit_slip` rows by date and amount; everything else lands as an open `unmatched_bank` variance. Every import appends `import.bank_statement.applied` to `domain_event`.
+
+**Not in Increment 1.5.** Aggregator feed, variance clearance / SoD runtime block, day close, ledger tie-out from bank lines, OFX parser, nightly scheduler, owner Tied tile.
+
 ## Risks that stay visible
 
 - Lifting Smile Notes tests while inverting the PHI premise will fail some of those tests; they become a tracked rewrite list, not a reason to leave PHI-blocking rules in place.

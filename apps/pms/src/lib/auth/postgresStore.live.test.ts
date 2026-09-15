@@ -109,7 +109,7 @@ describe.skipIf(!adminUrl)("Postgres auth store (live)", () => {
     expect(session).toMatchObject({ tenantId: owner.tenantId, userId: owner.id, revokedAt: null });
 
     const user = await store.getUserByUsername(owner.username);
-    expect(user?.entitlements).toEqual(["approve_writeoffs", "run_import"]);
+    expect(user?.entitlements).toEqual(["approve_writeoffs", "run_import", "bank_reconcile"]);
 
     const { rows } = await db.admin.query(
       "SELECT kind, payload->>'sessionId' AS session_id FROM domain_event WHERE tenant_id = $1",
