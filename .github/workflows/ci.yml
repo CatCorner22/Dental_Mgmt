@@ -52,6 +52,14 @@ jobs:
           POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
           PMS_VERIFY_ROLE: app_verify
         run: pnpm --filter @pms/verifier verify:chain
+      - name: Restore drill appends backup.restore_drill per tenant
+        env:
+          POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          PMS_APPEND_ROLE: app_append
+          BACKUP_TARGET: file:///tmp/pms-backups
+        run: |
+          mkdir -p /tmp/pms-backups
+          pnpm --filter @pms/db db:restore-drill
       - name: Nightly chain record writes audit_chain_checks as app_append
         env:
           POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres

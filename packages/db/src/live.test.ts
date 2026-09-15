@@ -7,6 +7,7 @@ import { DEFAULT_MIGRATIONS_DIR, HISTORY_TABLE, applyMigrations } from "./migrat
 import { GENESIS_HASH, hashDomainEvent } from "./chain";
 import { uuidv7 } from "./ids";
 import { SET_LOCAL_TENANT_SQL } from "./tenant-context";
+import { runRestoreDrill } from "./restore-drill";
 import { createLiveDatabase, liveAdminUrl, type LiveDatabase } from "./testing/liveDatabase";
 
 /**
@@ -469,6 +470,28 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         "baa/live",
       ]);
       expect(out).toEqual({ rows: [] });
+    });
+  });
+
+  describe("restore drill", () => {
+    it("appends backup.restore_drill per tenant through app_append", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "pms-restore-"));
+      const append = await db.connect();
+      await append.query("SET ROLE app_append");
+      const verdict = await runRestoreDrill(db.admin, append, `file://${dir}`);
+      expect(verdict.ok).toBe(true);
+      expect(verdict.tenants).toHaveLength(2);
+      const read = await attempt(
+        "app_verify",
+        null,
+        "SELECT tenant_id, kind FROM domain_event WHERE kind = 'backup.restore_drill' ORDER BY tenant_id"
+      );
+      expect(read.rows).toHaveLength(2);
+      expect(read.rows?.every((row) => row.kind === "backup.restore_drill")).toBe(true);
+      expect(read.rows?.map((row) => row.tenant_id).sort()).toEqual(
+        [ridgeview.id, oakridge.id].sort()
+      );
+      await append.end();
     });
   });
 
