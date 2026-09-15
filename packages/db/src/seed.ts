@@ -15,6 +15,7 @@ import {
   DEV_MFA_SECRET,
 } from "./seed-data";
 import { hashRecoveryCodes } from "./seed-recovery";
+import { seedLedgerDemo } from "./seed-ledger";
 
 export interface SeedOptions {
   password?: string;
@@ -133,6 +134,8 @@ export async function seedDatabase(
       ]
     );
   }
+
+  await seedLedgerDemo(db, now);
 
   return { tenants: DEV_TENANTS.length, users: DEV_USERS.length };
 }

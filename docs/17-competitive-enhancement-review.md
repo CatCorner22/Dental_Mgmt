@@ -227,6 +227,12 @@ Phase 1 shadow-ledger feeding starts with a Curve Hero report-import stub. This 
 
 **Not in Increment 1.3.** Ledger apply from staged rows, nightly scheduler, location-code resolution, AR tie-out report, dry-run diff UI, Open Dental or Dentrix parsers.
 
+## Increment 1.4
+
+The readable ledger gets a minimal Money Desk UI before checkout or posting screens ship. This increment seeds a Ridgeview demo charge with partial payment, adds `GET /api/ledger/accounts` and `GET /api/ledger/accounts/[accountId]`, and renders `/ledger` plus `/ledger/[accountId]` with the three labeled balance numbers and a running itemized view over `ledger_explanations`.
+
+**Not in Increment 1.4.** Posting UI, checkout, approvals inbox UI, As-of date chip, CPA/patient explanation audiences, palette search, mobile approvals surface.
+
 ## Risks that stay visible
 
 - Lifting Smile Notes tests while inverting the PHI premise will fail some of those tests; they become a tracked rewrite list, not a reason to leave PHI-blocking rules in place.

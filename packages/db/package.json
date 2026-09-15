@@ -10,7 +10,8 @@
     "./crypto": "./src/crypto.ts",
     "./migrate": "./src/migrate.ts",
     "./testing": "./src/testing/liveDatabase.ts",
-    "./seed-data": "./src/seed-data.ts"
+    "./seed-data": "./src/seed-data.ts",
+    "./seed-ledger": "./src/seed-ledger.ts"
   },
   "scripts": {
     "test": "vitest run",

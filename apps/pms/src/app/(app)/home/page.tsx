@@ -8,19 +8,21 @@ export default function HomePage() {
       <p className="mb-3 text-sm font-semibold tracking-wide text-teal">Practice home</p>
       <h1 className="mb-4 text-navy">Nothing on the Board yet</h1>
       <p className="max-w-prose text-[var(--ink-2)]">
-        Increment 0.11 runs the database for real: applied migrations, the
-        runtime role behind row-level security, and a verified audit chain.
-        Patients, the ledger, and encounters arrive in later increments. There
-        is no patient chart to open.
+        Phase 1 money layer is live beside the incumbent: read the guarantor
+        ledger with the three labeled balance numbers, then open a running
+        itemized view for any account.
       </p>
+      <div className="mt-6 flex flex-wrap gap-4">
+        <a
+          className="inline-flex min-h-[var(--target)] items-center rounded-md border border-[var(--line-strong)] bg-[var(--surface)] px-4 py-2 font-semibold text-[var(--ink)]"
+          href="/ledger"
+        >
+          Open ledger
+        </a>
+      </div>
       <div className="mt-6">
         <SessionStatus />
       </div>
-      <p className="mt-8">
-        <a className="font-semibold text-[var(--link)] underline" href="/signin">
-          Back to sign in
-        </a>
-      </p>
     </main>
   );
 }
