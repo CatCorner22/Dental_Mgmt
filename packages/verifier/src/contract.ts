@@ -82,7 +82,7 @@ export const NAMED_TABLES = [
 
 export const LIMITS = [
   "verify:chain reads SQL text and, as app_verify, the domain_event table alone. It writes nothing.",
-  "verify:chain:record additionally writes audit_chain_checks as app_append after a clean verify.",
+  "verify:chain:record additionally writes audit_chain_checks as app_append after a clean verify, then anchors signed heads to Object Lock storage when OBJECT_STORAGE_URL and CHAIN_HEAD_SIGN_KEY are set.",
   "It cannot prove the application's live role is non-owner. That is an operations check.",
   "It does not judge clinical or financial correctness.",
 ] as const;

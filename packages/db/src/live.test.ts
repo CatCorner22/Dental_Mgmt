@@ -120,6 +120,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [5, "mfa_enrollment", "app_migrate"],
         [6, "audit_chain_checks", "app_migrate"],
         [7, "disclosures_recovery", "app_migrate"],
+        [8, "chain_head_anchor", "app_migrate"],
       ]);
       const owners = await db.admin.query(
         "SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'"
@@ -130,7 +131,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
     it("is a no-op the second time", async () => {
       const result = await applyMigrations(db.admin);
       expect(result.applied).toEqual([]);
-      expect(result.alreadyApplied).toBe(7);
+      expect(result.alreadyApplied).toBe(8);
     });
 
     it("left domain_event with RLS forced after the seq backfill", async () => {
@@ -341,6 +342,32 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
   });
 
   describe("audit chain checks", () => {
+    it("lets app_append set object_lock_key once after anchoring", async () => {
+      const day = "2026-09-16";
+      const insert = await attempt(
+        "app_append",
+        ridgeview,
+        `INSERT INTO audit_chain_checks (tenant_id, day, ok, head_hash, event_count, checked_at)
+         VALUES ($1, $2::date, true, 'deadbeef', 0, now())`,
+        [ridgeview.id, day]
+      );
+      expect(insert).toEqual({ rows: [] });
+      const anchor = await attempt(
+        "app_append",
+        ridgeview,
+        `UPDATE audit_chain_checks SET object_lock_key = $3 WHERE tenant_id = $1 AND day = $2::date`,
+        [ridgeview.id, day, "audit-heads/example.json"]
+      );
+      expect(anchor).toEqual({ rows: [] });
+      const rewrite = await attempt(
+        "app_append",
+        ridgeview,
+        `UPDATE audit_chain_checks SET object_lock_key = 'changed' WHERE tenant_id = $1`,
+        [ridgeview.id]
+      );
+      expect(rewrite).toMatchObject({ code: "P0001" });
+    });
+
     it("lets app_append insert a daily row and app_verify read it back", async () => {
       const day = "2026-09-15";
       const insert = await attempt(
@@ -366,7 +393,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         "UPDATE audit_chain_checks SET ok = false WHERE tenant_id = $1",
         [ridgeview.id]
       );
-      expect(rewrite).toMatchObject({ code: "42501" });
+      expect(rewrite).toMatchObject({ code: "P0001" });
     });
 
     it("lets app_append read the domain_event tip for chain extension", async () => {

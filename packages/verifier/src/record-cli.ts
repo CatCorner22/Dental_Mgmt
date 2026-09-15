@@ -1,5 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
+import { fileObjectLockSink } from "./anchor";
 import { recordDatabaseChains } from "./record";
 
 /**
@@ -8,6 +9,7 @@ import { recordDatabaseChains } from "./record";
  * Verify: VERIFY_ROLE_DSN, or PMS_VERIFY_ROLE with POSTGRES_URL.
  * Record: APPEND_ROLE_DSN, or PMS_APPEND_ROLE with POSTGRES_URL.
  * DAY: UTC calendar day to stamp (defaults to today).
+ * Anchor: OBJECT_STORAGE_URL (file:// for dev/CI) and CHAIN_HEAD_SIGN_KEY.
  */
 export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number> {
   const verifyUrl = env.VERIFY_ROLE_DSN ?? (env.PMS_VERIFY_ROLE ? env.POSTGRES_URL : undefined);
@@ -37,7 +39,11 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
       if (!/^[a-z_][a-z0-9_]*$/.test(appendRole)) throw new Error("PMS_APPEND_ROLE is not a plain role name.");
       await appendClient.query(`SET ROLE ${appendRole}`);
     }
-    const verdict = await recordDatabaseChains(verifyClient, appendClient, day);
+    const storageUrl = env.OBJECT_STORAGE_URL;
+    const signKey = env.CHAIN_HEAD_SIGN_KEY;
+    const anchor =
+      storageUrl && signKey ? { sink: fileObjectLockSink(storageUrl), signKey } : undefined;
+    const verdict = await recordDatabaseChains(verifyClient, appendClient, day, { anchor });
     console.log(JSON.stringify(verdict, null, 2));
     const ok = verdict.publish && verdict.objections.length === 0;
     return ok ? 0 : 1;

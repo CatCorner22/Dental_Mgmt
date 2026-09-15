@@ -2,7 +2,7 @@
 
 > Source: owner review of 2026-09-14. The owner asked for a comprehensive, beautiful, low-cognitive-load dental PMS with an industry-leading one-way SuperByte note advisor (twin deterministic and probabilistic knowledge bases; see Smile Notes) and a novel Precog risk-avoidance module. Two decisions lock this document: start Phase 0 of the real product, and keep SuperByte one-way (staff never prompt, chat, or rate). Evidence for market claims is the v3 knowledge base (`knowledge/dental-pms-and-risk-platforms-report-v3-2026-09-02.md`, `knowledge/semantic-memory.md`). Legal statements inherit the PRIMARY / SECONDARY / REPO / UNVERIFIED labels from `docs/11`.
 
-This repository remains a consolidation plan plus a clickable prototype. Increment 0.1, recorded here, is the first code foundation of the merged PMS. Increment 0.2 wires the sessions table and `/api/me`. Increment 0.3 makes the database real: migrations that apply, roles that exist, and a verifier that reads a live chain. Increment 0.4 forces MFA enrollment on first login and seeds two Postgres tenants without `AUTH_DEV_MEMORY`. Increment 0.5 splits ledger appends to `app_append`, records nightly chain checks, and schedules the verifier. Increment 0.6 adds the `disclosures` schema and a two-admin recovery ceremony. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) stay listed, not silently marked done.
+This repository remains a consolidation plan plus a clickable prototype. Increment 0.1, recorded here, is the first code foundation of the merged PMS. Increment 0.2 wires the sessions table and `/api/me`. Increment 0.3 makes the database real: migrations that apply, roles that exist, and a verifier that reads a live chain. Increment 0.4 forces MFA enrollment on first login and seeds two Postgres tenants without `AUTH_DEV_MEMORY`. Increment 0.5 splits ledger appends to `app_append`, records nightly chain checks, and schedules the verifier. Increment 0.6 adds the `disclosures` schema and a two-admin recovery ceremony. Increment 0.7 anchors signed chain heads to Object Lock storage. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) stay listed, not silently marked done.
 
 ## Current state
 
@@ -171,6 +171,16 @@ Increment 0.5 split ledger appends and recorded nightly chain checks but left tw
 - Two-admin recovery: `POST /api/recovery-ceremony` (initiate + TOTP), `POST /api/recovery-ceremony/approve` (second admin + TOTP, returns `resetToken`), `POST /api/recovery-ceremony/reset` (token + new password, no session).
 
 **Not in Increment 0.6.** Object Lock chain head, egress paths that call `recordDisclosure`, real KMS, PHI patient rows, legal pack, D.8 interviews.
+
+## Increment 0.7
+
+Increment 0.6 added disclosures and recovery ceremonies but nightly verification still stopped at `audit_chain_checks` rows in Postgres. This increment anchors signed chain heads to Object Lock storage.
+
+- Migration `0008_chain_head_anchor.sql` adds `object_lock_key` to `audit_chain_checks` and permits `app_append` to set it once after insert; all other updates remain refused.
+- `packages/verifier` gains `anchor.ts`: HMAC-signed chain-head documents, a `file://` sink for dev/CI, and `anchorRecordedHeads` called from `verify:chain:record` when `OBJECT_STORAGE_URL` and `CHAIN_HEAD_SIGN_KEY` are set. Production will swap the dev HMAC signer for KMS ECDSA P-256.
+- CI writes anchored heads under `file:///tmp/pms-audit-heads`; the nightly workflow template passes through the production secrets.
+
+**Not in Increment 0.7.** Real KMS signing, S3 Object Lock compliance mode, egress paths that call `recordDisclosure`, PHI patient rows, legal pack, D.8 interviews.
 
 ## Risks that stay visible
 
