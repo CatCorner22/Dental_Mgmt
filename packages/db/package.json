@@ -20,7 +20,8 @@
     "db:migrate": "tsx src/cli.ts migrate",
     "db:status": "tsx src/cli.ts status",
     "db:reset": "tsx src/cli.ts reset",
-    "db:seed": "tsx src/cli.ts seed"
+    "db:seed": "tsx src/cli.ts seed",
+    "db:restore-drill": "tsx src/cli.ts restore-drill"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",

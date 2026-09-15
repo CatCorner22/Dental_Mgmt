@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
 import { applyMigrations, migrationStatus } from "./migrate";
+import { runRestoreDrill } from "./restore-drill";
 import { seedDatabase } from "./seed";
 
 /**
@@ -14,6 +15,7 @@ import { seedDatabase } from "./seed";
  *   reset    drop schema public, re-run roles and migrations
  *            (refuses unless PMS_ALLOW_DB_RESET=1)
  *   seed     idempotent dev tenants/users (administrator connection)
+ *   restore-drill  verify BACKUP_TARGET and append backup.restore_drill per tenant
  *
  * Connection: PMS_MIGRATE_URL, else POSTGRES_URL.
  * PMS_MIGRATE_ROLE, when set, is SET ROLE'd before migrating so CI applies
@@ -89,6 +91,38 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
       });
       return 0;
 
+    case "restore-drill": {
+      const backupTarget = env.BACKUP_TARGET;
+      if (!backupTarget) {
+        console.error("Set BACKUP_TARGET (file:// or s3://).");
+        return 2;
+      }
+      const appendUrl = env.APPEND_ROLE_DSN ?? (env.PMS_APPEND_ROLE ? env.POSTGRES_URL : undefined);
+      if (!appendUrl) {
+        console.error("Set APPEND_ROLE_DSN, or PMS_APPEND_ROLE together with POSTGRES_URL.");
+        return 2;
+      }
+      const admin = new Client({ connectionString: connectionString(env) });
+      const append = new Client({ connectionString: appendUrl });
+      await admin.connect();
+      await append.connect();
+      try {
+        const appendRole = env.PMS_APPEND_ROLE;
+        if (appendRole) {
+          if (!/^[a-z_][a-z0-9_]*$/.test(appendRole)) {
+            throw new Error("PMS_APPEND_ROLE is not a plain role name.");
+          }
+          await append.query(`SET ROLE ${appendRole}`);
+        }
+        const verdict = await runRestoreDrill(admin, append, backupTarget);
+        console.log(JSON.stringify(verdict, null, 2));
+        return verdict.ok ? 0 : 1;
+      } finally {
+        await append.end();
+        await admin.end();
+      }
+    }
+
     case "reset":
       if (env.PMS_ALLOW_DB_RESET !== "1") {
         console.error("reset drops every table. Set PMS_ALLOW_DB_RESET=1 to confirm.");
@@ -105,7 +139,7 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv = process.env)
       return 0;
 
     default:
-      console.error("usage: db <roles|migrate|status|reset|seed>");
+      console.error("usage: db <roles|migrate|status|reset|seed|restore-drill>");
       return 2;
   }
 }
