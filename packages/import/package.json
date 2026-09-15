@@ -11,7 +11,8 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "import:bank": "tsx src/bank-cli.ts",
-    "import:curve": "tsx src/cli.ts"
+    "import:curve": "tsx src/cli.ts",
+    "import:curve:apply": "tsx src/apply-cli.ts"
   },
   "dependencies": {
     "@pms/db": "workspace:*"
