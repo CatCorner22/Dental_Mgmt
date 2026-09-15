@@ -122,6 +122,9 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [6, "audit_chain_checks", "app_migrate"],
         [7, "disclosures_recovery", "app_migrate"],
         [8, "chain_head_anchor", "app_migrate"],
+        [9, "patients_accounts", "app_migrate"],
+        [10, "ledger_core", "app_migrate"],
+        [11, "ledger_views", "app_migrate"],
       ]);
       const owners = await db.admin.query(
         "SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'"
@@ -132,7 +135,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
     it("is a no-op the second time", async () => {
       const result = await applyMigrations(db.admin);
       expect(result.applied).toEqual([]);
-      expect(result.alreadyApplied).toBe(8);
+      expect(result.alreadyApplied).toBe(11);
     });
 
     it("left domain_event with RLS forced after the seq backfill", async () => {
@@ -494,6 +497,110 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [ridgeview.id, oakridge.id].sort()
       );
       await append.end();
+    });
+  });
+
+  describe("ledger kernel", () => {
+    const locationId = uuidv7(3_000);
+    const patientId = uuidv7(3_001);
+    const accountId = uuidv7(3_002);
+    const procedureId = uuidv7(3_003);
+    const chargeId = uuidv7(3_004);
+
+    beforeAll(async () => {
+      await db.admin.query(
+        `INSERT INTO locations (id, tenant_id, name, timezone, created_at)
+         VALUES ($1, $2, 'Ledger Site', 'America/Chicago', now())`,
+        [locationId, ridgeview.id]
+      );
+      await as("app_rw", ridgeview, async (c) => {
+        await c.query(
+          `INSERT INTO patients (id, tenant_id, mrn, first_name, last_name, date_of_birth,
+                                 primary_location_id, created_by_id, created_by_name)
+           VALUES ($1, $2, 'MRN-1', 'Pat', 'One', '1990-01-01', $3, $4, 'seed')`,
+          [patientId, ridgeview.id, locationId, ridgeview.user]
+        );
+        await c.query(
+          `INSERT INTO guarantor_accounts (id, tenant_id, display_name, created_by_id, created_by_name, created_at)
+           VALUES ($1, $2, 'Pat One', $3, 'seed', now())`,
+          [accountId, ridgeview.id, ridgeview.user]
+        );
+        await c.query(
+          `INSERT INTO account_members (id, tenant_id, account_id, patient_id, effective_from, created_at)
+           VALUES ($1, $2, $3, $4, '2026-09-01', now())`,
+          [uuidv7(3_010), ridgeview.id, accountId, patientId]
+        );
+        await c.query(
+          `INSERT INTO procedures (id, tenant_id, patient_id, cdt_code)
+           VALUES ($1, $2, $3, 'D2740')`,
+          [procedureId, ridgeview.id, patientId]
+        );
+        await c.query(
+          `INSERT INTO reason_codes (tenant_id, code, kind, label) VALUES
+             ($1, 'courtesy', 'write_off', 'Courtesy adjustment'),
+             ($1, 'correction', 'reversal', 'Correction')`,
+          [ridgeview.id]
+        );
+      });
+    });
+
+    it("lets app_append insert a charge and refuses UPDATE", async () => {
+      const insert = await attempt(
+        "app_append",
+        ridgeview,
+        `INSERT INTO ledger_entries (
+           id, tenant_id, account_id, patient_id, location_id, kind, gl_bucket, amount_cents,
+           effective_date, posted_at, created_by_id, created_by_name, procedure_id, idempotency_key
+         ) VALUES ($1, $2, $3, $4, $5, 'charge', 'patient_ar', 10000, '2026-09-01', now(), $6, 'Dana', $7, 'charge-1')`,
+        [chargeId, ridgeview.id, accountId, patientId, locationId, ridgeview.user, procedureId]
+      );
+      expect(insert).toEqual({ rows: [] });
+
+      const update = await attempt(
+        "app_append",
+        ridgeview,
+        "UPDATE ledger_entries SET amount_cents = 1 WHERE id = $1",
+        [chargeId]
+      );
+      expect(update).toMatchObject({ code: "42501" });
+    });
+
+    it("refuses a reversal that does not mirror the original amount", async () => {
+      const bad = await attempt(
+        "app_append",
+        ridgeview,
+        `INSERT INTO ledger_entries (
+           id, tenant_id, account_id, patient_id, location_id, kind, gl_bucket, amount_cents,
+           effective_date, posted_at, created_by_id, created_by_name, reason_code,
+           reverses_entry_id, idempotency_key
+         ) VALUES ($1, $2, $3, $4, $5, 'reversal', 'patient_ar', -5000, '2026-09-02', now(), $6,
+                   'Dana', 'correction', $7, 'rev-bad')`,
+        [uuidv7(3_005), ridgeview.id, accountId, patientId, locationId, ridgeview.user, chargeId]
+      );
+      expect(bad).toMatchObject({ code: "P0001" });
+    });
+
+    it("refuses allocations that exceed the payment", async () => {
+      const payId = uuidv7(3_006);
+      const insertPay = await attempt(
+        "app_append",
+        ridgeview,
+        `INSERT INTO ledger_entries (
+           id, tenant_id, account_id, patient_id, location_id, kind, gl_bucket, amount_cents,
+           effective_date, posted_at, created_by_id, created_by_name, idempotency_key
+         ) VALUES ($1, $2, $3, $4, $5, 'patient_payment', 'patient_ar', -4000, '2026-09-02', now(), $6, 'Dana', 'pay-1')`,
+        [payId, ridgeview.id, accountId, patientId, locationId, ridgeview.user]
+      );
+      expect(insertPay).toEqual({ rows: [] });
+
+      const over = await attempt(
+        "app_append",
+        ridgeview,
+        `INSERT INTO payment_allocations (id, tenant_id, payment_entry_id, charge_entry_id, amount_cents)
+         VALUES ($1, $2, $3, $4, 5000)`,
+        [uuidv7(3_007), ridgeview.id, payId, chargeId]
+      );
+      expect(over).toMatchObject({ code: "P0001" });
     });
   });
 

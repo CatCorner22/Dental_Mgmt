@@ -15,6 +15,9 @@ const authSql = readFileSync(join(here, "../migrations/0002_auth_lookup.sql"), "
 const auditSql = readFileSync(join(here, "../migrations/0006_audit_chain_checks.sql"), "utf8");
 const complianceSql = readFileSync(join(here, "../migrations/0007_disclosures_recovery.sql"), "utf8");
 const anchorSql = readFileSync(join(here, "../migrations/0008_chain_head_anchor.sql"), "utf8");
+const patientsSql = readFileSync(join(here, "../migrations/0009_patients_accounts.sql"), "utf8");
+const ledgerSql = readFileSync(join(here, "../migrations/0010_ledger_core.sql"), "utf8");
+const ledgerViewsSql = readFileSync(join(here, "../migrations/0011_ledger_views.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -51,8 +54,7 @@ describe("Increment 0.1 schema", () => {
     }
   });
 
-  it("does not create PHI patient tables", () => {
-    expect(sql).not.toMatch(/CREATE TABLE patients\b/);
+  it("does not create clinical encounter tables in Increment 0.1", () => {
     expect(sql).not.toMatch(/CREATE TABLE encounters\b/);
     expect(sql).not.toMatch(/CREATE TABLE notes\b/);
   });
@@ -81,6 +83,21 @@ describe("Increment 0.6 disclosures and recovery", () => {
     expect(complianceSql).toMatch(/recovery_ceremonies_distinct_admins/);
     expect(complianceSql).toMatch(/auth_lookup_recovery_ceremony/);
     expect(complianceSql).toMatch(/GRANT INSERT ON disclosures TO app_append/);
+  });
+});
+
+describe("Increment 1.1 ledger kernel", () => {
+  it("creates patient headers and append-only ledger tables", () => {
+    expect(patientsSql).toMatch(/CREATE TABLE patients\b/);
+    expect(patientsSql).toMatch(/CREATE TABLE guarantor_accounts\b/);
+    expect(ledgerSql).toMatch(/CREATE TABLE ledger_entries\b/);
+    expect(ledgerSql).toMatch(/CREATE TABLE payment_allocations\b/);
+    expect(ledgerSql).toMatch(/ledger_entries_immutable/);
+    expect(ledgerSql).toMatch(/payment_allocations_within_bounds/);
+    expect(ledgerSql).toMatch(/GRANT INSERT ON ledger_entries, payment_allocations TO app_append/);
+    expect(ledgerSql).toMatch(/GRANT SELECT ON ledger_entries, payment_allocations TO app_append/);
+    expect(ledgerViewsSql).toMatch(/CREATE OR REPLACE VIEW account_balances/);
+    expect(ledgerViewsSql).toMatch(/CREATE OR REPLACE VIEW ledger_explanations/);
   });
 });
 

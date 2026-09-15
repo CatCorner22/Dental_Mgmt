@@ -1,0 +1,26 @@
+{
+  "name": "@pms/ledger",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Append-only ledger kernel with property-tested allocations and postGuarded controls gate.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pms/controls-engine": "workspace:*",
+    "@pms/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/pg": "^8.15.5",
+    "fast-check": "^4.1.1",
+    "pg": "^8.16.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}

@@ -209,6 +209,77 @@ export const recoveryCeremonies = pgTable(
   (t) => [index("recovery_ceremonies_target_idx").on(t.tenantId, t.targetUserId, t.initiatedAt)]
 );
 
+export const patients = pgTable(
+  "patients",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    mrn: text("mrn").notNull(),
+    firstName: text("first_name").notNull(),
+    lastName: text("last_name").notNull(),
+    dateOfBirth: date("date_of_birth").notNull(),
+    primaryLocationId: uuid("primary_location_id").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    createdById: uuid("created_by_id").notNull(),
+    createdByName: text("created_by_name").notNull(),
+  },
+  (t) => [
+    index("patients_tenant_idx").on(t.tenantId),
+    uniqueIndex("patients_tenant_mrn_uidx").on(t.tenantId, t.mrn),
+  ]
+);
+
+export const guarantorAccounts = pgTable(
+  "guarantor_accounts",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    displayName: text("display_name").notNull(),
+    statementHold: boolean("statement_hold").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    createdById: uuid("created_by_id").notNull(),
+    createdByName: text("created_by_name").notNull(),
+  },
+  (t) => [index("guarantor_accounts_tenant_idx").on(t.tenantId)]
+);
+
+export const ledgerEntries = pgTable(
+  "ledger_entries",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    accountId: uuid("account_id").notNull(),
+    patientId: uuid("patient_id").notNull(),
+    locationId: uuid("location_id").notNull(),
+    kind: text("kind").notNull(),
+    glBucket: text("gl_bucket").notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    currency: text("currency").notNull().default("USD"),
+    reasonCode: text("reason_code"),
+    effectiveDate: date("effective_date").notNull(),
+    postedAt: timestamp("posted_at", { withTimezone: true }).notNull(),
+    createdById: uuid("created_by_id").notNull(),
+    createdByName: text("created_by_name").notNull(),
+    encounterId: uuid("encounter_id"),
+    procedureId: uuid("procedure_id"),
+    claimId: uuid("claim_id"),
+    coverageId: uuid("coverage_id"),
+    reversesEntryId: uuid("reverses_entry_id"),
+    approvalRequestId: uuid("approval_request_id"),
+    tender: text("tender"),
+    memo: text("memo"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    insuranceExpectedCents: bigint("insurance_expected_cents", { mode: "number" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("ledger_entries_tenant_account_idx").on(t.tenantId, t.accountId, t.postedAt),
+    index("ledger_entries_tenant_patient_idx").on(t.tenantId, t.patientId, t.effectiveDate),
+    uniqueIndex("ledger_entries_tenant_idempotency_uidx").on(t.tenantId, t.idempotencyKey),
+  ]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "users",
@@ -220,4 +291,7 @@ export const TENANT_SCOPED_TABLES = [
   "audit_chain_checks",
   "disclosures",
   "recovery_ceremonies",
+  "patients",
+  "guarantor_accounts",
+  "ledger_entries",
 ] as const;

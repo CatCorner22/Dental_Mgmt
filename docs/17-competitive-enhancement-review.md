@@ -209,6 +209,12 @@ Phase 0 non-code deliverables include a first-party usage-metrics pipeline deriv
 
 **Not in Increment 0.11.** Scheduled metrics worker, production KMS, real S3 restore verification, PHI patient rows, legal pack, D.8 interviews.
 
+## Increment 1.1
+
+Phase 1 starts with the ledger kernel before any UI. This increment adds patient and guarantor-account headers, the append-only `ledger_entries` and `payment_allocations` tables with database triggers (immutable rows, reversal mirroring, allocation bounds), balance and explanation views, and the `@pms/ledger` package (`post`, `postGuarded`, `balances`, `idempotency`) with fast-check property tests and live Postgres invariant tests.
+
+**Not in Increment 1.1.** Ledger UI, `approval_requests` inbox, report-import ETL, bank reconciliation, card processing, day close, statements.
+
 ## Risks that stay visible
 
 - Lifting Smile Notes tests while inverting the PHI premise will fail some of those tests; they become a tracked rewrite list, not a reason to leave PHI-blocking rules in place.
