@@ -43,9 +43,9 @@ These are the product's public pillars. They do not replace the three structural
 
 ## In / Later / Not (Trust page copy)
 
-**In by GA (already in the module map).** Tenancy, patients, Board, encounters, odontogram, six-point perio, treatment plans, readable ledger, checkout, membership and payment plans, eligibility, claims, ERA, denials, lab cases, referrals, imaging import, confirmations, reports that reconcile to the ledger, conversion, exit export.
+**In by GA (already in the module map).** Tenancy, patients, Board, encounters, odontogram, six-point perio, treatment plans, readable ledger, checkout, membership and payment plans, eligibility, claims, ERA, denials, lab cases, referrals, imaging import, confirmations, **patient self-scheduling (online booking via the portal, Phase 5)**, reports that reconcile to the ledger, conversion, exit export.
 
-**Later (do not pull into Phase 0–1).** eRx, portal, two-way text, online booking, digital intake, voice perio, sensor bridge, groups/SSO, public write API, specialty modules, TennCare.
+**Later (do not pull into Phase 0–1).** eRx, portal, two-way text, **patient self-scheduling / online booking** (Phase 5; Phase 2 schedule kernel is the prerequisite), digital intake, voice perio, sensor bridge, groups/SSO, public write API, specialty modules, TennCare.
 
 **Not at launch (say so).** Inventory, time-clock, and payroll as a system of record; marketing and reputation; teledentistry; Canada; DSO enterprise.
 
@@ -231,7 +231,7 @@ Phase 1 shadow-ledger feeding starts with a Curve Hero report-import stub. This 
 
 The readable ledger gets a minimal Money Desk UI before checkout or posting screens ship. This increment seeds a Ridgeview demo charge with partial payment, adds `GET /api/ledger/accounts` and `GET /api/ledger/accounts/[accountId]`, and renders `/ledger` plus `/ledger/[accountId]` with the three labeled balance numbers and a running itemized view over `ledger_explanations`.
 
-**Not in Increment 1.4.** Posting UI, checkout, approvals inbox UI, As-of date chip, CPA/patient explanation audiences, palette search, mobile approvals surface.
+**Not in Increment 1.4.** Posting UI, checkout, approvals inbox UI, As-of date chip, CPA/patient explanation audiences, palette search, mobile approvals surface, patient self-scheduling (on the roadmap for Phase 5; see `docs/08-roadmap.md`).
 
 ## Risks that stay visible
 
