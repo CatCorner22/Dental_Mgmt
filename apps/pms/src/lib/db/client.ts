@@ -40,6 +40,8 @@ export async function withTenantTransaction<T>(
   }
 }
 
-export function resetDbPoolForTests(): void {
+export async function resetDbPoolForTests(): Promise<void> {
+  const current = pool;
   pool = undefined;
+  await current?.end();
 }

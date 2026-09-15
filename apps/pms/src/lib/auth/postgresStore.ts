@@ -203,12 +203,15 @@ export function createPostgresStore(
     async appendDomainEvent(input) {
       await withTenantTransaction(input.tenantId, input.actorUserId ?? input.tenantId, async (db) => {
         const [last] = await db
-          .select({ hash: domainEvent.hash })
+          .select({ hash: domainEvent.hash, seq: domainEvent.seq })
           .from(domainEvent)
           .where(eq(domainEvent.tenantId, input.tenantId))
-          .orderBy(sql`${domainEvent.occurredAt} desc`)
+          .orderBy(sql`${domainEvent.seq} desc`)
           .limit(1);
         const prevHash = last?.hash ?? GENESIS_HASH;
+        // UNIQUE (tenant_id, seq) turns a concurrent append into a failed
+        // insert rather than a silent fork.
+        const seq = (last?.seq ?? 0) + 1;
         const occurredAt = input.at;
         const hash = hashDomainEvent({
           prevHash,
@@ -226,6 +229,7 @@ export function createPostgresStore(
           prevHash,
           hash,
           occurredAt,
+          seq,
         });
       }, env);
     },

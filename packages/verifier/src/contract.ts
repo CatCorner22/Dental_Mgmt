@@ -30,8 +30,14 @@ export const CHAIN_STEPS: readonly PipelineStep[] = [
   {
     id: "links-hold",
     promise: "Each event after the first names the previous event's hash as prev_hash.",
-    evidence: "event[n].prev_hash === event[n-1].hash, in occurred_at order.",
+    evidence: "event[n].prev_hash === event[n-1].hash, in seq order.",
     ifAbsent: "A link was inserted, deleted, or reordered after the fact.",
+  },
+  {
+    id: "sequence-dense",
+    promise: "A tenant's events are numbered 1, 2, 3 … with no gap, when a seq is present.",
+    evidence: "event[n].seq === n + 1 for every row read in seq order.",
+    ifAbsent: "A row was removed from the middle or the chain was rebuilt from two sources.",
   },
 ];
 
@@ -69,7 +75,7 @@ export const NAMED_TABLES = [
 ] as const;
 
 export const LIMITS = [
-  "The verifier reads artifacts (SQL text and event hashes). It does not connect to production.",
-  "It cannot prove a live cluster's role is non-owner. That is an operations check.",
+  "The verifier reads SQL text and, as app_verify, the domain_event table alone. It writes nothing.",
+  "It cannot prove the application's live role is non-owner. That is an operations check.",
   "It does not judge clinical or financial correctness.",
 ] as const;

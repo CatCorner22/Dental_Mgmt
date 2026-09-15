@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   index,
   integer,
@@ -108,10 +109,13 @@ export const domainEvent = pgTable(
     prevHash: text("prev_hash").notNull(),
     hash: text("hash").notNull(),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+    /** Per-tenant position in the chain, from 1. Defines order; forbids forks. */
+    seq: bigint("seq", { mode: "number" }).notNull(),
   },
   (t) => [
     index("domain_event_tenant_occurred_idx").on(t.tenantId, t.occurredAt),
     uniqueIndex("domain_event_tenant_hash_uidx").on(t.tenantId, t.hash),
+    uniqueIndex("domain_event_tenant_seq_uidx").on(t.tenantId, t.seq),
   ]
 );
 

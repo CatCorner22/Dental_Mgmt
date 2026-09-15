@@ -8,6 +8,8 @@ export interface ChainEvent {
   kind: string;
   payload: unknown;
   occurredAt: string;
+  /** Per-tenant position from 1. Optional so hash fixtures without it still verify. */
+  seq?: number;
 }
 
 export type Severity = "refuse" | "concern";
@@ -35,7 +37,7 @@ function canonicalize(payload: unknown): string {
   return JSON.stringify(payload);
 }
 
-export function expectedHash(event: Omit<ChainEvent, "hash">): string {
+export function expectedHash(event: Omit<ChainEvent, "hash" | "seq">): string {
   const body = [
     event.prevHash,
     event.tenantId,
@@ -80,6 +82,15 @@ export function verifyChain(events: ChainEvent[]): ChainVerdict {
         stepId: step.id,
         severity: "refuse",
         says: `Event ${i} does not name the previous event's hash.`,
+        because: step.ifAbsent,
+      });
+    }
+    if (ev.seq !== undefined && ev.seq !== i + 1) {
+      const step = byId.get("sequence-dense")!;
+      objections.push({
+        stepId: step.id,
+        severity: "refuse",
+        says: `Event ${i} carries seq ${ev.seq}; expected ${i + 1}.`,
         because: step.ifAbsent,
       });
     }

@@ -63,10 +63,11 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
   async function appendEvent(tenant: { id: string; user: string }, kind: string, payload: object) {
     return as("app_rw", tenant, async (c) => {
       const { rows } = await c.query(
-        "SELECT hash FROM domain_event WHERE tenant_id = $1 ORDER BY occurred_at DESC, id DESC LIMIT 1",
+        "SELECT hash, seq FROM domain_event WHERE tenant_id = $1 ORDER BY seq DESC LIMIT 1",
         [tenant.id]
       );
       const prevHash = (rows[0]?.hash as string | undefined) ?? GENESIS_HASH;
+      const seq = Number(rows[0]?.seq ?? 0) + 1;
       const occurredAt = new Date();
       const hash = hashDomainEvent({
         prevHash,
@@ -77,9 +78,9 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
       });
       const id = uuidv7(occurredAt.getTime());
       await c.query(
-        `INSERT INTO domain_event (id, tenant_id, actor_user_id, kind, payload, prev_hash, hash, occurred_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [id, tenant.id, tenant.user, kind, JSON.stringify(payload), prevHash, hash, occurredAt]
+        `INSERT INTO domain_event (id, tenant_id, actor_user_id, kind, payload, prev_hash, hash, occurred_at, seq)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [id, tenant.id, tenant.user, kind, JSON.stringify(payload), prevHash, hash, occurredAt, seq]
       );
       return id;
     });
@@ -115,6 +116,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [1, "init", "app_migrate"],
         [2, "auth_lookup", "app_migrate"],
         [3, "roles_grants", "app_migrate"],
+        [4, "domain_event_seq", "app_migrate"],
       ]);
       const owners = await db.admin.query(
         "SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'"
@@ -125,7 +127,14 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
     it("is a no-op the second time", async () => {
       const result = await applyMigrations(db.admin);
       expect(result.applied).toEqual([]);
-      expect(result.alreadyApplied).toBe(3);
+      expect(result.alreadyApplied).toBe(4);
+    });
+
+    it("left domain_event with RLS forced after the seq backfill", async () => {
+      const { rows } = await db.admin.query(
+        "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = 'domain_event'"
+      );
+      expect(rows).toEqual([{ relrowsecurity: true, relforcerowsecurity: true }]);
     });
 
     it("refuses to run when an applied file was rewritten", async () => {
@@ -251,6 +260,19 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
 
       const remove = await attempt("app_rw", ridgeview, "DELETE FROM domain_event WHERE id = $1", [id]);
       expect(remove).toMatchObject({ code: "42501" });
+    });
+
+    it("a second writer naming the same seq fails instead of forking the chain", async () => {
+      const first = await appendEvent(oakridge, "auth.signin", { sessionId: "fork-a" });
+      const { rows } = await db.admin.query("SELECT seq, prev_hash FROM domain_event WHERE id = $1", [first]);
+      const fork = await attempt(
+        "app_rw",
+        oakridge,
+        `INSERT INTO domain_event (id, tenant_id, kind, payload, prev_hash, hash, occurred_at, seq)
+         VALUES ($1, $2, 'auth.signin', '{"sessionId":"fork-b"}', $3, 'deadbeef', now(), $4)`,
+        [uuidv7(), oakridge.id, rows[0].prev_hash, rows[0].seq]
+      );
+      expect(fork).toMatchObject({ code: "23505" });
     });
 
     it("the append role can insert a PHI access row and cannot read any back", async () => {
