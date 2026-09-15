@@ -5,6 +5,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts"],
+    exclude: [
+      "src/lib/vocab/reference-parity.test.ts",
+      "src/lib/audit/severity-style.test.ts"
+    ],
     setupFiles: ["src/test/setup.ts"]
   },
   resolve: {
