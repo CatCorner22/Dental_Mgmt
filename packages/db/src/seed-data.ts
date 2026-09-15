@@ -46,7 +46,7 @@ export const DEV_USERS: readonly SeedUserSpec[] = [
     displayName: "Riley Owner",
     role: "admin",
     clinicalRole: "dentist",
-    entitlements: ["approve_writeoffs"],
+    entitlements: ["approve_writeoffs", "run_import"],
     mfaEnrolled: true,
   },
   {
@@ -56,7 +56,7 @@ export const DEV_USERS: readonly SeedUserSpec[] = [
     displayName: "Finn Front",
     role: "user",
     clinicalRole: "unset",
-    entitlements: ["post_payments"],
+    entitlements: ["post_payments", "run_import"],
     mfaEnrolled: true,
   },
   {

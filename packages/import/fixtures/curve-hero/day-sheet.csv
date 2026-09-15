@@ -1,0 +1,4 @@
+Date,Location,Patient MRN,Patient Name,Transaction Type,Amount,Provider,Description
+09/14/2026,MAIN,CH-10042,Jane Doe,Charge,245.00,DR-SMITH,D2391 composite
+09/14/2026,MAIN,CH-10042,Jane Doe,Payment,-100.00,,Patient copay
+09/14/2026,MAIN,CH-10088,John Smith,Charge,89.00,DR-LEE,D0120 periodic exam

@@ -221,6 +221,12 @@ Dual-release approvals are persisted and actionable without UI. This increment a
 
 **Not in Increment 1.2.** Push notifications, walk-over PIN sessions, policy/exceptions editor UI, denial-suppression, BEFORE INSERT approval trigger on `ledger_entries`, hosted posting HTTP route.
 
+## Increment 1.3
+
+Phase 1 shadow-ledger feeding starts with a Curve Hero report-import stub. This increment adds `import_runs` and `import_staged_rows`, the `@pms/import` package (CSV parsers for day sheets, AR aging, deposit slips, and patient/coverage headers), row validation with SHA-256 fingerprints, synthetic fixtures, `pnpm import:curve`, and `POST /api/import/curve` behind the `run_import` entitlement. Parsed rows are staged and audited via `import.curve_hero.staged`; nothing posts to the ledger yet.
+
+**Not in Increment 1.3.** Ledger apply from staged rows, nightly scheduler, location-code resolution, AR tie-out report, dry-run diff UI, Open Dental or Dentrix parsers.
+
 ## Risks that stay visible
 
 - Lifting Smile Notes tests while inverting the PHI premise will fail some of those tests; they become a tracked rewrite list, not a reason to leave PHI-blocking rules in place.

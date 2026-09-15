@@ -356,6 +356,51 @@ export const approvalsLog = pgTable(
   (t) => [index("approvals_log_request_idx").on(t.requestId)]
 );
 
+export const importRuns = pgTable(
+  "import_runs",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    sourceSystem: text("source_system").notNull().default("curve_hero"),
+    reportKind: text("report_kind").notNull(),
+    locationId: uuid("location_id"),
+    businessDate: date("business_date"),
+    fileName: text("file_name"),
+    fileSha256: text("file_sha256").notNull(),
+    status: text("status").notNull().default("staged"),
+    rowCount: integer("row_count").notNull().default(0),
+    errorCount: integer("error_count").notNull().default(0),
+    summary: jsonb("summary").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    createdById: uuid("created_by_id").notNull(),
+    createdByName: text("created_by_name").notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("import_runs_tenant_created_idx").on(t.tenantId, t.createdAt),
+    index("import_runs_tenant_kind_date_idx").on(t.tenantId, t.reportKind, t.businessDate),
+  ]
+);
+
+export const importStagedRows = pgTable(
+  "import_staged_rows",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    runId: uuid("run_id").notNull(),
+    rowNumber: integer("row_number").notNull(),
+    sourceKey: text("source_key"),
+    rowSha256: text("row_sha256").notNull(),
+    payload: jsonb("payload").notNull(),
+    validationErrors: text("validation_errors").array().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("import_staged_rows_run_idx").on(t.runId),
+    uniqueIndex("import_staged_rows_run_row_uidx").on(t.runId, t.rowNumber),
+  ]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "users",
@@ -374,4 +419,6 @@ export const TENANT_SCOPED_TABLES = [
   "control_policies",
   "approval_requests",
   "approvals_log",
+  "import_runs",
+  "import_staged_rows",
 ] as const;

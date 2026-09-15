@@ -19,6 +19,7 @@ const patientsSql = readFileSync(join(here, "../migrations/0009_patients_account
 const ledgerSql = readFileSync(join(here, "../migrations/0010_ledger_core.sql"), "utf8");
 const ledgerViewsSql = readFileSync(join(here, "../migrations/0011_ledger_views.sql"), "utf8");
 const controlsSql = readFileSync(join(here, "../migrations/0012_controls.sql"), "utf8");
+const importSql = readFileSync(join(here, "../migrations/0013_import_staging.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -109,6 +110,15 @@ describe("Increment 1.2 controls inbox", () => {
     expect(controlsSql).toMatch(/CREATE TABLE approvals_log\b/);
     expect(controlsSql).toMatch(/approval_requester_ne_second/);
     expect(controlsSql).toMatch(/GRANT SELECT, INSERT, UPDATE ON approval_requests TO app_rw/);
+  });
+});
+
+describe("Increment 1.3 Curve Hero import staging", () => {
+  it("creates import run and staged row tables with RLS", () => {
+    expect(importSql).toMatch(/CREATE TABLE import_runs\b/);
+    expect(importSql).toMatch(/CREATE TABLE import_staged_rows\b/);
+    expect(importSql).toMatch(/ALTER TABLE import_runs ENABLE ROW LEVEL SECURITY/);
+    expect(importSql).toMatch(/GRANT SELECT, INSERT, UPDATE ON import_runs, import_staged_rows TO app_rw/);
   });
 });
 
