@@ -37,7 +37,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         );
         if (!result.ok) return null;
         return {
-          id: result.user.id,
+          // NextAuth only guarantees `id` on the credentials user. The JWT
+          // is transport for the opaque sessions-table id, not the user id.
+          id: result.user.sessionId,
+          name: result.user.username,
           sessionId: result.user.sessionId,
           pwAt: result.user.pwAt,
         };

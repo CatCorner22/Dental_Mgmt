@@ -174,15 +174,17 @@ export async function createMemoryStore(
   return store;
 }
 
-let singleton: Promise<MemoryStore> | undefined;
+const globalStore = globalThis as typeof globalThis & {
+  __pmsMemoryStore?: Promise<MemoryStore>;
+};
 
 export function resetMemoryStoreSingleton(): void {
-  singleton = undefined;
+  globalStore.__pmsMemoryStore = undefined;
 }
 
 export function getMemoryStoreSingleton(
   env: Record<string, string | undefined> = process.env
 ): Promise<MemoryStore> {
-  singleton ??= createMemoryStore({ env });
-  return singleton;
+  globalStore.__pmsMemoryStore ??= createMemoryStore({ env });
+  return globalStore.__pmsMemoryStore;
 }

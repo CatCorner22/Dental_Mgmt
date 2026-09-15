@@ -12,14 +12,16 @@ export const authConfig: NextAuthConfig = {
   providers: [],
   callbacks: {
     jwt({ token, user }) {
-      const u = user as { sessionId?: string; pwAt?: string } | undefined;
+      const u = user as { id?: string; sessionId?: string; pwAt?: string } | undefined;
       if (u?.sessionId) token.sessionId = u.sessionId;
+      else if (u?.id) token.sessionId = u.id;
       if (u?.pwAt) token.pwAt = u.pwAt;
       return token;
     },
     session({ session, token }) {
       const extra = session as typeof session & { sessionId?: string };
       if (typeof token.sessionId === "string") extra.sessionId = token.sessionId;
+      if (typeof token.sessionId === "string" && extra.user) extra.user.id = token.sessionId;
       return extra;
     },
   },
