@@ -8,12 +8,27 @@ import { generateRecoveryCodes, hashRecoveryCodes } from "./recovery";
 import type { AuthStore, CreateSessionInput, StoredUser, ThrottleRow } from "./store";
 import type { SessionRow } from "./types";
 
+type CeremonyRow = {
+  id: string;
+  tenantId: string;
+  targetUserId: string;
+  initiatedBy: string;
+  approvedBy: string | null;
+  initiatedAt: Date;
+  approvedAt: Date | null;
+  expiresAt: Date;
+  consumedAt: Date | null;
+  resetTokenHash: string | null;
+};
+
 export interface MemoryStore extends AuthStore {
   users: Map<string, StoredUser>;
   sessions: Map<string, SessionRow>;
   throttle: Map<string, ThrottleRow>;
   phiLog: unknown[];
   events: { kind: string; payload: unknown }[];
+  disclosures: unknown[];
+  ceremonies: Map<string, CeremonyRow>;
   tenantSets: string[];
   lastEventHash: Map<string, string>;
   issuedRecoveryCodes: Map<string, string[]>;
@@ -66,6 +81,7 @@ export async function createMemoryStore(
   const sessions = new Map<string, SessionRow>();
   const throttle = new Map<string, ThrottleRow>();
   const lastEventHash = new Map<string, string>();
+  const ceremonies = new Map<string, CeremonyRow>();
 
   const store: MemoryStore = {
     users,
@@ -73,6 +89,8 @@ export async function createMemoryStore(
     throttle,
     phiLog: [],
     events: [],
+    disclosures: [],
+    ceremonies,
     tenantSets: [],
     lastEventHash,
     issuedRecoveryCodes,
@@ -160,6 +178,60 @@ export async function createMemoryStore(
       });
       lastEventHash.set(input.tenantId, hash);
       store.events.push({ kind: input.kind, payload: input.payload });
+    },
+    async recordDisclosure(input) {
+      const id = uuidv7(input.at.getTime());
+      store.disclosures.push({ id, ...input });
+      return id;
+    },
+    async createRecoveryCeremony(input) {
+      const id = uuidv7(input.initiatedAt.getTime());
+      ceremonies.set(id, {
+        id,
+        tenantId: input.tenantId,
+        targetUserId: input.targetUserId,
+        initiatedBy: input.initiatedBy,
+        approvedBy: null,
+        initiatedAt: input.initiatedAt,
+        approvedAt: null,
+        expiresAt: input.expiresAt,
+        consumedAt: null,
+        resetTokenHash: null,
+      });
+      return id;
+    },
+    async getRecoveryCeremony(id) {
+      const row = ceremonies.get(id);
+      return row ? { ...row } : null;
+    },
+    async getRecoveryCeremonyByTokenHash(resetToken) {
+      const dot = resetToken.indexOf(".");
+      if (dot <= 0) return null;
+      const row = ceremonies.get(resetToken.slice(0, dot));
+      if (!row?.resetTokenHash) return null;
+      const { createHash } = await import("node:crypto");
+      const digest = createHash("sha256").update(resetToken).digest("hex");
+      return row.resetTokenHash === digest ? { ...row } : null;
+    },
+    async approveRecoveryCeremony(input) {
+      const row = ceremonies.get(input.id);
+      if (!row) return;
+      ceremonies.set(input.id, {
+        ...row,
+        approvedBy: input.approvedBy,
+        approvedAt: input.approvedAt,
+        resetTokenHash: input.resetTokenHash,
+      });
+    },
+    async consumeRecoveryCeremony(id, consumedAt) {
+      const row = ceremonies.get(id);
+      if (!row) return;
+      ceremonies.set(id, { ...row, consumedAt });
+    },
+    async setPassword(userId, passwordHash, passwordChangedAt) {
+      const user = users.get(userId);
+      if (!user) return;
+      users.set(userId, { ...user, passwordHash, passwordChangedAt });
     },
     async getThrottle(key) {
       const row = throttle.get(key);

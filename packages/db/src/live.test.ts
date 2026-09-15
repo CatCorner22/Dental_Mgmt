@@ -119,6 +119,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [4, "domain_event_seq", "app_migrate"],
         [5, "mfa_enrollment", "app_migrate"],
         [6, "audit_chain_checks", "app_migrate"],
+        [7, "disclosures_recovery", "app_migrate"],
       ]);
       const owners = await db.admin.query(
         "SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'"
@@ -129,7 +130,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
     it("is a no-op the second time", async () => {
       const result = await applyMigrations(db.admin);
       expect(result.applied).toEqual([]);
-      expect(result.alreadyApplied).toBe(6);
+      expect(result.alreadyApplied).toBe(7);
     });
 
     it("left domain_event with RLS forced after the seq backfill", async () => {
@@ -230,7 +231,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
            FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner
           WHERE p.proname LIKE 'auth_lookup%' ORDER BY p.proname`
       );
-      expect(rows).toHaveLength(3);
+      expect(rows).toHaveLength(4);
       for (const row of rows) {
         expect(row.rolname).toBe("app_auth_lookup");
         expect(row.rolsuper).toBe(false);
@@ -296,6 +297,46 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
       expect(await attempt("app_rw", ridgeview, "DELETE FROM sessions")).toMatchObject({
         code: "42501",
       });
+    });
+  });
+
+  describe("disclosures and recovery", () => {
+    it("lets app_append insert a disclosure and refuses to rewrite it", async () => {
+      const id = uuidv7();
+      const insert = await attempt(
+        "app_append",
+        ridgeview,
+        `INSERT INTO disclosures (id, tenant_id, patient_id, at, channel, recipient, record_ids, purpose, actor_user_id, actor_name)
+         VALUES ($1, $2, $3, now(), 'export', 'patient@example.com', '["doc-1"]'::jsonb, 'patient_request', $4, 'Riley Owner')`,
+        [id, ridgeview.id, uuidv7(), ridgeview.user]
+      );
+      expect(insert).toEqual({ rows: [] });
+      const rewrite = await attempt(
+        "app_append",
+        ridgeview,
+        "UPDATE disclosures SET recipient = 'x' WHERE id = $1",
+        [id]
+      );
+      expect(rewrite).toMatchObject({ code: "42501" });
+    });
+
+    it("refuses a recovery ceremony approved by the same admin", async () => {
+      const ceremonyId = uuidv7();
+      const insert = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO recovery_ceremonies (id, tenant_id, target_user_id, initiated_by, initiated_at, expires_at)
+         VALUES ($1, $2, $3, $4, now(), now() + interval '15 minutes')`,
+        [ceremonyId, ridgeview.id, oakridge.user, ridgeview.user]
+      );
+      expect(insert).toEqual({ rows: [] });
+      const approve = await attempt(
+        "app_rw",
+        ridgeview,
+        `UPDATE recovery_ceremonies SET approved_by = $2, approved_at = now() WHERE id = $1`,
+        [ceremonyId, ridgeview.user]
+      );
+      expect(approve).toMatchObject({ code: "23514" });
     });
   });
 

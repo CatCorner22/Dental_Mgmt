@@ -13,6 +13,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const sql = readFileSync(join(here, "../migrations/0001_init.sql"), "utf8");
 const authSql = readFileSync(join(here, "../migrations/0002_auth_lookup.sql"), "utf8");
 const auditSql = readFileSync(join(here, "../migrations/0006_audit_chain_checks.sql"), "utf8");
+const complianceSql = readFileSync(join(here, "../migrations/0007_disclosures_recovery.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -69,6 +70,16 @@ describe("Increment 0.5 audit chain checks", () => {
     expect(auditSql).toMatch(/ALTER TABLE audit_chain_checks ENABLE ROW LEVEL SECURITY/);
     expect(auditSql).toMatch(/audit_chain_checks_immutable/);
     expect(auditSql).toMatch(/GRANT INSERT ON audit_chain_checks TO app_append/);
+  });
+});
+
+describe("Increment 0.6 disclosures and recovery", () => {
+  it("creates append-only disclosures and a two-admin recovery table", () => {
+    expect(complianceSql).toMatch(/CREATE TABLE disclosures/);
+    expect(complianceSql).toMatch(/CREATE TABLE recovery_ceremonies/);
+    expect(complianceSql).toMatch(/recovery_ceremonies_distinct_admins/);
+    expect(complianceSql).toMatch(/auth_lookup_recovery_ceremony/);
+    expect(complianceSql).toMatch(/GRANT INSERT ON disclosures TO app_append/);
   });
 });
 

@@ -14,6 +14,7 @@ const APP = path.join(ROOT, "src/app");
 const ALLOW = [
   path.join(APP, "api/health/route.ts"),
   path.join(APP, "api/auth/[...nextauth]/route.ts"),
+  path.join(APP, "api/recovery-ceremony/reset/route.ts"),
 ];
 
 function walk(dir) {
