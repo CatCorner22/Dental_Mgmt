@@ -19,6 +19,7 @@ import { seedBankAccount } from "./seed-bank";
 import { seedApprovalsDemo } from "./seed-approvals";
 import { seedDayCloseDemo } from "./seed-day-close";
 import { seedLedgerDemo } from "./seed-ledger";
+import { seedStatementsDemo } from "./seed-statements";
 
 export interface SeedOptions {
   password?: string;
@@ -142,6 +143,7 @@ export async function seedDatabase(
   await seedBankAccount(db, now);
   await seedDayCloseDemo(db, now);
   await seedApprovalsDemo(db, now);
+  await seedStatementsDemo(db, now);
 
   return { tenants: DEV_TENANTS.length, users: DEV_USERS.length };
 }

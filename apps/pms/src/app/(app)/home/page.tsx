@@ -9,8 +9,9 @@ export default function HomePage() {
       <h1 className="mb-4 text-navy">Nothing on the Board yet</h1>
       <p className="max-w-prose text-[var(--ink-2)]">
         Phase 1 money layer is live beside the incumbent: read the guarantor
-        ledger, import bank statements for independent reconciliation, and open
-        the variance queue when deposits do not tie.
+        ledger, issue a patient statement from the same balances, import bank
+        statements for independent reconciliation, and open the variance queue
+        when deposits do not tie.
       </p>
       <div className="mt-6 flex flex-wrap gap-4">
         <a
@@ -36,6 +37,12 @@ export default function HomePage() {
           href="/day-close"
         >
           Day close
+        </a>
+        <a
+          className="inline-flex min-h-[var(--target)] items-center rounded-md border border-[var(--line-strong)] bg-[var(--surface)] px-4 py-2 font-semibold text-[var(--ink)]"
+          href="/statements"
+        >
+          Statements
         </a>
         <a
           className="inline-flex min-h-[var(--target)] items-center rounded-md border border-[var(--line-strong)] bg-[var(--surface)] px-4 py-2 font-semibold text-[var(--ink)]"

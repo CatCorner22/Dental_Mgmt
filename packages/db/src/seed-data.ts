@@ -38,6 +38,7 @@ export const SEED_LEDGER = {
   memberJaneId: "0196b0a0-0000-7000-8000-000000000351",
   memberJohnId: "0196b0a0-0000-7000-8000-000000000352",
   allocationJaneId: "0196b0a0-0000-7000-8000-000000000361",
+  statementJaneId: "0196b0a0-0000-7000-8000-000000000701",
 } as const;
 
 export const DEV_LOCATIONS = [
