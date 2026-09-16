@@ -13,6 +13,9 @@ import {
 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { TENANT_CHAIN_LOCK_SQL } from "../auth/postgresStore";
+import { loadActivePolicy } from "../controls/policy";
+import { loadStaff } from "../controls/staff";
+import { canSealDeposits, type SealVerdict } from "./seal";
 import type { DayCloseSnapshot, DepositRow } from "./types";
 
 type DepositSlipPayload = {
@@ -227,6 +230,7 @@ export async function getDayCloseSnapshot(
   const daySheetTotal = await sumDaySheetCollections(db, tenantId, locationId, businessDate);
 
   if (closeRow) {
+    const summary = (closeRow.summary ?? {}) as { dualRelease?: { status?: string; degradedOwnerSeal?: boolean } };
     return {
       dayCloseId: closeRow.id,
       locationId,
@@ -238,6 +242,8 @@ export async function getDayCloseSnapshot(
       deposits: depositRows.map(mapDeposit),
       frozenAt: closeRow.frozenAt?.toISOString() ?? null,
       frozenByName: closeRow.frozenByName,
+      sealStatus: summary.dualRelease?.status ?? null,
+      degradedOwnerSeal: summary.dualRelease?.degradedOwnerSeal ?? false,
     };
   }
 
@@ -252,8 +258,17 @@ export async function getDayCloseSnapshot(
     deposits: depositRows.map(mapDeposit),
     frozenAt: null,
     frozenByName: null,
+    sealStatus: null,
+    degradedOwnerSeal: false,
   };
 }
+
+export type FreezeRefusal = {
+  error: "already_frozen" | "no_deposits" | "sod_preparer" | "sod_role";
+  verb?: string;
+  why?: string;
+  otherEligibleNames?: string[];
+};
 
 export async function freezeDayClose(
   db: AppDb,
@@ -265,7 +280,7 @@ export async function freezeDayClose(
     actorName: string;
     now?: Date;
   }
-): Promise<DayCloseSnapshot | { error: "already_frozen" | "no_deposits" }> {
+): Promise<DayCloseSnapshot | FreezeRefusal> {
   const now = input.now ?? new Date();
   const snapshot = await getDayCloseSnapshot(
     db,
@@ -277,11 +292,57 @@ export async function freezeDayClose(
   if (snapshot.status === "frozen") return { error: "already_frozen" };
   if (snapshot.deposits.length === 0) return { error: "no_deposits" };
 
+  // Dual count before the bag is sealed: the freezer is the second counter.
+  const depositRows = await db
+    .select({ preparedById: deposits.preparedById, amountCents: deposits.amountCents })
+    .from(deposits)
+    .where(
+      and(
+        eq(deposits.tenantId, input.tenantId),
+        eq(deposits.locationId, input.locationId),
+        eq(deposits.businessDate, input.businessDate)
+      )
+    );
+  const active = await loadActivePolicy(db, input.tenantId);
+  const staff = await loadStaff(db, input.tenantId, now);
+  const actorRow = staff.rows.find((r) => r.id === input.actorUserId);
+  const seal: SealVerdict = canSealDeposits({
+    actor: { id: input.actorUserId, name: input.actorName, role: actorRow?.role ?? "user" },
+    deposits: depositRows.map((d) => ({ preparedById: d.preparedById, amountCents: Number(d.amountCents) })),
+    policy: active?.policy ?? null,
+    people: staff.people,
+  });
+  if (!seal.ok) {
+    return {
+      error: seal.status === "blocked_same_person" ? "sod_preparer" : "sod_role",
+      verb: seal.verb,
+      why: seal.why,
+      otherEligibleNames: seal.otherEligibleNames,
+    };
+  }
+
   const dayCloseId = snapshot.dayCloseId ?? uuidv7(now.getTime());
-  const summary = {
+  const summary: Record<string, unknown> = {
     depositCount: snapshot.deposits.length,
     source: "manual_freeze",
+    dualRelease: {
+      channel: "deposit",
+      status: seal.status,
+      dualRequired: seal.dualRequired,
+      thresholdUsd: seal.thresholdUsd,
+      preparerIds: seal.preparerIds,
+      sealedById: input.actorUserId,
+      degradedOwnerSeal: seal.degradedOwnerSeal,
+      policyVersion: active?.version ?? null,
+    },
   };
+  if (seal.degradedOwnerSeal) {
+    summary.degradedOwnerSealFinding = {
+      kind: "degraded_owner_seal",
+      why: seal.why,
+      recordedAt: now.toISOString(),
+    };
+  }
 
   if (snapshot.dayCloseId) {
     await db
@@ -334,6 +395,10 @@ export async function freezeDayClose(
     depositTotalCents: snapshot.depositTotalCents,
     daySheetTotalCents: snapshot.daySheetTotalCents,
     varianceCents: snapshot.varianceCents,
+    dualReleaseStatus: seal.status,
+    dualRequired: seal.dualRequired,
+    degradedOwnerSeal: seal.degradedOwnerSeal,
+    preparerIds: seal.preparerIds,
   }, now);
 
   return getDayCloseSnapshot(db, input.tenantId, input.locationId, input.businessDate);

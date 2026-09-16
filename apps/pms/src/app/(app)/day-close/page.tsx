@@ -57,8 +57,20 @@ export default function DayClosePage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ locationId: DEMO_LOCATION, businessDate }),
       });
-      const body = (await res.json()) as { error?: string; created?: number; snapshot?: DayCloseSnapshot };
-      if (!res.ok) throw new Error(body.error ?? `${label} failed.`);
+      const body = (await res.json()) as {
+        error?: string;
+        why?: string;
+        otherEligibleNames?: string[];
+        created?: number;
+        snapshot?: DayCloseSnapshot;
+      };
+      if (!res.ok) {
+        // A seal refusal says why and who could count instead.
+        const who = body.otherEligibleNames?.length
+          ? ` Who could count instead: ${body.otherEligibleNames.join(", ")}.`
+          : "";
+        throw new Error((body.why ?? body.error ?? `${label} failed.`) + who);
+      }
       if (body.snapshot) setState({ status: "ready", snapshot: body.snapshot });
       else {
         const snapshot = await loadSnapshot();
@@ -79,8 +91,9 @@ export default function DayClosePage() {
       <p className="mb-2 text-sm font-semibold tracking-wide text-teal">Money Desk</p>
       <h1 className="mb-2">Day close</h1>
       <p className="mb-8 max-w-prose text-[var(--ink-2)]">
-        Location-scoped deposit batch versus imported day-sheet collections. Freezing locks the
-        close atomically and marks deposits closed.
+        Location-scoped deposit batch versus imported day-sheet collections. Freezing is the seal
+        on the bag: it locks the close atomically, marks deposits closed, and needs a second count
+        by someone other than the preparer.
       </p>
 
       <label className="mb-6 block max-w-xs text-sm">
@@ -132,6 +145,12 @@ export default function DayClosePage() {
             {state.snapshot.frozenByName && (
               <> · frozen by {state.snapshot.frozenByName}</>
             )}
+            {state.snapshot.sealStatus === "approved_dual" && <> · second count by a different person</>}
+            {state.snapshot.sealStatus === "degraded_owner_seal" && (
+              <> · owner-only seal, recorded as a finding</>
+            )}
+            {state.snapshot.sealStatus === "below_threshold" && <> · one count, under the threshold</>}
+            {state.snapshot.sealStatus === "policy_off" && <> · seal recorded, dual release not configured</>}
           </p>
 
           <div className="mb-8 flex flex-wrap gap-3">

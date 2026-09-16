@@ -40,9 +40,13 @@ const seedGrants: [typeof om, string][] = [
   [owner, "approve_writeoffs"],
   [owner, "approve_vendor"],
   [owner, "pms_admin_roles"],
+  // The office manager also holds cash: with the deposit channel enforced,
+  // posting + reconciliation (rule-cash-rec) is a mitigated critical, so the
+  // unmitigated critical these cases exercise is custody + reconciliation.
   [om, "post_payments"],
   [om, "prepare_deposit"],
   [om, "post_adjustments"],
+  [om, "collect_cash"],
   [front, "collect_cash"],
   [front, "post_payments"],
 ];
@@ -114,15 +118,20 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     const ctx = await tx((d) => loadControlsContext(d, tenant.id));
     expect(ctx.active?.version).toBe(1);
     expect(ctx.built.state.staff.teamSize).toBe(4);
-    // ACH and check are partial (patient refunds and transfers only) and the
-    // deposit channel is external, so no payment channel earns the credit.
-    expect(ctx.built.state.staff.dualControlPayments).toBe(false);
+    // ACH and check are partial (patient refunds and transfers only); the
+    // deposit channel is enforced at the day-close seal, so it earns the credit.
+    expect(ctx.built.state.staff.dualControlPayments).toBe(true);
+    expect(ctx.built.coverage.find((c) => c.channel === "deposit")?.status).toBe("enforced");
     expect(ctx.built.state.staff.independentBankRec).toBe(false);
     expect(ctx.built.state.staff.segregationScore).toBe(ctx.built.sod.summary.segregationHealth);
-    // Office manager: deposit + posting; front desk: cash + posting.
+    // Office manager: deposit + posting + cash; front desk: cash + posting.
+    // Both pairs are high, not critical, and the enforced deposit channel mitigates them.
     expect(ctx.built.sod.conflicts.map((c) => c.ruleId)).toEqual(
       expect.arrayContaining(["rule-deposit-post", "rule-collect-post"])
     );
+    const cashPairs = ctx.built.sod.conflicts.filter((c) => ["rule-deposit-post", "rule-collect-post"].includes(c.ruleId));
+    expect(cashPairs.length).toBeGreaterThanOrEqual(2);
+    expect(cashPairs.every((c) => c.dualReleaseMitigated)).toBe(true);
     expect(ctx.built.coverage.find((c) => c.channel === "payroll")?.status).toBe("external");
   });
 
@@ -134,7 +143,7 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     if (result.ok) return;
     expect(result.status).toBe(403);
     expect(result.code).toBe("sod_critical_conflict");
-    expect(result.conflicts?.map((c) => c.ruleId)).toContain("rule-cash-rec");
+    expect(result.conflicts?.map((c) => c.ruleId)).toContain("rule-custody-rec");
     expect(result.nextSteps[0]).toMatch(/control decision/);
 
     const { rows } = await db.admin.query(
@@ -218,13 +227,13 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     );
     expect(decisions.rows).toEqual(
       expect.arrayContaining([
-        { subject_kind: "sod_finding", subject_id: `${om.id}:rule-cash-rec`, kind: "accept_residual", review_by: reviewBy },
+        { subject_kind: "sod_finding", subject_id: `${om.id}:rule-custody-rec`, kind: "accept_residual", review_by: reviewBy },
       ])
     );
 
     const findings = await tx((d) => listFindings(d, tenant.id));
-    const cashRec = findings.find((f) => f.ruleId === "rule-cash-rec" && f.personId === om.id);
-    expect(cashRec).toMatchObject({ status: "open", severity: "critical", residualRiskAccepted: true });
+    const custodyRec = findings.find((f) => f.ruleId === "rule-custody-rec" && f.personId === om.id);
+    expect(custodyRec).toMatchObject({ status: "open", severity: "critical", residualRiskAccepted: true });
 
     const events = await db.admin.query(
       "SELECT kind FROM domain_event WHERE tenant_id = $1 ORDER BY seq",
@@ -236,13 +245,13 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
   });
 
   it("serializes concurrent grants so a critical pair cannot slip through together", async () => {
-    // Two administrators grant the two halves of rule-cash-rec to the same
+    // Two administrators grant the two halves of rule-custody-rec to the same
     // person at the same moment. The per-tenant lock makes the second grant
     // see the first, so exactly one succeeds and the other is refused.
     const target = secondAdmin.id;
     const [a, b] = await Promise.all([
       tx((d) =>
-        grantEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: target, entitlement: "post_payments" })
+        grantEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: target, entitlement: "collect_cash" })
       ),
       tx(
         (d) =>
@@ -297,9 +306,9 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     if (!revoked.ok) return;
     expect(revoked.findings.closed).toBeGreaterThan(0);
     let findings = await tx((d) => listFindings(d, tenant.id));
-    let cashRec = findings.find((f) => f.ruleId === "rule-cash-rec" && f.personId === om.id)!;
-    expect(cashRec.status).toBe("closed");
-    expect(cashRec.closedAt).not.toBeNull();
+    let custodyRec = findings.find((f) => f.ruleId === "rule-custody-rec" && f.personId === om.id)!;
+    expect(custodyRec.status).toBe("closed");
+    expect(custodyRec.closedAt).not.toBeNull();
 
     const missing = await tx((d) =>
       revokeEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: om.id, entitlement: "bank_reconcile" })
@@ -318,10 +327,10 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     );
     expect(regrant.ok).toBe(true);
     findings = await tx((d) => listFindings(d, tenant.id));
-    cashRec = findings.find((f) => f.ruleId === "rule-cash-rec" && f.personId === om.id)!;
-    expect(cashRec.status).toBe("open");
-    expect(cashRec.reopenedCount).toBe(1);
-    expect(cashRec.closedAt).toBeNull();
+    custodyRec = findings.find((f) => f.ruleId === "rule-custody-rec" && f.personId === om.id)!;
+    expect(custodyRec.status).toBe("open");
+    expect(custodyRec.reopenedCount).toBe(1);
+    expect(custodyRec.closedAt).toBeNull();
   });
 
   it("records a standalone decision and refuses a bare one", async () => {
@@ -358,7 +367,7 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
           tenantId: tenant.id,
           actor: asOm,
           subjectKind: "sod_finding",
-          subjectId: `${om.id}:rule-cash-rec`,
+          subjectId: `${om.id}:rule-custody-rec`,
           kind: "accept_residual",
           note: "I review my own reconciliation carefully every Friday.",
           reviewBy,
@@ -374,7 +383,7 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
           tenantId: tenant.id,
           actor: asOm,
           subjectKind: "sod_finding",
-          subjectId: `${om.id}:rule-cash-rec`,
+          subjectId: `${om.id}:rule-custody-rec`,
           kind: "monitor",
           note: "Asked the owner to review; tracking until then.",
           reviewBy,

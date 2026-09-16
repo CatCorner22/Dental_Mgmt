@@ -20,4 +20,7 @@ export type DayCloseSnapshot = {
   deposits: DepositRow[];
   frozenAt: string | null;
   frozenByName: string | null;
+  /** Dual-count verdict recorded at the seal; null while the day is open. */
+  sealStatus: string | null;
+  degradedOwnerSeal: boolean;
 };
