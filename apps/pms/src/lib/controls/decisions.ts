@@ -79,6 +79,18 @@ export async function recordDecision(db: AppDb, input: RecordDecisionInput): Pro
   ) {
     errors.push("residualAtDecision must be a whole number from 0 to 100.");
   }
+  // Nobody licenses a conflict on their own duties. The grant path refuses
+  // this too; the check lives here so the decisions route shares it.
+  const licenses = input.kind === "accept_residual" || input.kind === "compensate";
+  const subjectPerson =
+    input.subjectKind === "sod_finding" || input.subjectKind === "grant"
+      ? input.subjectId.split(":")[0]
+      : undefined;
+  if (licenses && subjectPerson && subjectPerson === input.actor.id) {
+    errors.push(
+      "You cannot accept or compensate a conflict on your own duties; a different administrator must record this decision."
+    );
+  }
   if (errors.length) return { ok: false, errors };
 
   if (input.supersedesDecisionId) {

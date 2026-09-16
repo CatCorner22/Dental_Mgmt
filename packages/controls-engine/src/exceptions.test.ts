@@ -74,4 +74,19 @@ describe("validateThresholdException", () => {
     ).toContain("amountMinUsd must not exceed amountMaxUsd.");
     expect(validateThresholdException(ex({ thresholdUsd: Infinity }), AS_OF).ok).toBe(false);
   });
+
+  it("refuses an unknown action and mistyped scope fields before they reach the policy", () => {
+    expect(validateThresholdException(ex({ action: "bogus" as never, thresholdUsd: undefined }), AS_OF).errors[0]).toMatch(
+      /action must be one of/,
+    );
+    expect(validateThresholdException(ex({ payeeContains: 123 as never }), AS_OF).errors).toContain(
+      "payeeContains must be a non-empty string when present.",
+    );
+    expect(validateThresholdException(ex({ payeeContains: "   " }), AS_OF).ok).toBe(false);
+    expect(validateThresholdException(ex({ role: {} as never }), AS_OF).ok).toBe(false);
+    expect(validateThresholdException(ex({ enabled: "yes" as never }), AS_OF).errors).toContain(
+      "Exception enabled must be true or false.",
+    );
+    expect(validateThresholdException(ex({ label: 5 as never }), AS_OF).errors).toContain("Exception needs a label.");
+  });
 });

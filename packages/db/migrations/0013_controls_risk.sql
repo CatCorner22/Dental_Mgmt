@@ -73,6 +73,13 @@ CREATE INDEX control_snapshots_tenant_taken_idx ON control_snapshots (tenant_id,
 ALTER TABLE user_entitlements
   ADD COLUMN decision_id uuid REFERENCES control_decisions(id);
 
+-- One live row per (tenant, person, entitlement). The grant path serializes
+-- on an advisory lock; this index is the backstop that turns any remaining
+-- race into a failed insert rather than a duplicate grant.
+CREATE UNIQUE INDEX user_entitlements_live_uidx
+  ON user_entitlements (tenant_id, user_id, entitlement)
+  WHERE effective_to IS NULL;
+
 CREATE OR REPLACE FUNCTION control_decisions_immutable()
 RETURNS trigger AS $$
 BEGIN

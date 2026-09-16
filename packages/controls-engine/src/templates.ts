@@ -180,6 +180,11 @@ function rulesLinkedTo(controlId: string): string[] {
   );
 }
 
+/** The control a SoD rule belongs to, or undefined for a family-level rule. */
+export function controlIdForRule(ruleId: string): string | undefined {
+  return CONTROL_TEMPLATES.find((t) => t.ruleIds.includes(ruleId))?.id;
+}
+
 export const CONTROL_TEMPLATES: ControlTemplate[] = [
   {
     id: "c-cash",

@@ -6,6 +6,7 @@
  * Pure functions over decision rows. Persistence lives in the app.
  */
 import type { DetectedConflict } from "./sod/detect";
+import { controlIdForRule } from "./templates";
 
 export const DECISION_KINDS = [
   "remediate",
@@ -66,8 +67,11 @@ export function isDecisionSubjectKind(value: string): value is DecisionSubjectKi
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** A real calendar date: the string must round-trip, so 2026-02-30 is refused. */
 export function isIsoDate(value: unknown): value is string {
-  return typeof value === "string" && ISO_DATE.test(value) && !Number.isNaN(Date.parse(value));
+  if (typeof value !== "string" || !ISO_DATE.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 /** Adds whole days to an ISO date and returns an ISO date. */
@@ -159,10 +163,23 @@ export interface DecisionCoverage {
 }
 
 /**
- * Which detected conflicts carry a current decision. A conflict mitigated
- * by dual release still needs a decision only if it is critical — the
- * mitigation is itself the control, and the summary already reclassifies it.
+ * The current decision that governs a conflict: one on the finding itself,
+ * or, failing that, one on the control its rule belongs to. A control-wide
+ * decision is how the engine's residualRiskAccepted flag is set, so the
+ * coverage count must honour it too, or one snapshot would call the same
+ * conflict both accepted and undecided.
  */
+export function governingDecision(
+  conflict: Pick<DetectedConflict, "id" | "ruleId">,
+  decisions: ControlDecision[],
+): ControlDecision | undefined {
+  const own = latestDecisionFor(decisions, "sod_finding", conflict.id);
+  if (own) return own;
+  const controlId = controlIdForRule(conflict.ruleId);
+  return controlId ? latestDecisionFor(decisions, "control", controlId) : undefined;
+}
+
+/** Which detected conflicts carry a current decision, and which reviews are overdue. */
 export function decisionCoverage(
   conflicts: DetectedConflict[],
   decisions: ControlDecision[],
@@ -172,7 +189,7 @@ export function decisionCoverage(
   const decided: DecisionCoverage["decided"] = [];
   const overdue: DecisionCoverage["overdue"] = [];
   for (const conflict of conflicts) {
-    const decision = latestDecisionFor(decisions, "sod_finding", conflict.id);
+    const decision = governingDecision(conflict, decisions);
     if (!decision) {
       open.push(conflict);
     } else if (decision.reviewBy != null && decision.reviewBy < asOf) {

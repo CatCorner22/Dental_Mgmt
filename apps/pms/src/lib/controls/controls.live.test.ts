@@ -10,7 +10,7 @@ import { listFindings } from "./findings";
 import { grantEntitlement, revokeEntitlement } from "./grants";
 import { seedControlPolicy } from "./policy";
 import { loadControlsContext } from "./practiceState";
-import { evaluateChannelRelease } from "./release";
+import { attestChannelRelease } from "./release";
 import { computeSnapshot, latestSnapshot, takeSnapshot } from "./snapshots";
 
 /**
@@ -109,7 +109,9 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     const ctx = await tx((d) => loadControlsContext(d, tenant.id));
     expect(ctx.active?.version).toBe(1);
     expect(ctx.built.state.staff.teamSize).toBe(4);
-    expect(ctx.built.state.staff.dualControlPayments).toBe(true);
+    // ACH and check are partial (patient refunds and transfers only) and the
+    // deposit channel is external, so no payment channel earns the credit.
+    expect(ctx.built.state.staff.dualControlPayments).toBe(false);
     expect(ctx.built.state.staff.independentBankRec).toBe(false);
     expect(ctx.built.state.staff.segregationScore).toBe(ctx.built.sod.summary.segregationHealth);
     // Office manager: deposit + posting; front desk: cash + posting.
@@ -228,6 +230,53 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     expect(verdict.tenants.find((t) => t.tenantId === tenant.id)?.publish).toBe(true);
   });
 
+  it("serializes concurrent grants so a critical pair cannot slip through together", async () => {
+    // Two administrators grant the two halves of rule-cash-rec to the same
+    // person at the same moment. The per-tenant lock makes the second grant
+    // see the first, so exactly one succeeds and the other is refused.
+    const target = secondAdmin.id;
+    const [a, b] = await Promise.all([
+      tx((d) =>
+        grantEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: target, entitlement: "post_payments" })
+      ),
+      tx(
+        (d) =>
+          grantEntitlement(d, {
+            tenantId: tenant.id,
+            actor: { id: front.id, name: front.name },
+            targetUserId: target,
+            entitlement: "bank_reconcile",
+          }),
+        { id: front.id, name: front.name }
+      ),
+    ]);
+    const outcomes = [a, b];
+    expect(outcomes.filter((r) => r.ok)).toHaveLength(1);
+    const refused = outcomes.find((r) => !r.ok);
+    expect(refused).toMatchObject({ ok: false, status: 403, code: "sod_critical_conflict" });
+
+    const { rows } = await db.admin.query(
+      "SELECT entitlement FROM user_entitlements WHERE user_id = $1 AND effective_to IS NULL ORDER BY entitlement",
+      [target]
+    );
+    expect(rows).toHaveLength(1);
+    // Clean up so later cases see the seeded picture.
+    await db.admin.query("DELETE FROM user_entitlements WHERE user_id = $1", [target]);
+    await db.admin.query("UPDATE sod_findings SET status = 'closed', closed_at = now() WHERE person_id = $1", [target]);
+  });
+
+  it("keeps one live row per grant at the database as the backstop", async () => {
+    const dup = await db.admin
+      .query(
+        `INSERT INTO user_entitlements (id, tenant_id, user_id, entitlement, effective_from)
+         VALUES ($1, $2, $3, 'collect_cash', now())`,
+        [uuidv7(), tenant.id, front.id]
+      )
+      .then(() => "inserted")
+      .catch((e: { code?: string }) => e.code);
+    expect(dup).toBe("23505");
+  });
+
   it("refuses a duplicate grant", async () => {
     const again = await tx((d) =>
       grantEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: om.id, entitlement: "bank_reconcile" })
@@ -296,6 +345,38 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     expect(good.ok).toBe(true);
     if (!good.ok) return;
     expect(good.decision.decidedByName).toBe(owner.name);
+
+    // Nobody licenses a conflict on their own duties through the register either.
+    const selfLicence = await tx(
+      (d) =>
+        recordDecision(d, {
+          tenantId: tenant.id,
+          actor: asOm,
+          subjectKind: "sod_finding",
+          subjectId: `${om.id}:rule-cash-rec`,
+          kind: "accept_residual",
+          note: "I review my own reconciliation carefully every Friday.",
+          reviewBy,
+        }),
+      asOm
+    );
+    expect(selfLicence.ok).toBe(false);
+    if (selfLicence.ok) return;
+    expect(selfLicence.errors[0]).toMatch(/your own duties/);
+    const monitorOwn = await tx(
+      (d) =>
+        recordDecision(d, {
+          tenantId: tenant.id,
+          actor: asOm,
+          subjectKind: "sod_finding",
+          subjectId: `${om.id}:rule-cash-rec`,
+          kind: "monitor",
+          note: "Asked the owner to review; tracking until then.",
+          reviewBy,
+        }),
+      asOm
+    );
+    expect(monitorOwn.ok).toBe(true);
   });
 
   it("versions the policy for every exception and keeps payroll external", async () => {
@@ -366,29 +447,44 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     expect(versions.rows.map((r) => r.version)).toEqual([1, 2, 3]);
   });
 
-  it("evaluates and records a release on a channel the ledger does not carry", async () => {
+  it("attests a release on a channel the ledger does not carry, and never as a completed dual release", async () => {
     const payroll = await tx(
-      (d) => evaluateChannelRelease(d, { tenantId: tenant.id, actor: asOm, channel: "payroll", amountUsd: 18000 }),
+      (d) => attestChannelRelease(d, { tenantId: tenant.id, actor: asOm, channel: "payroll", amountUsd: 18000 }),
       asOm
     );
     expect(payroll.ok).toBe(true);
     if (!payroll.ok) return;
     expect(payroll.coverage.enforcement).toBe("external");
+    expect(payroll.attestedBy).toBe(om.id);
     expect(payroll.evaluation.dualRequired).toBe(true);
+    expect(payroll.evaluation.status).not.toBe("approved_dual");
     // Payroll always needs two people; Maya's Precog role decides whether she may even initiate it.
     expect(["needs_second", "blocked_role", "blocked_missing_second"]).toContain(payroll.evaluation.status);
 
     const bad = await tx((d) =>
-      evaluateChannelRelease(d, { tenantId: tenant.id, actor: asOwner, channel: "wire", amountUsd: 10 })
+      attestChannelRelease(d, { tenantId: tenant.id, actor: asOwner, channel: "wire", amountUsd: 10 })
     );
     expect(bad).toMatchObject({ ok: false, status: 400, code: "unknown_channel" });
+    // Ledger channels are enforced or partial in postGuarded; nobody attests them by hand.
+    for (const channel of ["writeoff", "check", "ach"]) {
+      const ledger = await tx((d) =>
+        attestChannelRelease(d, { tenantId: tenant.id, actor: asOwner, channel, amountUsd: 900 })
+      );
+      expect(ledger).toMatchObject({ ok: false, status: 400, code: "ledger_channel" });
+    }
 
     const events = await db.admin.query(
-      "SELECT payload FROM domain_event WHERE tenant_id = $1 AND kind = 'control.release_evaluated'",
+      "SELECT payload FROM domain_event WHERE tenant_id = $1 AND kind = 'control.release_attested'",
       [tenant.id]
     );
     expect(events.rows).toHaveLength(1);
-    expect(events.rows[0].payload).toMatchObject({ channel: "payroll", enforcement: "external" });
+    expect(events.rows[0].payload).toMatchObject({
+      channel: "payroll",
+      enforcement: "external",
+      attestedBy: om.id,
+      dualRequired: true,
+    });
+    expect(events.rows[0].payload.status).not.toBe("approved_dual");
   });
 
   it("freezes a snapshot with both versions and serves it back", async () => {

@@ -12,6 +12,7 @@ import { userEntitlements, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { listDecisions, recordDecision } from "./decisions";
 import { appendControlEvent } from "./events";
+import { lockTenantGrants } from "./locks";
 import { refreshSodFindings, type FindingsRefreshSummary } from "./findings";
 import { loadControlsContext } from "./practiceState";
 import { precogRole } from "./people";
@@ -72,6 +73,9 @@ export async function grantEntitlement(db: AppDb, input: GrantInput): Promise<Gr
     };
   }
 
+  // Serialize evaluate-then-insert per tenant: without this, two concurrent
+  // grants would each pass the SoD check against the same pre-state.
+  await lockTenantGrants(db, input.tenantId);
   const ctx = await loadControlsContext(db, input.tenantId, now);
   const target = ctx.staff.rows.find((r) => r.id === input.targetUserId);
   if (!target) {
@@ -196,6 +200,8 @@ export async function grantEntitlement(db: AppDb, input: GrantInput): Promise<Gr
   const decisionsNow = decisionIds.length ? await listDecisions(db, input.tenantId) : ctx.decisions;
   const findings = await refreshSodFindings(db, input.tenantId, evaluation.reportAfter, now, decisionsNow);
 
+  // Flat payload only: the chain hasher binds top-level keys and arrays of
+  // primitives, not the keys of nested objects (see events.ts).
   await appendControlEvent(
     db,
     input.tenantId,
@@ -205,7 +211,9 @@ export async function grantEntitlement(db: AppDb, input: GrantInput): Promise<Gr
       grantId,
       userId: target.id,
       entitlement: input.entitlement,
-      newConflicts: evaluation.newConflicts.map((c) => ({ id: c.id, severity: c.severity, score: c.score })),
+      newConflictIds: evaluation.newConflicts.map((c) => c.id),
+      newConflictSeverities: evaluation.newConflicts.map((c) => c.severity),
+      newConflictScores: evaluation.newConflicts.map((c) => c.score),
       decisionIds,
     },
     now
@@ -240,6 +248,7 @@ export type RevokeResult =
 /** Ends every live row for the pair; rows are never deleted. */
 export async function revokeEntitlement(db: AppDb, input: RevokeInput): Promise<RevokeResult> {
   const now = input.now ?? new Date();
+  await lockTenantGrants(db, input.tenantId);
   const live = await db
     .select({ id: userEntitlements.id })
     .from(userEntitlements)

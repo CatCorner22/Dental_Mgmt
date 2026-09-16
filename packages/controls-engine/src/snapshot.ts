@@ -66,6 +66,7 @@ export function takeControlSnapshot(input: {
   const cover = decisionCoverage(input.sod.conflicts, input.decisions, asOf);
   const overdue = overdueReviews(input.decisions, asOf);
   const external = input.coverage.filter((c) => c.enforcement === "external");
+  const partial = input.coverage.filter((c) => c.enforcement === "partial");
 
   return {
     scoringVersion: SCORING_VERSION,
@@ -113,6 +114,11 @@ export function takeControlSnapshot(input: {
       ...(input.state.staff.independentBankRec
         ? []
         : ["Independent bank reconciliation is not measured yet and is treated as absent."]),
+      ...(partial.length
+        ? [
+            `${partial.map((c) => c.label).join(", ")}: enforced for patient-ledger kinds only; mitigates no SoD rule and earns no dual-control credit.`,
+          ]
+        : []),
       ...(external.length
         ? [
             `${external.map((c) => c.label).join(", ")}: external / attested, excluded from scores.`,

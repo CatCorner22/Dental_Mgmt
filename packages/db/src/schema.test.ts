@@ -124,6 +124,9 @@ describe("Increment 1.12 Precog on live rows", () => {
     expect(controlsRiskSql).toMatch(/sod_findings_no_delete/);
     expect(controlsRiskSql).toMatch(/length\(btrim\(note\)\) >= 10/);
     expect(controlsRiskSql).toMatch(/ADD COLUMN decision_id uuid REFERENCES control_decisions\(id\)/);
+    expect(controlsRiskSql).toMatch(
+      /CREATE UNIQUE INDEX user_entitlements_live_uidx\s+ON user_entitlements \(tenant_id, user_id, entitlement\)\s+WHERE effective_to IS NULL/
+    );
   });
 
   it("forces RLS and grants only what the runtime role needs", () => {

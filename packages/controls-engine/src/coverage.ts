@@ -1,8 +1,9 @@
 /**
  * Channel coverage: which dual-release channels the product enforces in
- * its own transaction, which it only records, and which are external to
- * the data it holds. An external channel is shown as attested and never
- * counts toward a score, so the table can never show a false green.
+ * its own transaction, which it enforces only for part of what the channel
+ * describes, which it only records, and which are external to the data it
+ * holds. Only a fully enforced or recorded channel may lower a score, so
+ * the table can never show a false green.
  */
 import {
   type DualReleasePolicy,
@@ -14,10 +15,17 @@ export const RELEASE_CHANNELS: ReleaseChannel[] = DEFAULT_DUAL_RELEASE_RULES.map
   (r) => r.channel,
 );
 
-export type Enforcement = "enforced" | "recorded" | "external";
+/**
+ * enforced : evaluated inside the write path for everything the channel describes
+ * partial  : evaluated inside the write path for some kinds only; the rest of
+ *            what the channel describes is not held, so no SoD credit
+ * recorded : evaluated and logged on request; the release happens elsewhere
+ * external : the data is not held; shown as attested, never as enforced
+ */
+export type Enforcement = "enforced" | "partial" | "recorded" | "external";
 export type EnforcementByChannel = Record<ReleaseChannel, Enforcement>;
 
-export type CoverageStatus = "enforced" | "recorded" | "external" | "off";
+export type CoverageStatus = Enforcement | "off";
 
 export interface ChannelCoverageRow {
   channel: ReleaseChannel;
@@ -28,7 +36,7 @@ export interface ChannelCoverageRow {
   thresholdUsd: number;
   mitigatesRuleIds: string[];
   activeExceptions: number;
-  /** Enabled and not external: the channel may lower a linked SoD score. */
+  /** Enabled and fully covered: the channel may lower a linked SoD score. */
   countsTowardScores: boolean;
   status: CoverageStatus;
   note: string;
@@ -36,9 +44,19 @@ export interface ChannelCoverageRow {
 
 const NOTE: Record<Enforcement, string> = {
   enforced: "Evaluated inside the posting transaction; a refusal rolls the posting back.",
+  partial:
+    "Evaluated inside the posting transaction for patient-ledger kinds only. The rest of this channel is not held yet, so it mitigates no SoD rule and earns no dual-control credit.",
   recorded: "Evaluated and logged on request; the release itself happens outside this system.",
   external:
     "This system does not yet hold the data for this channel. Shown as attested, never as enforced; excluded from scores.",
+};
+
+/** Classes that may lower a score when the policy enables the channel. */
+const COUNTS: Record<Enforcement, boolean> = {
+  enforced: true,
+  partial: false,
+  recorded: true,
+  external: false,
 };
 
 export function isReleaseChannel(value: string): value is ReleaseChannel {
@@ -65,9 +83,9 @@ export function channelCoverage(
   return policy.rules.map((rule) => {
     const level = enforcement[rule.channel] ?? "external";
     const policyEnabled = policy.enabled && rule.enabled;
-    const countsTowardScores = policyEnabled && level !== "external";
+    const countsTowardScores = policyEnabled && COUNTS[level];
     const status: CoverageStatus =
-      level === "external" ? "external" : policyEnabled ? level : "off";
+      level === "external" || level === "partial" ? level : policyEnabled ? level : "off";
     return {
       channel: rule.channel,
       label: rule.label,
@@ -85,7 +103,7 @@ export function channelCoverage(
 }
 
 /**
- * SoD rule ids that an enabled, non-external channel mitigates. This is the
+ * SoD rule ids that an enabled, fully covered channel mitigates. This is the
  * set the detector and the residual engine may credit; `mitigatedSodRuleIds`
  * in dual-release.ts credits every enabled channel and is kept for policy
  * display only.

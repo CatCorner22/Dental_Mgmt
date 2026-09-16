@@ -11,33 +11,46 @@ import { appendControlEvent } from "./events";
 import { loadActivePolicy } from "./policy";
 import { loadStaff } from "./staff";
 
-export type ReleaseEvaluateInput = {
+export type ReleaseAttestInput = {
   tenantId: string;
   actor: { id: string; name: string };
   channel: string;
   amountUsd: number;
-  initiatorPersonId?: string;
-  secondPersonId?: string;
   payee?: string;
   memo?: string;
   now?: Date;
 };
 
-export type ReleaseEvaluateResult =
-  | { ok: true; evaluation: ReleaseEvaluation; coverage: ChannelCoverageRow; recorded: boolean }
-  | { ok: false; status: 400 | 404; code: "unknown_channel" | "bad_amount" | "no_policy"; why: string };
+export type ReleaseAttestResult =
+  | { ok: true; evaluation: ReleaseEvaluation; coverage: ChannelCoverageRow; attestedBy: string }
+  | {
+      ok: false;
+      status: 400 | 404;
+      code: "unknown_channel" | "ledger_channel" | "bad_amount" | "no_policy";
+      why: string;
+    };
 
 /**
- * Evaluates a release on any of the six channels for a caller outside the
- * ledger (deposit bag, new vendor, payroll file). Ledger kinds go through
- * postGuarded and never call this. The evaluation is appended to the chain
- * as control.release_evaluated so an attested channel leaves a record;
- * the row names the enforcement class so nobody reads it as enforced.
+ * Attests a release on a channel the ledger does not carry (deposit bag, new
+ * vendor, payroll file). The actor is always the initiator; no second signer
+ * is accepted from the request, so this path can never produce an
+ * approved_dual verdict: it says whether a second person is needed and who
+ * may second, and it records that the actor attested the release. Channels
+ * the ledger enforces refuse here; their evidence comes from postGuarded.
  */
-export async function evaluateChannelRelease(db: AppDb, input: ReleaseEvaluateInput): Promise<ReleaseEvaluateResult> {
+export async function attestChannelRelease(db: AppDb, input: ReleaseAttestInput): Promise<ReleaseAttestResult> {
   const now = input.now ?? new Date();
   if (!isReleaseChannel(input.channel)) {
     return { ok: false, status: 400, code: "unknown_channel", why: `"${input.channel}" is not a dual-release channel.` };
+  }
+  const level = ENFORCEMENT[input.channel];
+  if (level === "enforced" || level === "partial") {
+    return {
+      ok: false,
+      status: 400,
+      code: "ledger_channel",
+      why: `${input.channel} releases run through the ledger posting path; they cannot be attested by hand.`,
+    };
   }
   if (typeof input.amountUsd !== "number" || !Number.isFinite(input.amountUsd) || input.amountUsd < 0) {
     return { ok: false, status: 400, code: "bad_amount", why: "Amount must be a finite, non-negative number of dollars." };
@@ -53,8 +66,7 @@ export async function evaluateChannelRelease(db: AppDb, input: ReleaseEvaluateIn
     {
       channel: input.channel,
       amountUsd: input.amountUsd,
-      initiatorPersonId: input.initiatorPersonId ?? input.actor.id,
-      secondPersonId: input.secondPersonId,
+      initiatorPersonId: input.actor.id,
       payee: input.payee,
       memo: input.memo,
       asOfDate: asOf,
@@ -67,20 +79,19 @@ export async function evaluateChannelRelease(db: AppDb, input: ReleaseEvaluateIn
     db,
     input.tenantId,
     input.actor.id,
-    "control.release_evaluated",
+    "control.release_attested",
     {
       channel: input.channel,
       enforcement: coverage.enforcement,
+      attestedBy: input.actor.id,
       amountUsd: input.amountUsd,
-      initiatorPersonId: input.initiatorPersonId ?? input.actor.id,
-      secondPersonId: input.secondPersonId ?? null,
       status: evaluation.status,
-      ok: evaluation.ok,
       dualRequired: evaluation.dualRequired,
       thresholdUsd: evaluation.thresholdUsd,
+      eligibleSecondIds: evaluation.eligibleSeconds.map((p) => p.id),
       appliedExceptionId: evaluation.appliedException?.id ?? null,
     },
     now
   );
-  return { ok: true, evaluation, coverage, recorded: true };
+  return { ok: true, evaluation, coverage, attestedBy: input.actor.id };
 }

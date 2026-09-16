@@ -65,6 +65,7 @@ export {
   latestDecisionFor,
   overdueReviews,
   decisionCoverage,
+  governingDecision,
 } from "./decisions";
 export type {
   DecisionKind,
@@ -83,7 +84,7 @@ export {
 } from "./coverage";
 export type { Enforcement, EnforcementByChannel, ChannelCoverageRow, CoverageStatus } from "./coverage";
 
-export { MAX_WAIVE_DAYS, validateThresholdException } from "./exceptions";
+export { MAX_WAIVE_DAYS, EXCEPTION_ACTIONS, validateThresholdException } from "./exceptions";
 
 export {
   buildPracticeState,
@@ -100,6 +101,7 @@ export {
   SCENARIO_TEMPLATES,
   CONTROL_TEMPLATES,
   ILLUSTRATIVE_CRIME_STATS,
+  controlIdForRule,
 } from "./templates";
 export type { ControlTemplate } from "./templates";
 export type { ControlItem, ScenarioTemplate, CrimeFraudStats, KnowledgeItem, KnowledgeRelation } from "./types";

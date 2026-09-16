@@ -11,14 +11,33 @@ import { addDays, isIsoDate } from "./decisions";
 /** Longest a waiver may stand before someone must look at it again. */
 export const MAX_WAIVE_DAYS = 90;
 
+export const EXCEPTION_ACTIONS = [
+  "raise_threshold",
+  "lower_threshold",
+  "force_dual",
+  "waive_dual",
+] as const;
+
+const OPTIONAL_STRING_FIELDS = ["payeeContains", "personId", "role", "residualNote", "approvedByPersonId"] as const;
+
 export function validateThresholdException(
   ex: ThresholdException,
   asOf: string,
 ): { ok: boolean; errors: string[] } {
   const errors: string[] = [];
   if (!ex.id || typeof ex.id !== "string") errors.push("Exception needs an id.");
-  if (!ex.label?.trim()) errors.push("Exception needs a label.");
-  if (!ex.reason?.trim()) errors.push("Exception needs a reason.");
+  if (typeof ex.label !== "string" || !ex.label.trim()) errors.push("Exception needs a label.");
+  if (typeof ex.reason !== "string" || !ex.reason.trim()) errors.push("Exception needs a reason.");
+  if (!(EXCEPTION_ACTIONS as readonly string[]).includes(ex.action)) {
+    errors.push(`Exception action must be one of: ${EXCEPTION_ACTIONS.join(", ")}.`);
+  }
+  if (typeof ex.enabled !== "boolean") errors.push("Exception enabled must be true or false.");
+  for (const field of OPTIONAL_STRING_FIELDS) {
+    const v = ex[field];
+    if (v != null && (typeof v !== "string" || !v.trim())) {
+      errors.push(`${field} must be a non-empty string when present.`);
+    }
+  }
   if (!Array.isArray(ex.channels)) {
     errors.push("Exception channels must be a list (empty = all channels).");
   } else {

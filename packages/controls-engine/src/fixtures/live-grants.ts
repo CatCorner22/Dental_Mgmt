@@ -55,10 +55,14 @@ export const liveGrants: GrantRow[] = [
   g("u-hyg", "view_schedule"),
 ];
 
-/** Ledger kinds map to ACH, check, and write-off. The rest is not held yet. */
+/**
+ * Write-offs are enforced in the ledger. Patient refunds and transfers run
+ * through the check and ACH channels but vendor payments are not held, so
+ * those two are partial. The rest is not held at all.
+ */
 export const ENFORCEMENT_INCREMENT_1_12: EnforcementByChannel = {
-  ach: "enforced",
-  check: "enforced",
+  ach: "partial",
+  check: "partial",
   writeoff: "enforced",
   deposit: "external",
   vendor_new: "external",

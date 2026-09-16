@@ -19,7 +19,7 @@ import {
   type ChannelCoverageRow,
   type EnforcementByChannel,
 } from "./coverage";
-import { activeDecisions, latestDecisionFor, type ControlDecision } from "./decisions";
+import { activeDecisions, governingDecision, type ControlDecision } from "./decisions";
 import { findKnowledgeRisks } from "./engine";
 import { assignmentsFromGrants, type GrantRow } from "./grants";
 import type { PracticeState } from "./practice-state";
@@ -62,11 +62,15 @@ export interface BuiltPracticeState {
   };
 }
 
-function controlIdForRule(ruleId: string): string | undefined {
-  return CONTROL_TEMPLATES.find((t) => t.ruleIds.includes(ruleId))?.id;
-}
-
-/** Residual-accepted control ids and compensating notes from decisions. */
+/**
+ * Residual-accepted control ids and compensating notes from decisions.
+ *
+ * The engine's flags are control-wide, so only a decision whose subject is
+ * the control feeds them directly. A decision on one person's finding never
+ * fans out to other people's conflicts on the same control; a control counts
+ * as residual-accepted from findings only when every one of its live
+ * conflicts carries a current accept_residual decision.
+ */
 export function controlDecisionInputs(
   decisions: ControlDecision[],
   sodConflicts?: SodDetectionReport["conflicts"],
@@ -76,29 +80,17 @@ export function controlDecisionInputs(
 } {
   const residualAcceptedControlIds = new Set<string>();
   const compensatingByControlId: Record<string, string[]> = {};
-  const push = (controlId: string, note: string) => {
-    (compensatingByControlId[controlId] ??= []).push(note);
-  };
   for (const d of activeDecisions(decisions)) {
-    if (d.subjectKind === "control") {
-      if (d.kind === "accept_residual") residualAcceptedControlIds.add(d.subjectId);
-      if (d.kind === "compensate") push(d.subjectId, d.note);
-      continue;
-    }
-    if (d.subjectKind === "sod_finding") {
-      const ruleId = d.subjectId.split(":")[1];
-      const controlId = ruleId ? controlIdForRule(ruleId) : undefined;
-      if (controlId && d.kind === "compensate") push(controlId, d.note);
-    }
+    if (d.subjectKind !== "control") continue;
+    if (d.kind === "accept_residual") residualAcceptedControlIds.add(d.subjectId);
+    if (d.kind === "compensate") (compensatingByControlId[d.subjectId] ??= []).push(d.note);
   }
-  // A control counts as residual-accepted when every one of its live
-  // conflicts carries a current accept_residual decision.
   if (sodConflicts) {
     for (const t of CONTROL_TEMPLATES) {
       const live = sodConflicts.filter((c) => t.ruleIds.includes(c.ruleId));
       if (live.length === 0) continue;
       const allAccepted = live.every(
-        (c) => latestDecisionFor(decisions, "sod_finding", c.id)?.kind === "accept_residual",
+        (c) => governingDecision(c, decisions)?.kind === "accept_residual",
       );
       if (allAccepted) residualAcceptedControlIds.add(t.id);
     }

@@ -4,6 +4,8 @@ import {
   addDays,
   decisionCoverage,
   decisionPermitsGrant,
+  governingDecision,
+  isIsoDate,
   latestDecisionFor,
   overdueReviews,
   validateDecision,
@@ -34,6 +36,14 @@ describe("validateDecision", () => {
     expect(validateDecision({ kind: "monitor", note, reviewBy: "soon" }, AS_OF).errors[0]).toMatch(
       /ISO date/,
     );
+  });
+
+  it("refuses a calendar-invalid date that Date.parse would roll forward", () => {
+    expect(isIsoDate("2026-02-30")).toBe(false);
+    expect(isIsoDate("2026-13-01")).toBe(false);
+    expect(isIsoDate("2026-02-28")).toBe(true);
+    expect(isIsoDate("2028-02-29")).toBe(true);
+    expect(validateDecision({ kind: "monitor", note, reviewBy: "2026-11-31" }, AS_OF).errors[0]).toMatch(/ISO date/);
   });
 });
 
@@ -90,5 +100,30 @@ describe("decision register helpers", () => {
     expect(cover.open.map((c) => c.id)).toEqual(["u-front:rule-collect-post"]);
     expect(cover.coveragePct).toBe(33);
     expect(decisionCoverage([], liveDecisions, AS_OF).coveragePct).toBe(100);
+  });
+
+  it("lets a decision on the control govern every conflict of that control", () => {
+    const conflict = (id: string): DetectedConflict =>
+      ({ id, ruleId: id.split(":")[1], personId: id.split(":")[0] }) as DetectedConflict;
+    const controlWide: ControlDecision = {
+      id: "dec-cash",
+      subjectKind: "control",
+      subjectId: "c-sod-cash",
+      kind: "accept_residual",
+      note: "Owner reconciles the bank personally every Friday.",
+      reviewBy: "2026-12-01",
+      decidedById: "u-owner",
+      decidedByName: "Dr. Reagan",
+      decidedAt: "2026-09-02T00:00:00.000Z",
+    };
+    const conflicts = [conflict("u-om:rule-deposit-post"), conflict("u-front:rule-deposit-post"), conflict("u-front:rule-collect-post")];
+    expect(governingDecision(conflicts[0], [controlWide])?.id).toBe("dec-cash");
+    expect(governingDecision(conflicts[2], [controlWide])).toBeUndefined(); // c-cash, not c-sod-cash
+    const cover = decisionCoverage(conflicts, [controlWide], AS_OF);
+    expect(cover.decided.map((d) => d.conflict.id)).toEqual(["u-om:rule-deposit-post", "u-front:rule-deposit-post"]);
+    expect(cover.open.map((c) => c.id)).toEqual(["u-front:rule-collect-post"]);
+    // A decision on the finding itself wins over the control-wide one.
+    const own: ControlDecision = { ...controlWide, id: "dec-own", subjectKind: "sod_finding", subjectId: "u-om:rule-deposit-post", kind: "remediate" };
+    expect(governingDecision(conflicts[0], [controlWide, own])?.id).toBe("dec-own");
   });
 });

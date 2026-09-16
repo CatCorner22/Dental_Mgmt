@@ -8,6 +8,7 @@ import {
 import type { AppDb } from "../db/client";
 import { ENFORCEMENT } from "./enforcement";
 import { appendControlEvent } from "./events";
+import { lockTenantPolicy } from "./locks";
 import { loadActivePolicy, writePolicyVersion, type ActivePolicy } from "./policy";
 
 export type ExceptionsView = {
@@ -70,6 +71,7 @@ export async function addException(
   const valid = validateThresholdException(ex, asOf);
   if (!valid.ok) return { ok: false, status: 400, code: "invalid", errors: valid.errors };
 
+  await lockTenantPolicy(db, input.tenantId);
   const active = await loadActivePolicy(db, input.tenantId);
   if (!active) {
     return { ok: false, status: 404, code: "no_policy", errors: ["No control policy is configured for this practice."] };
@@ -112,6 +114,7 @@ export async function retireException(
 ): Promise<ExceptionWriteResult> {
   const now = input.now ?? new Date();
   const asOf = now.toISOString().slice(0, 10);
+  await lockTenantPolicy(db, input.tenantId);
   const active: ActivePolicy | null = await loadActivePolicy(db, input.tenantId);
   if (!active) {
     return { ok: false, status: 404, code: "no_policy", errors: ["No control policy is configured for this practice."] };

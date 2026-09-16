@@ -61,6 +61,7 @@ describe("takeControlSnapshot", () => {
     expect(s.assumptions.some((a) => /bank reconciliation is not measured/.test(a))).toBe(true);
     expect(s.assumptions.some((a) => /external \/ attested, excluded from scores/.test(a))).toBe(true);
     expect(s.assumptions.find((a) => /external/.test(a))).toMatch(/Payroll transmission/);
+    expect(s.assumptions.find((a) => /patient-ledger kinds only/.test(a))).toMatch(/ACH \/ vendor electronic pay, Paper checks/);
   });
 
   it("is deterministic and finite", () => {
