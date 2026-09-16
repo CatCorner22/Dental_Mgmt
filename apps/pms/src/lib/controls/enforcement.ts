@@ -12,10 +12,13 @@ import type { EnforcementByChannel } from "@pms/controls-engine";
  *            channels mitigate no SoD rule and earn no dual-control credit;
  *            crediting the vendor-fraud controls from patient refunds would
  *            be the false green docs/05 forbids.
+ *            Deposits: freezing a day close is the seal on the bag, and
+ *            freezeDayClose refuses unless a different, role-eligible
+ *            person counts (or the owner alone, recorded as a finding).
  * external : the product does not yet hold the data for this channel. It is
  *            shown as attested, never as enforced, and never lowers a score.
- *            Deposits and vendors arrive with later Phase 1 increments;
- *            payroll stays external until the payroll-provider integration.
+ *            Vendors arrive with a later Phase 1 increment; payroll stays
+ *            external until the payroll-provider integration.
  *
  * Move a channel up only in the same change that makes the evaluator run
  * inside that channel's own write path.
@@ -24,7 +27,7 @@ export const ENFORCEMENT: EnforcementByChannel = {
   ach: "partial",
   check: "partial",
   writeoff: "enforced",
-  deposit: "external",
+  deposit: "enforced",
   vendor_new: "external",
   payroll: "external",
 };

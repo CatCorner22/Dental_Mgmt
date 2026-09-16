@@ -3,8 +3,13 @@ import { Client } from "pg";
 import { createLiveDatabase, liveAdminUrl, type LiveDatabase } from "@pms/db/testing";
 import { uuidv7 } from "@pms/db";
 import { verifyDatabaseChains } from "@pms/verifier";
+import { evaluateRelease } from "@pms/controls-engine";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
+import { createApprovalRequest, getApprovalRequest } from "./approvals";
+import { approveAndPost } from "./decideAndPost";
 import { recordDecision } from "./decisions";
+import { snapshotAllTenants } from "./nightly";
+import { loadStaff } from "./staff";
 import { addException, listExceptions, retireException } from "./exceptions";
 import { listFindings } from "./findings";
 import { grantEntitlement, revokeEntitlement } from "./grants";
@@ -35,9 +40,13 @@ const seedGrants: [typeof om, string][] = [
   [owner, "approve_writeoffs"],
   [owner, "approve_vendor"],
   [owner, "pms_admin_roles"],
+  // The office manager also holds cash: with the deposit channel enforced,
+  // posting + reconciliation (rule-cash-rec) is a mitigated critical, so the
+  // unmitigated critical these cases exercise is custody + reconciliation.
   [om, "post_payments"],
   [om, "prepare_deposit"],
   [om, "post_adjustments"],
+  [om, "collect_cash"],
   [front, "collect_cash"],
   [front, "post_payments"],
 ];
@@ -109,15 +118,20 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     const ctx = await tx((d) => loadControlsContext(d, tenant.id));
     expect(ctx.active?.version).toBe(1);
     expect(ctx.built.state.staff.teamSize).toBe(4);
-    // ACH and check are partial (patient refunds and transfers only) and the
-    // deposit channel is external, so no payment channel earns the credit.
-    expect(ctx.built.state.staff.dualControlPayments).toBe(false);
+    // ACH and check are partial (patient refunds and transfers only); the
+    // deposit channel is enforced at the day-close seal, so it earns the credit.
+    expect(ctx.built.state.staff.dualControlPayments).toBe(true);
+    expect(ctx.built.coverage.find((c) => c.channel === "deposit")?.status).toBe("enforced");
     expect(ctx.built.state.staff.independentBankRec).toBe(false);
     expect(ctx.built.state.staff.segregationScore).toBe(ctx.built.sod.summary.segregationHealth);
-    // Office manager: deposit + posting; front desk: cash + posting.
+    // Office manager: deposit + posting + cash; front desk: cash + posting.
+    // Both pairs are high, not critical, and the enforced deposit channel mitigates them.
     expect(ctx.built.sod.conflicts.map((c) => c.ruleId)).toEqual(
       expect.arrayContaining(["rule-deposit-post", "rule-collect-post"])
     );
+    const cashPairs = ctx.built.sod.conflicts.filter((c) => ["rule-deposit-post", "rule-collect-post"].includes(c.ruleId));
+    expect(cashPairs.length).toBeGreaterThanOrEqual(2);
+    expect(cashPairs.every((c) => c.dualReleaseMitigated)).toBe(true);
     expect(ctx.built.coverage.find((c) => c.channel === "payroll")?.status).toBe("external");
   });
 
@@ -129,7 +143,7 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     if (result.ok) return;
     expect(result.status).toBe(403);
     expect(result.code).toBe("sod_critical_conflict");
-    expect(result.conflicts?.map((c) => c.ruleId)).toContain("rule-cash-rec");
+    expect(result.conflicts?.map((c) => c.ruleId)).toContain("rule-custody-rec");
     expect(result.nextSteps[0]).toMatch(/control decision/);
 
     const { rows } = await db.admin.query(
@@ -213,13 +227,13 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     );
     expect(decisions.rows).toEqual(
       expect.arrayContaining([
-        { subject_kind: "sod_finding", subject_id: `${om.id}:rule-cash-rec`, kind: "accept_residual", review_by: reviewBy },
+        { subject_kind: "sod_finding", subject_id: `${om.id}:rule-custody-rec`, kind: "accept_residual", review_by: reviewBy },
       ])
     );
 
     const findings = await tx((d) => listFindings(d, tenant.id));
-    const cashRec = findings.find((f) => f.ruleId === "rule-cash-rec" && f.personId === om.id);
-    expect(cashRec).toMatchObject({ status: "open", severity: "critical", residualRiskAccepted: true });
+    const custodyRec = findings.find((f) => f.ruleId === "rule-custody-rec" && f.personId === om.id);
+    expect(custodyRec).toMatchObject({ status: "open", severity: "critical", residualRiskAccepted: true });
 
     const events = await db.admin.query(
       "SELECT kind FROM domain_event WHERE tenant_id = $1 ORDER BY seq",
@@ -231,13 +245,13 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
   });
 
   it("serializes concurrent grants so a critical pair cannot slip through together", async () => {
-    // Two administrators grant the two halves of rule-cash-rec to the same
+    // Two administrators grant the two halves of rule-custody-rec to the same
     // person at the same moment. The per-tenant lock makes the second grant
     // see the first, so exactly one succeeds and the other is refused.
     const target = secondAdmin.id;
     const [a, b] = await Promise.all([
       tx((d) =>
-        grantEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: target, entitlement: "post_payments" })
+        grantEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: target, entitlement: "collect_cash" })
       ),
       tx(
         (d) =>
@@ -292,9 +306,9 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     if (!revoked.ok) return;
     expect(revoked.findings.closed).toBeGreaterThan(0);
     let findings = await tx((d) => listFindings(d, tenant.id));
-    let cashRec = findings.find((f) => f.ruleId === "rule-cash-rec" && f.personId === om.id)!;
-    expect(cashRec.status).toBe("closed");
-    expect(cashRec.closedAt).not.toBeNull();
+    let custodyRec = findings.find((f) => f.ruleId === "rule-custody-rec" && f.personId === om.id)!;
+    expect(custodyRec.status).toBe("closed");
+    expect(custodyRec.closedAt).not.toBeNull();
 
     const missing = await tx((d) =>
       revokeEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: om.id, entitlement: "bank_reconcile" })
@@ -313,10 +327,10 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     );
     expect(regrant.ok).toBe(true);
     findings = await tx((d) => listFindings(d, tenant.id));
-    cashRec = findings.find((f) => f.ruleId === "rule-cash-rec" && f.personId === om.id)!;
-    expect(cashRec.status).toBe("open");
-    expect(cashRec.reopenedCount).toBe(1);
-    expect(cashRec.closedAt).toBeNull();
+    custodyRec = findings.find((f) => f.ruleId === "rule-custody-rec" && f.personId === om.id)!;
+    expect(custodyRec.status).toBe("open");
+    expect(custodyRec.reopenedCount).toBe(1);
+    expect(custodyRec.closedAt).toBeNull();
   });
 
   it("records a standalone decision and refuses a bare one", async () => {
@@ -353,7 +367,7 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
           tenantId: tenant.id,
           actor: asOm,
           subjectKind: "sod_finding",
-          subjectId: `${om.id}:rule-cash-rec`,
+          subjectId: `${om.id}:rule-custody-rec`,
           kind: "accept_residual",
           note: "I review my own reconciliation carefully every Friday.",
           reviewBy,
@@ -369,7 +383,7 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
           tenantId: tenant.id,
           actor: asOm,
           subjectKind: "sod_finding",
-          subjectId: `${om.id}:rule-cash-rec`,
+          subjectId: `${om.id}:rule-custody-rec`,
           kind: "monitor",
           note: "Asked the owner to review; tracking until then.",
           reviewBy,
@@ -521,6 +535,121 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     expect(ctx.active).toBeNull();
     expect(ctx.built.state.staff.dualControlPayments).toBe(false);
     expect(ctx.built.sod.conflicts).toEqual([]);
+  });
+
+  describe("held posting: approve, then post, then attach", () => {
+    const locationId = uuidv7(11_000);
+    const patientId = uuidv7(11_001);
+    const accountId = uuidv7(11_002);
+
+    async function heldWriteOff(amountCents: number, requestAmountCents = Math.abs(amountCents)) {
+      return tx(async (d) => {
+        const active = (await import("./policy")).loadActivePolicy(d, tenant.id);
+        const policy = (await active)!.policy;
+        const { people } = await loadStaff(d, tenant.id);
+        const evaluation = evaluateRelease(
+          policy,
+          { channel: "writeoff", amountUsd: Math.abs(amountCents) / 100, initiatorPersonId: om.id },
+          people
+        );
+        return createApprovalRequest(d, {
+          tenantId: tenant.id,
+          channel: "writeoff",
+          amountCents: requestAmountCents,
+          heldPayload: {
+            tenantId: tenant.id,
+            accountId,
+            patientId,
+            locationId,
+            kind: "write_off",
+            glBucket: "patient_ar",
+            amountCents,
+            reasonCode: "courtesy",
+            effectiveDate: "2026-09-01",
+            createdById: om.id,
+            createdByName: om.name,
+          },
+          evaluation,
+          requesterId: om.id,
+          requesterName: om.name,
+        });
+      }, asOm);
+    }
+
+    beforeAll(async () => {
+      await db.admin.query(
+        `INSERT INTO locations (id, tenant_id, name, timezone, created_at) VALUES ($1, $2, 'Main', 'America/Chicago', now())`,
+        [locationId, tenant.id]
+      );
+      await tx(async (d) => {
+        await d.execute(
+          (await import("drizzle-orm")).sql`INSERT INTO patients (id, tenant_id, mrn, first_name, last_name, date_of_birth, primary_location_id, created_by_id, created_by_name)
+           VALUES (${patientId}, ${tenant.id}, 'MRN-9', 'Pat', 'Nine', '1990-01-01', ${locationId}, ${owner.id}, 'seed')`
+        );
+        await d.execute(
+          (await import("drizzle-orm")).sql`INSERT INTO guarantor_accounts (id, tenant_id, display_name, created_by_id, created_by_name, created_at)
+           VALUES (${accountId}, ${tenant.id}, 'Pat Nine', ${owner.id}, 'seed', now())`
+        );
+        await d.execute(
+          (await import("drizzle-orm")).sql`INSERT INTO reason_codes (tenant_id, code, kind, label) VALUES (${tenant.id}, 'courtesy', 'write_off', 'Courtesy')`
+        );
+      });
+    });
+
+    it("records the approval, posts with the request id, and attaches the entry", async () => {
+      const request = await heldWriteOff(-30000);
+      expect(request.status).toBe("pending");
+
+      const self = await approveAndPost(tenant.id, asOm, request.id, env);
+      expect(self).toMatchObject({ ok: false, status: 403, code: "same_person" });
+
+      const result = await approveAndPost(tenant.id, asOwner, request.id, env);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      const after = await tx((d) => getApprovalRequest(d, tenant.id, request.id));
+      expect(after).toMatchObject({ status: "approved", secondApproverId: owner.id, resultingEntryId: result.entryId });
+      const entry = await db.admin.query(
+        "SELECT approval_request_id, applied_exception_id, created_by_id FROM ledger_entries WHERE id = $1",
+        [result.entryId]
+      );
+      expect(entry.rows[0]).toEqual({ approval_request_id: request.id, applied_exception_id: null, created_by_id: om.id });
+
+      const again = await approveAndPost(tenant.id, asOwner, request.id, env);
+      expect(again).toMatchObject({ ok: false, status: 409, code: "not_pending" });
+    });
+
+    it("cancels an approval the database then refuses, with the refusal as the reason", async () => {
+      // The request was raised for $200 but holds a $300 posting: the trigger refuses the mismatch.
+      const request = await heldWriteOff(-30000, 20000);
+      const result = await approveAndPost(tenant.id, asOwner, request.id, env);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.cancelled).toBe(true);
+      expect(result.why).toMatch(/dual_release_required: approval request .* approved 20000 cents, not 30000/);
+
+      const after = await tx((d) => getApprovalRequest(d, tenant.id, request.id));
+      expect(after?.status).toBe("cancelled");
+      expect(after?.decisionReason).toMatch(/approved 20000 cents/);
+      const log = await db.admin.query(
+        "SELECT decision FROM approvals_log WHERE request_id = $1 ORDER BY created_at",
+        [request.id]
+      );
+      expect(log.rows.map((r) => r.decision)).toEqual(["approved", "cancelled"]);
+      const entries = await db.admin.query("SELECT 1 FROM ledger_entries WHERE approval_request_id = $1", [request.id]);
+      expect(entries.rows).toEqual([]);
+    });
+  });
+
+  it("freezes a nightly snapshot for every tenant on the administrator's tenant list", async () => {
+    const report = await snapshotAllTenants(db.admin, env, new Date());
+    expect(report.failures).toEqual([]);
+    expect(report.tenants.map((t) => t.tenantId).sort()).toEqual([tenant.id, other.id].sort());
+    const stored = await db.admin.query(
+      "SELECT tenant_id, trigger FROM control_snapshots WHERE trigger = 'nightly' ORDER BY tenant_id",
+      []
+    );
+    expect(stored.rows.map((r) => r.tenant_id).sort()).toEqual([tenant.id, other.id].sort());
   });
 
   it("leaves the whole chain verifiable", async () => {

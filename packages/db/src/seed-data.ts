@@ -11,6 +11,36 @@ export const DEV_TENANTS = [
   { id: "0196b0a0-0000-7000-8000-000000000002", name: "Oakridge Dental", slug: "oakridge" },
 ] as const;
 
+/** Stable ids for the Ridgeview demo ledger seeded in Increment 1.4. */
+export const SEED_APPROVAL = {
+  requestId: "0196b0a0-0000-7000-8000-000000000601",
+} as const;
+
+export const SEED_BANK = {
+  tenantId: DEV_TENANTS[0].id,
+  locationId: "0196b0a0-0000-7000-8000-000000000101",
+  accountId: "0196b0a0-0000-7000-8000-000000000401",
+} as const;
+
+export const SEED_LEDGER = {
+  tenantId: DEV_TENANTS[0].id,
+  locationId: "0196b0a0-0000-7000-8000-000000000101",
+  ownerId: "0196b0a0-0000-7000-8000-000000000011",
+  patientJaneId: "0196b0a0-0000-7000-8000-000000000301",
+  patientJohnId: "0196b0a0-0000-7000-8000-000000000302",
+  accountDoeId: "0196b0a0-0000-7000-8000-000000000311",
+  accountSmithId: "0196b0a0-0000-7000-8000-000000000312",
+  procedureJaneId: "0196b0a0-0000-7000-8000-000000000321",
+  procedureJohnId: "0196b0a0-0000-7000-8000-000000000322",
+  chargeJaneId: "0196b0a0-0000-7000-8000-000000000331",
+  chargeJohnId: "0196b0a0-0000-7000-8000-000000000332",
+  paymentJaneId: "0196b0a0-0000-7000-8000-000000000341",
+  memberJaneId: "0196b0a0-0000-7000-8000-000000000351",
+  memberJohnId: "0196b0a0-0000-7000-8000-000000000352",
+  allocationJaneId: "0196b0a0-0000-7000-8000-000000000361",
+  statementJaneId: "0196b0a0-0000-7000-8000-000000000701",
+} as const;
+
 export const DEV_LOCATIONS = [
   {
     id: "0196b0a0-0000-7000-8000-000000000101",
@@ -46,7 +76,7 @@ export const DEV_USERS: readonly SeedUserSpec[] = [
     displayName: "Riley Owner",
     role: "admin",
     clinicalRole: "dentist",
-    entitlements: ["approve_writeoffs"],
+    entitlements: ["approve_writeoffs", "run_import", "bank_reconcile"],
     mfaEnrolled: true,
   },
   {
@@ -56,7 +86,7 @@ export const DEV_USERS: readonly SeedUserSpec[] = [
     displayName: "Finn Front",
     role: "user",
     clinicalRole: "unset",
-    entitlements: ["post_payments"],
+    entitlements: ["post_payments", "run_import"],
     mfaEnrolled: true,
   },
   {

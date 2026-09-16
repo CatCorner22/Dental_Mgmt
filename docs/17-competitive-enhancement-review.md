@@ -2,7 +2,7 @@
 
 > Source: owner review of 2026-09-14. The owner asked for a comprehensive, beautiful, low-cognitive-load dental PMS with an industry-leading one-way SuperByte note advisor (twin deterministic and probabilistic knowledge bases; see Smile Notes) and a novel Precog risk-avoidance module. Two decisions lock this document: start Phase 0 of the real product, and keep SuperByte one-way (staff never prompt, chat, or rate). Evidence for market claims is the v3 knowledge base (`knowledge/dental-pms-and-risk-platforms-report-v3-2026-09-02.md`, `knowledge/semantic-memory.md`). Legal statements inherit the PRIMARY / SECONDARY / REPO / UNVERIFIED labels from `docs/11`.
 
-This repository remains a consolidation plan plus a clickable prototype. Increment 0.1, recorded here, is the first code foundation of the merged PMS. Increment 0.2 wires the sessions table and `/api/me`. Increment 0.3 makes the database real: migrations that apply, roles that exist, and a verifier that reads a live chain. Increment 0.4 forces MFA enrollment on first login and seeds two Postgres tenants without `AUTH_DEV_MEMORY`. Increment 0.5 splits ledger appends to `app_append`, records nightly chain checks, and schedules the verifier. Increment 0.6 adds the `disclosures` schema and a two-admin recovery ceremony. Increment 0.7 anchors signed chain heads to Object Lock storage. Increment 0.8 wires the disclosure egress pattern and tenant-wide session revoke for incident response. Increment 0.9 adds golden snapshot tests for every exported controls-engine scorer. Increment 0.10 adds the restore drill CLI. Increment 0.11 refuses `DEV_MFA_KEY` in production boot and adds the PHI-free usage-metrics package. Increment 1.1 lays the ledger kernel, Increment 1.2 the approvals inbox, and Increment 1.12 wires Precog to live rows. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) stay listed, not silently marked done.
+This repository remains a consolidation plan plus a clickable prototype. Increment 0.1, recorded here, is the first code foundation of the merged PMS. Increment 0.2 wires the sessions table and `/api/me`. Increment 0.3 makes the database real: migrations that apply, roles that exist, and a verifier that reads a live chain. Increment 0.4 forces MFA enrollment on first login and seeds two Postgres tenants without `AUTH_DEV_MEMORY`. Increment 0.5 splits ledger appends to `app_append`, records nightly chain checks, and schedules the verifier. Increment 0.6 adds the `disclosures` schema and a two-admin recovery ceremony. Increment 0.7 anchors signed chain heads to Object Lock storage. Increment 0.8 wires the disclosure egress pattern and tenant-wide session revoke for incident response. Increment 0.9 adds golden snapshot tests for every exported controls-engine scorer. Increment 0.10 adds the restore drill CLI. Increment 0.11 refuses `DEV_MFA_KEY` in production boot and adds the PHI-free usage-metrics package. Increment 1.1 lays the ledger kernel, Increment 1.2 the approvals inbox, Increment 1.12 wires Precog to live rows, Increment 1.13 has the database re-check dual release on insert and adds the nightly snapshot job, and Increment 1.14 enforces the deposit channel at the day-close seal. Owner-only Phase 0 items (BAA, hosting contract, 24-month budget, D.8 interviews) stay listed, not silently marked done.
 
 ## Current state
 
@@ -43,9 +43,9 @@ These are the product's public pillars. They do not replace the three structural
 
 ## In / Later / Not (Trust page copy)
 
-**In by GA (already in the module map).** Tenancy, patients, Board, encounters, odontogram, six-point perio, treatment plans, readable ledger, checkout, membership and payment plans, eligibility, claims, ERA, denials, lab cases, referrals, imaging import, confirmations, reports that reconcile to the ledger, conversion, exit export.
+**In by GA (already in the module map).** Tenancy, patients, Board, encounters, odontogram, six-point perio, treatment plans, readable ledger, checkout, membership and payment plans, eligibility, claims, ERA, denials, lab cases, referrals, imaging import, confirmations, **patient self-scheduling (online booking via the portal, Phase 5)**, reports that reconcile to the ledger, conversion, exit export.
 
-**Later (do not pull into Phase 0–1).** eRx, portal, two-way text, online booking, digital intake, voice perio, sensor bridge, groups/SSO, public write API, specialty modules, TennCare.
+**Later (do not pull into Phase 0–1).** eRx, portal, two-way text, **patient self-scheduling / online booking** (Phase 5; Phase 2 schedule kernel is the prerequisite), digital intake, voice perio, sensor bridge, groups/SSO, public write API, specialty modules, TennCare.
 
 **Not at launch (say so).** Inventory, time-clock, and payroll as a system of record; marketing and reputation; teledentistry; Canada; DSO enterprise.
 
@@ -221,6 +221,60 @@ Dual-release approvals are persisted and actionable without UI. This increment a
 
 **Not in Increment 1.2.** Push notifications, walk-over PIN sessions, policy/exceptions editor UI, denial-suppression, BEFORE INSERT approval trigger on `ledger_entries`, hosted posting HTTP route.
 
+## Increment 1.3
+
+Phase 1 shadow-ledger feeding starts with a Curve Hero report-import stub. This increment adds `import_runs` and `import_staged_rows`, the `@pms/import` package (CSV parsers for day sheets, AR aging, deposit slips, and patient/coverage headers), row validation with SHA-256 fingerprints, synthetic fixtures, `pnpm import:curve`, and `POST /api/import/curve` behind the `run_import` entitlement. Parsed rows are staged and audited via `import.curve_hero.staged`; nothing posts to the ledger yet.
+
+**Not in Increment 1.3.** Ledger apply from staged rows, nightly scheduler, location-code resolution, AR tie-out report, dry-run diff UI, Open Dental or Dentrix parsers.
+
+## Increment 1.4
+
+The readable ledger gets a minimal Money Desk UI before checkout or posting screens ship. This increment seeds a Ridgeview demo charge with partial payment, adds `GET /api/ledger/accounts` and `GET /api/ledger/accounts/[accountId]`, and renders `/ledger` plus `/ledger/[accountId]` with the three labeled balance numbers and a running itemized view over `ledger_explanations`.
+
+**Not in Increment 1.4.** Posting UI, checkout, approvals inbox UI, As-of date chip, CPA/patient explanation audiences, palette search, mobile approvals surface, patient self-scheduling (on the roadmap for Phase 5; see `docs/08-roadmap.md`).
+
+## Increment 1.5
+
+Phase 1 independent reconciliation starts with bank statement import, not aggregator feeds. This increment adds `bank_accounts`, append-only `bank_transactions`, `bank_statement_imports`, `reconciliation_runs`, and `reconciliation_variances`; extends `@pms/import` with a CSV bank-statement parser and fixture; seeds a Ridgeview operating account; exposes `POST /api/import/bank-statement`, `GET /api/bank/accounts`, and `GET /api/reconciliation/runs` (+ detail); and renders `/reconciliation` with a statement-import form and variance queue. Credits on the statement auto-match staged Curve Hero `deposit_slip` rows by date and amount; everything else lands as an open `unmatched_bank` variance. Every import appends `import.bank_statement.applied` to `domain_event`.
+
+**Not in Increment 1.5.** Aggregator feed, variance clearance / SoD runtime block, day close, ledger tie-out from bank lines, OFX parser, nightly scheduler, owner Tied tile.
+
+## Increment 1.6
+
+Location-scoped deposits and atomic day close land before month-end or CPA tooling. This increment adds `deposits` and `day_closes` (frozen rows are immutable), seeds Ridgeview demo deposits for 2026-09-14, exposes `GET /api/day-close`, `POST /api/day-close/freeze` (`bank_reconcile`), and `POST /api/deposits/apply-staged` (`post_payments`), and renders `/day-close` with deposit batch vs imported day-sheet payment totals and a freeze control. Freezing appends `day_close.frozen` to `domain_event` and marks deposits `closed`.
+
+**Not in Increment 1.6.** Prior-period lock, month close, inter-location transfers, deposit variance alerts, owner Tied tile, ledger posting from deposits.
+
+## Increment 1.7
+
+Dual-release approvals get a minimal inbox UI. This increment seeds a pending write-off request from the front-desk user and renders `/approvals` with approve/decline actions wired to the existing `GET /api/approvals/inbox` and `POST /api/approvals/[id]/decide` routes (`approve_writeoffs`). Approving executes the held posting via `executeHeldPosting`.
+
+**Not in Increment 1.7.** Push notifications, walk-over PIN sessions, policy/exceptions editor, mobile approvals surface, palette search.
+
+## Increment 1.8
+
+Validated Curve Hero day-sheet rows post to the shadow ledger. This increment adds `apps/pms/src/lib/import/apply.ts` (MRN and location resolution, day-sheet → charge / `patient_payment` mapping, idempotency keys `import:curve:{runId}:{rowNumber}`), a Postgres-backed `@pms/ledger` writer, `POST /api/import/curve/apply` behind `run_import`, `pnpm import:curve:apply` as an API-only stub, and `import.curve_hero.applied` on `domain_event`. `import_runs` move from `validated` to `applied` when processing completes.
+
+**Not in Increment 1.8.** AR aging / deposit-slip ledger apply, nightly scheduler, dry-run diff UI, insurance-payment mapping, Open Dental or Dentrix parsers.
+
+## Increment 1.9
+
+Money Desk posting gets a guarded HTTP route and a minimal form. This increment adds `apps/pms/src/lib/ledger/post.ts` (Postgres `LedgerWriter` plus `postGuarded` with held `approval_requests` when dual release requires a second approver), `POST /api/ledger/post` behind `post_payments`, `GET /api/ledger/post/procedures` for charge procedure pickers, and `/ledger/post` with guarantor account, kind, amount, effective date, and reason code. Nav and home link to the posting screen; success and `needs_second` responses link staff to `/approvals` or the account ledger.
+
+**Not in Increment 1.9.** Checkout, card processing, palette search, full posting wizard, tender capture, insurance payments, reversals, and ledger posting from bank deposits.
+
+## Increment 1.10
+
+Patient and guarantor statements become a Money Desk surface. This increment adds `statements` (draft / issued / held / void; issued rows are immutable), snapshots the three labeled balances and `ledger_explanations` lines from the same queries as `/ledger`, and exposes `GET /api/statements`, `POST /api/statements` (draft from current balances), `POST /api/statements/[id]/issue`, and `POST /api/statements/[id]/hold`. Issue and hold require `post_payments`; list and preview are `minRank: user`. `/statements` and `/statements/[id]` preview the frozen artifact. Issue appends `statement.issued` to `domain_event`. Hold is minimal: optional `hold_reason`, and issue refuses while held (statement status, hold reason, or `guarantor_accounts.statement_hold`). Ridgeview seed includes an issued Jane Doe statement.
+
+**Not in Increment 1.10.** Hosted card processing, email or portal send of PHI, statement number sequences, maximum hold age, patient-voice explanation templates, print/mail/SMS disclosure channels, As-of historical re-query of posted_at.
+
+## Increment 1.11
+
+Variance clearance is enforced with runtime SoD (decision 7a). This increment is stacked independently of Increments 1.8 and 1.9: whoever prepared deposits covering the run period, or posted patient payments in that period, cannot clear that day's reconciliation run. When no other eligible clearer exists, tenant admin (`role=admin`) may still clear, and the degraded state is recorded as a finding on `reconciliation_runs.summary.degradedOwnerClearance` (not a silent disable) plus `domain_event` `reconciliation.cleared` / `reconciliation.variance_cleared`. Open variances become `cleared`; `matched_deposit` rows stay `matched`. Source remains `statement_import` — clearance is not a self-assertion. `POST /api/reconciliation/runs/[runId]/clear` is behind `bank_reconcile`. Ridgeview keeps only the owner on `bank_reconcile`; front desk has `post_payments` and prepared the demo deposits, so they are refused if they try to clear.
+
+**Not in Increment 1.11.** Per-variance waive route, `control_findings` table, aggregator feed, owner Tied tile, grant-time SoD refusal UI.
+
 ## Increment 1.12
 
 Increment 1.2 persisted approvals; the rest of Precog still scored a frozen fixture. This increment wires the engine to live rows so the module refuses, records, and scores from what the practice actually holds. Scores stay directional until a CPA calibrates them, and nothing here scores a person.
@@ -234,6 +288,29 @@ Increment 1.2 persisted approvals; the rest of Precog still scored a frozen fixt
 - **Tests.** Engine: 64 unit and golden tests (new golden file `golden-live-hashes.json`). Database: migration 0013 applied as `app_migrate` in the live suite, with append-only, uniqueness, and cross-tenant assertions. App: a live suite that grants, refuses, licenses, races two grants, revokes, reopens, versions, records, attests, snapshots, and verifies the chain afterwards. An adversarial review of the diff (three reviewers, one refuter per finding) confirmed eleven findings, all fixed before the push: the grant race, the release endpoint accepting other people as signers and ledger channels, nested chain payloads, self-licensing through the decisions route, unvalidated exception fields, the policy-version race, calendar-invalid dates, ACH and check crediting vendor controls, and the control-wide versus per-finding acceptance semantics.
 
 **Not in Increment 1.12.** A UI for any of this (routes only); the BEFORE INSERT approval trigger on `ledger_entries`; deposit, vendor, and payroll entities (their channels stay external); measured independent reconciliation; the knowledge map; detectors and `control_findings`; the strict "grant sits pending until a second admin decides" mode; a nightly snapshot schedule.
+
+## Increment 1.13
+
+Increment 1.12 made the service refuse; this increment makes the database refuse too, closes the one path that could still name a second person without a decision, and gives the scores a clock.
+
+- **Dual release re-checked on insert.** Migration 0014 adds `ledger_entries_dual_release`, a BEFORE INSERT trigger that reads the tenant's active policy exactly as the service does: the channel rule for the kind (write-off and adjustment and reversal → write-off; refund → check; transfers → ACH), its enabled flag, and its threshold. Above the threshold the row must cite an `approval_requests` row that is approved, decided by a different person than the poster, for the same channel and amount, and not yet consumed, or an enabled, in-window exception in that policy that licenses a single release at this amount. A unique index allows one entry per request. The trigger is a floor: role eligibility, `force_dual`, and `lower_threshold` stay with the service, which is stricter.
+- **A name is not a decision.** `postGuarded` no longer accepts a second person named inline as the second signature. A dual-required posting posts only with an approved request id, and a single release licensed by an exception carries `applied_exception_id` so the trigger can verify it. The earlier code also wrote the second person's id into `approval_request_id`; that is gone.
+- **Approve, then post, then attach.** The decide route records the approval first (the decision stands on its own), executes the held posting second (the trigger re-reads the approved request), and attaches the entry id last. If the ledger refuses, the approval is cancelled with the refusal as its reason and logged in `approvals_log` and on the chain, so no approval stands without the entry it was for.
+- **Nightly snapshots.** `pnpm controls:snapshot` freezes one snapshot per tenant and refreshes `sod_findings`; tenants are listed on the administrator connection and scored on the runtime connection with the tenant bound. `.github/workflows/nightly-controls.yml` is the schedule template; CI runs the command against the migrated database.
+- **Tests.** Database live suite: eight trigger cases (under threshold, no request, pending request, requester as approver, amount mismatch, one entry per request, raise up to its threshold, expired or wrong-channel or unknown or force-only exceptions, a tenant with no policy). App live suite: the approve-post-attach path, the cancel-on-refusal path, and the nightly job across two tenants. Ledger: inline second refused, request id stamped, exception id stamped, small posting free.
+
+**Not in Increment 1.13.** The posting HTTP route that creates held requests (it arrives with the Cursor stack's Increment 1.9), deposit and vendor entities, detectors, the strict grant mode, a UI.
+
+## Increment 1.14
+
+Increment 1.7 gave the product deposits and an atomic day close; Increment 1.12 could only mark the deposit channel external. This increment runs dual release on the deposit path, so the channel moves from attested to enforced and earns the dual-control credit it was denied.
+
+- **The freeze is the seal.** The rulebook's deposit control is "dual count of deposit before bag is sealed." In the product, preparing deposits is the first count (it already runs under its own entitlement) and freezing the day close is the second. `canSealDeposits` (`apps/pms/src/lib/day-close/seal.ts`) decides from the tenant's active policy, the day's deposit rows, and the live staff: policy or channel off → recorded, not enforced; total at or under the channel threshold → one count is enough; the freezer prepared any of the day's deposits → refused, unless the freezer is the owner and nobody else could count, in which case the seal proceeds as owner-only and is recorded as a finding (decision 7a, the same degradation variance clearance uses); a role the rule does not let second → refused; otherwise approved as a dual release. A refusal names who could count instead. Only the sealer's eligibility is checked; the preparer's was checked when the deposit was prepared.
+- **Frozen into the close and onto the chain.** `freezeDayClose` runs the check inside the tenant transaction before it writes anything. The verdict (channel, status, threshold, preparer ids, sealer id, degraded flag, policy version) is written to `day_closes.summary.dualRelease`, an owner-only seal also to `summary.degradedOwnerSealFinding`, and the flat fields to the `day_close.frozen` event. `POST /api/day-close/freeze` returns 403 with `verb`, `why`, and `otherEligibleNames` for `sod_preparer` and `sod_role`; the day-close page shows the reason and the names, and shows the seal status once frozen.
+- **Coverage, and what it changes at the grant path.** `ENFORCEMENT.deposit` is now `enforced`, so `channelCoverage` counts the channel, `dualControlPayments` derives `true` for a practice with the channel enabled, and the deposit control mitigates its three SoD rules in the scores: collect + post, deposit + post, and posting + reconciliation (`rule-cash-rec`, whose own compensating default is "dual count on deposit bags"). The last of these is critical, so the grant path now treats posting + reconciliation as a mitigated critical and writes the grant without a decision when the tenant's deposit channel is enabled; the finding is still recorded and scored. Custody + reconciliation (`rule-custody-rec`) is mitigated by no channel and still refuses. The live suite's critical-pair cases moved to that rule for this reason. The `golden-live-hashes.json` fixture did not change because it runs the engine's own fixture enforcement map, not the app's.
+- **Tests.** Six unit cases on `canSealDeposits` and a live suite (`day-close.live.test.ts`) on two tenants: the preparer refused with the other eligible names and no row written, an ineligible role refused, the office manager sealing with the verdict in `day_closes.summary` and in the event payload and every deposit closed, a second freeze refused as already frozen, the solo owner degrading with the finding recorded, and the chain verifying afterwards.
+
+**Not in Increment 1.14.** Checking the preparer's role at preparation time; a per-deposit second count (the bag is counted as a whole); vendor and payroll entities (their channels stay external); detectors; the strict grant mode.
 
 ## Risks that stay visible
 

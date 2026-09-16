@@ -17,6 +17,7 @@ const GUARDED_KINDS: LedgerKind[] = [
   "transfer_in",
 ];
 
+/** Mirrors ledger_release_channel() in migration 0014; change both together. */
 const CHANNEL_BY_KIND: Partial<Record<LedgerKind, ReleaseChannel>> = {
   adjustment: "writeoff",
   write_off: "writeoff",
@@ -51,7 +52,13 @@ function refusalFromEvaluation(evaluation: ReleaseEvaluation): PostRefusal {
 }
 
 /**
- * Runs evaluateRelease inside the posting transaction, then appends when allowed.
+ * Runs evaluateRelease inside the posting transaction, then appends when
+ * allowed. A release that needs two people posts only with an approved
+ * request id: the second person decides in their own session through the
+ * approvals inbox, and the database trigger (migration 0014) re-checks the
+ * request on insert. Naming a second person inline never substitutes for
+ * that decision. A single release licensed by an exception carries the
+ * exception id so the trigger can verify it against the policy.
  */
 export async function postGuarded(
   postEntry: PostEntryFn,
@@ -88,9 +95,25 @@ export async function postGuarded(
     return refusalFromEvaluation(evaluation);
   }
 
+  if (evaluation.dualRequired && !input.approvalRequestId) {
+    return {
+      ok: false,
+      code: "approval_request_required",
+      verb: "Request approval",
+      control: evaluation.eligibleSeconds[0]?.name ?? "Controls",
+      why: "Two people must release this amount. The second person decides the request in their own session; a name on the posting is not a decision.",
+      evaluation,
+      held: false,
+    };
+  }
+
+  const appliedExceptionId =
+    !evaluation.dualRequired && evaluation.appliedException ? evaluation.appliedException.id : null;
+
   return postEntry({
     ...input,
-    approvalRequestId: input.approvalRequestId ?? evaluation.second?.id ?? null,
+    approvalRequestId: input.approvalRequestId ?? null,
+    appliedExceptionId: input.appliedExceptionId ?? appliedExceptionId,
   });
 }
 

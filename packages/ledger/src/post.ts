@@ -29,6 +29,7 @@ export type PostEntryInput = {
   coverageId?: string | null;
   reversesEntryId?: string | null;
   approvalRequestId?: string | null;
+  appliedExceptionId?: string | null;
   tender?: LedgerEntry["tender"];
   memo?: string | null;
   idempotencyKey?: string;
@@ -139,6 +140,7 @@ export function createPostEntry(writer: LedgerWriter): PostEntryFn {
       coverageId: input.coverageId,
       reversesEntryId: input.reversesEntryId,
       approvalRequestId: input.approvalRequestId,
+      appliedExceptionId: input.appliedExceptionId,
       tender: input.tender,
       memo: input.memo,
       idempotencyKey,

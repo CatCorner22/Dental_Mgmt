@@ -135,6 +135,69 @@ export async function getApprovalRequest(
   return row ? mapRow(row) : null;
 }
 
+/** Records the entry an approved request produced. Idempotent for the same entry. */
+export async function attachResultingEntry(
+  db: AppDb,
+  input: { tenantId: string; requestId: string; entryId: string }
+): Promise<boolean> {
+  const updated = await db
+    .update(approvalRequests)
+    .set({ resultingEntryId: input.entryId })
+    .where(
+      and(
+        eq(approvalRequests.id, input.requestId),
+        eq(approvalRequests.tenantId, input.tenantId),
+        eq(approvalRequests.status, "approved")
+      )
+    )
+    .returning({ id: approvalRequests.id });
+  return updated.length > 0;
+}
+
+/**
+ * An approved request whose posting the ledger then refused is cancelled,
+ * with the refusal as the reason, so an approval never stands without the
+ * entry it was for. The approvals log and the chain both record it.
+ */
+export async function cancelApprovedRequest(
+  db: AppDb,
+  input: { tenantId: string; requestId: string; actorId: string; actorName: string; reason: string; now?: Date }
+): Promise<boolean> {
+  const now = input.now ?? new Date();
+  const updated = await db
+    .update(approvalRequests)
+    .set({ status: "cancelled", decisionReason: input.reason.slice(0, 500) })
+    .where(
+      and(
+        eq(approvalRequests.id, input.requestId),
+        eq(approvalRequests.tenantId, input.tenantId),
+        eq(approvalRequests.status, "approved")
+      )
+    )
+    .returning({ id: approvalRequests.id });
+  if (!updated.length) return false;
+
+  await db.insert(approvalsLog).values({
+    id: uuidv7(now.getTime()),
+    tenantId: input.tenantId,
+    requestId: input.requestId,
+    decision: "cancelled",
+    actorId: input.actorId,
+    actorName: input.actorName,
+    reason: input.reason.slice(0, 500),
+    createdAt: now,
+  });
+  await appendEvent(
+    db,
+    input.tenantId,
+    input.actorId,
+    "approval.cancelled",
+    { requestId: input.requestId, reason: input.reason.slice(0, 500) },
+    now
+  );
+  return true;
+}
+
 export type DecideResult =
   | { ok: true; request: ApprovalRow }
   | { ok: false; reason: "not_found" | "same_person" | "not_pending" | "decline_reason_required" };

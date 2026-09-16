@@ -127,6 +127,11 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [11, "ledger_views", "app_migrate"],
         [12, "controls", "app_migrate"],
         [13, "controls_risk", "app_migrate"],
+        [14, "controls_enforcement", "app_migrate"],
+        [15, "import_staging", "app_migrate"],
+        [16, "bank_reconciliation", "app_migrate"],
+        [17, "day_close_deposits", "app_migrate"],
+        [18, "statements", "app_migrate"],
       ]);
       const owners = await db.admin.query(
         "SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'"
@@ -137,7 +142,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
     it("is a no-op the second time", async () => {
       const result = await applyMigrations(db.admin);
       expect(result.applied).toEqual([]);
-      expect(result.alreadyApplied).toBe(13);
+      expect(result.alreadyApplied).toBe(18);
     });
 
     it("left domain_event with RLS forced after the seq backfill", async () => {
@@ -759,6 +764,165 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
       expect(
         await attempt("app_rw", ridgeview, "DELETE FROM control_snapshots WHERE id = $1", [snapshotId])
       ).toMatchObject({ code: "42501" });
+    });
+  });
+
+  describe("dual release re-checked on ledger insert", () => {
+    // Oakridge gets its own ledger seed so the trigger cases stay independent
+    // of the Ridgeview ledger tests above, which run with no policy row.
+    const locationId = uuidv7(6_000);
+    const patientId = uuidv7(6_001);
+    const accountId = uuidv7(6_002);
+    const approverId = uuidv7(6_003);
+    const pendingRequest = uuidv7(6_010);
+    const approvedRequest = uuidv7(6_011);
+    let seq = 0;
+    const key = () => `oak-${++seq}`;
+
+    const policy = {
+      enabled: true,
+      hardBlockWithoutSecond: false,
+      ownerCanSecondAny: true,
+      rules: [
+        { channel: "writeoff", enabled: true, thresholdUsd: 150 },
+        { channel: "check", enabled: true, thresholdUsd: 500 },
+        { channel: "ach", enabled: false, thresholdUsd: 500 },
+      ],
+      exceptions: [
+        { id: "ex-raise", enabled: true, action: "raise_threshold", thresholdUsd: 400, channels: ["writeoff"] },
+        { id: "ex-expired", enabled: true, action: "raise_threshold", thresholdUsd: 9000, channels: ["writeoff"], effectiveTo: "2020-01-01" },
+        { id: "ex-check-only", enabled: true, action: "waive_dual", channels: ["check"] },
+        { id: "ex-force", enabled: true, action: "force_dual", channels: [] },
+      ],
+    };
+
+    function writeOff(amountCents: number, extra: { approval?: string; exception?: string } = {}) {
+      return attempt(
+        "app_append",
+        oakridge,
+        `INSERT INTO ledger_entries (
+           id, tenant_id, account_id, patient_id, location_id, kind, gl_bucket, amount_cents,
+           reason_code, effective_date, posted_at, created_by_id, created_by_name, idempotency_key,
+           approval_request_id, applied_exception_id
+         ) VALUES ($1, $2, $3, $4, $5, 'write_off', 'patient_ar', $6,
+                   'courtesy', '2026-09-01', now(), $7, 'Oak Biller', $8, $9, $10)`,
+        [uuidv7(), oakridge.id, accountId, patientId, locationId, amountCents, oakridge.user, key(),
+         extra.approval ?? null, extra.exception ?? null]
+      );
+    }
+
+    beforeAll(async () => {
+      await db.admin.query(
+        `INSERT INTO locations (id, tenant_id, name, timezone, created_at)
+         VALUES ($1, $2, 'Oak Site', 'America/Chicago', now())`,
+        [locationId, oakridge.id]
+      );
+      await db.admin.query(
+        `INSERT INTO users (id, tenant_id, username, display_name, password_hash, role, mfa_secret_enc,
+                            mfa_enrolled_at, password_changed_at, created_at)
+         VALUES ($1, $2, 'oakridge.partner', 'Oak Partner', 'x', 'admin', '{}'::jsonb, now(), now(), now())`,
+        [approverId, oakridge.id]
+      );
+      await as("app_rw", oakridge, async (c) => {
+        await c.query(
+          `INSERT INTO patients (id, tenant_id, mrn, first_name, last_name, date_of_birth,
+                                 primary_location_id, created_by_id, created_by_name)
+           VALUES ($1, $2, 'MRN-OAK', 'Oak', 'One', '1985-01-01', $3, $4, 'seed')`,
+          [patientId, oakridge.id, locationId, oakridge.user]
+        );
+        await c.query(
+          `INSERT INTO guarantor_accounts (id, tenant_id, display_name, created_by_id, created_by_name, created_at)
+           VALUES ($1, $2, 'Oak One', $3, 'seed', now())`,
+          [accountId, oakridge.id, oakridge.user]
+        );
+        await c.query(
+          `INSERT INTO reason_codes (tenant_id, code, kind, label) VALUES ($1, 'courtesy', 'write_off', 'Courtesy')`,
+          [oakridge.id]
+        );
+        await c.query(
+          `INSERT INTO control_policies (id, tenant_id, version, rulebook_version, policy, created_by_id, created_by_name)
+           VALUES ($1, $2, 1, '0.1.0', $3::jsonb, $4, 'seed')`,
+          [uuidv7(6_020), oakridge.id, JSON.stringify(policy), oakridge.user]
+        );
+        for (const [id, status] of [[pendingRequest, "pending"], [approvedRequest, "pending"]] as const) {
+          await c.query(
+            `INSERT INTO approval_requests (id, tenant_id, status, channel, amount_cents, held_payload, evaluation, requester_id, requester_name)
+             VALUES ($1, $2, $3, 'writeoff', 30000, '{}'::jsonb, '{}'::jsonb, $4, 'Oak Biller')`,
+            [id, oakridge.id, status, oakridge.user]
+          );
+        }
+        await c.query(
+          `UPDATE approval_requests SET status = 'approved', second_approver_id = $2, decided_at = now() WHERE id = $1`,
+          [approvedRequest, approverId]
+        );
+      });
+    });
+
+    it("lets a write-off at or under the channel threshold post with nothing attached", async () => {
+      expect(await writeOff(-15000)).toEqual({ rows: [] });
+    });
+
+    it("refuses a write-off above the threshold that cites no approved request", async () => {
+      const out = await writeOff(-30000);
+      expect(out).toMatchObject({ code: "P0001" });
+      expect((out as { message: string }).message).toMatch(/dual_release_required: write_off of 30000 cents on channel writeoff exceeds 15000 cents/);
+    });
+
+    it("refuses a request that is still pending, and one decided by the requester", async () => {
+      const pending = await writeOff(-30000, { approval: pendingRequest });
+      expect(pending).toMatchObject({ code: "P0001" });
+      expect((pending as { message: string }).message).toMatch(/is pending, not approved/);
+
+      // A request "approved" by the same person who posts it: the CHECK
+      // constraint refuses the update; the trigger would refuse the insert too.
+      const self = await attempt(
+        "app_rw",
+        oakridge,
+        `UPDATE approval_requests SET status = 'approved', second_approver_id = $2 WHERE id = $1`,
+        [pendingRequest, oakridge.user]
+      );
+      expect(self).toMatchObject({ code: "23514" });
+    });
+
+    it("refuses an approved request whose amount or channel does not match the entry", async () => {
+      const wrongAmount = await writeOff(-31000, { approval: approvedRequest });
+      expect(wrongAmount).toMatchObject({ code: "P0001" });
+      expect((wrongAmount as { message: string }).message).toMatch(/approved 30000 cents, not 31000/);
+    });
+
+    it("posts once against an approved request decided by a different person, never twice", async () => {
+      expect(await writeOff(-30000, { approval: approvedRequest })).toEqual({ rows: [] });
+      const again = await writeOff(-30000, { approval: approvedRequest });
+      expect(again).toMatchObject({ code: "23505" });
+    });
+
+    it("honours a raise exception in the active policy up to its threshold, and no further", async () => {
+      expect(await writeOff(-30000, { exception: "ex-raise" })).toEqual({ rows: [] });
+      const over = await writeOff(-50000, { exception: "ex-raise" });
+      expect(over).toMatchObject({ code: "P0001" });
+      expect((over as { message: string }).message).toMatch(/raises the threshold only to 40000 cents/);
+    });
+
+    it("refuses an expired, wrong-channel, unknown, or non-licensing exception", async () => {
+      expect((await writeOff(-30000, { exception: "ex-expired" }) as { message: string }).message).toMatch(/has expired/);
+      expect((await writeOff(-30000, { exception: "ex-check-only" }) as { message: string }).message).toMatch(
+        /does not cover channel writeoff/
+      );
+      expect((await writeOff(-30000, { exception: "ex-nope" }) as { message: string }).message).toMatch(
+        /is not in the active policy/
+      );
+      expect((await writeOff(-30000, { exception: "ex-force" }) as { message: string }).message).toMatch(
+        /does not license a single release/
+      );
+    });
+
+    it("leaves a tenant with no policy row untouched", async () => {
+      // Ridgeview has entries above every threshold in the ledger tests and no policy: still fine.
+      const { rows } = await db.admin.query(
+        "SELECT count(*)::int AS n FROM control_policies WHERE tenant_id = $1",
+        [ridgeview.id]
+      );
+      expect(rows[0].n).toBe(0);
     });
   });
 
