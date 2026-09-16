@@ -57,6 +57,8 @@ export async function listReconciliationRuns(
       summary: reconciliationRuns.summary,
       createdAt: reconciliationRuns.createdAt,
       createdByName: reconciliationRuns.createdByName,
+      clearedAt: reconciliationRuns.clearedAt,
+      clearedByName: reconciliationRuns.clearedByName,
     })
     .from(reconciliationRuns)
     .innerJoin(bankAccounts, eq(bankAccounts.id, reconciliationRuns.bankAccountId))
@@ -79,6 +81,9 @@ export async function listReconciliationRuns(
       openVarianceCount: Number(summary.openVarianceCount ?? 0),
       createdAt: row.createdAt.toISOString(),
       createdByName: row.createdByName,
+      clearedAt: row.clearedAt?.toISOString() ?? null,
+      clearedByName: row.clearedByName,
+      degradedOwnerClearance: summary.degradedOwnerClearance === true,
     };
   });
 }
@@ -103,6 +108,8 @@ export async function getReconciliationRun(
       summary: reconciliationRuns.summary,
       createdAt: reconciliationRuns.createdAt,
       createdByName: reconciliationRuns.createdByName,
+      clearedAt: reconciliationRuns.clearedAt,
+      clearedByName: reconciliationRuns.clearedByName,
     })
     .from(reconciliationRuns)
     .innerJoin(bankAccounts, eq(bankAccounts.id, reconciliationRuns.bankAccountId))
@@ -154,6 +161,9 @@ export async function getReconciliationRun(
     openVarianceCount: Number(summary.openVarianceCount ?? 0),
     createdAt: run.createdAt.toISOString(),
     createdByName: run.createdByName,
+    clearedAt: run.clearedAt?.toISOString() ?? null,
+    clearedByName: run.clearedByName,
+    degradedOwnerClearance: summary.degradedOwnerClearance === true,
     summary,
     variances,
   };

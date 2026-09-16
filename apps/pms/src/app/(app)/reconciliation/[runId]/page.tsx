@@ -4,7 +4,10 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatCents } from "@/lib/ledger/format";
-import type { ReconciliationRunDetail } from "@/lib/reconciliation/types";
+import {
+  independenceSourceLabel,
+  type ReconciliationRunDetail,
+} from "@/lib/reconciliation/types";
 
 type LoadState =
   | { status: "loading" }
@@ -30,14 +33,22 @@ export default function ReconciliationRunPage() {
   const params = useParams<{ runId: string }>();
   const runId = params.runId;
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function loadRun(): Promise<ReconciliationRunDetail> {
+    const res = await fetch(`/api/reconciliation/runs/${runId}`);
+    const body = (await res.json()) as { run?: ReconciliationRunDetail; error?: string };
+    if (!res.ok) throw new Error(body.error ?? "Could not load reconciliation run.");
+    if (!body.run) throw new Error("Missing reconciliation run.");
+    return body.run;
+  }
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/reconciliation/runs/${runId}`)
-      .then(async (res) => {
-        const body = (await res.json()) as { run?: ReconciliationRunDetail; error?: string };
-        if (!res.ok) throw new Error(body.error ?? "Could not load reconciliation run.");
-        if (!cancelled && body.run) setState({ status: "ready", run: body.run });
+    loadRun()
+      .then((run) => {
+        if (!cancelled) setState({ status: "ready", run });
       })
       .catch((err: unknown) => {
         if (!cancelled) {
@@ -51,6 +62,33 @@ export default function ReconciliationRunPage() {
       cancelled = true;
     };
   }, [runId]);
+
+  async function handleClear() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/reconciliation/runs/${runId}/clear`, { method: "POST" });
+      const body = (await res.json()) as {
+        run?: ReconciliationRunDetail;
+        error?: string;
+        verb?: string;
+        why?: string;
+      };
+      if (!res.ok) {
+        throw new Error(body.verb ?? body.error ?? "Could not clear this run.");
+      }
+      if (body.run) setState({ status: "ready", run: body.run });
+      setMessage(
+        body.run?.degradedOwnerClearance
+          ? "Cleared. Owner-only clearance was recorded as a finding."
+          : "Variances cleared."
+      );
+    } catch (err: unknown) {
+      setMessage(err instanceof Error ? err.message : "Could not clear this run.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <main>
@@ -68,8 +106,11 @@ export default function ReconciliationRunPage() {
           <h1 className="mb-2">
             {state.run.periodStart} → {state.run.periodEnd}
           </h1>
-          <p className="mb-6 max-w-prose text-[var(--ink-2)]">
-            {state.run.bankAccountName} · Source: statement import · Opened by {state.run.createdByName}
+          <p className="mb-2 max-w-prose text-[var(--ink-2)]">
+            {state.run.bankAccountName} · Opened by {state.run.createdByName}
+          </p>
+          <p className="mb-6 text-sm font-semibold text-[var(--ink-2)]">
+            Independence source: {independenceSourceLabel(state.run.source)}
           </p>
 
           <div className="mb-8 grid gap-4 sm:grid-cols-3">
@@ -86,6 +127,49 @@ export default function ReconciliationRunPage() {
               <p className="mt-1 text-xl font-semibold tabular-nums">{state.run.openVarianceCount}</p>
             </div>
           </div>
+
+          {state.run.status === "cleared" && (
+            <div className="mb-6 rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+              <p className="font-semibold">Cleared</p>
+              <p className="mt-1 text-sm text-[var(--ink-2)]">
+                {state.run.clearedByName ?? "Unknown"}
+                {state.run.clearedAt ? ` · ${new Date(state.run.clearedAt).toLocaleString()}` : ""}
+              </p>
+              {state.run.degradedOwnerClearance && (
+                <p className="mt-2 text-sm text-[var(--ink-2)]">
+                  Finding: owner-only clearance — no other eligible person existed. The control was
+                  not disabled.
+                </p>
+              )}
+            </div>
+          )}
+
+          {state.run.status !== "cleared" && state.run.clearance?.ok && (
+            <div className="mb-6 rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+              <p className="mb-2 text-sm text-[var(--ink-2)]">{state.run.clearance.why}</p>
+              <button
+                type="button"
+                className="rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                disabled={busy}
+                onClick={() => void handleClear()}
+              >
+                {busy ? "Clearing…" : state.run.clearance.verb}
+              </button>
+            </div>
+          )}
+
+          {state.run.status !== "cleared" && state.run.clearance && !state.run.clearance.ok && (
+            <div className="mb-6 rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] p-4">
+              <p className="font-semibold">{state.run.clearance.verb}</p>
+              <p className="mt-1 text-sm text-[var(--ink-2)]">{state.run.clearance.why}</p>
+            </div>
+          )}
+
+          {message && (
+            <p className="mb-6 text-sm text-[var(--ink-2)]" aria-live="polite">
+              {message}
+            </p>
+          )}
 
           <div className="overflow-x-auto rounded-lg border border-[var(--line)] bg-[var(--surface)]">
             <table className="min-w-full text-left text-sm">
