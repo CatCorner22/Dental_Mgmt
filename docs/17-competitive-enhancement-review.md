@@ -43,9 +43,9 @@ These are the product's public pillars. They do not replace the three structural
 
 ## In / Later / Not (Trust page copy)
 
-**In by GA (already in the module map).** Tenancy, patients, Board, encounters, odontogram, six-point perio, treatment plans, readable ledger, checkout, membership and payment plans, eligibility, claims, ERA, denials, lab cases, referrals, imaging import, confirmations, reports that reconcile to the ledger, conversion, exit export.
+**In by GA (already in the module map).** Tenancy, patients, Board, encounters, odontogram, six-point perio, treatment plans, readable ledger, checkout, membership and payment plans, eligibility, claims, ERA, denials, lab cases, referrals, imaging import, confirmations, **patient self-scheduling (online booking via the portal, Phase 5)**, reports that reconcile to the ledger, conversion, exit export.
 
-**Later (do not pull into Phase 0–1).** eRx, portal, two-way text, online booking, digital intake, voice perio, sensor bridge, groups/SSO, public write API, specialty modules, TennCare.
+**Later (do not pull into Phase 0–1).** eRx, portal, two-way text, **patient self-scheduling / online booking** (Phase 5; Phase 2 schedule kernel is the prerequisite), digital intake, voice perio, sensor bridge, groups/SSO, public write API, specialty modules, TennCare.
 
 **Not at launch (say so).** Inventory, time-clock, and payroll as a system of record; marketing and reputation; teledentistry; Canada; DSO enterprise.
 
@@ -220,6 +220,54 @@ Phase 1 starts with the ledger kernel before any UI. This increment adds patient
 Dual-release approvals are persisted and actionable without UI. This increment adds `control_policies`, `approval_requests`, and `approvals_log`; seeds an active policy per tenant (`hardBlockWithoutSecond: false`); teaches `postGuarded` to return `needs_second` as a held refusal; and exposes `GET /api/approvals/inbox`, `POST /api/approvals/[id]/decide`, and `GET /api/controls/policy`.
 
 **Not in Increment 1.2.** Push notifications, walk-over PIN sessions, policy/exceptions editor UI, denial-suppression, BEFORE INSERT approval trigger on `ledger_entries`, hosted posting HTTP route.
+
+## Increment 1.3
+
+Phase 1 shadow-ledger feeding starts with a Curve Hero report-import stub. This increment adds `import_runs` and `import_staged_rows`, the `@pms/import` package (CSV parsers for day sheets, AR aging, deposit slips, and patient/coverage headers), row validation with SHA-256 fingerprints, synthetic fixtures, `pnpm import:curve`, and `POST /api/import/curve` behind the `run_import` entitlement. Parsed rows are staged and audited via `import.curve_hero.staged`; nothing posts to the ledger yet.
+
+**Not in Increment 1.3.** Ledger apply from staged rows, nightly scheduler, location-code resolution, AR tie-out report, dry-run diff UI, Open Dental or Dentrix parsers.
+
+## Increment 1.4
+
+The readable ledger gets a minimal Money Desk UI before checkout or posting screens ship. This increment seeds a Ridgeview demo charge with partial payment, adds `GET /api/ledger/accounts` and `GET /api/ledger/accounts/[accountId]`, and renders `/ledger` plus `/ledger/[accountId]` with the three labeled balance numbers and a running itemized view over `ledger_explanations`.
+
+**Not in Increment 1.4.** Posting UI, checkout, approvals inbox UI, As-of date chip, CPA/patient explanation audiences, palette search, mobile approvals surface, patient self-scheduling (on the roadmap for Phase 5; see `docs/08-roadmap.md`).
+
+## Increment 1.5
+
+Phase 1 independent reconciliation starts with bank statement import, not aggregator feeds. This increment adds `bank_accounts`, append-only `bank_transactions`, `bank_statement_imports`, `reconciliation_runs`, and `reconciliation_variances`; extends `@pms/import` with a CSV bank-statement parser and fixture; seeds a Ridgeview operating account; exposes `POST /api/import/bank-statement`, `GET /api/bank/accounts`, and `GET /api/reconciliation/runs` (+ detail); and renders `/reconciliation` with a statement-import form and variance queue. Credits on the statement auto-match staged Curve Hero `deposit_slip` rows by date and amount; everything else lands as an open `unmatched_bank` variance. Every import appends `import.bank_statement.applied` to `domain_event`.
+
+**Not in Increment 1.5.** Aggregator feed, variance clearance / SoD runtime block, day close, ledger tie-out from bank lines, OFX parser, nightly scheduler, owner Tied tile.
+
+## Increment 1.6
+
+Location-scoped deposits and atomic day close land before month-end or CPA tooling. This increment adds `deposits` and `day_closes` (frozen rows are immutable), seeds Ridgeview demo deposits for 2026-09-14, exposes `GET /api/day-close`, `POST /api/day-close/freeze` (`bank_reconcile`), and `POST /api/deposits/apply-staged` (`post_payments`), and renders `/day-close` with deposit batch vs imported day-sheet payment totals and a freeze control. Freezing appends `day_close.frozen` to `domain_event` and marks deposits `closed`.
+
+**Not in Increment 1.6.** Prior-period lock, month close, inter-location transfers, deposit variance alerts, owner Tied tile, ledger posting from deposits.
+
+## Increment 1.7
+
+Dual-release approvals get a minimal inbox UI. This increment seeds a pending write-off request from the front-desk user and renders `/approvals` with approve/decline actions wired to the existing `GET /api/approvals/inbox` and `POST /api/approvals/[id]/decide` routes (`approve_writeoffs`). Approving executes the held posting via `executeHeldPosting`.
+
+**Not in Increment 1.7.** Push notifications, walk-over PIN sessions, policy/exceptions editor, mobile approvals surface, palette search.
+
+## Increment 1.8
+
+Validated Curve Hero day-sheet rows post to the shadow ledger. This increment adds `apps/pms/src/lib/import/apply.ts` (MRN and location resolution, day-sheet → charge / `patient_payment` mapping, idempotency keys `import:curve:{runId}:{rowNumber}`), a Postgres-backed `@pms/ledger` writer, `POST /api/import/curve/apply` behind `run_import`, `pnpm import:curve:apply` as an API-only stub, and `import.curve_hero.applied` on `domain_event`. `import_runs` move from `validated` to `applied` when processing completes.
+
+**Not in Increment 1.8.** AR aging / deposit-slip ledger apply, nightly scheduler, dry-run diff UI, insurance-payment mapping, Open Dental or Dentrix parsers.
+
+## Increment 1.9
+
+Money Desk posting gets a guarded HTTP route and a minimal form. This increment adds `apps/pms/src/lib/ledger/post.ts` (Postgres `LedgerWriter` plus `postGuarded` with held `approval_requests` when dual release requires a second approver), `POST /api/ledger/post` behind `post_payments`, `GET /api/ledger/post/procedures` for charge procedure pickers, and `/ledger/post` with guarantor account, kind, amount, effective date, and reason code. Nav and home link to the posting screen; success and `needs_second` responses link staff to `/approvals` or the account ledger.
+
+**Not in Increment 1.9.** Checkout, card processing, palette search, full posting wizard, tender capture, insurance payments, reversals, and ledger posting from bank deposits.
+
+## Increment 1.11
+
+Variance clearance is enforced with runtime SoD (decision 7a). This increment is stacked independently of Increments 1.8 and 1.9: whoever prepared deposits covering the run period, or posted patient payments in that period, cannot clear that day's reconciliation run. When no other eligible clearer exists, tenant admin (`role=admin`) may still clear, and the degraded state is recorded as a finding on `reconciliation_runs.summary.degradedOwnerClearance` (not a silent disable) plus `domain_event` `reconciliation.cleared` / `reconciliation.variance_cleared`. Open variances become `cleared`; `matched_deposit` rows stay `matched`. Source remains `statement_import` — clearance is not a self-assertion. `POST /api/reconciliation/runs/[runId]/clear` is behind `bank_reconcile`. Ridgeview keeps only the owner on `bank_reconcile`; front desk has `post_payments` and prepared the demo deposits, so they are refused if they try to clear.
+
+**Not in Increment 1.11.** Per-variance waive route, `control_findings` table, aggregator feed, owner Tied tile, grant-time SoD refusal UI.
 
 ## Increment 1.12
 

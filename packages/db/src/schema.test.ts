@@ -21,6 +21,9 @@ const ledgerViewsSql = readFileSync(join(here, "../migrations/0011_ledger_views.
 const controlsSql = readFileSync(join(here, "../migrations/0012_controls.sql"), "utf8");
 const controlsRiskSql = readFileSync(join(here, "../migrations/0013_controls_risk.sql"), "utf8");
 const enforcementSql = readFileSync(join(here, "../migrations/0014_controls_enforcement.sql"), "utf8");
+const importSql = readFileSync(join(here, "../migrations/0015_import_staging.sql"), "utf8");
+const bankSql = readFileSync(join(here, "../migrations/0016_bank_reconciliation.sql"), "utf8");
+const dayCloseSql = readFileSync(join(here, "../migrations/0017_day_close_deposits.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -154,6 +157,35 @@ describe("Increment 1.13 dual release re-checked by the database", () => {
     expect(enforcementSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_approval_request_uidx/);
     expect(enforcementSql).toMatch(/GRANT SELECT ON control_policies, approval_requests TO app_append/);
     expect(enforcementSql).not.toMatch(/GRANT[^\n]*(INSERT|UPDATE|DELETE)[^\n]*TO app_append/);
+  });
+});
+
+describe("Increment 1.3 Curve Hero import staging", () => {
+  it("creates import run and staged row tables with RLS", () => {
+    expect(importSql).toMatch(/CREATE TABLE import_runs\b/);
+    expect(importSql).toMatch(/CREATE TABLE import_staged_rows\b/);
+    expect(importSql).toMatch(/ALTER TABLE import_runs ENABLE ROW LEVEL SECURITY/);
+    expect(importSql).toMatch(/GRANT SELECT, INSERT, UPDATE ON import_runs, import_staged_rows TO app_rw/);
+  });
+});
+
+describe("Increment 1.5 bank reconciliation", () => {
+  it("creates bank accounts, append-only transactions, and reconciliation tables", () => {
+    expect(bankSql).toMatch(/CREATE TABLE bank_accounts\b/);
+    expect(bankSql).toMatch(/CREATE TABLE bank_transactions\b/);
+    expect(bankSql).toMatch(/CREATE TABLE reconciliation_runs\b/);
+    expect(bankSql).toMatch(/CREATE TABLE reconciliation_variances\b/);
+    expect(bankSql).toMatch(/bank_transactions_immutable/);
+    expect(bankSql).toMatch(/GRANT SELECT, INSERT ON bank_transactions TO app_rw/);
+  });
+});
+
+describe("Increment 1.6 day close and deposits", () => {
+  it("creates deposits and frozen day close tables", () => {
+    expect(dayCloseSql).toMatch(/CREATE TABLE deposits\b/);
+    expect(dayCloseSql).toMatch(/CREATE TABLE day_closes\b/);
+    expect(dayCloseSql).toMatch(/day_closes_immutable_when_frozen/);
+    expect(dayCloseSql).toMatch(/GRANT SELECT, INSERT, UPDATE ON deposits, day_closes TO app_rw/);
   });
 });
 

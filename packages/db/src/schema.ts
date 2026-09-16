@@ -433,6 +433,210 @@ export const controlSnapshots = pgTable(
   (t) => [index("control_snapshots_tenant_taken_idx").on(t.tenantId, t.takenAt)]
 );
 
+export const importRuns = pgTable(
+  "import_runs",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    sourceSystem: text("source_system").notNull().default("curve_hero"),
+    reportKind: text("report_kind").notNull(),
+    locationId: uuid("location_id"),
+    businessDate: date("business_date"),
+    fileName: text("file_name"),
+    fileSha256: text("file_sha256").notNull(),
+    status: text("status").notNull().default("staged"),
+    rowCount: integer("row_count").notNull().default(0),
+    errorCount: integer("error_count").notNull().default(0),
+    summary: jsonb("summary").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    createdById: uuid("created_by_id").notNull(),
+    createdByName: text("created_by_name").notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("import_runs_tenant_created_idx").on(t.tenantId, t.createdAt),
+    index("import_runs_tenant_kind_date_idx").on(t.tenantId, t.reportKind, t.businessDate),
+  ]
+);
+
+export const importStagedRows = pgTable(
+  "import_staged_rows",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    runId: uuid("run_id").notNull(),
+    rowNumber: integer("row_number").notNull(),
+    sourceKey: text("source_key"),
+    rowSha256: text("row_sha256").notNull(),
+    payload: jsonb("payload").notNull(),
+    validationErrors: text("validation_errors").array().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("import_staged_rows_run_idx").on(t.runId),
+    uniqueIndex("import_staged_rows_run_row_uidx").on(t.runId, t.rowNumber),
+  ]
+);
+
+export const bankAccounts = pgTable(
+  "bank_accounts",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    locationId: uuid("location_id"),
+    displayName: text("display_name").notNull(),
+    institutionName: text("institution_name"),
+    accountNumberLast4: text("account_number_last4"),
+    currency: text("currency").notNull().default("USD"),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("bank_accounts_tenant_idx").on(t.tenantId)]
+);
+
+export const bankStatementImports = pgTable(
+  "bank_statement_imports",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    bankAccountId: uuid("bank_account_id").notNull(),
+    format: text("format").notNull().default("csv"),
+    fileName: text("file_name"),
+    fileSha256: text("file_sha256").notNull(),
+    status: text("status").notNull().default("validated"),
+    rowCount: integer("row_count").notNull().default(0),
+    errorCount: integer("error_count").notNull().default(0),
+    periodStart: date("period_start"),
+    periodEnd: date("period_end"),
+    summary: jsonb("summary").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    createdById: uuid("created_by_id").notNull(),
+    createdByName: text("created_by_name").notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [index("bank_statement_imports_tenant_created_idx").on(t.tenantId, t.createdAt)]
+);
+
+export const bankTransactions = pgTable(
+  "bank_transactions",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    bankAccountId: uuid("bank_account_id").notNull(),
+    importId: uuid("import_id"),
+    postedDate: date("posted_date").notNull(),
+    description: text("description").notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    currency: text("currency").notNull().default("USD"),
+    externalKey: text("external_key").notNull(),
+    payload: jsonb("payload").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("bank_transactions_tenant_account_date_idx").on(
+      t.tenantId,
+      t.bankAccountId,
+      t.postedDate
+    ),
+    index("bank_transactions_import_idx").on(t.importId),
+    uniqueIndex("bank_transactions_tenant_account_external_uidx").on(
+      t.tenantId,
+      t.bankAccountId,
+      t.externalKey
+    ),
+  ]
+);
+
+export const reconciliationRuns = pgTable(
+  "reconciliation_runs",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    bankAccountId: uuid("bank_account_id").notNull(),
+    importId: uuid("import_id"),
+    source: text("source").notNull().default("statement_import"),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    status: text("status").notNull().default("open"),
+    bankNetCents: bigint("bank_net_cents", { mode: "number" }).notNull().default(0),
+    matchedCents: bigint("matched_cents", { mode: "number" }).notNull().default(0),
+    varianceCents: bigint("variance_cents", { mode: "number" }).notNull().default(0),
+    summary: jsonb("summary").notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    createdById: uuid("created_by_id").notNull(),
+    createdByName: text("created_by_name").notNull(),
+    clearedAt: timestamp("cleared_at", { withTimezone: true }),
+    clearedById: uuid("cleared_by_id"),
+    clearedByName: text("cleared_by_name"),
+  },
+  (t) => [index("reconciliation_runs_tenant_created_idx").on(t.tenantId, t.createdAt)]
+);
+
+export const reconciliationVariances = pgTable(
+  "reconciliation_variances",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    runId: uuid("run_id").notNull(),
+    bankTransactionId: uuid("bank_transaction_id"),
+    kind: text("kind").notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    description: text("description").notNull(),
+    status: text("status").notNull().default("open"),
+    matchRef: jsonb("match_ref"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("reconciliation_variances_run_idx").on(t.runId)]
+);
+
+export const deposits = pgTable(
+  "deposits",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    locationId: uuid("location_id").notNull(),
+    bankAccountId: uuid("bank_account_id").notNull(),
+    businessDate: date("business_date").notNull(),
+    method: text("method").notNull(),
+    amountCents: bigint("amount_cents", { mode: "number" }).notNull(),
+    currency: text("currency").notNull().default("USD"),
+    reference: text("reference"),
+    status: text("status").notNull().default("open"),
+    importStagedRowId: uuid("import_staged_row_id"),
+    dayCloseId: uuid("day_close_id"),
+    preparedById: uuid("prepared_by_id").notNull(),
+    preparedByName: text("prepared_by_name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("deposits_tenant_location_date_idx").on(t.tenantId, t.locationId, t.businessDate),
+    uniqueIndex("deposits_tenant_staged_row_uidx").on(t.tenantId, t.importStagedRowId),
+  ]
+);
+
+export const dayCloses = pgTable(
+  "day_closes",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    locationId: uuid("location_id").notNull(),
+    businessDate: date("business_date").notNull(),
+    status: text("status").notNull().default("open"),
+    depositTotalCents: bigint("deposit_total_cents", { mode: "number" }).notNull().default(0),
+    daySheetTotalCents: bigint("day_sheet_total_cents", { mode: "number" }).notNull().default(0),
+    varianceCents: bigint("variance_cents", { mode: "number" }).notNull().default(0),
+    summary: jsonb("summary").notNull().default({}),
+    frozenAt: timestamp("frozen_at", { withTimezone: true }),
+    frozenById: uuid("frozen_by_id"),
+    frozenByName: text("frozen_by_name"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    index("day_closes_tenant_location_date_idx").on(t.tenantId, t.locationId, t.businessDate),
+    uniqueIndex("day_closes_tenant_location_date_uidx").on(t.tenantId, t.locationId, t.businessDate),
+  ]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "users",
@@ -454,4 +658,13 @@ export const TENANT_SCOPED_TABLES = [
   "sod_findings",
   "control_decisions",
   "control_snapshots",
+  "import_runs",
+  "import_staged_rows",
+  "bank_accounts",
+  "bank_statement_imports",
+  "bank_transactions",
+  "reconciliation_runs",
+  "reconciliation_variances",
+  "deposits",
+  "day_closes",
 ] as const;
