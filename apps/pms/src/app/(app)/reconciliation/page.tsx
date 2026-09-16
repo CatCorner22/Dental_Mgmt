@@ -3,7 +3,11 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { formatCents } from "@/lib/ledger/format";
-import type { BankAccountOption, ReconciliationRunSummary } from "@/lib/reconciliation/types";
+import {
+  independenceSourceLabel,
+  type BankAccountOption,
+  type ReconciliationRunSummary,
+} from "@/lib/reconciliation/types";
 
 type LoadState =
   | { status: "loading" }
@@ -184,7 +188,7 @@ export default function ReconciliationPage() {
                     </Link>
                   </td>
                   <td className="px-4 py-3">{run.bankAccountName}</td>
-                  <td className="px-4 py-3">Statement import</td>
+                  <td className="px-4 py-3">{independenceSourceLabel(run.source)}</td>
                   <td className="px-4 py-3">{statusLabel(run.status)}</td>
                   <td className="px-4 py-3 tabular-nums">{formatCents(run.bankNetCents)}</td>
                   <td className="px-4 py-3 tabular-nums">{run.openVarianceCount}</td>

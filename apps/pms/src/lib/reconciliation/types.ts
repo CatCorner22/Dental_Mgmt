@@ -1,3 +1,11 @@
+export type VarianceClearanceVerdict = {
+  ok: boolean;
+  code: string;
+  verb: string;
+  why: string;
+  degradedOwnerClearance: boolean;
+};
+
 export type ReconciliationRunSummary = {
   runId: string;
   bankAccountId: string;
@@ -12,7 +20,16 @@ export type ReconciliationRunSummary = {
   openVarianceCount: number;
   createdAt: string;
   createdByName: string;
+  clearedAt: string | null;
+  clearedByName: string | null;
+  degradedOwnerClearance: boolean;
 };
+
+export function independenceSourceLabel(source: string): string {
+  if (source === "statement_import") return "statement import";
+  if (source === "aggregator_feed") return "aggregator feed";
+  return source.replace(/_/g, " ");
+}
 
 export type ReconciliationVarianceRow = {
   varianceId: string;
@@ -27,6 +44,7 @@ export type ReconciliationVarianceRow = {
 export type ReconciliationRunDetail = ReconciliationRunSummary & {
   variances: ReconciliationVarianceRow[];
   summary: Record<string, unknown>;
+  clearance?: VarianceClearanceVerdict;
 };
 
 export type BankAccountOption = {

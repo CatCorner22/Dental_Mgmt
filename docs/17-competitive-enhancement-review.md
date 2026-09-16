@@ -262,6 +262,12 @@ Money Desk posting gets a guarded HTTP route and a minimal form. This increment 
 
 **Not in Increment 1.9.** Checkout, card processing, palette search, full posting wizard, tender capture, insurance payments, reversals, and ledger posting from bank deposits.
 
+## Increment 1.11
+
+Variance clearance is enforced with runtime SoD (decision 7a). This increment is stacked independently of Increments 1.8 and 1.9: whoever prepared deposits covering the run period, or posted patient payments in that period, cannot clear that day's reconciliation run. When no other eligible clearer exists, tenant admin (`role=admin`) may still clear, and the degraded state is recorded as a finding on `reconciliation_runs.summary.degradedOwnerClearance` (not a silent disable) plus `domain_event` `reconciliation.cleared` / `reconciliation.variance_cleared`. Open variances become `cleared`; `matched_deposit` rows stay `matched`. Source remains `statement_import` — clearance is not a self-assertion. `POST /api/reconciliation/runs/[runId]/clear` is behind `bank_reconcile`. Ridgeview keeps only the owner on `bank_reconcile`; front desk has `post_payments` and prepared the demo deposits, so they are refused if they try to clear.
+
+**Not in Increment 1.11.** Per-variance waive route, `control_findings` table, aggregator feed, owner Tied tile, grant-time SoD refusal UI.
+
 ## Risks that stay visible
 
 - Lifting Smile Notes tests while inverting the PHI premise will fail some of those tests; they become a tracked rewrite list, not a reason to leave PHI-blocking rules in place.

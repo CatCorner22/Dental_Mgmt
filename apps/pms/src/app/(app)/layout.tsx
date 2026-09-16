@@ -26,7 +26,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               Approvals
             </Link>
           </nav>
-          <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.9</p>
+          <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.11</p>
         </div>
       </header>
       <div className="mx-auto max-w-5xl px-6 py-10">{children}</div>
