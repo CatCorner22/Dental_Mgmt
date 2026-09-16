@@ -10,6 +10,7 @@
     "./crypto": "./src/crypto.ts",
     "./migrate": "./src/migrate.ts",
     "./testing": "./src/testing/liveDatabase.ts",
+    "./seed": "./src/seed.ts",
     "./seed-data": "./src/seed-data.ts",
     "./seed-ledger": "./src/seed-ledger.ts"
   },

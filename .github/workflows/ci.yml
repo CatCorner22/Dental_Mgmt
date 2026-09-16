@@ -74,6 +74,11 @@ jobs:
           POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: pnpm controls:snapshot
       - run: pnpm test:packages
+      - name: Production build
+        run: pnpm --filter @pms/app build
+      - run: pnpm exec playwright install chromium
+      - name: Browser test of the Practice Risk page against a throwaway database
+        run: pnpm e2e
       - run: pnpm check:routes
       - name: Version stamps
         if: github.event_name == 'pull_request'

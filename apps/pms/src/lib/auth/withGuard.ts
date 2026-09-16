@@ -31,7 +31,7 @@ export function withGuard(
   ports?: AuthPorts
 ): NextRouteHandler {
   return async (req, ctx) => {
-    const surface = requestSurfaceOk(req);
+    const surface = requestSurfaceOk(req, process.env);
     if (!surface.ok) {
       return Response.json({ error: surface.error }, { status: surface.status });
     }
