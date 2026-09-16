@@ -3,8 +3,12 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { formatCents, formatLedgerKind } from "@/lib/ledger/format";
-import { POSTABLE_KINDS, type PostableKind } from "@/lib/ledger/post";
-import type { LedgerAccountSummary, LedgerPatientBalance } from "@/lib/ledger/types";
+import {
+  POSTABLE_KINDS,
+  type LedgerAccountSummary,
+  type LedgerPatientBalance,
+  type PostableKind,
+} from "@/lib/ledger/types";
 
 type AccountDetail = {
   accountId: string;

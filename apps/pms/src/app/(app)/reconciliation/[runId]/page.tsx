@@ -67,7 +67,12 @@ export default function ReconciliationRunPage() {
     setBusy(true);
     setMessage(null);
     try {
-      const res = await fetch(`/api/reconciliation/runs/${runId}/clear`, { method: "POST" });
+      // Every guarded write needs a JSON content type; a bare POST is refused with 415.
+      const res = await fetch(`/api/reconciliation/runs/${runId}/clear`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
       const body = (await res.json()) as {
         run?: ReconciliationRunDetail;
         error?: string;

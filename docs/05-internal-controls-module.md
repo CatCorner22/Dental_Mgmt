@@ -39,7 +39,7 @@ Adopted from `docs/13-innovation-and-intuitiveness.md` (the feature workflow's s
 - From the critique: the desk PIN on Post mints or resumes the second coordinator's own server session for the single posting (the 60-second single-entitlement session designed for walk-over approvals); a PIN never annotates another person's session.
 - From the critique: the S0 chart/note/claim contradiction has no reason-coded override; the only exits are the three 'Use this' corrections through each source's normal path, or a rule change under `RULESET_VERSION`.
 
-## Implementation status (Increments 1.12 to 1.14, 2026-09-16)
+## Implementation status (Increments 1.12 to 1.15, 2026-09-16)
 
 What the code enforces, records, or leaves external today. The design above governs; this table says how far the build has caught up with it. See `docs/17` for the increment record.
 
@@ -54,6 +54,7 @@ What the code enforces, records, or leaves external today. The design above gove
 | Exceptions (raise / lower / force / waive) | Built as policy versions under a per-tenant lock; owner rank, typed fields, reason, residual note, window; waiver ≤ 90 days; 'hours' and 'vendor_state' scopes not built | `POST /api/controls/exceptions`, `/retire` |
 | Decision register (`control_decisions`) | Built, append-only; a control-wide decision governs every conflict of the control, a finding's own decision wins; overdue reviews surfaced; `measured_effect` and monthly batching not built | `POST /api/controls/decisions` |
 | Residual, COSO, leading indicators, tornado, `control_snapshots` | Built; frozen with both version stamps; nightly job freezes one snapshot per tenant and refreshes findings (`pnpm controls:snapshot`, `.github/workflows/nightly-controls.yml`) | `POST /api/controls/risk`, `apps/pms/src/lib/controls/nightly.ts` |
+| Enforced-versus-recorded table and the Practice Risk surface, shown in-product | Built at `/risk` (manager rank to read, administrator rank to act): provenance sentence (frozen or live, both version stamps, "directional"), four headline tiles, the six-channel enforced / partial / attested table, duty combinations with the governing decision state, who holds which duties with grant and revoke, the Refusal component on a refused grant with "record the decision and grant in the same step" only for an unmitigated critical pair, the decision register with overdue marks, standing exceptions, and the assumptions list. Owner home tiles, the digest, and the CPA export are not built | `apps/pms/src/app/(app)/risk/` |
 | Independent reconciliation, measured | Not built; treated as absent and named as an assumption on every snapshot | — |
 | Knowledge map and sole-owner detection | Not built; counts as zero and named as an assumption | — |
 | Detectors and `control_findings` | Not built | — |
