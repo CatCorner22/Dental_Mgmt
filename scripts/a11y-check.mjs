@@ -9,7 +9,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-process.env.PLAYWRIGHT_BROWSERS_PATH = process.env.PLAYWRIGHT_BROWSERS_PATH || '/opt/pw-browsers';
+if (!process.env.PLAYWRIGHT_BROWSERS_PATH && fs.existsSync('/opt/pw-browsers')) {
+  process.env.PLAYWRIGHT_BROWSERS_PATH = '/opt/pw-browsers';
+}
 const require = createRequire(import.meta.url);
 let chromium;
 try { chromium = require('playwright').chromium; } catch { try { chromium = require('/usr/lib/node_modules/playwright').chromium; } catch { chromium = require('/opt/node22/lib/node_modules/playwright').chromium; } }

@@ -1,18 +1,33 @@
 {
   "name": "dental-mgmt",
   "private": true,
-  "description": "Planning repository and clickable prototype for the Smile Notes + Precog Pioneer consolidation. The prototype itself is dependency-free; Playwright is only needed by the checks under scripts/.",
+  "packageManager": "pnpm@10.33.3",
+  "description": "Planning repository, clickable prototype, and Phase 0 Increment 0.1 monorepo for the Smile Notes + Precog Pioneer consolidation.",
   "scripts": {
-    "setup": "npm install && playwright install chromium",
+    "setup": "pnpm install && playwright install chromium",
     "syntax": "node scripts/syntax-check.mjs",
     "check": "node scripts/proto-check.mjs",
     "reproduce": "node scripts/beta/reproduce.mjs",
     "verify-docs": "bash scripts/verify-docs.sh",
-    "test": "npm run syntax && npm run verify-docs && npm run check && npm run a11y && npm run reproduce",
     "a11y": "node scripts/a11y-check.mjs",
-    "review": "bash scripts/final-review.sh"
+    "test": "pnpm run syntax && pnpm run verify-docs && pnpm run check && pnpm run a11y && pnpm run reproduce",
+    "test:packages": "pnpm -r --filter \"./packages/*\" --filter \"./apps/pms\" test",
+    "typecheck": "pnpm -r --filter \"./packages/*\" --filter \"./apps/pms\" typecheck",
+    "check:routes": "pnpm --filter @pms/app check:routes",
+    "test:live": "pnpm --filter @pms/db --filter @pms/app test:live",
+    "db:roles": "pnpm --filter @pms/db db:roles",
+    "db:migrate": "pnpm --filter @pms/db db:migrate",
+    "db:status": "pnpm --filter @pms/db db:status",
+    "db:reset": "pnpm --filter @pms/db db:reset",
+    "db:seed": "pnpm --filter @pms/db db:seed",
+    "verify:chain": "pnpm --filter @pms/verifier verify:chain",
+    "check:versions": "bash scripts/check-version-stamps.sh",
+    "secret-scan": "bash scripts/secret-scan.sh",
+    "review": "bash scripts/final-review.sh",
+    "ci": "pnpm typecheck && pnpm test:packages && pnpm check:routes && pnpm check:versions && pnpm secret-scan && pnpm run syntax && pnpm run verify-docs"
   },
   "devDependencies": {
-    "playwright": "1.63.0"
+    "playwright": "1.63.0",
+    "typescript": "^5.8.3"
   }
 }

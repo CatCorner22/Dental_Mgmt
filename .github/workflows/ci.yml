@@ -1,0 +1,97 @@
+name: ci
+
+on:
+  push:
+    branches: [main, claude/dental-precog-consolidation-60ckgd]
+  pull_request:
+
+jobs:
+  packages:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Administrator connection. Live tests build a throwaway database each
+      # and apply every migration as app_migrate, never as this superuser.
+      PMS_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      PMS_TEST_POSTGRES_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm typecheck
+      - name: Migrations apply from empty as app_migrate
+        env:
+          POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          PMS_MIGRATE_ROLE: app_migrate
+        run: |
+          pnpm --filter @pms/db db:roles
+          pnpm --filter @pms/db db:migrate
+          pnpm --filter @pms/db db:status
+          pnpm --filter @pms/db db:migrate
+      - name: Chain verifier runs as app_verify against the migrated database
+        env:
+          POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          PMS_VERIFY_ROLE: app_verify
+        run: pnpm --filter @pms/verifier verify:chain
+      - name: Restore drill appends backup.restore_drill per tenant
+        env:
+          POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          PMS_APPEND_ROLE: app_append
+          BACKUP_TARGET: file:///tmp/pms-backups
+        run: |
+          mkdir -p /tmp/pms-backups
+          pnpm --filter @pms/db db:restore-drill
+      - name: Nightly chain record writes audit_chain_checks as app_append
+        env:
+          POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          PMS_VERIFY_ROLE: app_verify
+          PMS_APPEND_ROLE: app_append
+          DAY: 2026-09-15
+          OBJECT_STORAGE_URL: file:///tmp/pms-audit-heads
+          CHAIN_HEAD_SIGN_KEY: ci-chain-head-sign-key
+        run: pnpm --filter @pms/verifier verify:chain:record
+      - run: pnpm test:packages
+      - run: pnpm check:routes
+      - name: Version stamps
+        if: github.event_name == 'pull_request'
+        env:
+          VERSION_STAMP_BASE: origin/${{ github.base_ref }}
+        run: |
+          git fetch --no-tags origin ${{ github.base_ref }}
+          bash scripts/check-version-stamps.sh
+      - run: bash scripts/secret-scan.sh
+
+  prototype:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm exec playwright install chromium
+      - run: pnpm run syntax
+      - run: pnpm run verify-docs
+      - run: pnpm run check
+      - run: pnpm run a11y

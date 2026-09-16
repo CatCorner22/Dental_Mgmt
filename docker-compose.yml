@@ -1,0 +1,23 @@
+# Local Postgres. The container's `pms` user is an administrator; use it only
+# to bootstrap. Then:
+#
+#   POSTGRES_URL=postgres://pms:pms@localhost:5432/pms pnpm db:roles
+#   POSTGRES_URL=postgres://pms:pms@localhost:5432/pms PMS_MIGRATE_ROLE=app_migrate pnpm db:migrate
+#
+# and point the app at a LOGIN role that inherits app_rw (see
+# packages/db/sql/roles.sql). Production connects the same way; the boot
+# guard refuses a superuser, BYPASSRLS, or table-owning connection.
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: pms
+      POSTGRES_PASSWORD: pms
+      POSTGRES_DB: pms
+    ports:
+      - "5432:5432"
+    volumes:
+      - pms-pg:/var/lib/postgresql/data
+
+volumes:
+  pms-pg:

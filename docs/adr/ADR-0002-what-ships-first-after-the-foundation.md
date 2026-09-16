@@ -1,6 +1,8 @@
 # ADR 2: What ships first after the foundation
 
-**Status:** Proposed (awaiting owner confirmation)
+**Status:** Accepted (owner, 2026-09-14)
+
+The product identity is the full PMS from the first public page. Phase 1 is the money layer of that PMS, run beside the incumbent as a report-import shadow ledger — not a separately named controls product. See `docs/17-competitive-enhancement-review.md`.
 
 ## Context
 

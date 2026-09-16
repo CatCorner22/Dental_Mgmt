@@ -1,0 +1,42 @@
+{
+  "name": "@pms/app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Next.js 15 PMS shell. Sign-in plus empty home. Increment 0.11 holds no PHI patient rows.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "test": "vitest run && node scripts/check-route-guards.mjs",
+    "test:live": "PMS_TEST_POSTGRES_REQUIRED=1 vitest run src/lib/auth/postgresStore.live.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check:routes": "node scripts/check-route-guards.mjs"
+  },
+  "dependencies": {
+    "@pms/clinical-core": "workspace:*",
+    "@pms/clinical-kb": "workspace:*",
+    "@pms/controls-engine": "workspace:*",
+    "@pms/db": "workspace:*",
+    "@pms/ledger": "workspace:*",
+    "@pms/verifier": "workspace:*",
+    "bcryptjs": "^3.0.2",
+    "drizzle-orm": "^0.45.2",
+    "next": "^15.3.3",
+    "next-auth": "5.0.0-beta.32",
+    "otpauth": "^9.5.1",
+    "pg": "^8.16.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/pg": "^8.15.5",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}

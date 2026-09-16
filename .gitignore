@@ -4,3 +4,11 @@ node_modules/
 # Agent worktrees: transient checkouts of this same repository, created when a
 # background agent needs an isolated tree. Never part of a commit.
 .claude/worktrees/
+
+.next/
+dist/
+coverage/
+*.tsbuildinfo
+.turbo
+.pnpm-store/
+.vendor/

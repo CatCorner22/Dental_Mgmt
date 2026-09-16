@@ -1,0 +1,134 @@
+{
+  "$schema": "https://design-tokens.org/schema/2025.10/format.json",
+  "name": "Smile Notes",
+  "version": "1.1.0",
+  "description": "Production design tokens for Smile Notes. Daylight chart (cooler cream paper / navy / note blue / check teal) plus severity luminance ladder. Primitive → semantic → component.",
+  "primitive": {
+    "color": {
+      "brand": {
+        "cream": { "$type": "color", "$value": "#F3F1EB" },
+        "navy": { "$type": "color", "$value": "#1E3A5F" },
+        "blue": { "$type": "color", "$value": "#2B6CB8" },
+        "teal": { "$type": "color", "$value": "#0F766E" },
+        "gold": { "$type": "color", "$value": "#F2CE4B" }
+      },
+      "severity": {
+        "stop": {
+          "fill": { "$type": "color", "$value": "#9B1C1C" },
+          "soft": { "$type": "color", "$value": "#FEF2F2" },
+          "ink": { "$type": "color", "$value": "#7F1D1D" },
+          "rail": { "$type": "color", "$value": "#B91C1C" },
+          "on": { "$type": "color", "$value": "#FFFFFF" }
+        },
+        "required": {
+          "fill": { "$type": "color", "$value": "#C2410C" },
+          "soft": { "$type": "color", "$value": "#FFF7ED" },
+          "ink": { "$type": "color", "$value": "#9A3412" },
+          "rail": { "$type": "color", "$value": "#EA580C" },
+          "on": { "$type": "color", "$value": "#FFFFFF" }
+        },
+        "review": {
+          "fill": { "$type": "color", "$value": "#D97706" },
+          "soft": { "$type": "color", "$value": "#FFFBEB" },
+          "ink": { "$type": "color", "$value": "#1C1917" },
+          "rail": { "$type": "color", "$value": "#D97706" },
+          "on": { "$type": "color", "$value": "#1C1917" }
+        },
+        "style": {
+          "fill": { "$type": "color", "$value": "#6D28D9" },
+          "soft": { "$type": "color", "$value": "#F5F3FF" },
+          "ink": { "$type": "color", "$value": "#5B21B6" },
+          "rail": { "$type": "color", "$value": "#7C3AED" },
+          "on": { "$type": "color", "$value": "#FFFFFF" }
+        },
+        "info": {
+          "fill": { "$type": "color", "$value": "#475569" },
+          "soft": { "$type": "color", "$value": "#F8FAFC" },
+          "ink": { "$type": "color", "$value": "#334155" },
+          "rail": { "$type": "color", "$value": "#64748B" },
+          "on": { "$type": "color", "$value": "#FFFFFF" }
+        },
+        "clear": {
+          "fill": { "$type": "color", "$value": "#047857" },
+          "soft": { "$type": "color", "$value": "#ECFDF5" },
+          "ink": { "$type": "color", "$value": "#065F46" },
+          "rail": { "$type": "color", "$value": "#059669" },
+          "on": { "$type": "color", "$value": "#FFFFFF" }
+        }
+      },
+      "slate": {
+        "50": { "$type": "color", "$value": "#F8FAFC" },
+        "100": { "$type": "color", "$value": "#F1F5F9" },
+        "200": { "$type": "color", "$value": "#E2E8F0" },
+        "300": { "$type": "color", "$value": "#CBD5E1" },
+        "400": { "$type": "color", "$value": "#94A3B8" },
+        "500": { "$type": "color", "$value": "#5B6578" },
+        "600": { "$type": "color", "$value": "#475569" },
+        "700": { "$type": "color", "$value": "#334155" },
+        "800": { "$type": "color", "$value": "#1E293B" },
+        "900": { "$type": "color", "$value": "#0F172A" }
+      },
+      "white": { "$type": "color", "$value": "#FFFFFF" }
+    },
+    "space": {
+      "1": { "$type": "dimension", "$value": "4px" },
+      "2": { "$type": "dimension", "$value": "8px" },
+      "3": { "$type": "dimension", "$value": "12px" },
+      "4": { "$type": "dimension", "$value": "16px" },
+      "5": { "$type": "dimension", "$value": "24px" },
+      "6": { "$type": "dimension", "$value": "32px" }
+    },
+    "radius": {
+      "sm": { "$type": "dimension", "$value": "8px" },
+      "md": { "$type": "dimension", "$value": "12px" },
+      "lg": { "$type": "dimension", "$value": "16px" },
+      "pill": { "$type": "dimension", "$value": "9999px" }
+    },
+    "target": {
+      "min": { "$type": "dimension", "$value": "44px" }
+    }
+  },
+  "semantic": {
+    "color": {
+      "surface": {
+        "page": { "$type": "color", "$value": "{primitive.color.brand.cream}" },
+        "card": { "$type": "color", "$value": "{primitive.color.white}" },
+        "inset": { "$type": "color", "$value": "{primitive.color.brand.cream}" },
+        "soft": { "$type": "color", "$value": "{primitive.color.slate.50}" }
+      },
+      "fg": {
+        "brand": { "$type": "color", "$value": "{primitive.color.brand.navy}" },
+        "body": { "$type": "color", "$value": "{primitive.color.slate.800}" },
+        "muted": { "$type": "color", "$value": "{primitive.color.slate.500}" },
+        "subtle": { "$type": "color", "$value": "{primitive.color.slate.400}" },
+        "chrome": { "$type": "color", "$value": "{primitive.color.brand.teal}" }
+      },
+      "action": {
+        "primary": { "$type": "color", "$value": "{primitive.color.brand.navy}" },
+        "primary.interactive": { "$type": "color", "$value": "{primitive.color.brand.blue}" },
+        "primary.on": { "$type": "color", "$value": "{primitive.color.white}" },
+        "complete": { "$type": "color", "$value": "{primitive.color.brand.teal}" },
+        "complete.on": { "$type": "color", "$value": "{primitive.color.white}" }
+      },
+      "border": {
+        "default": { "$type": "color", "$value": "{primitive.color.slate.200}" },
+        "strong": { "$type": "color", "$value": "{primitive.color.slate.300}" },
+        "field": { "$type": "color", "$value": "{primitive.color.slate.500}" },
+        "focus": { "$type": "color", "$value": "{primitive.color.brand.blue}" }
+      }
+    }
+  },
+  "component": {
+    "button": {
+      "primary": {
+        "bgFrom": { "$type": "color", "$value": "{semantic.color.action.primary}" },
+        "bgTo": { "$type": "color", "$value": "{semantic.color.action.primary.interactive}" },
+        "fg": { "$type": "color", "$value": "{semantic.color.action.primary.on}" }
+      },
+      "complete": {
+        "bg": { "$type": "color", "$value": "{semantic.color.action.complete}" },
+        "fg": { "$type": "color", "$value": "{semantic.color.action.complete.on}" }
+      }
+    }
+  }
+}
