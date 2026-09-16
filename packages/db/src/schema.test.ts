@@ -8,6 +8,7 @@ import { GENESIS_HASH, hashDomainEvent } from "./chain";
 import { uuidv7 } from "./ids";
 import { DB_ROLES, PROCESS_ROLES } from "./roles";
 import { SET_LOCAL_TENANT_SQL } from "./tenant-context";
+import { TENANT_SCOPED_TABLES } from "./schema";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const sql = readFileSync(join(here, "../migrations/0001_init.sql"), "utf8");
@@ -24,6 +25,7 @@ const enforcementSql = readFileSync(join(here, "../migrations/0014_controls_enfo
 const importSql = readFileSync(join(here, "../migrations/0015_import_staging.sql"), "utf8");
 const bankSql = readFileSync(join(here, "../migrations/0016_bank_reconciliation.sql"), "utf8");
 const dayCloseSql = readFileSync(join(here, "../migrations/0017_day_close_deposits.sql"), "utf8");
+const statementsSql = readFileSync(join(here, "../migrations/0018_statements.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -186,6 +188,16 @@ describe("Increment 1.6 day close and deposits", () => {
     expect(dayCloseSql).toMatch(/CREATE TABLE day_closes\b/);
     expect(dayCloseSql).toMatch(/day_closes_immutable_when_frozen/);
     expect(dayCloseSql).toMatch(/GRANT SELECT, INSERT, UPDATE ON deposits, day_closes TO app_rw/);
+  });
+});
+
+describe("Increment 1.10 patient statements", () => {
+  it("creates statements with issued-row immutability and RLS", () => {
+    expect(statementsSql).toMatch(/CREATE TABLE statements\b/);
+    expect(statementsSql).toMatch(/hold_reason/);
+    expect(statementsSql).toMatch(/statements_immutable_when_issued/);
+    expect(statementsSql).toMatch(/GRANT SELECT, INSERT, UPDATE ON statements TO app_rw/);
+    expect(TENANT_SCOPED_TABLES).toContain("statements");
   });
 });
 

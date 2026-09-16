@@ -263,6 +263,12 @@ Money Desk posting gets a guarded HTTP route and a minimal form. This increment 
 
 **Not in Increment 1.9.** Checkout, card processing, palette search, full posting wizard, tender capture, insurance payments, reversals, and ledger posting from bank deposits.
 
+## Increment 1.10
+
+Patient and guarantor statements become a Money Desk surface. This increment adds `statements` (draft / issued / held / void; issued rows are immutable), snapshots the three labeled balances and `ledger_explanations` lines from the same queries as `/ledger`, and exposes `GET /api/statements`, `POST /api/statements` (draft from current balances), `POST /api/statements/[id]/issue`, and `POST /api/statements/[id]/hold`. Issue and hold require `post_payments`; list and preview are `minRank: user`. `/statements` and `/statements/[id]` preview the frozen artifact. Issue appends `statement.issued` to `domain_event`. Hold is minimal: optional `hold_reason`, and issue refuses while held (statement status, hold reason, or `guarantor_accounts.statement_hold`). Ridgeview seed includes an issued Jane Doe statement.
+
+**Not in Increment 1.10.** Hosted card processing, email or portal send of PHI, statement number sequences, maximum hold age, patient-voice explanation templates, print/mail/SMS disclosure channels, As-of historical re-query of posted_at.
+
 ## Increment 1.11
 
 Variance clearance is enforced with runtime SoD (decision 7a). This increment is stacked independently of Increments 1.8 and 1.9: whoever prepared deposits covering the run period, or posted patient payments in that period, cannot clear that day's reconciliation run. When no other eligible clearer exists, tenant admin (`role=admin`) may still clear, and the degraded state is recorded as a finding on `reconciliation_runs.summary.degradedOwnerClearance` (not a silent disable) plus `domain_event` `reconciliation.cleared` / `reconciliation.variance_cleared`. Open variances become `cleared`; `matched_deposit` rows stay `matched`. Source remains `statement_import` — clearance is not a self-assertion. `POST /api/reconciliation/runs/[runId]/clear` is behind `bank_reconcile`. Ridgeview keeps only the owner on `bank_reconcile`; front desk has `post_payments` and prepared the demo deposits, so they are refused if they try to clear.
