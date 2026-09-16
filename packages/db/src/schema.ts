@@ -560,6 +560,28 @@ export const dayCloses = pgTable(
   ]
 );
 
+export const statements = pgTable(
+  "statements",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    accountId: uuid("account_id").notNull(),
+    patientId: uuid("patient_id"),
+    asOf: date("as_of").notNull(),
+    status: text("status").notNull().default("draft"),
+    patientDueCents: bigint("patient_due_cents", { mode: "number" }).notNull().default(0),
+    insurancePendingCents: bigint("insurance_pending_cents", { mode: "number" }).notNull().default(0),
+    creditCents: bigint("credit_cents", { mode: "number" }).notNull().default(0),
+    holdReason: text("hold_reason"),
+    snapshot: jsonb("snapshot").notNull().default({}),
+    issuedAt: timestamp("issued_at", { withTimezone: true }),
+    issuedById: uuid("issued_by_id"),
+    issuedByName: text("issued_by_name"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("statements_tenant_account_as_of_idx").on(t.tenantId, t.accountId, t.asOf)]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "users",
@@ -587,4 +609,5 @@ export const TENANT_SCOPED_TABLES = [
   "reconciliation_variances",
   "deposits",
   "day_closes",
+  "statements",
 ] as const;

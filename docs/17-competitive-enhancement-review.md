@@ -257,6 +257,12 @@ Money Desk posting gets a guarded HTTP route and a minimal form. This increment 
 
 **Not in Increment 1.9.** Checkout, card processing, palette search, full posting wizard, tender capture, insurance payments, reversals, and ledger posting from bank deposits.
 
+## Increment 1.10
+
+Patient and guarantor statements become a Money Desk surface. This increment adds `statements` (draft / issued / held / void; issued rows are immutable), snapshots the three labeled balances and `ledger_explanations` lines from the same queries as `/ledger`, and exposes `GET /api/statements`, `POST /api/statements` (draft from current balances), `POST /api/statements/[id]/issue`, and `POST /api/statements/[id]/hold`. Issue and hold require `post_payments`; list and preview are `minRank: user`. `/statements` and `/statements/[id]` preview the frozen artifact. Issue appends `statement.issued` to `domain_event`. Hold is minimal: optional `hold_reason`, and issue refuses while held (statement status, hold reason, or `guarantor_accounts.statement_hold`). Ridgeview seed includes an issued Jane Doe statement.
+
+**Not in Increment 1.10.** Hosted card processing, email or portal send of PHI, statement number sequences, maximum hold age, patient-voice explanation templates, print/mail/SMS disclosure channels, As-of historical re-query of posted_at.
+
 ## Risks that stay visible
 
 - Lifting Smile Notes tests while inverting the PHI premise will fail some of those tests; they become a tracked rewrite list, not a reason to leave PHI-blocking rules in place.
