@@ -381,8 +381,24 @@ function RiskBody({
           Unmitigated critical conflicts: {s.headline.unmitigatedCritical}. COSO overall {s.headline.cosoOverall}.
           Pressure band: {s.headline.pressureBand}. Average residual {s.headline.averageResidual}. Team of{" "}
           {s.staff.teamSize}; dual control on payments{" "}
-          {s.staff.dualControlPayments ? "counted" : "not counted"}; independent bank reconciliation{" "}
-          {s.staff.independentBankRec ? "measured" : "not measured"}.
+          {s.staff.dualControlPayments ? "counted" : "not counted"}.
+        </p>
+        <p className="mt-2 max-w-prose text-sm text-[var(--ink-2)]">
+          Independent bank reconciliation:{" "}
+          {s.measurements?.reconciliation ? (
+            <>
+              <span className="font-semibold text-[var(--ink)]">
+                {s.measurements.reconciliation.grade === "independent"
+                  ? "independent"
+                  : s.measurements.reconciliation.grade === "same_hands"
+                    ? "same hands"
+                    : "stale import"}
+              </span>{" "}
+              (measured over the last {s.measurements.reconciliation.windowDays} days). {s.measurements.reconciliation.why}
+            </>
+          ) : (
+            <>not measured in this snapshot; treated as absent.</>
+          )}
         </p>
       </section>
 

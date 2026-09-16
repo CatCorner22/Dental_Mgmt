@@ -64,6 +64,43 @@ describe("takeControlSnapshot", () => {
     expect(s.assumptions.find((a) => /patient-ledger kinds only/.test(a))).toMatch(/ACH \/ vendor electronic pay, Paper checks/);
   });
 
+  it("carries a measurement only when one was taken, and words the assumption from it", () => {
+    const unmeasured = snap();
+    expect("measurements" in unmeasured).toBe(false);
+
+    const b = buildPracticeState({
+      people: livePeople,
+      grants: liveGrants,
+      policy: livePolicy(),
+      decisions: liveDecisions,
+      enforcement: ENFORCEMENT_INCREMENT_1_12,
+      asOf: AS_OF,
+      independentBankRec: false,
+    });
+    const measured = takeControlSnapshot({
+      state: b.state,
+      sod: b.sod,
+      coverage: b.coverage,
+      decisions: liveDecisions,
+      takenAt: TAKEN_AT,
+      measurements: {
+        reconciliation: {
+          grade: "same_hands",
+          windowDays: 45,
+          clearedInWindow: 2,
+          sameHandsInWindow: 1,
+          latestClearedAt: "2026-09-08T18:00:00Z",
+          why: "1 of 2 runs cleared in the last 45 days was cleared by someone who prepared deposits or posted payments in the period.",
+        },
+      },
+    });
+    expect(measured.measurements?.reconciliation?.grade).toBe("same_hands");
+    expect(measured.assumptions.some((a) => /bank reconciliation is not measured/.test(a))).toBe(false);
+    expect(measured.assumptions.find((a) => /bank reconciliation is measured/.test(a))).toMatch(
+      /absent \(same hands\): 1 of 2 runs/
+    );
+  });
+
   it("is deterministic and finite", () => {
     const a = JSON.stringify(snap());
     const b = JSON.stringify(snap());

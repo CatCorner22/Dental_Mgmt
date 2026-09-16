@@ -13,11 +13,33 @@ import { scoreLeadingIndicators } from "./signals/leading-indicators";
 import type { SodDetectionReport } from "./sod/detect";
 import { CONTROL_RULEBOOK_VERSION, SCORING_VERSION } from "./version";
 
+/**
+ * Independent bank reconciliation as the product measured it: the grade
+ * docs/05 names, over a window of cleared runs. Absent when the product
+ * has not measured it, in which case the staff flag is an assumption.
+ */
+export interface ReconciliationMeasurementSummary {
+  grade: "independent" | "same_hands" | "stale_import";
+  windowDays: number;
+  clearedInWindow: number;
+  sameHandsInWindow: number;
+  /** ISO timestamp of the latest cleared run in the window, or null. */
+  latestClearedAt: string | null;
+  /** One sentence a reader can act on. */
+  why: string;
+}
+
+export interface SnapshotMeasurements {
+  reconciliation?: ReconciliationMeasurementSummary;
+}
+
 export interface ControlSnapshot {
   scoringVersion: string;
   rulebookVersion: string;
   /** ISO timestamp supplied by the caller. */
   takenAt: string;
+  /** Present only for inputs the product measured rather than assumed. */
+  measurements?: SnapshotMeasurements;
   headline: {
     averageResidual: number;
     criticalPath: number;
@@ -57,6 +79,7 @@ export function takeControlSnapshot(input: {
   decisions: ControlDecision[];
   takenAt: string;
   vars?: RiskVariableState;
+  measurements?: SnapshotMeasurements;
 }): ControlSnapshot {
   const asOf = input.takenAt.slice(0, 10);
   const portfolio = portfolioSummary(input.state, input.vars);
@@ -68,10 +91,13 @@ export function takeControlSnapshot(input: {
   const external = input.coverage.filter((c) => c.enforcement === "external");
   const partial = input.coverage.filter((c) => c.enforcement === "partial");
 
+  const recon = input.measurements?.reconciliation;
+
   return {
     scoringVersion: SCORING_VERSION,
     rulebookVersion: CONTROL_RULEBOOK_VERSION,
     takenAt: input.takenAt,
+    ...(input.measurements ? { measurements: input.measurements } : {}),
     headline: {
       averageResidual: portfolio.averageResidual,
       criticalPath: portfolio.criticalPath,
@@ -113,7 +139,11 @@ export function takeControlSnapshot(input: {
         : []),
       ...(input.state.staff.independentBankRec
         ? []
-        : ["Independent bank reconciliation is not measured yet and is treated as absent."]),
+        : recon
+          ? [
+              `Independent bank reconciliation is measured over the last ${recon.windowDays} days and is absent (${recon.grade.replace("_", " ")}): ${recon.why}`,
+            ]
+          : ["Independent bank reconciliation is not measured yet and is treated as absent."]),
       ...(partial.length
         ? [
             `${partial.map((c) => c.label).join(", ")}: enforced for patient-ledger kinds only; mitigates no SoD rule and earns no dual-control credit.`,
