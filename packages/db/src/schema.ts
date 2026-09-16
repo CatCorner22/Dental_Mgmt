@@ -269,6 +269,8 @@ export const ledgerEntries = pgTable(
     coverageId: uuid("coverage_id"),
     reversesEntryId: uuid("reverses_entry_id"),
     approvalRequestId: uuid("approval_request_id"),
+    /** The policy exception that licensed a single release above threshold. */
+    appliedExceptionId: text("applied_exception_id"),
     tender: text("tender"),
     memo: text("memo"),
     idempotencyKey: text("idempotency_key").notNull(),

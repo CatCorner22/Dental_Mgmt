@@ -1,0 +1,24 @@
+name: nightly-controls
+
+on:
+  schedule:
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  snapshot-controls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install
+      - name: Freeze one control snapshot per tenant and refresh SoD findings
+        env:
+          PMS_ADMIN_URL: ${{ secrets.PMS_ADMIN_URL }}
+          POSTGRES_URL: ${{ secrets.RUNTIME_ROLE_DSN }}
+          APPEND_ROLE_DSN: ${{ secrets.APPEND_ROLE_DSN }}
+        run: pnpm controls:snapshot

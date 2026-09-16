@@ -30,11 +30,10 @@ export type ControlsContext = {
  * false, never assumed.
  */
 export async function loadControlsContext(db: AppDb, tenantId: string, now: Date = new Date()): Promise<ControlsContext> {
-  const [active, staff, decisions] = await Promise.all([
-    loadActivePolicy(db, tenantId),
-    loadStaff(db, tenantId, now),
-    listDecisions(db, tenantId),
-  ]);
+  // One transaction client: queries run in sequence, never interleaved.
+  const active = await loadActivePolicy(db, tenantId);
+  const staff = await loadStaff(db, tenantId, now);
+  const decisions = await listDecisions(db, tenantId);
   const policy = active?.policy ?? mergeDualReleasePolicy({ enabled: false, exceptions: [] });
   const asOf = now.toISOString().slice(0, 10);
   const built = buildPracticeState({

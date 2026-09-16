@@ -44,6 +44,8 @@ export type LedgerEntry = {
   coverageId?: string | null;
   reversesEntryId?: string | null;
   approvalRequestId?: string | null;
+  /** The policy exception that licensed a single release above the channel threshold. */
+  appliedExceptionId?: string | null;
   tender?: Tender | null;
   memo?: string | null;
   idempotencyKey: string;

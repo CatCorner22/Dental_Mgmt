@@ -20,6 +20,7 @@ const ledgerSql = readFileSync(join(here, "../migrations/0010_ledger_core.sql"),
 const ledgerViewsSql = readFileSync(join(here, "../migrations/0011_ledger_views.sql"), "utf8");
 const controlsSql = readFileSync(join(here, "../migrations/0012_controls.sql"), "utf8");
 const controlsRiskSql = readFileSync(join(here, "../migrations/0013_controls_risk.sql"), "utf8");
+const enforcementSql = readFileSync(join(here, "../migrations/0014_controls_enforcement.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -140,6 +141,19 @@ describe("Increment 1.12 Precog on live rows", () => {
     expect(controlsRiskSql).toMatch(/GRANT SELECT, INSERT ON control_snapshots TO app_rw/);
     expect(controlsRiskSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*control_decisions/);
     expect(controlsRiskSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*control_snapshots/);
+  });
+});
+
+describe("Increment 1.13 dual release re-checked by the database", () => {
+  it("adds a BEFORE INSERT trigger on ledger_entries that reads the active policy", () => {
+    expect(enforcementSql).toMatch(/CREATE TRIGGER ledger_entries_dual_release\s+BEFORE INSERT ON ledger_entries/);
+    expect(enforcementSql).toMatch(/FROM control_policies\s+WHERE tenant_id = NEW\.tenant_id\s+ORDER BY version DESC/);
+    expect(enforcementSql).toMatch(/req\.status <> 'approved'/);
+    expect(enforcementSql).toMatch(/req\.second_approver_id = NEW\.created_by_id/);
+    expect(enforcementSql).toMatch(/ADD COLUMN applied_exception_id text/);
+    expect(enforcementSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_approval_request_uidx/);
+    expect(enforcementSql).toMatch(/GRANT SELECT ON control_policies, approval_requests TO app_append/);
+    expect(enforcementSql).not.toMatch(/GRANT[^\n]*(INSERT|UPDATE|DELETE)[^\n]*TO app_append/);
   });
 });
 

@@ -1,13 +1,19 @@
 import { withGuard } from "@/lib/auth/withGuard";
 import { withTenantTransaction } from "@/lib/db/client";
 import { decideApprovalRequest, getApprovalRequest } from "@/lib/controls/approvals";
-import { executeHeldPosting } from "@/lib/controls/postHeld";
+import { approveAndPost } from "@/lib/controls/decideAndPost";
 
 type Body = {
   decision?: "approved" | "declined";
   reason?: string;
 };
 
+/**
+ * The second person's decision on a held posting. Approval is recorded
+ * first, the ledger posts second (the database re-checks the request on
+ * insert), and the entry is attached to the request last. A refused
+ * posting cancels the approval with the refusal as its reason.
+ */
 export const POST = withGuard(
   async (req, ctx) => {
     const params = await ctx.params;
@@ -22,15 +28,14 @@ export const POST = withGuard(
     const tenantId = ctx.access.user.tenantId;
     const user = ctx.access.user;
 
-    const existing = await withTenantTransaction(tenantId, user.id, async (db) =>
-      getApprovalRequest(db, tenantId, id)
-    );
-    if (!existing) return Response.json({ error: "Approval request not found." }, { status: 404 });
-    if (existing.requesterId === user.id) {
-      return Response.json({ error: "Requester cannot approve their own request." }, { status: 403 });
-    }
-
     if (body.decision === "declined") {
+      const existing = await withTenantTransaction(tenantId, user.id, async (db) =>
+        getApprovalRequest(db, tenantId, id)
+      );
+      if (!existing) return Response.json({ error: "Approval request not found." }, { status: 404 });
+      if (existing.requesterId === user.id) {
+        return Response.json({ error: "Requester cannot decide their own request." }, { status: 403 });
+      }
       const declined = await withTenantTransaction(tenantId, user.id, async (db) =>
         decideApprovalRequest(db, {
           tenantId,
@@ -50,39 +55,20 @@ export const POST = withGuard(
       return Response.json({ ok: true, status: "declined", requestId: id });
     }
 
-    const posted = await executeHeldPosting(tenantId, user.id, existing, user.id);
-    if (!posted.ok) {
+    const result = await approveAndPost(tenantId, { id: user.id, name: user.displayName }, id);
+    if (!result.ok) {
       return Response.json(
         {
-          error: posted.why,
-          code: posted.code,
-          verb: posted.verb,
-          control: posted.control,
+          error: result.why,
+          code: result.code,
+          verb: result.verb,
+          control: result.control,
+          cancelled: result.cancelled ?? false,
         },
-        { status: 403 }
+        { status: result.status }
       );
     }
-
-    const decided = await withTenantTransaction(tenantId, user.id, async (db) =>
-      decideApprovalRequest(db, {
-        tenantId,
-        requestId: id,
-        approverId: user.id,
-        approverName: user.displayName,
-        decision: "approved",
-        resultingEntryId: posted.entry.id,
-      })
-    );
-    if (!decided.ok) {
-      return Response.json({ error: "Approval request is no longer pending." }, { status: 409 });
-    }
-
-    return Response.json({
-      ok: true,
-      status: "approved",
-      requestId: id,
-      entryId: posted.entry.id,
-    });
+    return Response.json({ ok: true, status: "approved", requestId: id, entryId: result.entryId });
   },
   { entitlements: ["approve_writeoffs"] }
 );

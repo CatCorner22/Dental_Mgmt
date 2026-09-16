@@ -3,8 +3,13 @@ import { Client } from "pg";
 import { createLiveDatabase, liveAdminUrl, type LiveDatabase } from "@pms/db/testing";
 import { uuidv7 } from "@pms/db";
 import { verifyDatabaseChains } from "@pms/verifier";
+import { evaluateRelease } from "@pms/controls-engine";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
+import { createApprovalRequest, getApprovalRequest } from "./approvals";
+import { approveAndPost } from "./decideAndPost";
 import { recordDecision } from "./decisions";
+import { snapshotAllTenants } from "./nightly";
+import { loadStaff } from "./staff";
 import { addException, listExceptions, retireException } from "./exceptions";
 import { listFindings } from "./findings";
 import { grantEntitlement, revokeEntitlement } from "./grants";
@@ -521,6 +526,121 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     expect(ctx.active).toBeNull();
     expect(ctx.built.state.staff.dualControlPayments).toBe(false);
     expect(ctx.built.sod.conflicts).toEqual([]);
+  });
+
+  describe("held posting: approve, then post, then attach", () => {
+    const locationId = uuidv7(11_000);
+    const patientId = uuidv7(11_001);
+    const accountId = uuidv7(11_002);
+
+    async function heldWriteOff(amountCents: number, requestAmountCents = Math.abs(amountCents)) {
+      return tx(async (d) => {
+        const active = (await import("./policy")).loadActivePolicy(d, tenant.id);
+        const policy = (await active)!.policy;
+        const { people } = await loadStaff(d, tenant.id);
+        const evaluation = evaluateRelease(
+          policy,
+          { channel: "writeoff", amountUsd: Math.abs(amountCents) / 100, initiatorPersonId: om.id },
+          people
+        );
+        return createApprovalRequest(d, {
+          tenantId: tenant.id,
+          channel: "writeoff",
+          amountCents: requestAmountCents,
+          heldPayload: {
+            tenantId: tenant.id,
+            accountId,
+            patientId,
+            locationId,
+            kind: "write_off",
+            glBucket: "patient_ar",
+            amountCents,
+            reasonCode: "courtesy",
+            effectiveDate: "2026-09-01",
+            createdById: om.id,
+            createdByName: om.name,
+          },
+          evaluation,
+          requesterId: om.id,
+          requesterName: om.name,
+        });
+      }, asOm);
+    }
+
+    beforeAll(async () => {
+      await db.admin.query(
+        `INSERT INTO locations (id, tenant_id, name, timezone, created_at) VALUES ($1, $2, 'Main', 'America/Chicago', now())`,
+        [locationId, tenant.id]
+      );
+      await tx(async (d) => {
+        await d.execute(
+          (await import("drizzle-orm")).sql`INSERT INTO patients (id, tenant_id, mrn, first_name, last_name, date_of_birth, primary_location_id, created_by_id, created_by_name)
+           VALUES (${patientId}, ${tenant.id}, 'MRN-9', 'Pat', 'Nine', '1990-01-01', ${locationId}, ${owner.id}, 'seed')`
+        );
+        await d.execute(
+          (await import("drizzle-orm")).sql`INSERT INTO guarantor_accounts (id, tenant_id, display_name, created_by_id, created_by_name, created_at)
+           VALUES (${accountId}, ${tenant.id}, 'Pat Nine', ${owner.id}, 'seed', now())`
+        );
+        await d.execute(
+          (await import("drizzle-orm")).sql`INSERT INTO reason_codes (tenant_id, code, kind, label) VALUES (${tenant.id}, 'courtesy', 'write_off', 'Courtesy')`
+        );
+      });
+    });
+
+    it("records the approval, posts with the request id, and attaches the entry", async () => {
+      const request = await heldWriteOff(-30000);
+      expect(request.status).toBe("pending");
+
+      const self = await approveAndPost(tenant.id, asOm, request.id, env);
+      expect(self).toMatchObject({ ok: false, status: 403, code: "same_person" });
+
+      const result = await approveAndPost(tenant.id, asOwner, request.id, env);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      const after = await tx((d) => getApprovalRequest(d, tenant.id, request.id));
+      expect(after).toMatchObject({ status: "approved", secondApproverId: owner.id, resultingEntryId: result.entryId });
+      const entry = await db.admin.query(
+        "SELECT approval_request_id, applied_exception_id, created_by_id FROM ledger_entries WHERE id = $1",
+        [result.entryId]
+      );
+      expect(entry.rows[0]).toEqual({ approval_request_id: request.id, applied_exception_id: null, created_by_id: om.id });
+
+      const again = await approveAndPost(tenant.id, asOwner, request.id, env);
+      expect(again).toMatchObject({ ok: false, status: 409, code: "not_pending" });
+    });
+
+    it("cancels an approval the database then refuses, with the refusal as the reason", async () => {
+      // The request was raised for $200 but holds a $300 posting: the trigger refuses the mismatch.
+      const request = await heldWriteOff(-30000, 20000);
+      const result = await approveAndPost(tenant.id, asOwner, request.id, env);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.cancelled).toBe(true);
+      expect(result.why).toMatch(/dual_release_required: approval request .* approved 20000 cents, not 30000/);
+
+      const after = await tx((d) => getApprovalRequest(d, tenant.id, request.id));
+      expect(after?.status).toBe("cancelled");
+      expect(after?.decisionReason).toMatch(/approved 20000 cents/);
+      const log = await db.admin.query(
+        "SELECT decision FROM approvals_log WHERE request_id = $1 ORDER BY created_at",
+        [request.id]
+      );
+      expect(log.rows.map((r) => r.decision)).toEqual(["approved", "cancelled"]);
+      const entries = await db.admin.query("SELECT 1 FROM ledger_entries WHERE approval_request_id = $1", [request.id]);
+      expect(entries.rows).toEqual([]);
+    });
+  });
+
+  it("freezes a nightly snapshot for every tenant on the administrator's tenant list", async () => {
+    const report = await snapshotAllTenants(db.admin, env, new Date());
+    expect(report.failures).toEqual([]);
+    expect(report.tenants.map((t) => t.tenantId).sort()).toEqual([tenant.id, other.id].sort());
+    const stored = await db.admin.query(
+      "SELECT tenant_id, trigger FROM control_snapshots WHERE trigger = 'nightly' ORDER BY tenant_id",
+      []
+    );
+    expect(stored.rows.map((r) => r.tenant_id).sort()).toEqual([tenant.id, other.id].sort());
   });
 
   it("leaves the whole chain verifiable", async () => {

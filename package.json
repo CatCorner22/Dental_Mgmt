@@ -21,6 +21,7 @@
     "db:reset": "pnpm --filter @pms/db db:reset",
     "db:seed": "pnpm --filter @pms/db db:seed",
     "verify:chain": "pnpm --filter @pms/verifier verify:chain",
+    "controls:snapshot": "pnpm --filter @pms/app controls:snapshot",
     "check:versions": "bash scripts/check-version-stamps.sh",
     "secret-scan": "bash scripts/secret-scan.sh",
     "review": "bash scripts/final-review.sh",
