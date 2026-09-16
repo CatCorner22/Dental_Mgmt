@@ -33,7 +33,76 @@ export { scoreLeadingIndicators } from "./signals/leading-indicators";
 export { beamSearchLevers } from "./llm/reasoning/beam-search";
 export { runCounterfactuals } from "./llm/reasoning/counterfactual";
 
-export { findKnowledgeRisks, runPrecogScenario } from "./engine";
+export { findKnowledgeRisks, runPrecogScenario, rankDangerousScenarios } from "./engine";
+export { tornadoSensitivity } from "./scoring/residual-engine";
+export { simulateAllCascades, simulateCascadeLever, CASCADE_LEVERS } from "./scoring/variable-cascade";
+export type { CascadeLeverId, CascadeSimulation } from "./scoring/variable-cascade";
+export { compareScenarioFutures, compareScenarios } from "./scoring/scenario-compare";
+export {
+  dualReleaseCoverage,
+  activeExceptionSummary,
+  listEligibleApprovers,
+  matchExceptions,
+} from "./controls/dual-release";
+export type { ExceptionAction, ExceptionScope, ReleaseStatus } from "./controls/dual-release";
+
+export { ENTITLEMENT_IDS, isEntitlementId, assignmentsFromGrants, evaluateGrant } from "./grants";
+export type { GrantRow, GrantRequest, GrantEvaluation, AssignmentsFromGrants } from "./grants";
+export type { EntitlementId, ConflictRule, DutyFamily } from "./sod/conflict-rules";
+
+export {
+  DECISION_KINDS,
+  DECISION_SUBJECT_KINDS,
+  DECISION_KIND_LABEL,
+  MAX_REVIEW_DAYS,
+  isDecisionKind,
+  isDecisionSubjectKind,
+  isIsoDate,
+  addDays,
+  validateDecision,
+  decisionPermitsGrant,
+  activeDecisions,
+  latestDecisionFor,
+  overdueReviews,
+  decisionCoverage,
+} from "./decisions";
+export type {
+  DecisionKind,
+  DecisionSubjectKind,
+  ControlDecision,
+  DecisionInput,
+  DecisionCoverage,
+} from "./decisions";
+
+export {
+  RELEASE_CHANNELS,
+  isReleaseChannel,
+  channelCoverage,
+  mitigatedRuleIdsForScoring,
+  dualControlPaymentsFromCoverage,
+} from "./coverage";
+export type { Enforcement, EnforcementByChannel, ChannelCoverageRow, CoverageStatus } from "./coverage";
+
+export { MAX_WAIVE_DAYS, validateThresholdException } from "./exceptions";
+
+export {
+  buildPracticeState,
+  deriveControlsRegistry,
+  deriveStaffComposition,
+  controlDecisionInputs,
+} from "./practice-state-builder";
+export type { BuildPracticeStateInput, BuiltPracticeState } from "./practice-state-builder";
+
+export { takeControlSnapshot } from "./snapshot";
+export type { ControlSnapshot } from "./snapshot";
+
+export {
+  SCENARIO_TEMPLATES,
+  CONTROL_TEMPLATES,
+  ILLUSTRATIVE_CRIME_STATS,
+} from "./templates";
+export type { ControlTemplate } from "./templates";
+export type { ControlItem, ScenarioTemplate, CrimeFraudStats, KnowledgeItem, KnowledgeRelation } from "./types";
 export {
   DEFAULT_RISK_VARIABLES,
   mergeStaffIntoVariables,

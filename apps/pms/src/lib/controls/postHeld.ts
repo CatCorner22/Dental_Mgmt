@@ -1,31 +1,10 @@
-import { eq } from "drizzle-orm";
-import { ledgerEntries, paymentAllocations, users, userEntitlements } from "@pms/db";
+import { ledgerEntries, paymentAllocations } from "@pms/db";
 import { createPostEntry, makeInMemoryWriter, postGuarded } from "@pms/ledger";
 import type { PostEntryInput } from "@pms/ledger";
-import type { AppDb } from "../db/client";
 import { withTenantAppendTransaction } from "../db/client";
 import { loadActivePolicy } from "./policy";
-import { staffToPeople } from "./people";
+import { loadStaff } from "./staff";
 import type { ApprovalRow } from "./approvals";
-
-async function loadStaff(db: AppDb, tenantId: string) {
-  const staff = await db.select().from(users).where(eq(users.tenantId, tenantId));
-  const out = [];
-  for (const row of staff) {
-    const ents = await db
-      .select({ entitlement: userEntitlements.entitlement })
-      .from(userEntitlements)
-      .where(eq(userEntitlements.userId, row.id));
-    out.push({
-      id: row.id,
-      displayName: row.displayName,
-      role: row.role,
-      clinicalRole: row.clinicalRole,
-      entitlements: ents.map((e) => e.entitlement),
-    });
-  }
-  return staffToPeople(out);
-}
 
 /** Executes a held ledger posting after dual approval. */
 export async function executeHeldPosting(
@@ -41,7 +20,7 @@ export async function executeHeldPosting(
     async (db) => {
       const active = await loadActivePolicy(db, tenantId);
       if (!active) throw new Error("No control policy configured for tenant.");
-      const people = await loadStaff(db, tenantId);
+      const { people } = await loadStaff(db, tenantId);
       const payload: PostEntryInput = {
         ...request.heldPayload,
         approvalRequestId: request.id,

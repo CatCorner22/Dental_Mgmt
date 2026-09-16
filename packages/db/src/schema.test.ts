@@ -19,6 +19,7 @@ const patientsSql = readFileSync(join(here, "../migrations/0009_patients_account
 const ledgerSql = readFileSync(join(here, "../migrations/0010_ledger_core.sql"), "utf8");
 const ledgerViewsSql = readFileSync(join(here, "../migrations/0011_ledger_views.sql"), "utf8");
 const controlsSql = readFileSync(join(here, "../migrations/0012_controls.sql"), "utf8");
+const controlsRiskSql = readFileSync(join(here, "../migrations/0013_controls_risk.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -109,6 +110,33 @@ describe("Increment 1.2 controls inbox", () => {
     expect(controlsSql).toMatch(/CREATE TABLE approvals_log\b/);
     expect(controlsSql).toMatch(/approval_requester_ne_second/);
     expect(controlsSql).toMatch(/GRANT SELECT, INSERT, UPDATE ON approval_requests TO app_rw/);
+  });
+});
+
+describe("Increment 1.12 Precog on live rows", () => {
+  it("creates findings, an append-only decision register, and append-only snapshots", () => {
+    expect(controlsRiskSql).toMatch(/CREATE TABLE sod_findings\b/);
+    expect(controlsRiskSql).toMatch(/CREATE TABLE control_decisions\b/);
+    expect(controlsRiskSql).toMatch(/CREATE TABLE control_snapshots\b/);
+    expect(controlsRiskSql).toMatch(/UNIQUE \(tenant_id, rule_id, person_id\)/);
+    expect(controlsRiskSql).toMatch(/control_decisions_immutable/);
+    expect(controlsRiskSql).toMatch(/control_snapshots_immutable/);
+    expect(controlsRiskSql).toMatch(/sod_findings_no_delete/);
+    expect(controlsRiskSql).toMatch(/length\(btrim\(note\)\) >= 10/);
+    expect(controlsRiskSql).toMatch(/ADD COLUMN decision_id uuid REFERENCES control_decisions\(id\)/);
+  });
+
+  it("forces RLS and grants only what the runtime role needs", () => {
+    for (const name of ["sod_findings", "control_decisions", "control_snapshots"]) {
+      expect(controlsRiskSql, name).toMatch(new RegExp(`ALTER TABLE ${name} ENABLE ROW LEVEL SECURITY`));
+      expect(controlsRiskSql, name).toMatch(new RegExp(`ALTER TABLE ${name} FORCE ROW LEVEL SECURITY`));
+      expect(controlsRiskSql, name).toMatch(new RegExp(`CREATE POLICY ${name}_isolation ON ${name}`));
+    }
+    expect(controlsRiskSql).toMatch(/GRANT SELECT, INSERT, UPDATE ON sod_findings TO app_rw/);
+    expect(controlsRiskSql).toMatch(/GRANT SELECT, INSERT ON control_decisions TO app_rw/);
+    expect(controlsRiskSql).toMatch(/GRANT SELECT, INSERT ON control_snapshots TO app_rw/);
+    expect(controlsRiskSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*control_decisions/);
+    expect(controlsRiskSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*control_snapshots/);
   });
 });
 

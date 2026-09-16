@@ -38,3 +38,22 @@ Adopted from `docs/13-innovation-and-intuitiveness.md` (the feature workflow's s
 - From the critique: the CPA seat is split. The aggregate package, the question verb, and attestations need no BAA and carry payer ids and trace numbers only; patient-level drill-down and named bank reconciliation are refused at grant time until a countersigned BAA row for the firm exists, with the refusal rendered through the Refusal component.
 - From the critique: the desk PIN on Post mints or resumes the second coordinator's own server session for the single posting (the 60-second single-entitlement session designed for walk-over approvals); a PIN never annotates another person's session.
 - From the critique: the S0 chart/note/claim contradiction has no reason-coded override; the only exits are the three 'Use this' corrections through each source's normal path, or a rule change under `RULESET_VERSION`.
+
+## Implementation status (Increment 1.12, 2026-09-16)
+
+What the code enforces, records, or leaves external today. The design above governs; this table says how far the build has caught up with it. See `docs/17` for the increment record.
+
+| Design element | Status | Where |
+|---|---|---|
+| SoD detection from real grants (`user_entitlements` → `RoleAssignment[]`) | Built; runs on every grant and revoke and on every snapshot; nightly run not scheduled yet | `packages/controls-engine/src/grants.ts`, `apps/pms/src/lib/controls/grants.ts` |
+| Grant refusal on a critical conflict without a decision | Enforced (403 inside the tenant transaction); self-licensing refused; strict "pending until a second admin decides" mode not built | `POST /api/controls/grants` |
+| `sod_findings` with history (close, reopen, never delete) | Built | migration 0013, `apps/pms/src/lib/controls/findings.ts` |
+| Dual release inside the posting transaction | Enforced for write-off, check, ACH (the ledger kinds); BEFORE INSERT approval trigger not built | `packages/ledger/src/postGuarded.ts` |
+| Deposit, new vendor, payroll channels | External / attested: evaluable and recorded on request, never enforced, excluded from scores | `POST /api/controls/release/evaluate`, `apps/pms/src/lib/controls/enforcement.ts` |
+| Exceptions (raise / lower / force / waive) | Built as policy versions; owner rank, reason, residual note, window; waiver ≤ 90 days; 'hours' and 'vendor_state' scopes not built | `POST /api/controls/exceptions`, `/retire` |
+| Decision register (`control_decisions`) | Built, append-only; overdue reviews surfaced; `measured_effect` and monthly batching not built | `POST /api/controls/decisions` |
+| Residual, COSO, leading indicators, tornado, `control_snapshots` | Built; frozen with both version stamps; nightly schedule not built | `POST /api/controls/risk` |
+| Independent reconciliation, measured | Not built; treated as absent and named as an assumption on every snapshot | — |
+| Knowledge map and sole-owner detection | Not built; counts as zero and named as an assumption | — |
+| Detectors and `control_findings` | Not built | — |
+| Hard runtime SoD blocks (variance clearance, vendor self-approval, payroll self-approval) | Not built in this branch | — |

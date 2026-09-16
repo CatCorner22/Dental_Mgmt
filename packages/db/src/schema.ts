@@ -95,6 +95,8 @@ export const userEntitlements = pgTable(
     effectiveFrom: timestamp("effective_from", { withTimezone: true }).notNull(),
     effectiveTo: timestamp("effective_to", { withTimezone: true }),
     reason: text("reason"),
+    /** The control decision that permitted a grant with a critical SoD conflict. */
+    decisionId: uuid("decision_id"),
   },
   (t) => [index("user_entitlements_tenant_user_idx").on(t.tenantId, t.userId)]
 );
@@ -356,6 +358,79 @@ export const approvalsLog = pgTable(
   (t) => [index("approvals_log_request_idx").on(t.requestId)]
 );
 
+export const sodFindings = pgTable(
+  "sod_findings",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    ruleId: text("rule_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    entitlementA: text("entitlement_a").notNull(),
+    entitlementB: text("entitlement_b").notNull(),
+    severity: text("severity").notNull(),
+    score: integer("score").notNull(),
+    status: text("status").notNull().default("open"),
+    dualReleaseMitigated: boolean("dual_release_mitigated").notNull().default(false),
+    residualRiskAccepted: boolean("residual_risk_accepted").notNull().default(false),
+    linkedControlId: text("linked_control_id"),
+    conflict: jsonb("conflict").notNull(),
+    rulebookVersion: text("rulebook_version").notNull(),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    reopenedCount: integer("reopened_count").notNull().default(0),
+  },
+  (t) => [
+    index("sod_findings_tenant_status_idx").on(t.tenantId, t.status, t.severity),
+    uniqueIndex("sod_findings_tenant_rule_person_uidx").on(t.tenantId, t.ruleId, t.personId),
+  ]
+);
+
+export const controlDecisions = pgTable(
+  "control_decisions",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    subjectKind: text("subject_kind").notNull(),
+    subjectId: text("subject_id").notNull(),
+    kind: text("kind").notNull(),
+    note: text("note").notNull(),
+    reviewBy: date("review_by"),
+    residualAtDecision: integer("residual_at_decision"),
+    supersedesDecisionId: uuid("supersedes_decision_id"),
+    decidedById: uuid("decided_by_id").notNull(),
+    decidedByName: text("decided_by_name").notNull(),
+    decidedAt: timestamp("decided_at", { withTimezone: true }).notNull(),
+    scoringVersion: text("scoring_version").notNull(),
+    rulebookVersion: text("rulebook_version").notNull(),
+  },
+  (t) => [
+    index("control_decisions_subject_idx").on(t.tenantId, t.subjectKind, t.subjectId, t.decidedAt),
+    index("control_decisions_review_idx").on(t.tenantId, t.reviewBy),
+  ]
+);
+
+export const controlSnapshots = pgTable(
+  "control_snapshots",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    takenAt: timestamp("taken_at", { withTimezone: true }).notNull(),
+    trigger: text("trigger").notNull(),
+    scoringVersion: text("scoring_version").notNull(),
+    rulebookVersion: text("rulebook_version").notNull(),
+    averageResidual: integer("average_residual").notNull(),
+    cosoOverall: integer("coso_overall").notNull(),
+    pressureIndex: integer("pressure_index").notNull(),
+    segregationHealth: integer("segregation_health").notNull(),
+    openConflicts: integer("open_conflicts").notNull(),
+    conflictsWithoutDecision: integer("conflicts_without_decision").notNull(),
+    snapshot: jsonb("snapshot").notNull(),
+    takenById: uuid("taken_by_id"),
+  },
+  (t) => [index("control_snapshots_tenant_taken_idx").on(t.tenantId, t.takenAt)]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "users",
@@ -374,4 +449,7 @@ export const TENANT_SCOPED_TABLES = [
   "control_policies",
   "approval_requests",
   "approvals_log",
+  "sod_findings",
+  "control_decisions",
+  "control_snapshots",
 ] as const;

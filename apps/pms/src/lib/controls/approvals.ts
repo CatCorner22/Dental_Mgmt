@@ -1,16 +1,9 @@
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import type { ReleaseEvaluation } from "@pms/controls-engine";
-import {
-  approvalRequests,
-  approvalsLog,
-  domainEvent,
-  GENESIS_HASH,
-  hashDomainEvent,
-  uuidv7,
-} from "@pms/db";
+import { approvalRequests, approvalsLog, uuidv7 } from "@pms/db";
 import type { PostEntryInput } from "@pms/ledger";
 import type { AppDb } from "../db/client";
-import { TENANT_CHAIN_LOCK_SQL } from "../auth/postgresStore";
+import { appendControlEvent as appendEvent } from "./events";
 
 export type ApprovalRow = {
   id: string;
@@ -44,44 +37,6 @@ type CreateInput = {
   subjectId?: string | null;
   now?: Date;
 };
-
-async function appendEvent(
-  db: AppDb,
-  tenantId: string,
-  actorUserId: string,
-  kind: string,
-  payload: Record<string, unknown>,
-  at: Date
-) {
-  await db.execute(TENANT_CHAIN_LOCK_SQL(tenantId));
-  const [last] = await db
-    .select({ hash: domainEvent.hash, seq: domainEvent.seq })
-    .from(domainEvent)
-    .where(eq(domainEvent.tenantId, tenantId))
-    .orderBy(sql`${domainEvent.seq} desc`)
-    .limit(1);
-  const prevHash = last?.hash ?? GENESIS_HASH;
-  const seq = (last?.seq ?? 0) + 1;
-  const occurredAt = at;
-  const hash = hashDomainEvent({
-    prevHash,
-    tenantId,
-    kind,
-    payload,
-    occurredAt: occurredAt.toISOString(),
-  });
-  await db.insert(domainEvent).values({
-    id: uuidv7(at.getTime()),
-    tenantId,
-    actorUserId,
-    kind,
-    payload,
-    prevHash,
-    hash,
-    occurredAt,
-    seq,
-  });
-}
 
 function mapRow(row: typeof approvalRequests.$inferSelect): ApprovalRow {
   return {

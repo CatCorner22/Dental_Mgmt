@@ -126,6 +126,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [10, "ledger_core", "app_migrate"],
         [11, "ledger_views", "app_migrate"],
         [12, "controls", "app_migrate"],
+        [13, "controls_risk", "app_migrate"],
       ]);
       const owners = await db.admin.query(
         "SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'"
@@ -136,7 +137,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
     it("is a no-op the second time", async () => {
       const result = await applyMigrations(db.admin);
       expect(result.applied).toEqual([]);
-      expect(result.alreadyApplied).toBe(12);
+      expect(result.alreadyApplied).toBe(13);
     });
 
     it("left domain_event with RLS forced after the seq backfill", async () => {
@@ -627,6 +628,137 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [requestId, ridgeview.user]
       );
       expect(self).toMatchObject({ code: "23514" });
+    });
+  });
+
+  describe("Precog on live rows", () => {
+    const decisionId = uuidv7(5_000);
+
+    it("lets the runtime record a decision and refuses to rewrite or remove it", async () => {
+      const insert = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO control_decisions (
+           id, tenant_id, subject_kind, subject_id, kind, note, review_by,
+           decided_by_id, decided_by_name, decided_at, scoring_version, rulebook_version
+         ) VALUES ($1, $2, 'sod_finding', $3, 'accept_residual',
+                   'Owner signs the monthly exception report.', '2026-12-01',
+                   $4, 'Ridgeview Admin', now(), 'precog-residual-v1.1.0', '0.1.0')`,
+        [decisionId, ridgeview.id, `${ridgeview.user}:rule-writeoff`, ridgeview.user]
+      );
+      expect(insert).toEqual({ rows: [] });
+
+      const rewrite = await attempt(
+        "app_rw",
+        ridgeview,
+        "UPDATE control_decisions SET kind = 'monitor' WHERE id = $1",
+        [decisionId]
+      );
+      expect(rewrite).toMatchObject({ code: "42501" });
+      const remove = await attempt("app_rw", ridgeview, "DELETE FROM control_decisions WHERE id = $1", [
+        decisionId,
+      ]);
+      expect(remove).toMatchObject({ code: "42501" });
+    });
+
+    it("refuses a decision whose note does not say why", async () => {
+      const bare = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO control_decisions (
+           id, tenant_id, subject_kind, subject_id, kind, note,
+           decided_by_id, decided_by_name, decided_at, scoring_version, rulebook_version
+         ) VALUES ($1, $2, 'control', 'c-cash', 'monitor', '   ok   ',
+                   $3, 'Ridgeview Admin', now(), 'precog-residual-v1.1.0', '0.1.0')`,
+        [uuidv7(5_001), ridgeview.id, ridgeview.user]
+      );
+      expect(bare).toMatchObject({ code: "23514" });
+    });
+
+    it("links a grant to the decision that permitted it", async () => {
+      const grant = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO user_entitlements (id, tenant_id, user_id, entitlement, granted_by, effective_from, decision_id)
+         VALUES ($1, $2, $3, 'bank_reconcile', $3, now(), $4)`,
+        [uuidv7(5_002), ridgeview.id, ridgeview.user, decisionId]
+      );
+      expect(grant).toEqual({ rows: [] });
+      const dangling = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO user_entitlements (id, tenant_id, user_id, entitlement, effective_from, decision_id)
+         VALUES ($1, $2, $3, 'post_payments', now(), $4)`,
+        [uuidv7(5_003), ridgeview.id, ridgeview.user, uuidv7(9_999)]
+      );
+      expect(dangling).toMatchObject({ code: "23503" });
+    });
+
+    it("upserts a finding on (rule, person), closes it, and never deletes it", async () => {
+      const findingId = uuidv7(5_004);
+      const insert = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO sod_findings (
+           id, tenant_id, rule_id, person_id, entitlement_a, entitlement_b, severity, score,
+           conflict, rulebook_version, first_seen_at, last_seen_at
+         ) VALUES ($1, $2, 'rule-cash-rec', $3, 'post_payments', 'bank_reconcile', 'critical', 88,
+                   '{}'::jsonb, '0.1.0', now(), now())`,
+        [findingId, ridgeview.id, ridgeview.user]
+      );
+      expect(insert).toEqual({ rows: [] });
+      const duplicate = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO sod_findings (
+           id, tenant_id, rule_id, person_id, entitlement_a, entitlement_b, severity, score,
+           conflict, rulebook_version, first_seen_at, last_seen_at
+         ) VALUES ($1, $2, 'rule-cash-rec', $3, 'post_payments', 'bank_reconcile', 'critical', 90,
+                   '{}'::jsonb, '0.1.0', now(), now())`,
+        [uuidv7(5_005), ridgeview.id, ridgeview.user]
+      );
+      expect(duplicate).toMatchObject({ code: "23505" });
+      const closeWithoutTime = await attempt(
+        "app_rw",
+        ridgeview,
+        "UPDATE sod_findings SET status = 'closed' WHERE id = $1",
+        [findingId]
+      );
+      expect(closeWithoutTime).toMatchObject({ code: "23514" });
+      const close = await attempt(
+        "app_rw",
+        ridgeview,
+        "UPDATE sod_findings SET status = 'closed', closed_at = now() WHERE id = $1",
+        [findingId]
+      );
+      expect(close).toEqual({ rows: [] });
+      const remove = await attempt("app_rw", ridgeview, "DELETE FROM sod_findings WHERE id = $1", [findingId]);
+      expect(remove).toMatchObject({ code: "42501" });
+      const otherTenant = await attempt("app_rw", oakridge, "SELECT id FROM sod_findings");
+      expect(otherTenant).toEqual({ rows: [] });
+    });
+
+    it("freezes a snapshot that the runtime can neither rewrite nor remove", async () => {
+      const snapshotId = uuidv7(5_006);
+      const insert = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO control_snapshots (
+           id, tenant_id, taken_at, trigger, scoring_version, rulebook_version,
+           average_residual, coso_overall, pressure_index, segregation_health,
+           open_conflicts, conflicts_without_decision, snapshot
+         ) VALUES ($1, $2, now(), 'manual', 'precog-residual-v1.1.0', '0.1.0', 41, 58, 33, 72, 3, 1, '{}'::jsonb)`,
+        [snapshotId, ridgeview.id]
+      );
+      expect(insert).toEqual({ rows: [] });
+      expect(
+        await attempt("app_rw", ridgeview, "UPDATE control_snapshots SET average_residual = 1 WHERE id = $1", [
+          snapshotId,
+        ])
+      ).toMatchObject({ code: "42501" });
+      expect(
+        await attempt("app_rw", ridgeview, "DELETE FROM control_snapshots WHERE id = $1", [snapshotId])
+      ).toMatchObject({ code: "42501" });
     });
   });
 

@@ -31,10 +31,17 @@ export async function loadActivePolicy(db: AppDb, tenantId: string): Promise<Act
   };
 }
 
+/**
+ * A new tenant starts with every channel on, held postings instead of hard
+ * blocks, and no exceptions. The engine's sample exceptions are demo data;
+ * a real exception arrives only through addException with an owner's
+ * reason, residual note, and window.
+ */
 export function defaultTenantPolicy(): DualReleasePolicy {
   return mergeDualReleasePolicy({
     enabled: true,
     hardBlockWithoutSecond: false,
+    exceptions: [],
   });
 }
 
@@ -48,14 +55,40 @@ export async function seedControlPolicy(
     now?: Date;
   }
 ): Promise<string> {
+  return writePolicyVersion(db, {
+    tenantId: input.tenantId,
+    version: 1,
+    policy: input.policy ?? defaultTenantPolicy(),
+    createdById: input.createdById,
+    createdByName: input.createdByName,
+    now: input.now,
+  });
+}
+
+/**
+ * control_policies is append-only: every change is a new version row.
+ * The unique (tenant_id, version) index refuses two writers racing for
+ * the same next version; the caller retries or reports a conflict.
+ */
+export async function writePolicyVersion(
+  db: AppDb,
+  input: {
+    tenantId: string;
+    version: number;
+    policy: DualReleasePolicy;
+    createdById: string;
+    createdByName: string;
+    now?: Date;
+  }
+): Promise<string> {
   const id = uuidv7();
   const now = input.now ?? new Date();
   await db.insert(controlPolicies).values({
     id,
     tenantId: input.tenantId,
-    version: 1,
+    version: input.version,
     rulebookVersion: CONTROL_RULEBOOK_VERSION,
-    policy: input.policy ?? defaultTenantPolicy(),
+    policy: { ...input.policy, updatedAt: now.toISOString() },
     effectiveFrom: now,
     createdAt: now,
     createdById: input.createdById,
