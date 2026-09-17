@@ -223,12 +223,17 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await page().getByText(/^Bank matching:/).innerText()).toMatch(/100% within 48 hours, median lag 2 days[\s\S]*recorded, not scored/);
     await b.audit("practice risk (owner, measured)");
 
-    // Freezing again runs the detectors on the cleared run: the finding closes with its reason and stays readable.
+    // Freezing again runs the detectors on the cleared run: the bank-line finding closes with its reason and
+    // stays readable, and the owner-only clearance the owner just performed is recorded as its own finding.
     await page().getByRole("button", { name: "Freeze snapshot" }).click();
     await flash(/Snapshot frozen/).waitFor({ timeout: 30_000 });
     const detectors = page().locator("section[aria-labelledby=detectors]");
-    expect(await detectors.innerText()).toMatch(/0 open[\s\S]*1 closed[\s\S]*Unmatched bank line older than 48 hours[\s\S]*Closed[\s\S]*matched or cleared/);
-    await b.audit("practice risk, detector finding closed");
+    const text = await detectors.innerText();
+    expect(text).toMatch(/1 open \(0 high, 1 medium, 0 low\), 1 closed/);
+    expect(text).toMatch(/Owner-only clearance[\s\S]*was cleared on \d{4}-\d{2}-\d{2} as owner-only clearance: no other eligible person existed[\s\S]*Open/);
+    expect(text).toMatch(/Unmatched bank line older than 48 hours[\s\S]*Closed[\s\S]*matched or cleared/);
+    expect(text).not.toMatch(/Riley|Finn/);
+    await b.audit("practice risk, detector findings open and closed");
   }, 120_000);
 
   it("lets the front desk draft and issue a statement from the same balances", async () => {

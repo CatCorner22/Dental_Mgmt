@@ -4,7 +4,16 @@ import { uuidv7 } from "@pms/db";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { createBankStatementImport } from "../bank/import";
 import { clearReconciliationRun } from "../reconciliation/clear";
-import { countOpenControlFindings, listControlFindings, listOpenBankLines, refreshUnmatchedBankLineFindings } from "./detectors";
+import {
+  countOpenControlFindings,
+  DECISION_UNREVIEWED_KIND,
+  DEGRADED_CLEARANCE_KIND,
+  listControlFindings,
+  listOpenBankLines,
+  refreshDegradedClearanceFindings,
+  refreshUnmatchedBankLineFindings,
+  refreshUnreviewedDecisionFindings,
+} from "./detectors";
 import { seedControlPolicy } from "./policy";
 import { takeSnapshot } from "./snapshots";
 
@@ -170,6 +179,63 @@ describe.skipIf(!adminUrl)("Unmatched bank line detector (live)", () => {
       reopened: 0,
       open: 0,
     });
+    expect(await tx((d) => countOpenControlFindings(d, tenant.id))).toBe(0);
+  });
+
+  it("records owner-only clearance inside the window as a finding and closes it once the run ages out", async () => {
+    const insertRun = (id: string, periodStart: string, periodEnd: string, clearedAt: string, degraded: boolean) =>
+      db.admin.query(
+        `INSERT INTO reconciliation_runs (id, tenant_id, bank_account_id, source, period_start, period_end, status, summary,
+                                          created_at, created_by_id, created_by_name, cleared_at, cleared_by_id, cleared_by_name)
+         VALUES ($1, $2, $3, 'statement_import', $4, $5, 'cleared', $6, $7, $8, $9, $7, $8, $9)`,
+        [id, tenant.id, bank.id, periodStart, periodEnd, JSON.stringify(degraded ? { degradedOwnerClearance: true } : {}), clearedAt, owner.id, owner.name]
+      );
+    const degradedRun = uuidv7(33_300);
+    await insertRun(degradedRun, "2026-09-08", "2026-09-10", "2026-09-11T18:00:00Z", true);
+    await insertRun(uuidv7(33_301), "2026-09-01", "2026-09-05", "2026-09-06T18:00:00Z", false);
+    await insertRun(uuidv7(33_302), "2026-06-01", "2026-06-05", "2026-06-06T18:00:00Z", true); // outside the window
+
+    const first = await tx((d) => refreshDegradedClearanceFindings(d, tenant.id, now));
+    expect(first).toMatchObject({ kind: DEGRADED_CLEARANCE_KIND, inserted: 1, open: 1 });
+    const rows = (await tx((d) => listControlFindings(d, tenant.id))).filter((r) => r.kind === DEGRADED_CLEARANCE_KIND);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ subjectKind: "reconciliation_run", subjectId: degradedRun, severity: "medium", status: "open" });
+    expect((rows[0]!.detail as { sentence: string }).sentence).toMatch(/^The reconciliation run for 2026-09-08 to 2026-09-10 was cleared on 2026-09-11 as owner-only clearance/);
+    expect(JSON.stringify(rows[0]!.detail)).not.toMatch(/Riley|Owner/);
+
+    // Sixty days on, the run has left the 45-day window and the finding closes with that reason.
+    const later = await tx((d) => refreshDegradedClearanceFindings(d, tenant.id, new Date("2026-11-16T12:00:00Z")));
+    expect(later).toMatchObject({ closed: 1, open: 0 });
+    const closed = (await tx((d) => listControlFindings(d, tenant.id))).find((r) => r.subjectId === degradedRun);
+    expect(closed).toMatchObject({ status: "closed", closedReason: "outside the 45-day window" });
+  });
+
+  it("records an active decision past its review date and closes the finding when a new decision supersedes it", async () => {
+    const overdueId = uuidv7(33_400);
+    const insertDecision = (id: string, reviewBy: string, supersedes: string | null) =>
+      db.admin.query(
+        `INSERT INTO control_decisions (id, tenant_id, subject_kind, subject_id, kind, note, review_by, supersedes_decision_id,
+                                        decided_by_id, decided_by_name, decided_at, scoring_version, rulebook_version)
+         VALUES ($1, $2, 'sod_finding', $3, 'accept_residual', 'Owner reconciles independently on Fridays.', $4, $5,
+                 $6, $7, now(), 'precog-residual-v1.1.0', '0.1.0')`,
+        [id, tenant.id, `${front.id}:rule-cash-rec`, reviewBy, supersedes, owner.id, owner.name]
+      );
+    await insertDecision(overdueId, "2026-08-01", null);
+
+    const first = await tx((d) => refreshUnreviewedDecisionFindings(d, tenant.id, now));
+    expect(first).toMatchObject({ kind: DECISION_UNREVIEWED_KIND, inserted: 1, open: 1 });
+    const open = (await tx((d) => listControlFindings(d, tenant.id))).find((r) => r.kind === DECISION_UNREVIEWED_KIND);
+    expect(open).toMatchObject({ subjectKind: "control_decision", subjectId: overdueId, severity: "high", status: "open" });
+    expect((open!.detail as { daysOverdue: number; sentence: string }).daysOverdue).toBe(47);
+    expect((open!.detail as { sentence: string }).sentence).toMatch(/was due for review on 2026-08-01 and has been past that date for 47 days/);
+    expect(JSON.stringify(open!.detail)).not.toMatch(/Riley/);
+
+    await insertDecision(uuidv7(33_401), "2026-12-01", overdueId);
+    const after = await tx((d) => refreshUnreviewedDecisionFindings(d, tenant.id, now));
+    expect(after).toMatchObject({ closed: 1, open: 0 });
+    const closed = (await tx((d) => listControlFindings(d, tenant.id))).find((r) => r.subjectId === overdueId);
+    expect(closed).toMatchObject({ status: "closed", closedReason: "superseded" });
+    // Everything open across the three detectors is now zero.
     expect(await tx((d) => countOpenControlFindings(d, tenant.id))).toBe(0);
   });
 });
