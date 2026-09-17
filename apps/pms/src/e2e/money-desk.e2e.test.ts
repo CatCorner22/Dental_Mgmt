@@ -166,7 +166,20 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await page().locator("tbody tr", { hasText: "Unmatched bank line" }).count()).toBe(1);
     expect(await page().locator("div", { has: page().getByText(/^Matched$/) }).getByText("$350.00").count()).toBe(1);
 
+    // The fee line is dated the seeded business day, so it is already older than 48 hours: freezing a
+    // snapshot runs the detectors, and the finding appears on Practice Risk, worded about the line.
+    const runUrl = page().url();
+    await page().goto(`${app.base}/risk`);
+    await page().getByRole("heading", { name: "Headline" }).waitFor({ timeout: 60_000 });
+    await page().getByRole("button", { name: "Freeze snapshot" }).click();
+    await flash(/Snapshot frozen/).waitFor({ timeout: 30_000 });
+    const detectors = page().locator("section[aria-labelledby=detectors]");
+    expect(await detectors.innerText()).toMatch(/1 open[\s\S]*Unmatched bank line older than 48 hours[\s\S]*A \$150\.00 bank debit posted 2026-09-14 \(ACH MERCHANT FEE\) has had no matching deposit and no clearance for \d+ days\.[\s\S]*Open/);
+    expect(await detectors.innerText()).not.toMatch(/Riley|Finn/);
+    await b.audit("practice risk, detector finding open");
+
     // The owner posted the seeded payments, so only owner-only clearance is open to them; it is recorded, not hidden.
+    await page().goto(runUrl);
     const clear = page().getByRole("button", { name: /^Clear/ });
     await clear.waitFor({ timeout: 30_000 });
     await b.audit("reconciliation run, open variance");
@@ -209,7 +222,14 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await page().getByText(/^Independent bank reconciliation:/).innerText()).toMatch(/same hands[\s\S]*owner-only clearance recorded as a finding/);
     expect(await page().getByText(/^Bank matching:/).innerText()).toMatch(/100% within 48 hours, median lag 2 days[\s\S]*recorded, not scored/);
     await b.audit("practice risk (owner, measured)");
-  }, 90_000);
+
+    // Freezing again runs the detectors on the cleared run: the finding closes with its reason and stays readable.
+    await page().getByRole("button", { name: "Freeze snapshot" }).click();
+    await flash(/Snapshot frozen/).waitFor({ timeout: 30_000 });
+    const detectors = page().locator("section[aria-labelledby=detectors]");
+    expect(await detectors.innerText()).toMatch(/0 open[\s\S]*1 closed[\s\S]*Unmatched bank line older than 48 hours[\s\S]*Closed[\s\S]*matched or cleared/);
+    await b.audit("practice risk, detector finding closed");
+  }, 120_000);
 
   it("lets the front desk draft and issue a statement from the same balances", async () => {
     await b.signIn("ridgeview-front", "/statements");

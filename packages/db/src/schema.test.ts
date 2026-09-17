@@ -26,6 +26,7 @@ const importSql = readFileSync(join(here, "../migrations/0015_import_staging.sql
 const bankSql = readFileSync(join(here, "../migrations/0016_bank_reconciliation.sql"), "utf8");
 const dayCloseSql = readFileSync(join(here, "../migrations/0017_day_close_deposits.sql"), "utf8");
 const statementsSql = readFileSync(join(here, "../migrations/0018_statements.sql"), "utf8");
+const controlFindingsSql = readFileSync(join(here, "../migrations/0019_control_findings.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -146,6 +147,23 @@ describe("Increment 1.12 Precog on live rows", () => {
     expect(controlsRiskSql).toMatch(/GRANT SELECT, INSERT ON control_snapshots TO app_rw/);
     expect(controlsRiskSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*control_decisions/);
     expect(controlsRiskSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*control_snapshots/);
+  });
+});
+
+describe("Increment 1.22 detector findings", () => {
+  it("creates control_findings as open-or-closed rows that are never deleted", () => {
+    expect(controlFindingsSql).toMatch(/CREATE TABLE control_findings\b/);
+    expect(controlFindingsSql).toMatch(/kind IN \('unmatched_bank_line_48h', 'degraded_owner_clearance', 'decision_unreviewed'\)/);
+    expect(controlFindingsSql).toMatch(/UNIQUE \(tenant_id, kind, subject_kind, subject_id\)/);
+    expect(controlFindingsSql).toMatch(/control_findings_closed_has_time/);
+    expect(controlFindingsSql).toMatch(/control_findings_closed_has_reason/);
+    expect(controlFindingsSql).toMatch(/control_findings_no_delete/);
+    expect(controlFindingsSql).toMatch(/ALTER TABLE control_findings ENABLE ROW LEVEL SECURITY/);
+    expect(controlFindingsSql).toMatch(/ALTER TABLE control_findings FORCE ROW LEVEL SECURITY/);
+    expect(controlFindingsSql).toMatch(/CREATE POLICY control_findings_isolation ON control_findings/);
+    expect(controlFindingsSql).toMatch(/GRANT SELECT, INSERT, UPDATE ON control_findings TO app_rw/);
+    expect(controlFindingsSql).not.toMatch(/GRANT[^\n]*DELETE[^\n]*control_findings/);
+    expect(TENANT_SCOPED_TABLES).toContain("control_findings");
   });
 });
 

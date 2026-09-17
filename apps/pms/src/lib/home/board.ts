@@ -11,6 +11,7 @@ import {
 } from "@pms/controls-engine";
 import type { AppDb } from "../db/client";
 import { listInboxApprovals } from "../controls/approvals";
+import { countOpenControlFindings } from "../controls/detectors";
 import { matchingSummary } from "../controls/matchingMeasure";
 import { measurementSummary } from "../controls/reconciliationMeasure";
 import { computeSnapshot } from "../controls/snapshots";
@@ -230,6 +231,8 @@ export type OwnerBoard = {
   decisionsDue: DecisionDue[];
   expiringExceptions: ExpiringException[];
   health: HealthCard;
+  /** Open detector findings as of the last frozen snapshot (the detectors write only then). */
+  detectorFindingsOpen: number;
   reconciliation: ReconciliationMeasurementSummary;
   matching: MatchingMeasurementSummary;
 };
@@ -279,6 +282,7 @@ export async function buildOwnerBoard(db: AppDb, tenantId: string, viewerId: str
     decisionsDue: decisionsDue(ctx.decisions, asOf),
     expiringExceptions: expiringExceptions(ctx.active?.policy.exceptions ?? [], asOf),
     health: healthCard(snapshot),
+    detectorFindingsOpen: await countOpenControlFindings(db, tenantId),
     reconciliation: measurementSummary(ctx.reconciliation),
     matching: matchingSummary(ctx.matching),
   };

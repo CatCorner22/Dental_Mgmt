@@ -388,6 +388,30 @@ export const sodFindings = pgTable(
   ]
 );
 
+export const controlFindings = pgTable(
+  "control_findings",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    kind: text("kind").notNull(),
+    subjectKind: text("subject_kind").notNull(),
+    subjectId: text("subject_id").notNull(),
+    severity: text("severity").notNull(),
+    status: text("status").notNull().default("open"),
+    detail: jsonb("detail").notNull().default({}),
+    detectorVersion: text("detector_version").notNull(),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    closedReason: text("closed_reason"),
+    reopenedCount: integer("reopened_count").notNull().default(0),
+  },
+  (t) => [
+    index("control_findings_tenant_status_idx").on(t.tenantId, t.status, t.kind),
+    uniqueIndex("control_findings_tenant_subject_uidx").on(t.tenantId, t.kind, t.subjectKind, t.subjectId),
+  ]
+);
+
 export const controlDecisions = pgTable(
   "control_decisions",
   {
@@ -690,4 +714,5 @@ export const TENANT_SCOPED_TABLES = [
   "deposits",
   "day_closes",
   "statements",
+  "control_findings",
 ] as const;
