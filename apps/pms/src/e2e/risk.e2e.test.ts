@@ -205,6 +205,49 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await b.audit("practice risk, after the board review");
   }, 150_000);
 
+  it("switches the after-hours hold off only with a decision and a review date, says so on the home board, and switches it back on", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const reviewDue = addDays(today, 90);
+    const exceptions = page().locator("section[aria-labelledby=exceptions]");
+    const holdRow = exceptions.locator("tbody tr", { hasText: "After-hours hold" });
+    expect(await holdRow.innerText()).toMatch(/force dual[\s\S]*writeoff, check[\s\S]*Yes/);
+
+    await holdRow.getByRole("button", { name: "Switch off After-hours hold" }).click();
+    const form = exceptions.locator("form");
+    await form.waitFor({ timeout: 30_000 });
+    const submit = form.getByRole("button", { name: "Switch off with this decision" });
+    expect(await submit.isDisabled()).toBe(true);
+    expect(await form.getByRole("combobox").locator("option").allInnerTexts()).toEqual(["Accept residual", "Compensate"]);
+    await b.audit("practice risk, switching the after-hours hold off");
+    await form.locator("input[placeholder*='compensates']").fill("Two people staff the evening clinic through the year end.");
+    // A note alone is not enough: the review date is required before the button lives.
+    expect(await submit.isDisabled()).toBe(true);
+    await form.locator("input[type=date]").fill(reviewDue);
+    await submit.click();
+    await flash(new RegExp(`^Switched off: After-hours hold\\. Review due ${reviewDue}`)).waitFor({ timeout: 30_000 });
+    expect(await holdRow.innerText()).toMatch(/No[\s\S]*Switch on/);
+    expect(await page().locator("section[aria-labelledby=register] tbody tr", { hasText: "exception" }).innerText()).toMatch(
+      new RegExp(`Accept residual[\\s\\S]*${reviewDue}`)
+    );
+
+    await page().goto(`${app.base}/home`);
+    const line = page().locator("section[aria-labelledby=after-hours-hold]");
+    await line.waitFor({ timeout: 60_000 });
+    expect(await line.innerText()).toMatch(new RegExp(`After-hours hold: off since ${today}, review due ${reviewDue}[\\s\\S]*Decided by Riley Owner: Two people staff`));
+    await b.audit("home board, after-hours hold off");
+
+    await page().goto(`${app.base}/risk`);
+    await page().getByRole("heading", { name: "Headline" }).waitFor({ timeout: 60_000 });
+    await holdRow.getByRole("button", { name: "Switch on After-hours hold" }).click();
+    await flash(/^Switched on: After-hours hold\. The decision that switched it off is retired\./).waitFor({ timeout: 30_000 });
+    expect(await holdRow.innerText()).toMatch(/Yes[\s\S]*Switch off/);
+    expect(await page().locator("section[aria-labelledby=register] tbody tr", { hasText: "Retired" }).count()).toBe(2);
+
+    await page().goto(`${app.base}/home`);
+    await page().locator("section[aria-labelledby=decisions-due]").waitFor({ timeout: 60_000 });
+    expect(await page().locator("section[aria-labelledby=after-hours-hold]").count()).toBe(0);
+  }, 150_000);
+
   it("shows a user-rank account the Refusal, not the page", async () => {
     await b.signIn("ridgeview-front", "/risk");
     await page().locator("main [role=alert]").waitFor({ timeout: 30_000 });

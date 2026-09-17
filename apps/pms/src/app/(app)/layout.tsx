@@ -35,7 +35,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
               Digest
             </Link>
           </nav>
-          <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.30</p>
+          <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.31</p>
         </div>
       </header>
       <div className="mx-auto max-w-5xl px-6 py-10">{children}</div>

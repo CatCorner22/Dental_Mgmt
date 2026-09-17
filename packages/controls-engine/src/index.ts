@@ -93,7 +93,13 @@ export {
 } from "./coverage";
 export type { Enforcement, EnforcementByChannel, ChannelCoverageRow, CoverageStatus } from "./coverage";
 
-export { MAX_WAIVE_DAYS, EXCEPTION_ACTIONS, validateThresholdException } from "./exceptions";
+export {
+  MAX_WAIVE_DAYS,
+  EXCEPTION_ACTIONS,
+  validateThresholdException,
+  exceptionTightens,
+  decisionPermitsRetirement,
+} from "./exceptions";
 
 export {
   buildPracticeState,

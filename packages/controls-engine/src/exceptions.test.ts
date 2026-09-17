@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ThresholdException } from "./controls/dual-release";
-import { validateThresholdException } from "./exceptions";
+import { decisionPermitsRetirement, exceptionTightens, validateThresholdException } from "./exceptions";
 import { AS_OF } from "./fixtures/live-grants";
 
 function ex(partial: Partial<ThresholdException>): ThresholdException {
@@ -88,5 +88,34 @@ describe("validateThresholdException", () => {
       "Exception enabled must be true or false.",
     );
     expect(validateThresholdException(ex({ label: 5 as never }), AS_OF).errors).toContain("Exception needs a label.");
+  });
+});
+
+describe("switching a tightening exception off (Increment 1.31)", () => {
+  it("knows which exceptions tighten: force_dual and lower_threshold", () => {
+    expect(exceptionTightens(ex({ action: "force_dual" }))).toBe(true);
+    expect(exceptionTightens(ex({ action: "lower_threshold" }))).toBe(true);
+    expect(exceptionTightens(ex({ action: "raise_threshold" }))).toBe(false);
+    expect(exceptionTightens(ex({ action: "waive_dual" }))).toBe(false);
+  });
+
+  it("needs an accepting or compensating decision with a review date", () => {
+    const monitor = decisionPermitsRetirement({ kind: "monitor", note: "Watching it for now.", reviewBy: "2026-12-01" }, AS_OF);
+    expect(monitor.ok).toBe(false);
+    expect(monitor.errors).toEqual(["Switching a tightening control off needs an accept_residual or compensate decision."]);
+
+    const noDate = decisionPermitsRetirement({ kind: "accept_residual", note: "Evening clinic runs with two people present." }, AS_OF);
+    expect(noDate.ok).toBe(false);
+    expect(noDate.errors).toEqual([
+      "Switching a tightening control off needs a review date: the day the practice looks at this again.",
+    ]);
+
+    const shortNote = decisionPermitsRetirement({ kind: "compensate", note: "short", reviewBy: "2026-12-01" }, AS_OF);
+    expect(shortNote.ok).toBe(false);
+    expect(shortNote.errors[0]).toMatch(/at least 10 characters/);
+
+    expect(
+      decisionPermitsRetirement({ kind: "accept_residual", note: "Evening clinic runs with two people present.", reviewBy: "2026-12-01" }, AS_OF),
+    ).toEqual({ ok: true, errors: [] });
   });
 });

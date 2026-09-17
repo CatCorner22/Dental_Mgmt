@@ -10,7 +10,10 @@ import { approveAndPost } from "./decideAndPost";
 import { recordDecision } from "./decisions";
 import { snapshotAllTenants } from "./nightly";
 import { loadStaff } from "./staff";
-import { addException, listExceptions, retireException } from "./exceptions";
+import { addException, listExceptions, restoreException, retireException } from "./exceptions";
+import { listDecisions } from "./decisions";
+import { afterHoursHoldStatus } from "../home/board";
+import { AFTER_HOURS_HOLD_EXCEPTION, addDays, latestDecisionFor } from "@pms/controls-engine";
 import { listFindings } from "./findings";
 import { grantEntitlement, revokeEntitlement } from "./grants";
 import { seedControlPolicy } from "./policy";
@@ -463,6 +466,99 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
       [tenant.id]
     );
     expect(versions.rows.map((r) => r.version)).toEqual([1, 2, 3]);
+  });
+
+  it("switches the after-hours hold off only with an accepting decision and a review date, and back on by retiring it", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const reviewDue = addDays(today, 90);
+    const holdId = AFTER_HOURS_HOLD_EXCEPTION.id;
+    const versionsBefore = (await db.admin.query("SELECT max(version) AS v FROM control_policies WHERE tenant_id = $1", [tenant.id])).rows[0].v as number;
+
+    // No decision: refused, and no policy version is written.
+    const bare = await tx((d) => retireException(d, { tenantId: tenant.id, actor: asOwner, exceptionId: holdId, reason: "Evening clinic." }));
+    expect(bare).toMatchObject({ ok: false, status: 400, code: "needs_decision" });
+    if (bare.ok) return;
+    expect(bare.errors[0]).toMatch(/^Switching off "After-hours hold" loosens a control\./);
+
+    // The wrong kind, then no review date: refused with the engine's reasons.
+    const monitor = await tx((d) =>
+      retireException(d, { tenantId: tenant.id, actor: asOwner, exceptionId: holdId, decision: { kind: "monitor", note: "Watching the evening clinic.", reviewBy: reviewDue } })
+    );
+    expect(monitor).toMatchObject({ ok: false, status: 400, code: "invalid" });
+    if (monitor.ok) return;
+    expect(monitor.errors).toEqual(["Switching a tightening control off needs an accept_residual or compensate decision."]);
+    const noDate = await tx((d) =>
+      retireException(d, { tenantId: tenant.id, actor: asOwner, exceptionId: holdId, decision: { kind: "accept_residual", note: "Two people staff the evening clinic through December." } })
+    );
+    expect(noDate).toMatchObject({ ok: false, status: 400, code: "invalid" });
+    if (noDate.ok) return;
+    expect(noDate.errors).toEqual(["Switching a tightening control off needs a review date: the day the practice looks at this again."]);
+    const stillBefore = (await db.admin.query("SELECT max(version) AS v FROM control_policies WHERE tenant_id = $1", [tenant.id])).rows[0].v as number;
+    expect(stillBefore).toBe(versionsBefore);
+
+    // With the decision: one policy version, one decision row on the exception, one chain event naming both.
+    const off = await tx((d) =>
+      retireException(d, {
+        tenantId: tenant.id,
+        actor: asOwner,
+        exceptionId: holdId,
+        decision: { kind: "accept_residual", note: "Two people staff the evening clinic through December.", reviewBy: reviewDue },
+      })
+    );
+    expect(off).toMatchObject({ ok: true, policyVersion: versionsBefore + 1 });
+    if (!off.ok) return;
+    expect(off.exception).toMatchObject({ id: holdId, enabled: false, effectiveTo: today });
+    expect(off.decision).toMatchObject({ subjectKind: "exception", subjectId: holdId, kind: "accept_residual", reviewBy: reviewDue, decidedByName: owner.name });
+    let view = await tx((d) => listExceptions(d, tenant.id));
+    expect(view.exceptions.find((e) => e.id === holdId)?.enabled).toBe(false);
+    expect(view.summary.forceDual).toBe(0);
+    let decisions = await tx((d) => listDecisions(d, tenant.id));
+    expect(latestDecisionFor(decisions, "exception", holdId)?.id).toBe(off.decision!.id);
+    expect(afterHoursHoldStatus(view.exceptions, decisions, today)).toEqual({
+      exceptionId: holdId,
+      label: "After-hours hold",
+      on: false,
+      offSince: today,
+      reviewDue,
+      overdue: false,
+      decidedByName: owner.name,
+      why: "Two people staff the evening clinic through December.",
+    });
+    const retiredEvent = await db.admin.query(
+      "SELECT payload FROM domain_event WHERE tenant_id = $1 AND kind = 'control.policy_changed' AND payload->>'change' = 'exception_retired' AND payload->>'exceptionId' = $2",
+      [tenant.id, holdId]
+    );
+    expect(retiredEvent.rows).toHaveLength(1);
+    expect(retiredEvent.rows[0].payload).toMatchObject({ loosens: true, decisionId: off.decision!.id, reviewBy: reviewDue, action: "force_dual" });
+
+    // Off twice is refused; switching on retires the decision and writes the next version.
+    const twice = await tx((d) =>
+      retireException(d, { tenantId: tenant.id, actor: asOwner, exceptionId: holdId, decision: { kind: "accept_residual", note: "Two people staff the evening clinic.", reviewBy: reviewDue } })
+    );
+    expect(twice).toMatchObject({ ok: false, status: 409, code: "already_off" });
+    const on = await tx((d) => restoreException(d, { tenantId: tenant.id, actor: asOwner, exceptionId: holdId }));
+    expect(on).toMatchObject({ ok: true, policyVersion: versionsBefore + 2 });
+    if (!on.ok) return;
+    expect(on.exception).toMatchObject({ id: holdId, enabled: true });
+    expect(on.exception.effectiveTo).toBeUndefined();
+    expect(on.decision).toMatchObject({ kind: "retire", supersedesDecisionId: off.decision!.id, subjectId: holdId });
+    view = await tx((d) => listExceptions(d, tenant.id));
+    decisions = await tx((d) => listDecisions(d, tenant.id));
+    expect(view.summary.forceDual).toBe(1);
+    expect(latestDecisionFor(decisions, "exception", holdId)).toBeUndefined();
+    expect(afterHoursHoldStatus(view.exceptions, decisions, today)).toEqual({ exceptionId: holdId, label: "After-hours hold", on: true });
+    const restoredEvent = await db.admin.query(
+      "SELECT payload FROM domain_event WHERE tenant_id = $1 AND kind = 'control.policy_changed' AND payload->>'change' = 'exception_restored'",
+      [tenant.id]
+    );
+    expect(restoredEvent.rows).toHaveLength(1);
+    expect(restoredEvent.rows[0].payload).toMatchObject({ exceptionId: holdId, retiredDecisionId: off.decision!.id });
+    const onTwice = await tx((d) => restoreException(d, { tenantId: tenant.id, actor: asOwner, exceptionId: holdId }));
+    expect(onTwice).toMatchObject({ ok: false, status: 409, code: "already_on" });
+
+    // A retired raise is not switched back on: it arrives only as a new exception with its own window.
+    const raise = await tx((d) => restoreException(d, { tenantId: tenant.id, actor: asOwner, exceptionId: "ex-lab-raise" }));
+    expect(raise).toMatchObject({ ok: false, status: 400, code: "not_restorable" });
   });
 
   it("attests a release on a channel the ledger does not carry, and never as a completed dual release", async () => {

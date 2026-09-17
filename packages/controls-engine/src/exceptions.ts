@@ -6,7 +6,7 @@
  */
 import type { ThresholdException } from "./controls/dual-release";
 import { isReleaseChannel } from "./coverage";
-import { addDays, isIsoDate } from "./decisions";
+import { addDays, isIsoDate, validateDecision, type DecisionInput } from "./decisions";
 
 /** Longest a waiver may stand before someone must look at it again. */
 export const MAX_WAIVE_DAYS = 90;
@@ -94,6 +94,35 @@ export function validateThresholdException(
     if (v != null && (typeof v !== "number" || !Number.isFinite(v) || v < 0)) {
       errors.push(`${k} must be a finite, non-negative number.`);
     }
+  }
+  return { ok: errors.length === 0, errors };
+}
+
+/**
+ * An exception that tightens a control (Increment 1.31). Retiring it
+ * loosens the control, so the app asks for a decision before it does.
+ * Retiring a raise or a waiver tightens, and needs none.
+ */
+export function exceptionTightens(ex: Pick<ThresholdException, "action">): boolean {
+  return ex.action === "force_dual" || ex.action === "lower_threshold";
+}
+
+/**
+ * Switching a tightening control off is a decision the owner records, not a
+ * settings change (docs/13 item 25): accept the residual or name what
+ * compensates, say why, and set the day the practice looks at it again.
+ */
+export function decisionPermitsRetirement(
+  input: DecisionInput,
+  asOf: string,
+): { ok: boolean; errors: string[] } {
+  const base = validateDecision(input, asOf);
+  const errors = [...base.errors];
+  if (input.kind !== "accept_residual" && input.kind !== "compensate") {
+    errors.push("Switching a tightening control off needs an accept_residual or compensate decision.");
+  }
+  if (input.reviewBy == null) {
+    errors.push("Switching a tightening control off needs a review date: the day the practice looks at this again.");
   }
   return { ok: errors.length === 0, errors };
 }

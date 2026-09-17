@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { ControlDecision, ReconciliationMeasurementSummary, ThresholdException } from "@pms/controls-engine";
-import { dayBefore, daysAfter, decisionsDue, expiringExceptions, yesterdayTile, type CloseForBoard, type RunForBoard } from "./board";
+import { AFTER_HOURS_HOLD_EXCEPTION } from "@pms/controls-engine";
+import {
+  afterHoursHoldStatus,
+  dayBefore,
+  daysAfter,
+  decisionsDue,
+  expiringExceptions,
+  yesterdayTile,
+  type CloseForBoard,
+  type RunForBoard,
+} from "./board";
 
 const asOf = "2026-09-17";
 
@@ -156,5 +166,50 @@ describe("expiringExceptions", () => {
       ["today", 0],
       ["x1", 8],
     ]);
+  });
+});
+
+describe("afterHoursHoldStatus (Increment 1.31)", () => {
+  const off: ThresholdException = { ...AFTER_HOURS_HOLD_EXCEPTION, enabled: false, effectiveTo: "2026-09-10" };
+  const decision = (over: Partial<ControlDecision>): ControlDecision => ({
+    id: "d-hold",
+    subjectKind: "exception",
+    subjectId: AFTER_HOURS_HOLD_EXCEPTION.id,
+    kind: "accept_residual",
+    note: "Evening clinic runs with two people at the desk.",
+    reviewBy: "2026-12-01",
+    decidedById: "u-owner",
+    decidedByName: "Riley Owner",
+    decidedAt: "2026-09-10T20:00:00Z",
+    ...over,
+  });
+
+  it("is null when the policy holds no hold, and on when the hold is enabled", () => {
+    expect(afterHoursHoldStatus([], [], asOf)).toBeNull();
+    expect(afterHoursHoldStatus([AFTER_HOURS_HOLD_EXCEPTION], [], asOf)).toEqual({
+      exceptionId: AFTER_HOURS_HOLD_EXCEPTION.id,
+      label: "After-hours hold",
+      on: true,
+    });
+  });
+
+  it("reads off since and review due from the exception's end and the governing decision", () => {
+    expect(afterHoursHoldStatus([off], [decision({})], asOf)).toEqual({
+      exceptionId: AFTER_HOURS_HOLD_EXCEPTION.id,
+      label: "After-hours hold",
+      on: false,
+      offSince: "2026-09-10",
+      reviewDue: "2026-12-01",
+      overdue: false,
+      decidedByName: "Riley Owner",
+      why: "Evening clinic runs with two people at the desk.",
+    });
+    expect(afterHoursHoldStatus([off], [decision({ reviewBy: "2026-09-01" })], asOf)).toMatchObject({ on: false, overdue: true });
+  });
+
+  it("says no review date when nothing governs the switch-off, and ignores a retired decision", () => {
+    expect(afterHoursHoldStatus([off], [], asOf)).toMatchObject({ on: false, offSince: "2026-09-10", reviewDue: undefined, overdue: undefined });
+    const retired = decision({ id: "d-retire", kind: "retire", reviewBy: undefined, supersedesDecisionId: "d-hold", decidedAt: "2026-09-12T20:00:00Z" });
+    expect(afterHoursHoldStatus([off], [decision({}), retired], asOf)).toMatchObject({ on: false, reviewDue: undefined, decidedByName: undefined });
   });
 });

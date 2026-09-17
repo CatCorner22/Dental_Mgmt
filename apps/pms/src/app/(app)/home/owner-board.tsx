@@ -169,6 +169,25 @@ export function OwnerBoard() {
         </p>
       </section>
 
+      {b.afterHoursHold && !b.afterHoursHold.on && (
+        <section aria-labelledby="after-hours-hold" className="rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] p-4">
+          <p id="after-hours-hold" className="font-semibold text-[var(--ink)]">
+            After-hours hold: off since {b.afterHoursHold.offSince ?? "an unrecorded date"},{" "}
+            {b.afterHoursHold.reviewDue
+              ? `review ${b.afterHoursHold.overdue ? "was due" : "due"} ${b.afterHoursHold.reviewDue}`
+              : "no review date recorded"}
+          </p>
+          <p className="mt-1 text-sm text-[var(--ink-2)]">
+            {b.afterHoursHold.why
+              ? `Decided by ${b.afterHoursHold.decidedByName}: ${b.afterHoursHold.why} `
+              : "An evening refund, adjustment, or write-off posts with no second person while this is off. "}
+            <Link className="font-semibold text-[var(--link)] underline-offset-2 hover:underline" href="/risk">
+              Switch it back on
+            </Link>
+          </p>
+        </section>
+      )}
+
       {state.alerts && (
         <Card id="hard-events" title={`Hard events · last ${state.alerts.days} days`}>
           <p className="mt-1 text-2xl font-semibold tabular-nums">{state.alerts.items.length}</p>

@@ -2,7 +2,9 @@ import { and, eq } from "drizzle-orm";
 import { locations } from "@pms/db";
 import {
   activeDecisions,
+  AFTER_HOURS_HOLD_EXCEPTION,
   DECISION_KIND_LABEL,
+  latestDecisionFor,
   type ControlDecision,
   type ControlSnapshot,
   type MatchingMeasurementSummary,
@@ -204,6 +206,42 @@ export function expiringExceptions(exceptions: ThresholdException[], asOf: strin
     .sort((a, b) => a.daysLeft - b.daysLeft);
 }
 
+/**
+ * Whether the after-hours hold stands (docs/13 item 25, Increment 1.31).
+ * While it is off, the owner home says since when and when the practice
+ * looks at it again, from the exception's end date and the decision that
+ * licensed switching it off. Null when the policy holds no such exception.
+ */
+export type HoldStatus = {
+  exceptionId: string;
+  label: string;
+  on: boolean;
+  /** ISO date the hold was switched off; absent while it is on. */
+  offSince?: string;
+  /** The review date of the decision that switched it off; absent when none was recorded. */
+  reviewDue?: string;
+  overdue?: boolean;
+  decidedByName?: string;
+  why?: string;
+};
+
+export function afterHoursHoldStatus(exceptions: ThresholdException[], decisions: ControlDecision[], asOf: string): HoldStatus | null {
+  const hold = exceptions.find((e) => e.id === AFTER_HOURS_HOLD_EXCEPTION.id);
+  if (!hold) return null;
+  if (hold.enabled) return { exceptionId: hold.id, label: hold.label, on: true };
+  const decision = latestDecisionFor(decisions, "exception", hold.id);
+  return {
+    exceptionId: hold.id,
+    label: hold.label,
+    on: false,
+    offSince: hold.effectiveTo ?? decision?.decidedAt.slice(0, 10),
+    reviewDue: decision?.reviewBy,
+    overdue: decision?.reviewBy != null ? decision.reviewBy < asOf : undefined,
+    decidedByName: decision?.decidedByName,
+    why: decision?.note,
+  };
+}
+
 export type HealthCard = {
   segregationHealth: number;
   cosoOverall: number;
@@ -236,6 +274,8 @@ export type OwnerBoard = {
   approvals: { waiting: number; totalCents: number };
   decisionsDue: DecisionDue[];
   expiringExceptions: ExpiringException[];
+  /** The after-hours hold: on, or off since a date with a review due (Increment 1.31). */
+  afterHoursHold: HoldStatus | null;
   health: HealthCard;
   /** Open detector findings as of the last frozen snapshot (the detectors write only then). */
   detectorFindingsOpen: number;
@@ -297,6 +337,7 @@ export async function buildOwnerBoard(db: AppDb, tenantId: string, viewerId: str
     approvals: { waiting: inbox.length, totalCents: inbox.reduce((n, r) => n + Number(r.amountCents), 0) },
     decisionsDue: due,
     expiringExceptions: expiringExceptions(ctx.active?.policy.exceptions ?? [], asOf),
+    afterHoursHold: afterHoursHoldStatus(ctx.active?.policy.exceptions ?? [], ctx.decisions, asOf),
     health: healthCard(snapshot),
     detectorFindingsOpen: findings.open,
     detectorFindingsUndecided: findings.undecided,
