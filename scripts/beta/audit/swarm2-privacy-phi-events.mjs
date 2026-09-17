@@ -1,7 +1,13 @@
 // Swarm 2 hunt, lens "privacy-phi-events": PHI under privacy mode on visual and non-visual surfaces, the disclosure
-// record the screens promise, the event log as a PHI/credential channel, and ui.js initials on unusual names.
+// record the screens promise, and ui.js initials on unusual names.
 // Default position is NOT reproduced: every check measures the breach it claims and carries the values.
 // Each check closes its browser context in `finally` so one failure cannot hang the run.
+// Verified (swarm2/verified-privacy-phi-events): checks 1-3 reproduce independently and each flips to "no" when the
+// named source line is patched (hint date changed; ledger.showpatient calls Proto.store.disclose; initials() iterates
+// code points). The hunter's check 4 (PIN digits and typed DOB readable from window.__events) was rejected: CONTRACTS
+// §5 specifies `key: KeyboardEvent.key` with `field: true` on keys typed in inputs (B12), §4 names `phone.stepup.<0-9>`
+// and `pin.key.<0-9>`, and the same realm exposes Proto.store.currentUser().pin and every patient's dob directly, so
+// the harness log is not a trust boundary privacy mode covers.
 // Clean under privacy=1 on desk/operatory/shared/phone x nine personas x every §2 route (details, rail tabs, dialogs,
 // title, aria-*, title/placeholder/alt, data-*, #live, hash, storage): no seeded full name, DOB, phone or guardian.
 
@@ -21,7 +27,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
 
   return {
     // palette.js:291 (field hint) and :336 (validateDob) hard-code the example date "04/12/1978", which is p-301
-    // Marisol Vega's seeded date of birth (seed.js). With privacy=1 on a shared device the confirm step for MV prints
+    // Marisol Vega's seeded date of birth (seed.js:49). With privacy=1 on a shared device the confirm step for MV prints
     // "MV · …0141 · MRN-301" and, one line under it, her exact DOB as the "example"; the hint is the input's
     // aria-describedby target, so a screen reader hears it too, and typing the example passes the second-identifier
     // gate ("Chart open: MV"). Privacy mode hides DOB on every other surface (rail identLine, encounter head, read-back).
@@ -122,42 +128,5 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       } finally { await c.close(); }
     },
 
-    // events.js:31-44 · every click is logged with its closest data-testid and every keydown with `key`, so the in-page
-    // event log becomes a credential and PHI channel: the phone step-up keypad's digits are testids (phone.stepup.<d>,
-    // CONTRACTS §4), so the approver's PIN (2468 for the seeded dentist) is readable in order from window.__events; and the
-    // palette's second identifier — a date of birth typed under privacy=1 — is reconstructed key by key from the `key`
-    // field, even though privacy mode hides that date on every screen. CONTRACTS §5 documents `key: KeyboardEvent.key`,
-    // so this is a documented-intent-vs-safety conflict (severity low).
-    // Negative control: keys typed into a text field are logged without their value (key omitted or masked for field:true)
-    // and keypad digits log a digit-free testid, so pinFromEvents !== the user's PIN and dobFromKeys does not contain the
-    // typed date; the check reports false.
-    async 'S2-privacy-phi-events-4'(b) {
-      const { c, p } = await ctx(b, 420, 860);
-      try {
-        await go(p, '#/phone/approvals?device=phone');
-        await click(p, 'phone.simulate'); await p.waitForTimeout(150);
-        const user = await p.evaluate(() => { const u = Proto.store.currentUser(); return { id: u.id, name: u.name, pin: u.pin || null }; });
-        const seq0 = await p.evaluate(() => window.__events.length ? window.__events[window.__events.length - 1].seq : 0);
-        await click(p, 'phone.request.ar-1.approve'); await p.waitForTimeout(150);
-        const padOpen = !!(await p.$('[data-testid="phone.stepup.display"]'));
-        if (padOpen && user.pin) for (const d of user.pin) await click(p, 'phone.stepup.' + d);
-        const pinEvents = await p.evaluate((s) => window.__events.filter((e) => e.seq > s && e.kind === 'click' && /^phone\.stepup\.\d$/.test(e.testid || '')).map((e) => ({ seq: e.seq, testid: e.testid })), seq0);
-        const pinFromEvents = pinEvents.map((e) => e.testid.slice(-1)).join('');
-        await click(p, 'phone.stepup.cancel');
-        // The second identifier typed under privacy: the palette DOB field on a shared device.
-        await hop(p, '#/frontdesk/board?device=shared&privacy=1'); await p.evaluate(() => window.__proto.set({ device: 'shared', privacy: true })); await p.waitForTimeout(150);
-        const seq1 = await p.evaluate(() => window.__events[window.__events.length - 1].seq);
-        const opened = await openPalette(p, 'MRN-302');
-        const row = opened && await p.$('[data-testid="palette.row.0"]'); if (row) { await row.click(); await p.waitForTimeout(150); }
-        const dob302 = await p.evaluate(() => { const x = window.__proto.state().patients.find((q) => q.id === 'p-302'); const [y, m, d] = x.dob.split('-'); return m + '/' + d + '/' + y; });
-        if (await p.$('[data-testid="palette.confirm.dob"]')) await p.type('[data-testid="palette.confirm.dob"]', dob302, { delay: 5 });
-        const keyEvents = await p.evaluate((s) => window.__events.filter((e) => e.seq > s && e.kind === 'key' && e.field === true && e.testid === 'palette.confirm.dob').map((e) => ({ seq: e.seq, key: e.key })), seq1);
-        const dobFromKeys = keyEvents.map((e) => e.key).join('');
-        const onScreenDob = await p.evaluate(() => document.getElementById('canvas').textContent.includes(window.__proto.state().patients.find((q) => q.id === 'p-302').dob.slice(5)));
-        const privacy = await p.evaluate(() => ({ privacy: window.__proto.privacy, device: window.__proto.device }));
-        const reproduced = padOpen && !!user.pin && pinFromEvents === user.pin && privacy.privacy === true && dobFromKeys.includes(dob302);
-        rec('S2-privacy-phi-events-4', 'window.__events reconstructs the approver\'s step-up PIN from phone.stepup.<digit> click testids and the palette\'s typed date of birth from key events under privacy=1, so the event log carries a credential and the PHI privacy mode hides on screen', 'CONTRACTS §5 (key: KeyboardEvent.key; testid on click) vs B8 privacy / credential hygiene — documented-intent conflict, severity low; events.js:31-44, phone.js:122-124', reproduced, { user: { id: user.id, name: user.name }, pinLength: user.pin ? user.pin.length : 0, pinMatches: pinFromEvents === user.pin, pinSeqRange: pinEvents.length ? [pinEvents[0].seq, pinEvents[pinEvents.length - 1].seq] : null, dobKeySeqRange: keyEvents.length ? [keyEvents[0].seq, keyEvents[keyEvents.length - 1].seq] : null, dobFromKeys, dobOnScreenUnderPrivacy: onScreenDob, privacy });
-      } finally { await c.close(); }
-    },
   };
 };
