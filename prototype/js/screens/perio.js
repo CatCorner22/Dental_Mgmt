@@ -153,9 +153,10 @@
     if (k === 'PageUp') return nextTooth(st, -1);
     return null;
   }
+  const uncoded = (st) => st.sextants.filter((c) => !c).length;
   function focusSextant(st) { const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); }
   function applyScreening(st, k) {
-    if (/^[0-4]$/.test(k) || k === '*') { if (st.scur > 5) return 'All six sextants coded. Save exam.'; st.sextants[st.scur] = k; st.scur++; return 'Sextant ' + SEXTANTS[st.scur - 1][0] + ' = ' + k; }
+    if (/^[0-4]$/.test(k) || k === '*') { if (st.scur > 5) return uncoded(st) ? 'Past the last sextant; go back to code the ' + uncoded(st) + ' empty' : 'All six sextants coded. Save exam.'; st.sextants[st.scur] = k; st.scur++; return 'Sextant ' + SEXTANTS[st.scur - 1][0] + ' = ' + k; }
     if (k === 'Backspace') { if (st.scur === 0) return 'Nothing to undo'; st.scur--; st.sextants[st.scur] = ''; return 'Undo: cleared sextant ' + SEXTANTS[st.scur][0]; }
     if (k === 'ArrowRight' || k === 'ArrowDown' || k === 'PageDown') { if (st.scur < 5) st.scur++; return 'Next sextant'; }
     if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp') { if (st.scur > 0) st.scur--; return 'Previous sextant'; }
@@ -180,7 +181,11 @@
     const st = stateFor(enc); const k = ev.key;
     // Escape dismisses the inline sub-forms as it dismisses a dialog, from inside their fields too, and hands
     // focus back to the control that opened them.
-    if (k === 'Escape' && (st.licenceOpen || st.tagOpen)) { ev.preventDefault(); closeInline(st, r); return; }
+    if (k === 'Escape' && (st.licenceOpen || st.tagOpen)) {
+      const inTag = t && t.closest && t.closest('.pe-tag'); const inReason = t && t.closest && t.closest('.pe-licence');
+      if (inTag && !st.tagOpen) return; if (inReason && !st.licenceOpen) return;
+      ev.preventDefault(); closeInline(st, r, inTag ? 'tag' : inReason ? 'reason' : undefined); return;
+    }
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
     const onCell = t && t.classList && t.classList.contains('psite');
     const onControl = t && !onCell && ['BUTTON', 'SUMMARY', 'A'].includes(t.tagName);
@@ -506,8 +511,9 @@
     const note = S().notes[st.encId] || {}; const deep = deepest(st);
     // Each fact once: the chip word names the state, the heading names the thing, and neither repeats the other.
     const card = h('section', { class: 'card stack pe-saved', 'aria-labelledby': 'pe-savedhead' },
-      h('div', { class: 'row' }, chip('clear', 'Saved'), h('h2', { id: 'pe-savedhead', text: st.mode === 'screening' ? 'Screening' : 'Full chart' })),
-      h('p', { class: 'small muted', style: 'color: var(--ink-2)', text: 'Derived into the hygiene note at ' + clock12(st.savedAt) + ' · author ' + st.saved.author + '. Read-only there; the exam is the source.' }));
+      h('div', { class: 'row' }, chip('clear', 'Saved'), h('h2', { id: 'pe-savedhead', text: (st.mode === 'screening' ? 'Screening' : 'Full chart') + (st.saved.amendsExamId ? ' addendum' : '') })),
+      // An addendum says what it amends: the row links to the original, and the card says so in the same breath.
+      h('p', { class: 'small muted', style: 'color: var(--ink-2)', text: 'Derived into the hygiene note at ' + clock12(st.savedAt) + ' · author ' + st.saved.author + (st.saved.amendsExamId ? ' · addendum to the saved exam, which stands unchanged' : '') + '. Read-only there; the exam is the source.' }));
     if (st.mode === 'screening') {
       card.append(h('p', { text: 'Screening codes: ' + SEXTANTS.map(([lab], i) => lab + ' ' + st.sextants[i]).join(' · ') }));
       if (st.sextants.some((c) => c === '3' || c === '4')) card.append(h('p', { class: 'small muted', style: 'color: var(--ink-2)', text: 'A full six-point chart is booked into the next hygiene visit.' }));
@@ -611,7 +617,8 @@
         h('span', { class: 'pe-count small', text: 'Sites recorded: ' + probedCount(st) + '/' + total(st) + (skippedCount(st) ? ' · ' + skippedCount(st) + ' not probed' : '') }),
         st.saved ? null : undoBtn));
     } else {
-      page.append(h('div', { class: 'activesite' }, h('span', { text: st.saved ? 'Screening saved' : st.scur <= 5 ? 'Sextant ' + SEXTANTS[st.scur][0] + ' (teeth ' + SEXTANTS[st.scur][1] + ') · keys 0–4 or *' : 'All six sextants coded · Save exam' }),
+      const firstEmpty = st.sextants.findIndex((c) => !c);
+      page.append(h('div', { class: 'activesite' }, h('span', { text: st.saved ? 'Screening saved' : st.scur <= 5 ? 'Sextant ' + SEXTANTS[st.scur][0] + ' (teeth ' + SEXTANTS[st.scur][1] + ') · keys 0–4 or *' : firstEmpty >= 0 ? uncoded(st) + ' sextant' + (uncoded(st) > 1 ? 's' : '') + ' still empty · ⌫ or ← back to ' + SEXTANTS[firstEmpty][0] : 'All six sextants coded · Save exam' }),
         h('span', { class: 'pe-count small', text: 'Codes: ' + st.sextants.filter(Boolean).length + '/6' + (st.sextants.some((c) => c === '3' || c === '4') ? ' · Full chart due' : '') }),
         st.saved ? null : undoBtn));
     }

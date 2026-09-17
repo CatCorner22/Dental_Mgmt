@@ -436,7 +436,10 @@
        ledger still leaves open, or the released charges' patient side). This screen used to foot its own from
        S.estimates / a.balanceCents, so a visit charted and filed today read $130 due above a $0.00 est. footer. */
     const est = Object.assign({ note: 'No plan estimate on file; the patient portion shown is what the account still owes.' }, Proto.store.windowEstimate(aid));
-    const st = state[aid] || (state[aid] = fresh(est.patientCents));
+    // A draft belongs to the person typing it: the PIN pad's author switch says local drafts are wiped, so the
+    // next author starts from the store's estimate rather than posting a colleague's amount under their name.
+    const key = Proto.store.currentUser().id + '|' + aid;
+    const st = state[key] || (state[key] = fresh(est.patientCents));
     // A stale prefill outlives the state it was built from: re-read it when the ledger has moved under it.
     if (st.decision !== 'zero_due' && est.patientCents <= 0 && !st.posted) { st.decision = 'zero_due'; st.amountStr = dollars(0); st.tender = null; }
     // A gate goes with its cause (the Board prunes its own the same way): Post is never Held for an outage the
