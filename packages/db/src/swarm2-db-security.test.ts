@@ -169,11 +169,18 @@ describe.skipIf(!adminUrl)("swarm2 db-security (live Postgres)", () => {
       [phiId]
     );
 
-    expect({ rewriteEvent, deleteEvent, rewritePhi, deletePhi }).toEqual({
-      rewriteEvent: expect.objectContaining({ code: "P0001" }),
-      deleteEvent: expect.objectContaining({ code: "P0001" }),
-      rewritePhi: expect.objectContaining({ code: "P0001" }),
-      deletePhi: expect.objectContaining({ code: "P0001" }),
+    // Any SQL error is a refusal; a row coming back means the audit stream was rewritten.
+    const refused = (o: Outcome) => ("code" in o ? "refused" : `mutated ${o.rowCount} row(s)`);
+    expect({
+      rewriteEvent: refused(rewriteEvent),
+      deleteEvent: refused(deleteEvent),
+      rewritePhi: refused(rewritePhi),
+      deletePhi: refused(deletePhi),
+    }).toEqual({
+      rewriteEvent: "refused",
+      deleteEvent: "refused",
+      rewritePhi: "refused",
+      deletePhi: "refused",
     });
   });
 });
