@@ -98,8 +98,15 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await flash(/Snapshot frozen/).waitFor({ timeout: 30_000 });
     expect(await provenance().innerText()).toMatch(/^Frozen /);
     expect(await page().getByText(/^Independent bank reconciliation:/).innerText()).toMatch(/stale import/);
-    // The detectors ran on the freeze; with no bank line in the tenant they have nothing to record.
-    expect(await page().locator("section[aria-labelledby=detectors]").innerText()).toMatch(/0 open \(0 high, 0 medium, 0 low\), 0 closed[\s\S]*No detector findings yet/);
+    // The detectors ran on the freeze. No bank line exists, so no bank-line finding; the seeded grants leave two
+    // highest-weight duties with one holder each (approve_writeoffs with the owner, collect_cash with Finn), recorded
+    // without naming either. Totals are not asserted: the seeded deposits age past the banking lag on the calendar.
+    const detectors = await page().locator("section[aria-labelledby=detectors]").innerText();
+    expect(detectors).not.toMatch(/Unmatched bank line|Owner-only clearance|No detector findings yet/);
+    expect(detectors.match(/Critical duty held by one person/g)?.length).toBe(2);
+    expect(detectors).toMatch(/"Approve write-offs \/ adjustments" is held by one active person only/);
+    expect(detectors).toMatch(/"Collect patient payments \/ cash drawer" is held by one active person only/);
+    expect(detectors).not.toMatch(/Riley|Finn/);
     await b.audit("practice risk, frozen snapshot with decisions");
 
     await page().getByRole("button", { name: "Revoke Reconcile bank to PMS from Finn Front" }).click();

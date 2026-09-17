@@ -28,6 +28,7 @@ const dayCloseSql = readFileSync(join(here, "../migrations/0017_day_close_deposi
 const statementsSql = readFileSync(join(here, "../migrations/0018_statements.sql"), "utf8");
 const controlFindingsSql = readFileSync(join(here, "../migrations/0019_control_findings.sql"), "utf8");
 const ledgerFindingsSql = readFileSync(join(here, "../migrations/0020_control_findings_ledger.sql"), "utf8");
+const coverageFindingsSql = readFileSync(join(here, "../migrations/0021_control_findings_coverage.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -173,6 +174,12 @@ describe("Increment 1.22 detector findings", () => {
     expect(ledgerFindingsSql).toMatch(/DROP CONSTRAINT control_findings_subject_kind_check/);
     expect(ledgerFindingsSql).toMatch(/'control_decision', 'ledger_entry'\)/);
     expect(ledgerFindingsSql).not.toMatch(/GRANT|DROP TABLE|DELETE/);
+  });
+
+  it("adds the coverage detectors' kinds and the deposit and entitlement subjects", () => {
+    expect(coverageFindingsSql).toMatch(/'deposit_not_banked', 'sole_holder_critical_duty'/);
+    expect(coverageFindingsSql).toMatch(/'ledger_entry', 'deposit', 'entitlement'\)/);
+    expect(coverageFindingsSql).not.toMatch(/GRANT|DROP TABLE|DELETE/);
   });
 });
 

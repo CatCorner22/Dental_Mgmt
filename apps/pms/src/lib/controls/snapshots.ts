@@ -50,7 +50,7 @@ export async function takeSnapshot(
   const now = input.now ?? new Date();
   const { ctx, snapshot } = await computeSnapshot(db, input.tenantId, now);
   await refreshSodFindings(db, input.tenantId, ctx.built.sod, now, ctx.decisions);
-  await runDetectors(db, input.tenantId, now, ctx.decisions);
+  await runDetectors(db, input.tenantId, now, { decisions: ctx.decisions, staff: ctx.staff });
 
   const id = uuidv7(now.getTime());
   await db.insert(controlSnapshots).values({

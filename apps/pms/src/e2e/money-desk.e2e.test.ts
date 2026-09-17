@@ -174,7 +174,12 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().getByRole("button", { name: "Freeze snapshot" }).click();
     await flash(/Snapshot frozen/).waitFor({ timeout: 30_000 });
     const detectors = page().locator("section[aria-labelledby=detectors]");
-    expect(await detectors.innerText()).toMatch(/1 open[\s\S]*Unmatched bank line older than 48 hours[\s\S]*A \$150\.00 bank debit posted 2026-09-14 \(ACH MERCHANT FEE\) has had no matching deposit and no clearance for \d+ days\.[\s\S]*Open/);
+    const detectorRow = (label: string) => detectors.locator("tbody tr", { hasText: label });
+    expect(await detectorRow("Unmatched bank line older than 48 hours").innerText()).toMatch(
+      /A \$150\.00 bank debit posted 2026-09-14 \(ACH MERCHANT FEE\) has had no matching deposit and no clearance for \d+ days\.[\s\S]*Open/
+    );
+    // The seeded grants leave two highest-weight duties with one holder each; the rows name the duty, never the holder.
+    expect(await detectorRow("Critical duty held by one person").count()).toBe(2);
     expect(await detectors.innerText()).not.toMatch(/Riley|Finn/);
     await b.audit("practice risk, detector finding open");
 
@@ -228,11 +233,12 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().getByRole("button", { name: "Freeze snapshot" }).click();
     await flash(/Snapshot frozen/).waitFor({ timeout: 30_000 });
     const detectors = page().locator("section[aria-labelledby=detectors]");
-    const text = await detectors.innerText();
-    expect(text).toMatch(/1 open \(0 high, 1 medium, 0 low\), 1 closed/);
-    expect(text).toMatch(/Owner-only clearance[\s\S]*was cleared on \d{4}-\d{2}-\d{2} as owner-only clearance: no other eligible person existed[\s\S]*Open/);
-    expect(text).toMatch(/Unmatched bank line older than 48 hours[\s\S]*Closed[\s\S]*matched or cleared/);
-    expect(text).not.toMatch(/Riley|Finn/);
+    const detectorRow = (label: string) => detectors.locator("tbody tr", { hasText: label });
+    expect(await detectorRow("Owner-only clearance").innerText()).toMatch(
+      /was cleared on \d{4}-\d{2}-\d{2} as owner-only clearance: no other eligible person existed[\s\S]*Open/
+    );
+    expect(await detectorRow("Unmatched bank line older than 48 hours").innerText()).toMatch(/Closed[\s\S]*matched or cleared/);
+    expect(await detectors.innerText()).not.toMatch(/Riley|Finn/);
     await b.audit("practice risk, detector findings open and closed");
   }, 120_000);
 

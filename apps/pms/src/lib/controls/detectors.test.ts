@@ -7,7 +7,11 @@ import {
   DECISION_UNREVIEWED_KIND,
   degradedRunCandidate,
   degradedRunSentence,
+  depositNotBankedCandidates,
   duplicatePaymentCandidates,
+  dutyHolders,
+  soleHolderCandidates,
+  severityForBankingGap,
   lineDetail,
   lineSentence,
   overdueDecisionCandidate,
@@ -235,5 +239,52 @@ describe("duplicate patient payment detector", () => {
     );
     const reversal = entry({ id: "r1", kind: "reversal", amountCents: 10_000, reversesEntryId: "p2", effectiveDate: "2026-09-15", postedOn: "2026-09-15" });
     expect(duplicatePaymentCandidates([a, b, reversal])).toEqual([]);
+  });
+});
+
+describe("deposit not banked detector", () => {
+  it("flags unmatched deposits once the banking lag has passed, graded by age, and skips matched or young ones", () => {
+    const out = depositNotBankedCandidates(
+      [
+        { depositId: "d-old", bankAccountId: "b1", businessDate: "2026-08-20", method: "Cash", amountCents: 25_000, reference: null, matched: false }, // 28 days
+        { depositId: "d-due", bankAccountId: "b1", businessDate: "2026-09-12", method: "Check", amountCents: 10_000, reference: "1042", matched: false }, // exactly 5 days
+        { depositId: "d-young", bankAccountId: "b1", businessDate: "2026-09-13", method: "Cash", amountCents: 5_000, reference: null, matched: false }, // 4 days
+        { depositId: "d-matched", bankAccountId: "b1", businessDate: "2026-08-01", method: "Cash", amountCents: 5_000, reference: null, matched: true },
+      ],
+      "2026-09-17"
+    );
+    expect(out.map((c) => [c.subjectId, c.severity])).toEqual([
+      ["d-old", "high"],
+      ["d-due", "medium"],
+    ]);
+    expect(out[1]!.detail.sentence).toBe("A $100.00 check deposit prepared for 2026-09-12 has no matching bank credit after 5 days.");
+    expect(severityForBankingGap(14)).toBe("medium");
+    expect(severityForBankingGap(15)).toBe("high");
+  });
+});
+
+describe("sole holder detector", () => {
+  it("counts live holders of the highest-weight duties among active people and flags exactly one", () => {
+    const rows = [
+      { id: "u1", displayName: "Riley", role: "admin", clinicalRole: "unset", active: true, createdAt: new Date(), entitlements: ["bank_reconcile", "approve_writeoffs", "run_import"] },
+      { id: "u2", displayName: "Finn", role: "user", clinicalRole: "unset", active: true, createdAt: new Date(), entitlements: ["bank_reconcile", "post_payments"] },
+      { id: "u3", displayName: "Gone", role: "user", clinicalRole: "unset", active: false, createdAt: new Date(), entitlements: ["approve_writeoffs", "collect_cash"] },
+    ];
+    const holders = dutyHolders({ rows });
+    expect(Object.fromEntries(holders.map((h) => [h.entitlement, h.activeHolders]))).toEqual({
+      collect_cash: 0,
+      prepare_deposit: 0,
+      bank_reconcile: 2,
+      approve_writeoffs: 1,
+      create_vendor: 0,
+      release_payment: 0,
+    });
+    const out = soleHolderCandidates(holders);
+    expect(out.map((c) => c.subjectId)).toEqual(["approve_writeoffs"]);
+    expect(out[0]).toMatchObject({ severity: "medium", detail: { label: "Approve write-offs / adjustments", activeHolders: 1 } });
+    expect(out[0]!.detail.sentence).toBe(
+      '"Approve write-offs / adjustments" is held by one active person only. If that person is away, no one can perform it and no one can check it: the practice depends on one set of hands for this duty.'
+    );
+    expect(String(out[0]!.detail.sentence)).not.toMatch(/Riley|Finn/);
   });
 });

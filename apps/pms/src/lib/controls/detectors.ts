@@ -1,11 +1,12 @@
 import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
-import { activeDecisions, DECISION_KIND_LABEL, type ControlDecision, type DualReleasePolicy } from "@pms/controls-engine";
-import { bankTransactions, controlFindings, ledgerEntries, reconciliationRuns, reconciliationVariances, uuidv7 } from "@pms/db";
+import { activeDecisions, DECISION_KIND_LABEL, ENTITLEMENTS, type ControlDecision, type DualReleasePolicy } from "@pms/controls-engine";
+import { bankTransactions, controlFindings, deposits, ledgerEntries, reconciliationRuns, reconciliationVariances, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { listDecisions } from "./decisions";
 import { MATCH_DUE_DAYS, daysBetween } from "./matchingMeasure";
 import { loadActivePolicy } from "./policy";
 import { RECONCILIATION_WINDOW_DAYS, windowStartFor } from "./reconciliationMeasure";
+import { loadStaff, type LoadedStaff } from "./staff";
 
 /**
  * Detectors (docs/05: "recorded, batched"). A detector reads live rows and
@@ -44,14 +45,23 @@ import { RECONCILIATION_WINDOW_DAYS, windowStartFor } from "./reconciliationMeas
  *   with the same amount and effective date, neither reversed, inside the
  *   window; the later entries carry the finding. Closes when one is
  *   reversed or the rows leave the window.
+ * - deposit_not_banked: a deposit the practice prepared, at least
+ *   DEPOSIT_BANK_DAYS old and inside the window, that no imported bank
+ *   credit has matched (docs/05 "deposit-batch vs bank gaps"). Closes when
+ *   a bank credit matches it or it leaves the window.
+ * - sole_holder_critical_duty: a duty of the highest risk weight held live
+ *   by exactly one active person (docs/05 "sole ownership of a critical
+ *   process"). Closes when a second holder is live or none is.
  */
-export const DETECTOR_VERSION = "detectors-v3";
+export const DETECTOR_VERSION = "detectors-v4";
 export const UNMATCHED_BANK_LINE_KIND = "unmatched_bank_line_48h";
 export const DEGRADED_CLEARANCE_KIND = "degraded_owner_clearance";
 export const DECISION_UNREVIEWED_KIND = "decision_unreviewed";
 export const RELEASE_WITHOUT_APPROVAL_KIND = "release_without_approval";
 export const BACKDATED_POSTING_KIND = "backdated_posting";
 export const DUPLICATE_PAYMENT_KIND = "duplicate_patient_payment";
+export const DEPOSIT_NOT_BANKED_KIND = "deposit_not_banked";
+export const SOLE_HOLDER_KIND = "sole_holder_critical_duty";
 
 export const FINDING_KIND_LABEL: Record<string, string> = {
   [UNMATCHED_BANK_LINE_KIND]: "Unmatched bank line older than 48 hours",
@@ -60,11 +70,13 @@ export const FINDING_KIND_LABEL: Record<string, string> = {
   [RELEASE_WITHOUT_APPROVAL_KIND]: "Release above threshold without approval",
   [BACKDATED_POSTING_KIND]: "Posting dated well before it was posted",
   [DUPLICATE_PAYMENT_KIND]: "Duplicate patient payment",
+  [DEPOSIT_NOT_BANKED_KIND]: "Deposit not yet at the bank",
+  [SOLE_HOLDER_KIND]: "Critical duty held by one person",
 };
 
 export type ControlFindingRow = typeof controlFindings.$inferSelect;
 export type FindingSeverity = "low" | "medium" | "high";
-export type FindingSubjectKind = "bank_transaction" | "reconciliation_run" | "control_decision" | "ledger_entry";
+export type FindingSubjectKind = "bank_transaction" | "reconciliation_run" | "control_decision" | "ledger_entry" | "deposit" | "entitlement";
 
 /** What a detector proposes for one subject: the row it would write, minus bookkeeping. */
 export type FindingCandidate = {
@@ -652,19 +664,162 @@ export async function refreshLedgerFindings(db: AppDb, tenantId: string, now: Da
 }
 
 // ---------------------------------------------------------------------------
+// Detector 7: deposits with no bank credit after the banking lag
+// ---------------------------------------------------------------------------
+
+/** Calendar days a deposit gets to appear on a bank statement before it counts as a gap. */
+export const DEPOSIT_BANK_DAYS = 5;
+
+export type DepositFacts = {
+  depositId: string;
+  bankAccountId: string;
+  /** YYYY-MM-DD. */
+  businessDate: string;
+  method: string;
+  amountCents: number;
+  reference: string | null;
+  /** True when a matched_deposit variance row cites this deposit. */
+  matched: boolean;
+};
+
+/** Two weeks or less is medium; longer is high. */
+export function severityForBankingGap(ageDays: number): FindingSeverity {
+  return ageDays <= 14 ? "medium" : "high";
+}
+
+/**
+ * Deposits prepared at least dueDays ago that no imported bank credit has
+ * matched. The caller bounds the rows to the window; the age is measured
+ * from the business date.
+ */
+export function depositNotBankedCandidates(depositRows: DepositFacts[], asOf: string, dueDays: number = DEPOSIT_BANK_DAYS): FindingCandidate[] {
+  const out: FindingCandidate[] = [];
+  for (const d of depositRows) {
+    if (d.matched) continue;
+    const ageDays = daysBetween(d.businessDate, asOf);
+    if (ageDays < dueDays) continue;
+    out.push({
+      subjectId: d.depositId,
+      severity: severityForBankingGap(ageDays),
+      detail: {
+        bankAccountId: d.bankAccountId,
+        businessDate: d.businessDate,
+        method: d.method,
+        amountCents: d.amountCents,
+        reference: d.reference,
+        ageDays,
+        sentence: `A ${money(d.amountCents)} ${d.method.toLowerCase()} deposit prepared for ${d.businessDate} has no matching bank credit after ${ageDays} day${ageDays === 1 ? "" : "s"}.`,
+      },
+    });
+  }
+  return out;
+}
+
+/** Deposits whose business date falls inside the window, with whether a matched bank line cites each. */
+export async function listDepositFacts(db: AppDb, tenantId: string, now: Date, windowDays: number = RECONCILIATION_WINDOW_DAYS): Promise<DepositFacts[]> {
+  const asOf = now.toISOString().slice(0, 10);
+  const windowStart = windowStartFor(asOf, windowDays);
+  const rows = await db
+    .select({
+      id: deposits.id,
+      bankAccountId: deposits.bankAccountId,
+      businessDate: deposits.businessDate,
+      method: deposits.method,
+      amountCents: deposits.amountCents,
+      reference: deposits.reference,
+    })
+    .from(deposits)
+    .where(and(eq(deposits.tenantId, tenantId), gte(deposits.businessDate, windowStart)));
+  const matchedRows = await db
+    .select({ matchRef: reconciliationVariances.matchRef })
+    .from(reconciliationVariances)
+    .where(and(eq(reconciliationVariances.tenantId, tenantId), eq(reconciliationVariances.kind, "matched_deposit")));
+  const matched = new Set<string>();
+  for (const row of matchedRows) {
+    const ref = (row.matchRef ?? {}) as { depositId?: string };
+    if (ref.depositId) matched.add(ref.depositId);
+  }
+  return rows.map((r) => ({
+    depositId: r.id,
+    bankAccountId: r.bankAccountId,
+    businessDate: String(r.businessDate),
+    method: r.method,
+    amountCents: Number(r.amountCents),
+    reference: r.reference,
+    matched: matched.has(r.id),
+  }));
+}
+
+export async function refreshDepositNotBankedFindings(db: AppDb, tenantId: string, now: Date = new Date()): Promise<DetectorRefreshSummary> {
+  const asOf = now.toISOString().slice(0, 10);
+  const existing = await existingOfKind(db, tenantId, DEPOSIT_NOT_BANKED_KIND);
+  const plan = planFindings(existing, DEPOSIT_NOT_BANKED_KIND, "deposit", depositNotBankedCandidates(await listDepositFacts(db, tenantId, now), asOf));
+  return applyPlan(db, tenantId, DEPOSIT_NOT_BANKED_KIND, "deposit", plan, `matched at the bank or outside the ${RECONCILIATION_WINDOW_DAYS}-day window`, now);
+}
+
+// ---------------------------------------------------------------------------
+// Detector 8: a critical duty held by one person
+// ---------------------------------------------------------------------------
+
+/** The duties whose loss or misuse the rulebook weights highest. */
+export const CRITICAL_DUTY_WEIGHT = 5;
+export const CRITICAL_DUTIES = ENTITLEMENTS.filter((e) => e.riskWeight >= CRITICAL_DUTY_WEIGHT).map((e) => e.id as string);
+
+export type DutyHolders = { entitlement: string; activeHolders: number };
+
+/** Live holders per duty among active people, from the staff loader's rows. */
+export function dutyHolders(staff: Pick<LoadedStaff, "rows">): DutyHolders[] {
+  const counts = new Map<string, Set<string>>();
+  for (const row of staff.rows) {
+    if (!row.active) continue;
+    for (const e of row.entitlements) {
+      const set = counts.get(e) ?? new Set<string>();
+      set.add(row.id);
+      counts.set(e, set);
+    }
+  }
+  return CRITICAL_DUTIES.map((entitlement) => ({ entitlement, activeHolders: counts.get(entitlement)?.size ?? 0 }));
+}
+
+export function soleHolderCandidates(holders: DutyHolders[]): FindingCandidate[] {
+  const labels = new Map(ENTITLEMENTS.map((e) => [e.id as string, e.label]));
+  return holders
+    .filter((h) => h.activeHolders === 1)
+    .map((h) => ({
+      subjectId: h.entitlement,
+      severity: "medium" as const,
+      detail: {
+        entitlement: h.entitlement,
+        label: labels.get(h.entitlement) ?? h.entitlement,
+        activeHolders: 1,
+        sentence: `"${labels.get(h.entitlement) ?? h.entitlement}" is held by one active person only. If that person is away, no one can perform it and no one can check it: the practice depends on one set of hands for this duty.`,
+      },
+    }));
+}
+
+export async function refreshSoleHolderFindings(db: AppDb, tenantId: string, now: Date = new Date(), staff?: LoadedStaff): Promise<DetectorRefreshSummary> {
+  const existing = await existingOfKind(db, tenantId, SOLE_HOLDER_KIND);
+  const loaded = staff ?? (await loadStaff(db, tenantId, now));
+  const plan = planFindings(existing, SOLE_HOLDER_KIND, "entitlement", soleHolderCandidates(dutyHolders(loaded)));
+  return applyPlan(db, tenantId, SOLE_HOLDER_KIND, "entitlement", plan, "a second holder is live, or none is", now);
+}
+
+// ---------------------------------------------------------------------------
 
 /** Every detector the product runs, in order. Called wherever a snapshot is frozen. */
 export async function runDetectors(
   db: AppDb,
   tenantId: string,
   now: Date = new Date(),
-  decisions?: ControlDecision[]
+  context?: { decisions?: ControlDecision[]; staff?: LoadedStaff }
 ): Promise<DetectorRefreshSummary[]> {
   return [
     await refreshUnmatchedBankLineFindings(db, tenantId, now),
     await refreshDegradedClearanceFindings(db, tenantId, now),
-    await refreshUnreviewedDecisionFindings(db, tenantId, now, decisions),
+    await refreshUnreviewedDecisionFindings(db, tenantId, now, context?.decisions),
     ...(await refreshLedgerFindings(db, tenantId, now)),
+    await refreshDepositNotBankedFindings(db, tenantId, now),
+    await refreshSoleHolderFindings(db, tenantId, now, context?.staff),
   ];
 }
 
