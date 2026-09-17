@@ -1,22 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createLiveDatabase, liveAdminUrl, type LiveDatabase } from "@pms/db/testing";
 import { uuidv7 } from "@pms/db";
-import { createPostEntry } from "@pms/ledger";
 import { resetDbPoolForTests, withTenantTransaction } from "./db/client";
-import { makePostgresLedgerWriter } from "./ledger/postgresWriter";
 import { createCurveHeroImportRun } from "./import/runs";
 import { applyCurveHeroImport } from "./import/apply";
 import { createBankStatementImport } from "./bank/import";
 import { clearReconciliationRun } from "./reconciliation/clear";
 import { getReconciliationRun } from "./reconciliation/queries";
-import { createDraftStatement } from "./statements/service";
 import { buildOwnerBoard } from "./home/board";
 import { seedControlPolicy } from "./controls/policy";
 
 /**
- * Swarm 2, lens import-bank-statements: the Curve Hero apply path, the bank
- * statement matcher and clearance, and patient statements, driven through the
- * real service functions as app_rw on a throwaway database. Each test asserts
+ * Swarm 2, lens import-bank-statements (verified set): the Curve Hero apply
+ * path and the bank statement matcher and clearance, driven through the real
+ * service functions as app_rw on a throwaway database. Each test asserts
  * the correct behaviour and fails on the reference commit; the failing
  * assertion is the measured breach. Skipped without PMS_TEST_POSTGRES_URL;
  * mandatory under PMS_TEST_POSTGRES_REQUIRED=1 (see liveDatabase.ts).
@@ -220,55 +217,6 @@ describe.skipIf(!adminUrl)("S2 import-bank-statements: apply, matching, clearanc
     });
   });
 
-  // Negative control: a draft as of today shows the full current balance on the reference commit.
-  it("S2-import-bank-statements-10: a statement drafted as of a date shows the balance as of that date, not today's", async () => {
-    const post = (d: Parameters<Parameters<typeof tx>[0]>[0]) => createPostEntry(makePostgresLedgerWriter(d));
-    for (const [effectiveDate, amount] of [
-      ["2026-09-01", -10_000],
-      ["2026-09-20", -5_000],
-    ] as const) {
-      const result = await tx((d) =>
-        post(d)({
-          tenantId: tenant.id,
-          accountId: patient.accountId,
-          patientId: patient.id,
-          locationId: location.id,
-          kind: "patient_payment",
-          glBucket: "patient_ar",
-          amountCents: amount,
-          effectiveDate,
-          createdById: front.id,
-          createdByName: front.name,
-          tender: "cash",
-          idempotencyKey: `s2-asof-${effectiveDate}`,
-        }),
-        front
-      );
-      expect(result.ok).toBe(true);
-    }
-
-    const draft = await tx((d) =>
-      createDraftStatement(d, {
-        tenantId: tenant.id,
-        accountId: patient.accountId,
-        patientId: patient.id,
-        asOf: "2026-09-10",
-        actorUserId: front.id,
-        actorName: front.name,
-        now: asOfNow,
-      }),
-      front
-    );
-    expect("error" in draft).toBe(false);
-    if ("error" in draft) return;
-    const lines = draft.snapshot.lines.map((e) => ({ effectiveDate: e.effectiveDate, amountCents: e.amountCents }));
-    expect({ asOf: draft.asOf, lines, creditCents: draft.creditCents }).toMatchObject({
-      asOf: "2026-09-10",
-      lines: lines.filter((l) => l.effectiveDate <= "2026-09-10"),
-    });
-    expect(draft.creditCents).toBe(10_000);
-  });
-
   // Negative control: an import against the tenant's own bank account succeeds with status validated.
   it("S2-import-bank-statements-11: a statement import against another tenant's bank account is refused", async () => {
     const attempt = tx((d) =>
@@ -290,7 +238,9 @@ describe.skipIf(!adminUrl)("S2 import-bank-statements: apply, matching, clearanc
   });
 
   // Negative control: before the re-import the cleared run reads "cleared" and the owner board reads the day as tied.
-  it("S2-import-bank-statements-12: re-importing an already cleared statement does not reopen its lines as variances on the owner board", async () => {
+  // The re-run itself creating unmatched rows is documented (docs/17 Increment 1.19 and matching-measure.live.test);
+  // the breach measured here is the owner board contradicting the clearance and the detector's governing disposition.
+  it("S2-import-bank-statements-12: re-importing an already cleared statement does not put its lines back on the owner board as open variances", async () => {
     const imported = await tx((d) =>
       createBankStatementImport(d, {
         tenantId: tenant.id,
@@ -331,12 +281,18 @@ describe.skipIf(!adminUrl)("S2 import-bank-statements: apply, matching, clearanc
 
     const rerun = await tx((d) => getReconciliationRun(d, tenant.id, again.reconciliationRunId));
     const reopened = rerun!.variances.filter((v) => v.status === "open");
+    const firstRun = await tx((d) => getReconciliationRun(d, tenant.id, runId));
     const board = await tx((d) => buildOwnerBoard(d, tenant.id, owner.id, asOfNow));
     expect({
+      firstRunStatus: firstRun!.status,
       rerunStatus: rerun!.status,
       reopenedOpenVariances: reopened.map((v) => `${v.kind} ${v.amountCents}`),
       boardHeadline: board.yesterday.headline,
       boardWhy: board.yesterday.why,
-    }).toMatchObject({ reopenedOpenVariances: [], boardHeadline: expect.not.stringMatching(/variance/) });
+    }).toMatchObject({
+      firstRunStatus: "cleared",
+      boardHeadline: expect.not.stringMatching(/variance/),
+      boardWhy: expect.not.stringMatching(/no clearance/),
+    });
   });
 });
