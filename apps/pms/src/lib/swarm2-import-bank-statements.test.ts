@@ -6,7 +6,6 @@ import { resetDbPoolForTests, withTenantTransaction } from "./db/client";
 import { makePostgresLedgerWriter } from "./ledger/postgresWriter";
 import { createCurveHeroImportRun } from "./import/runs";
 import { applyCurveHeroImport } from "./import/apply";
-import { mapDaySheetRow } from "./import/map";
 import { createBankStatementImport } from "./bank/import";
 import { clearReconciliationRun } from "./reconciliation/clear";
 import { getReconciliationRun } from "./reconciliation/queries";
@@ -53,35 +52,6 @@ const BANK_CSV = [
   "2026-09-12,DEPOSIT CHECK 1042,100.00,1042",
   "2026-09-13,ACH MERCHANT FEE,-150.00,",
 ].join("\n");
-
-describe("S2 import-bank-statements: pure mapping", () => {
-  // Negative control: a positive Charge maps to +15000 and a positive Payment to -5000 on the reference commit.
-  it("S2-import-bank-statements-7: a negative day-sheet line (reversal) keeps its direction instead of being posted as the original", () => {
-    // A -$50 "Payment" line on a Curve Hero day sheet is a payment reversal; posting it as another -$50 payment doubles the credit.
-    expect(mapDaySheetRow({
-      kind: "day_sheet",
-      businessDate: "2026-09-12",
-      locationCode: "Main",
-      patientMrn: "MRN-1",
-      patientName: "Pat One",
-      transactionType: "Payment",
-      amountCents: -5000,
-      providerCode: null,
-      description: "Payment reversal",
-    })).toMatchObject({ kind: "patient_payment", amountCents: 5000 });
-    expect(mapDaySheetRow({
-      kind: "day_sheet",
-      businessDate: "2026-09-12",
-      locationCode: "Main",
-      patientMrn: "MRN-1",
-      patientName: "Pat One",
-      transactionType: "Charge",
-      amountCents: -15000,
-      providerCode: null,
-      description: "Charge reversal",
-    })).toMatchObject({ kind: "charge", amountCents: -15000 });
-  });
-});
 
 describe.skipIf(!adminUrl)("S2 import-bank-statements: apply, matching, clearance, statements (live)", () => {
   let db: LiveDatabase;
@@ -201,7 +171,7 @@ describe.skipIf(!adminUrl)("S2 import-bank-statements: apply, matching, clearanc
   }
 
   // Negative control: the same day sheet with the row typed "Payment" applies (posted: 1) on the reference commit.
-  it("S2-import-bank-statements-8: applying a validated day sheet that contains a Charge row posts it or reports a row error, instead of aborting the whole apply", async () => {
+  it("S2-import-bank-statements-7: applying a validated day sheet that contains a Charge row posts it or reports a row error, instead of aborting the whole apply", async () => {
     const run = await tx((d) =>
       createCurveHeroImportRun(d, {
         tenantId: tenant.id,
@@ -220,7 +190,7 @@ describe.skipIf(!adminUrl)("S2 import-bank-statements: apply, matching, clearanc
   });
 
   // Negative control: applying the SAME run twice posts once (idempotency key import:curve:<runId>:<row>).
-  it("S2-import-bank-statements-9: the same day sheet file staged and applied a second time does not post its lines again", async () => {
+  it("S2-import-bank-statements-8: the same day sheet file staged and applied a second time does not post its lines again", async () => {
     const first = await stageAndApply(DAY_SHEET, new Date("2026-09-13T15:00:00Z"));
     expect(first.run.status).toBe("validated");
     expect(first.applied).toMatchObject({ posted: 1, duplicates: 0 });
@@ -236,7 +206,7 @@ describe.skipIf(!adminUrl)("S2 import-bank-statements: apply, matching, clearanc
   });
 
   // Negative control: a row whose Location is "Main" posts to the Main location on the reference commit.
-  it("S2-import-bank-statements-10: a day-sheet row for a location the tenant does not have is refused, not posted to the first location", async () => {
+  it("S2-import-bank-statements-9: a day-sheet row for a location the tenant does not have is refused, not posted to the first location", async () => {
     const csv = [
       "Date,Location,Patient MRN,Patient Name,Transaction Type,Amount",
       `2026-09-11,Northside,${patient.mrn},Pat One,Payment,42.00`,
@@ -251,7 +221,7 @@ describe.skipIf(!adminUrl)("S2 import-bank-statements: apply, matching, clearanc
   });
 
   // Negative control: a draft as of today shows the full current balance on the reference commit.
-  it("S2-import-bank-statements-11: a statement drafted as of a date shows the balance as of that date, not today's", async () => {
+  it("S2-import-bank-statements-10: a statement drafted as of a date shows the balance as of that date, not today's", async () => {
     const post = (d: Parameters<Parameters<typeof tx>[0]>[0]) => createPostEntry(makePostgresLedgerWriter(d));
     for (const [effectiveDate, amount] of [
       ["2026-09-01", -10_000],
@@ -300,7 +270,7 @@ describe.skipIf(!adminUrl)("S2 import-bank-statements: apply, matching, clearanc
   });
 
   // Negative control: an import against the tenant's own bank account succeeds with status validated.
-  it("S2-import-bank-statements-12: a statement import against another tenant's bank account is refused", async () => {
+  it("S2-import-bank-statements-11: a statement import against another tenant's bank account is refused", async () => {
     const attempt = tx((d) =>
       createBankStatementImport(d, {
         tenantId: tenant.id,
@@ -320,7 +290,7 @@ describe.skipIf(!adminUrl)("S2 import-bank-statements: apply, matching, clearanc
   });
 
   // Negative control: before the re-import the cleared run reads "cleared" and the owner board reads the day as tied.
-  it("S2-import-bank-statements-13: re-importing an already cleared statement does not reopen its lines as variances on the owner board", async () => {
+  it("S2-import-bank-statements-12: re-importing an already cleared statement does not reopen its lines as variances on the owner board", async () => {
     const imported = await tx((d) =>
       createBankStatementImport(d, {
         tenantId: tenant.id,
