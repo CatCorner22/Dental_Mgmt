@@ -1,9 +1,10 @@
-import { and, eq, gte, lte, sql } from "drizzle-orm";
-import { activeDecisions, DECISION_KIND_LABEL, type ControlDecision } from "@pms/controls-engine";
-import { bankTransactions, controlFindings, reconciliationRuns, reconciliationVariances, uuidv7 } from "@pms/db";
+import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { activeDecisions, DECISION_KIND_LABEL, type ControlDecision, type DualReleasePolicy } from "@pms/controls-engine";
+import { bankTransactions, controlFindings, ledgerEntries, reconciliationRuns, reconciliationVariances, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { listDecisions } from "./decisions";
 import { MATCH_DUE_DAYS, daysBetween } from "./matchingMeasure";
+import { loadActivePolicy } from "./policy";
 import { RECONCILIATION_WINDOW_DAYS, windowStartFor } from "./reconciliationMeasure";
 
 /**
@@ -30,21 +31,40 @@ import { RECONCILIATION_WINDOW_DAYS, windowStartFor } from "./reconciliationMeas
  * - decision_unreviewed: an active control decision whose review date has
  *   passed (docs/13 item 21: "an unreviewed decision becomes a
  *   control_finding"). Closes when the decision is superseded.
+ * - release_without_approval: a ledger entry in a guarded channel above the
+ *   active policy's threshold that cites neither an approved request nor a
+ *   policy exception. The database trigger (Increment 1.13) should make
+ *   this impossible, so docs/05 calls it a chain-integrity alarm. Judged
+ *   against the active policy over every row; closes only when the policy
+ *   no longer holds that amount to dual release.
+ * - backdated_posting: a reversal, adjustment, or write-off posted more
+ *   than BACKDATE_DAYS after its effective date, inside the 45-day window
+ *   on the posting date. Closes when the row leaves the window.
+ * - duplicate_patient_payment: two or more patient payments on one account
+ *   with the same amount and effective date, neither reversed, inside the
+ *   window; the later entries carry the finding. Closes when one is
+ *   reversed or the rows leave the window.
  */
-export const DETECTOR_VERSION = "detectors-v2";
+export const DETECTOR_VERSION = "detectors-v3";
 export const UNMATCHED_BANK_LINE_KIND = "unmatched_bank_line_48h";
 export const DEGRADED_CLEARANCE_KIND = "degraded_owner_clearance";
 export const DECISION_UNREVIEWED_KIND = "decision_unreviewed";
+export const RELEASE_WITHOUT_APPROVAL_KIND = "release_without_approval";
+export const BACKDATED_POSTING_KIND = "backdated_posting";
+export const DUPLICATE_PAYMENT_KIND = "duplicate_patient_payment";
 
 export const FINDING_KIND_LABEL: Record<string, string> = {
   [UNMATCHED_BANK_LINE_KIND]: "Unmatched bank line older than 48 hours",
   [DEGRADED_CLEARANCE_KIND]: "Owner-only clearance",
   [DECISION_UNREVIEWED_KIND]: "Decision past its review date",
+  [RELEASE_WITHOUT_APPROVAL_KIND]: "Release above threshold without approval",
+  [BACKDATED_POSTING_KIND]: "Posting dated well before it was posted",
+  [DUPLICATE_PAYMENT_KIND]: "Duplicate patient payment",
 };
 
 export type ControlFindingRow = typeof controlFindings.$inferSelect;
 export type FindingSeverity = "low" | "medium" | "high";
-export type FindingSubjectKind = "bank_transaction" | "reconciliation_run" | "control_decision";
+export type FindingSubjectKind = "bank_transaction" | "reconciliation_run" | "control_decision" | "ledger_entry";
 
 /** What a detector proposes for one subject: the row it would write, minus bookkeeping. */
 export type FindingCandidate = {
@@ -418,6 +438,220 @@ export async function refreshUnreviewedDecisionFindings(
 }
 
 // ---------------------------------------------------------------------------
+// Detectors 4 to 6: ledger rows
+// ---------------------------------------------------------------------------
+
+export type LedgerEntryFacts = {
+  id: string;
+  accountId: string;
+  kind: string;
+  amountCents: number;
+  /** YYYY-MM-DD. */
+  effectiveDate: string;
+  /** YYYY-MM-DD, from posted_at. */
+  postedOn: string;
+  approvalRequestId: string | null;
+  appliedExceptionId: string | null;
+  reversesEntryId: string | null;
+};
+
+/** The same map the Increment 1.13 trigger uses (ledger_release_channel). */
+export const LEDGER_RELEASE_CHANNEL: Record<string, string> = {
+  adjustment: "writeoff",
+  write_off: "writeoff",
+  reversal: "writeoff",
+  refund: "check",
+  transfer_out: "ach",
+  transfer_in: "ach",
+};
+
+const KIND_WORD: Record<string, string> = {
+  adjustment: "adjustment",
+  write_off: "write-off",
+  reversal: "reversal",
+  refund: "refund",
+  transfer_out: "transfer out",
+  transfer_in: "transfer in",
+  patient_payment: "patient payment",
+};
+
+function kindWord(kind: string): string {
+  return KIND_WORD[kind] ?? kind.replace(/_/g, " ");
+}
+
+/**
+ * Entries in a guarded channel above the active threshold with neither an
+ * approved request nor a policy exception. Mirrors the trigger's floor: the
+ * master switch and the channel rule must be enabled, and the amount must
+ * exceed the rule's threshold. Exceptions that raise a threshold are
+ * recorded on the row as applied_exception_id when they license a release,
+ * so a row without one above the base threshold is the alarm.
+ */
+export function releaseWithoutApprovalCandidates(entries: LedgerEntryFacts[], policy: DualReleasePolicy | null): FindingCandidate[] {
+  if (!policy || !policy.enabled) return [];
+  const out: FindingCandidate[] = [];
+  for (const e of entries) {
+    const channel = LEDGER_RELEASE_CHANNEL[e.kind];
+    if (!channel) continue;
+    const rule = policy.rules.find((r) => r.channel === channel);
+    if (!rule || !rule.enabled) continue;
+    const thresholdCents = Math.round(rule.thresholdUsd * 100);
+    if (Math.abs(e.amountCents) <= thresholdCents) continue;
+    if (e.approvalRequestId || e.appliedExceptionId) continue;
+    out.push({
+      subjectId: e.id,
+      severity: "high",
+      detail: {
+        kind: e.kind,
+        channel,
+        amountCents: e.amountCents,
+        thresholdUsd: rule.thresholdUsd,
+        effectiveDate: e.effectiveDate,
+        postedOn: e.postedOn,
+        accountId: e.accountId,
+        sentence: `A ${money(e.amountCents)} ${kindWord(e.kind)} posted ${e.postedOn} cites neither an approved request nor a policy exception, and the active policy holds the ${channel} channel to dual release above ${money(thresholdCents)}. The database trigger should have refused this row; treat it as a chain-integrity alarm.`,
+      },
+    });
+  }
+  return out;
+}
+
+export const BACKDATE_DAYS = 7;
+const BACKDATED_KINDS = new Set(["reversal", "adjustment", "write_off"]);
+
+/** A month or less between effective and posted is medium; more is high. */
+export function severityForBackdate(daysBack: number): FindingSeverity {
+  return daysBack <= 30 ? "medium" : "high";
+}
+
+/** Reversals, adjustments, and write-offs posted more than BACKDATE_DAYS after their effective date. */
+export function backdatedPostingCandidates(entries: LedgerEntryFacts[], backdateDays: number = BACKDATE_DAYS): FindingCandidate[] {
+  const out: FindingCandidate[] = [];
+  for (const e of entries) {
+    if (!BACKDATED_KINDS.has(e.kind)) continue;
+    const daysBack = daysBetween(e.effectiveDate, e.postedOn);
+    if (daysBack <= backdateDays) continue;
+    out.push({
+      subjectId: e.id,
+      severity: severityForBackdate(daysBack),
+      detail: {
+        kind: e.kind,
+        amountCents: e.amountCents,
+        effectiveDate: e.effectiveDate,
+        postedOn: e.postedOn,
+        daysBack,
+        accountId: e.accountId,
+        sentence: `A ${money(e.amountCents)} ${kindWord(e.kind)} effective ${e.effectiveDate} was posted on ${e.postedOn}, ${daysBack} days after its effective date.`,
+      },
+    });
+  }
+  return out;
+}
+
+/**
+ * Two or more patient payments on one account with the same amount and
+ * effective date, none of them reversed. The first (by posting time) stands;
+ * each later one carries the finding, so a genuine second payment on the
+ * same day is one row to look at, not an accusation.
+ */
+export function duplicatePaymentCandidates(entries: LedgerEntryFacts[]): FindingCandidate[] {
+  const reversed = new Set(entries.map((e) => e.reversesEntryId).filter((id): id is string => Boolean(id)));
+  const groups = new Map<string, LedgerEntryFacts[]>();
+  for (const e of entries) {
+    if (e.kind !== "patient_payment" || reversed.has(e.id)) continue;
+    const key = `${e.accountId}|${e.amountCents}|${e.effectiveDate}`;
+    const g = groups.get(key) ?? [];
+    g.push(e);
+    groups.set(key, g);
+  }
+  const out: FindingCandidate[] = [];
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    const sorted = [...g].sort((a, b) => (a.postedOn < b.postedOn ? -1 : a.postedOn > b.postedOn ? 1 : a.id < b.id ? -1 : 1));
+    const first = sorted[0]!;
+    for (const e of sorted.slice(1)) {
+      out.push({
+        subjectId: e.id,
+        severity: "low",
+        detail: {
+          amountCents: e.amountCents,
+          effectiveDate: e.effectiveDate,
+          accountId: e.accountId,
+          firstEntryId: first.id,
+          count: g.length,
+          sentence: `${g.length} patient payments of ${money(e.amountCents)} on one account carry the effective date ${e.effectiveDate}, and none has been reversed. This row is the later one; the first stands as posted.`,
+        },
+      });
+    }
+  }
+  return out;
+}
+
+async function listLedgerFacts(db: AppDb, tenantId: string, since: Date | null, kinds: string[] | null): Promise<LedgerEntryFacts[]> {
+  const filters = [eq(ledgerEntries.tenantId, tenantId)];
+  if (since) filters.push(gte(ledgerEntries.postedAt, since));
+  if (kinds) filters.push(inArray(ledgerEntries.kind, kinds));
+  const rows = await db
+    .select({
+      id: ledgerEntries.id,
+      accountId: ledgerEntries.accountId,
+      kind: ledgerEntries.kind,
+      amountCents: ledgerEntries.amountCents,
+      effectiveDate: ledgerEntries.effectiveDate,
+      postedAt: ledgerEntries.postedAt,
+      approvalRequestId: ledgerEntries.approvalRequestId,
+      appliedExceptionId: ledgerEntries.appliedExceptionId,
+      reversesEntryId: ledgerEntries.reversesEntryId,
+    })
+    .from(ledgerEntries)
+    .where(and(...filters));
+  return rows.map((r) => ({
+    id: r.id,
+    accountId: r.accountId,
+    kind: r.kind,
+    amountCents: Number(r.amountCents),
+    effectiveDate: String(r.effectiveDate),
+    postedOn: r.postedAt.toISOString().slice(0, 10),
+    approvalRequestId: r.approvalRequestId,
+    appliedExceptionId: r.appliedExceptionId,
+    reversesEntryId: r.reversesEntryId,
+  }));
+}
+
+export async function refreshLedgerFindings(db: AppDb, tenantId: string, now: Date = new Date()): Promise<DetectorRefreshSummary[]> {
+  const asOf = now.toISOString().slice(0, 10);
+  const since = new Date(`${windowStartFor(asOf, RECONCILIATION_WINDOW_DAYS)}T00:00:00Z`);
+  const windowReason = `outside the ${RECONCILIATION_WINDOW_DAYS}-day window`;
+
+  const active = await loadActivePolicy(db, tenantId);
+  const guarded = await listLedgerFacts(db, tenantId, null, Object.keys(LEDGER_RELEASE_CHANNEL));
+  const releasePlan = planFindings(
+    await existingOfKind(db, tenantId, RELEASE_WITHOUT_APPROVAL_KIND),
+    RELEASE_WITHOUT_APPROVAL_KIND,
+    "ledger_entry",
+    releaseWithoutApprovalCandidates(guarded, active?.policy ?? null)
+  );
+  const release = await applyPlan(db, tenantId, RELEASE_WITHOUT_APPROVAL_KIND, "ledger_entry", releasePlan, "below the active threshold or licensed", now);
+
+  const recent = await listLedgerFacts(db, tenantId, since, null);
+  const backdatedPlan = planFindings(await existingOfKind(db, tenantId, BACKDATED_POSTING_KIND), BACKDATED_POSTING_KIND, "ledger_entry", backdatedPostingCandidates(recent));
+  const backdated = await applyPlan(db, tenantId, BACKDATED_POSTING_KIND, "ledger_entry", backdatedPlan, windowReason, now);
+
+  // Reversals may sit outside the window while the payments they reverse sit inside it, so reversal
+  // rows are read without the window and merged in for the exclusion only.
+  const reversals = await listLedgerFacts(db, tenantId, null, ["reversal"]);
+  const duplicatePlan = planFindings(
+    await existingOfKind(db, tenantId, DUPLICATE_PAYMENT_KIND),
+    DUPLICATE_PAYMENT_KIND,
+    "ledger_entry",
+    duplicatePaymentCandidates([...recent.filter((e) => e.kind === "patient_payment"), ...reversals])
+  );
+  const duplicates = await applyPlan(db, tenantId, DUPLICATE_PAYMENT_KIND, "ledger_entry", duplicatePlan, `reversed or ${windowReason}`, now);
+
+  return [release, backdated, duplicates];
+}
+
+// ---------------------------------------------------------------------------
 
 /** Every detector the product runs, in order. Called wherever a snapshot is frozen. */
 export async function runDetectors(
@@ -430,6 +664,7 @@ export async function runDetectors(
     await refreshUnmatchedBankLineFindings(db, tenantId, now),
     await refreshDegradedClearanceFindings(db, tenantId, now),
     await refreshUnreviewedDecisionFindings(db, tenantId, now, decisions),
+    ...(await refreshLedgerFindings(db, tenantId, now)),
   ];
 }
 

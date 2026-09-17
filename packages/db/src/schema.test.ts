@@ -27,6 +27,7 @@ const bankSql = readFileSync(join(here, "../migrations/0016_bank_reconciliation.
 const dayCloseSql = readFileSync(join(here, "../migrations/0017_day_close_deposits.sql"), "utf8");
 const statementsSql = readFileSync(join(here, "../migrations/0018_statements.sql"), "utf8");
 const controlFindingsSql = readFileSync(join(here, "../migrations/0019_control_findings.sql"), "utf8");
+const ledgerFindingsSql = readFileSync(join(here, "../migrations/0020_control_findings_ledger.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -164,6 +165,14 @@ describe("Increment 1.22 detector findings", () => {
     expect(controlFindingsSql).toMatch(/GRANT SELECT, INSERT, UPDATE ON control_findings TO app_rw/);
     expect(controlFindingsSql).not.toMatch(/GRANT[^\n]*DELETE[^\n]*control_findings/);
     expect(TENANT_SCOPED_TABLES).toContain("control_findings");
+  });
+
+  it("widens the finding kinds to the ledger detectors and adds the ledger entry as a subject", () => {
+    expect(ledgerFindingsSql).toMatch(/DROP CONSTRAINT control_findings_kind_check/);
+    expect(ledgerFindingsSql).toMatch(/'release_without_approval', 'backdated_posting', 'duplicate_patient_payment'/);
+    expect(ledgerFindingsSql).toMatch(/DROP CONSTRAINT control_findings_subject_kind_check/);
+    expect(ledgerFindingsSql).toMatch(/'control_decision', 'ledger_entry'\)/);
+    expect(ledgerFindingsSql).not.toMatch(/GRANT|DROP TABLE|DELETE/);
   });
 });
 

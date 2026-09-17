@@ -133,6 +133,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [17, "day_close_deposits", "app_migrate"],
         [18, "statements", "app_migrate"],
         [19, "control_findings", "app_migrate"],
+        [20, "control_findings_ledger", "app_migrate"],
       ]);
       const owners = await db.admin.query(
         "SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'"
@@ -143,7 +144,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
     it("is a no-op the second time", async () => {
       const result = await applyMigrations(db.admin);
       expect(result.applied).toEqual([]);
-      expect(result.alreadyApplied).toBe(19);
+      expect(result.alreadyApplied).toBe(20);
     });
 
     it("left domain_event with RLS forced after the seq backfill", async () => {
@@ -774,6 +775,15 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [uuidv7(5_013), ridgeview.id, uuidv7(5_014)]
       );
       expect(unknownKind).toMatchObject({ code: "23514" });
+      const ledgerKind = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO control_findings (
+           id, tenant_id, kind, subject_kind, subject_id, severity, detail, detector_version, first_seen_at, last_seen_at
+         ) VALUES ($1, $2, 'release_without_approval', 'ledger_entry', $3, 'high', '{}'::jsonb, 'detectors-v3', now(), now())`,
+        [uuidv7(5_015), ridgeview.id, uuidv7(5_016)]
+      );
+      expect(ledgerKind).toEqual({ rows: [] });
       const closeWithoutReason = await attempt(
         "app_rw",
         ridgeview,
