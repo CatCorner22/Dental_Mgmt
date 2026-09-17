@@ -182,6 +182,7 @@ export async function createMemoryStore(
       const hash = hashDomainEvent({
         prevHash: prev,
         tenantId: input.tenantId,
+        actorUserId: input.actorUserId,
         kind: input.kind,
         payload: input.payload,
         occurredAt: input.at.toISOString(),

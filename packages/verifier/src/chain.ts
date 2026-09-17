@@ -5,6 +5,11 @@ export interface ChainEvent {
   prevHash: string;
   hash: string;
   tenantId: string;
+  /**
+   * Who acted, `null` for a system actor. Rows written before the actor
+   * joined the digest carry no key here and verify under the legacy digest.
+   */
+  actorUserId?: string | null;
   kind: string;
   payload: unknown;
   occurredAt: string;
@@ -41,11 +46,25 @@ export function expectedHash(event: Omit<ChainEvent, "hash" | "seq">): string {
   const body = [
     event.prevHash,
     event.tenantId,
+    ...(event.actorUserId === undefined ? [] : [`actor:${event.actorUserId ?? ""}`]),
     event.kind,
     canonicalize(event.payload),
     event.occurredAt,
   ].join("\n");
   return createHash("sha256").update(body).digest("hex");
+}
+
+/**
+ * The digest that binds the actor is authoritative. The five-field legacy
+ * digest still matches rows sealed before the actor was included; a legacy
+ * row's actor is therefore unprotected, and a rewritten actor on an
+ * actor-bound row matches neither digest.
+ */
+export function hashAgrees(event: ChainEvent): boolean {
+  if (expectedHash(event) === event.hash) return true;
+  if (event.actorUserId === undefined) return false;
+  const { actorUserId: _actor, ...legacy } = event;
+  return expectedHash(legacy) === event.hash;
 }
 
 export function verifyChain(events: ChainEvent[]): ChainVerdict {
@@ -66,8 +85,7 @@ export function verifyChain(events: ChainEvent[]): ChainVerdict {
 
   for (let i = 0; i < events.length; i++) {
     const ev = events[i];
-    const recomputed = expectedHash(ev);
-    if (recomputed !== ev.hash) {
+    if (!hashAgrees(ev)) {
       const step = byId.get("hash-agrees")!;
       objections.push({
         stepId: step.id,

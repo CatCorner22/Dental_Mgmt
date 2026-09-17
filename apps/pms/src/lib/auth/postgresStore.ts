@@ -256,6 +256,7 @@ export function createPostgresStore(
         const hash = hashDomainEvent({
           prevHash,
           tenantId: input.tenantId,
+          actorUserId: input.actorUserId,
           kind: input.kind,
           payload: input.payload,
           occurredAt: occurredAt.toISOString(),
