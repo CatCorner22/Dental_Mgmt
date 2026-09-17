@@ -117,6 +117,10 @@
   const BILLING = ['post_payment', 'post_era', 'write_off', 'submit_claims'];
   const bills = (u) => (u.noPass ? refuse('entitlement', 'Issue a day pass before posting', 'Open Roles', NO_PASS_WHY)
     : needs(u, BILLING, 'Ask a seat that posts payments', 'Switch author', u.short + ' carries no billing entitlement, and this posts money against the ledger. The biller, the front desk, Dana or Dr. Reagan post here; the author switch names who.'));
+  /* An 835 is posted by the seat that carries post_era: a payment-only seat posts at the window, not remittances, and a
+     contractual write-off an ERA line carries is a write-off, so Confirm needs write_off as the write-off control does. */
+  const postsEra = (u) => bills(u) || needs(u, ['post_era'], 'Ask a seat that posts remittances', 'Switch author', u.short + ' carries no post_era grant, and this posts an 835 against the ledger. The biller posts remittances here; the author switch names who.');
+  const writesOff = (u) => needs(u, ['write_off'], 'Ask a seat that can write off balances', 'Switch author', u.short + ' carries no write_off grant, and confirming this line writes the contractual difference off. The biller, Dana or Dr. Reagan write off here; the author switch names who.');
   /* A write-off retires what the patient owes and no more: $1,000 against a $410 balance posted and hid a −$590 net,
      and a $100 courtesy beside a $410 cash payment on a $410 window posted a credit nobody paid. */
   const writeoffCap = (amountCents, due) => (amountCents > Math.max(0, due)
@@ -770,7 +774,7 @@
     const b = S.eraBatches.find((x) => x.id === batchId); if (!b) return notFound('claim');
     const off = offline('Wait for the server — postings are paused'); if (off) return off;
     if (b.status === 'deltas' || b.status === 'posted') return refuse('already_decided', 'Confirm the delta lines below', 'Go to the deltas', 'The matched lines of this batch are already posted. What is left is the lines where the payer differs from the claim.');
-    const pin = requirePin(extras); if (!pin.ok) return pin; const ent = bills(pin.user); if (ent) return ent; const u = poster(pin.user); let posted = 0;
+    const pin = requirePin(extras); if (!pin.ok) return pin; const ent = postsEra(pin.user); if (ent) return ent; const u = poster(pin.user); let posted = 0;
     // A line is posted when its ledger row exists: the status flips here, with the row, never in the seed.
     for (const l of S.eraLines.filter((x) => x.batchId === batchId && x.status === 'matched')) {
       if (!S.ledger.some((e) => e.eraLineId === l.id)) ledgerRow({ id: id('le'), kind: 'insurance_payment', patientId: l.patientId, amountCents: -l.paidCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: 'loc-1', payer: b.payer, eraLineId: l.id, gl: 'ins_ar_primary', chargeIds: eraTargets(l, S.tenant.today) });
@@ -786,9 +790,11 @@
   function settleBatch(batchId) { const b = S.eraBatches.find((x) => x.id === batchId); if (b && b.status === 'deltas' && !S.eraLines.some((l) => l.batchId === batchId && OPEN_LINE.includes(l.status))) { b.status = 'posted'; touch('eraBatches', b.id); } }
   function eraConfirm(lineId, extras) {
     const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — postings are paused'); if (off) return off;
-    if (l.status === 'posted' || l.status === 'disputed') return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'This line is already decided. A correction is a reversal and a repost, both linked to the original.');
-    if (l.status === 'denied') return refuse('already_decided', 'Appeal or attach — this line paid nothing', 'Open the denial', 'A denied line paid $0. Confirming it would post a $0 insurance payment and a write-off of the whole expected amount; the denial worklist is where that line is worked.');
-    const pin = requirePin(extras); if (!pin.ok) return pin; const ent = bills(pin.user); if (ent) return ent;
+    // One 835 line posts once: the ledger rows that cite it are the record, whatever status the line was moved to since.
+    if (l.status === 'posted' || l.status === 'disputed' || S.ledger.some((e) => e.eraLineId === lineId)) return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'This line is already decided. A correction is a reversal and a repost, both linked to the original.');
+    const claim = S.claims.find((x) => x.id === l.claimId);
+    if (l.status === 'denied' || (claim && claim.status === 'denied')) return refuse('already_decided', 'Appeal or attach — this line paid nothing', 'Open the denial', 'A denied line paid $0. Confirming it would post a $0 insurance payment and a write-off of the whole expected amount; the denial worklist is where that line is worked.');
+    const pin = requirePin(extras); if (!pin.ok) return pin; const ent = postsEra(pin.user) || (l.expectedCents - l.paidCents > 0 ? writesOff(pin.user) : null); if (ent) return ent;
     // A contractual write-off is still a write-off: the after-hours hold applies to it as to any other.
     const gate = evaluateRelease('write_off', l.expectedCents - l.paidCents, pin.user, { contractual: true });
     if (!gate.ok) return refuse(gate.code, gate.verb, 'Set aside', gate.why);
@@ -799,12 +805,21 @@
     settleBatch(l.batchId);
     return { ok: true };
   }
-  function eraHold(lineId, extras) { const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — the line cannot be held'); if (off) return off; const pin = requirePin(extras); if (!pin.ok) return pin; const ent = bills(pin.user); if (ent) return ent; const u = poster(pin.user); l.status = 'held'; touch('eraLines', l.id); write('claimEvents', { id: id('cev'), claimId: l.claimId, kind: 'era.line_held', actor: u.name }); settleBatch(l.batchId); return { ok: true }; }
+  // Set aside is for a line still to be decided: a posted line is corrected from the ledger and a denied one is worked from the denial.
+  const HOLDABLE = ['matched', 'unmatched', 'delta'];
+  function eraHold(lineId, extras) {
+    const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — the line cannot be held'); if (off) return off;
+    if (l.status === 'held') return { ok: true, already: true };
+    if (l.status === 'denied') return refuse('already_decided', 'Appeal or attach — this line paid nothing', 'Open the denial', 'A denied line paid $0 and is worked from the denial worklist. Setting it aside would let Confirm post its whole expected amount as a write-off.');
+    if (!HOLDABLE.includes(l.status)) return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'This line is already ' + l.status + '. A correction is a reversal and a repost, both linked to the original; setting it aside would let it post again.');
+    const pin = requirePin(extras); if (!pin.ok) return pin; const ent = postsEra(pin.user); if (ent) return ent; const u = poster(pin.user);
+    l.status = 'held'; touch('eraLines', l.id); write('claimEvents', { id: id('cev'), claimId: l.claimId, kind: 'era.line_held', actor: u.name }); settleBatch(l.batchId); return { ok: true };
+  }
   /* Dispute writes the appeal row its Why promises: one packet per line, citing the fee-schedule line the payer paid under.
      It used to write the claim event alone, so the decided row said "An appeal row cites the fee-schedule line" over none. */
   function eraDispute(lineId, extras) {
     const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — the dispute cannot send'); if (off) return off;
-    const pin = requirePin(extras); if (!pin.ok) return pin; const ent = bills(pin.user); if (ent) return ent; const u = poster(pin.user);
+    const pin = requirePin(extras); if (!pin.ok) return pin; const ent = postsEra(pin.user); if (ent) return ent; const u = poster(pin.user);
     l.status = 'disputed'; touch('eraLines', l.id);
     write('claimEvents', { id: id('cev'), claimId: l.claimId, kind: 'era.contract_variance_disputed', actor: u.name });
     const packet = S.appealPackets.find((p) => p.eraLineId === lineId) || write('appealPackets', { id: id('ap'), claimId: l.claimId, eraLineId: lineId, kind: 'contract_variance', slots: { feeSchedule: true, eraSegment: true, letter: true }, citation: 'Fee schedule allows ' + Proto.ui.money(l.expectedCents) + ' for ' + l.cdt.toUpperCase() + '; ERA paid ' + Proto.ui.money(l.paidCents) + ' (CARC ' + l.carc + ')', patientSentence: 'We are asking your plan about the amount it paid. You owe nothing while they review.' });
