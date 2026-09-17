@@ -61,6 +61,28 @@ describe("packageHash and the flat rows", () => {
     expect(packageHash(pkg({ journal: { ...a.journal, totalCents: -7_600 } }))).not.toBe(packageHash(a));
   });
 
+  it("covers what the package says about the month, and nothing it says about the practice right now (Increment 1.36)", () => {
+    const a = pkg();
+    const hash = packageHash(a);
+    // The practice's position now: the chain head, the last nightly check, how many findings
+    // are open, how many reviews are overdue, and how much of the chart of accounts is
+    // approved or waiting. None of these is a figure about the month, so none moves the hash.
+    expect(packageHash(pkg({ chain: { headSeq: 4_000, headHash: "cd".repeat(32), eventsInMonth: 12, lastCheck: { day: "2026-09-30", ok: true, checkedAt: "2026-09-30T06:00:00.000Z" } } }))).toBe(hash);
+    expect(packageHash(pkg({ mappings: { approved: 9, pending: 4, unmappedLines: 1 } }))).toBe(hash);
+    expect(packageHash(pkg({ counts: { ...a.counts, findings: { ...a.counts.findings, openNow: 7 } } }))).toBe(hash);
+    expect(packageHash(pkg({ counts: { ...a.counts, decisions: { ...a.counts.decisions, overdueNow: 5 } } }))).toBe(hash);
+    expect(
+      packageHash(pkg({ tieOut: [{ key: "journal_equals_postings", label: "Journal totals equal the month's ledger postings", holds: true, detail: "2 entries, said another way." }] }))
+    ).toBe(hash);
+
+    // Figures about the month: how many of its lines went unmapped, how many chain events it
+    // carried, what its controls were at month end, and whether a tie-out held.
+    expect(packageHash(pkg({ mappings: { approved: 1, pending: 1, unmappedLines: 0 } }))).not.toBe(hash);
+    expect(packageHash(pkg({ chain: { ...a.chain, eventsInMonth: 13 } }))).not.toBe(hash);
+    expect(packageHash(pkg({ controls: { ...a.controls, activeExceptions: [] } }))).not.toBe(hash);
+    expect(packageHash(pkg({ tieOut: [{ ...a.tieOut[0]!, holds: false }] }))).not.toBe(hash);
+  });
+
   it("flattens every section into section, key, label, count, cents, and ends with the hash", () => {
     const a = pkg();
     const hash = packageHash(a);

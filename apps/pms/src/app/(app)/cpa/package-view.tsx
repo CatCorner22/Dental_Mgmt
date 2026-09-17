@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
 import { ANY_REASON, GL_BUCKETS, GL_KINDS, GL_SIDES, type GlMapping } from "@/lib/cpa/types";
+import type { MonthClose } from "@/lib/cpa/close";
 import type { MonthPackage, PackageExport } from "@/lib/cpa/package";
 import { formatCents } from "@/lib/ledger/format";
 
@@ -11,6 +12,8 @@ type Me = { ok: boolean; role?: string };
 type PackageResponse = {
   month: string;
   inProgress: boolean;
+  close: MonthClose | null;
+  changedSinceClose: boolean;
   package: MonthPackage;
   packageHash: string;
   exports: PackageExport[];
@@ -84,6 +87,8 @@ export function PackageView() {
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  // The month the owner is confirming a close for; closing cannot be undone.
+  const [confirmClose, setConfirmClose] = useState<string | null>(null);
 
   const load = useCallback(async (m: string) => {
     const meRes = await fetch("/api/me");
@@ -139,6 +144,31 @@ export function PackageView() {
       setMessage(`Exported as ${format.toUpperCase()}: ${rows} rows, package hash ${hash.slice(0, 12)}…, recorded on the chain.`);
     } catch (err: unknown) {
       setMessage(err instanceof Error ? err.message : "The package was not exported.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Freezes the month. Irreversible, so the page asks once before calling. */
+  async function close() {
+    if (state.status !== "ready") return;
+    setBusy("close");
+    setMessage(null);
+    try {
+      const res = await fetch("/api/cpa/close", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ month }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      setConfirmClose(null);
+      const [data, mappings] = await Promise.all([loadPackage(month), loadMappings()]);
+      setState({ ...state, data, mappings });
+      setMessage(`Closed ${month}. The package hash is frozen; a correction now posts today with reason prior_period.`);
+    } catch (err: unknown) {
+      setConfirmClose(null);
+      setMessage(err instanceof Error ? err.message : "The month was not closed.");
     } finally {
       setBusy(null);
     }
@@ -229,6 +259,16 @@ export function PackageView() {
                     state.data.changedSinceLastExport ? "The rows have changed since that export." : "Unchanged since that export."
                   }`}
             </p>
+            {state.data.close && (
+              <p className="mt-2 text-sm text-[var(--ink-2)]">
+                Closed by {state.data.close.closedByName} on {state.data.close.closedAt.slice(0, 10)}, with {state.data.close.entryCount} entr
+                {state.data.close.entryCount === 1 ? "y" : "ies"} totalling {formatCents(state.data.close.totalCents)}. Frozen hash{" "}
+                <code className="text-xs">{state.data.close.packageHash.slice(0, 16)}…</code>.{" "}
+                {state.data.changedSinceClose
+                  ? "This month no longer reads as the accountant received it: a figure it states has changed since, most often an account mapping or a control policy. The hash above is what it reads now."
+                  : "This month still reads as the accountant received it. A later correction into it posts today with reason prior_period, and is reported in the month it posts."}
+              </p>
+            )}
             {state.isAdmin ? (
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
@@ -247,6 +287,39 @@ export function PackageView() {
                 >
                   {busy === "json" ? "Exporting…" : "Download JSON"}
                 </button>
+                {!state.data.close &&
+                  !state.data.inProgress &&
+                  (confirmClose === month ? (
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm text-[var(--ink-2)]">
+                        Closing {month} cannot be undone. A correction afterwards posts today with reason prior_period.
+                      </span>
+                      <button
+                        type="button"
+                        className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                        disabled={busy !== null}
+                        onClick={() => void close()}
+                      >
+                        {busy === "close" ? "Closing…" : "Close it for good"}
+                      </button>
+                      <button
+                        type="button"
+                        className="min-h-[var(--target)] rounded-md border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold"
+                        onClick={() => setConfirmClose(null)}
+                      >
+                        Cancel
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="min-h-[var(--target)] rounded-md border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                      disabled={busy !== null}
+                      onClick={() => setConfirmClose(month)}
+                    >
+                      Close month
+                    </button>
+                  ))}
               </div>
             ) : (
               <p className="mt-2 text-sm text-[var(--ink-3)]">Only an administrator exports the package; each export is recorded on the chain.</p>

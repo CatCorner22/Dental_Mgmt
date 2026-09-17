@@ -127,6 +127,7 @@ export const EVENT_LABEL: Record<string, string> = {
   "cpa.package_exported": "CPA month-end package exported",
   "gl_mapping.proposed": "GL mapping proposed",
   "gl_mapping.decided": "GL mapping decided",
+  "month.closed": "Month closed for the accountant",
 };
 
 export function eventLabel(kind: string): string {

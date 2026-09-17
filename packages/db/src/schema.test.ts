@@ -36,6 +36,7 @@ const locationHoursSql = readFileSync(join(here, "../migrations/0025_locations_h
 const afterHoursHoldSql = readFileSync(join(here, "../migrations/0026_after_hours_hold.sql"), "utf8");
 const hardEventAcksSql = readFileSync(join(here, "../migrations/0027_hard_event_acks.sql"), "utf8");
 const glMappingsSql = readFileSync(join(here, "../migrations/0028_gl_mappings.sql"), "utf8");
+const monthClosesSql = readFileSync(join(here, "../migrations/0029_month_closes.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -253,6 +254,28 @@ describe("Increment 1.35 GL mappings under maker-checker", () => {
     expect(glMappingsSql).toMatch(/GRANT SELECT, INSERT, UPDATE ON gl_mappings TO app_rw/);
     expect(glMappingsSql).not.toMatch(/GRANT[^\n]*DELETE[^\n]*gl_mappings/);
     expect(TENANT_SCOPED_TABLES).toContain("gl_mappings");
+  });
+});
+
+describe("Increment 1.36 month close and the prior-period refusal", () => {
+  it("freezes one close per month, append-only, and refuses a back-dated entry without reason prior_period", () => {
+    expect(monthClosesSql).toMatch(/CREATE TABLE month_closes\b/);
+    expect(monthClosesSql).toMatch(/month text NOT NULL CHECK \(month ~ '\^\[0-9\]\{4\}-\(0\[1-9\]\|1\[0-2\]\)\$'\)/);
+    expect(monthClosesSql).toMatch(/package_hash text NOT NULL CHECK \(length\(package_hash\) = 64\)/);
+    expect(monthClosesSql).toMatch(/UNIQUE \(tenant_id, month\)/);
+    expect(monthClosesSql).toMatch(/month_closes_no_update/);
+    expect(monthClosesSql).toMatch(/month_closes_no_delete/);
+    expect(monthClosesSql).toMatch(/ALTER TABLE month_closes FORCE ROW LEVEL SECURITY/);
+    expect(monthClosesSql).toMatch(/CREATE POLICY month_closes_isolation ON month_closes/);
+    expect(monthClosesSql).toMatch(/GRANT SELECT, INSERT ON month_closes TO app_rw/);
+    expect(monthClosesSql).toMatch(/GRANT SELECT ON month_closes TO app_append/);
+    expect(monthClosesSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*month_closes/);
+    // The refusal itself: a trigger on the posting path, with the one way through.
+    expect(monthClosesSql).toMatch(/CREATE OR REPLACE FUNCTION ledger_entries_month_not_closed/);
+    expect(monthClosesSql).toMatch(/NEW\.reason_code IS DISTINCT FROM 'prior_period'/);
+    expect(monthClosesSql).toMatch(/RAISE EXCEPTION\s+'month_closed:/);
+    expect(monthClosesSql).toMatch(/CREATE TRIGGER ledger_entries_month_not_closed\s+BEFORE INSERT ON ledger_entries/);
+    expect(TENANT_SCOPED_TABLES).toContain("month_closes");
   });
 });
 

@@ -75,6 +75,7 @@ describe.skipIf(!adminUrl)("CPA month-end package (live)", () => {
   it("records an export on the chain with its hash, keeps the hash while the rows stand, and moves it when they change", async () => {
     const before = await tx((d) => computeMonthPackage(d, tenantId, month));
     const hash = packageHash(before);
+    const endedMonthHash = packageHash(await tx((d) => computeMonthPackage(d, tenantId, "2020-01")));
     const rows = packageRows(before, hash);
     expect(toCsv(rows)).toContain(`meta,package_hash,${hash},,`);
     expect(await tx((d) => listPackageExports(d, tenantId, month))).toEqual([]);
@@ -89,11 +90,17 @@ describe.skipIf(!adminUrl)("CPA month-end package (live)", () => {
     expect(chain.rows).toHaveLength(1);
     expect(chain.rows[0].payload).toEqual({ month, format: "csv", packageHash: hash, rowCount: rows.length, entryCount: before.journal.entryCount, totalCents: before.journal.totalCents });
 
-    // The export is itself a chain event, so the chain head moved and with it the hash: an export never leaves a month unchanged.
+    // The export is itself a chain event, and it falls inside the month being exported, so that
+    // month's own event count moves and the hash with it: exporting the current month never leaves
+    // it unchanged. A month that has already ended is a different matter — the event falls outside
+    // it, and its hash is unmoved. The close depends on exactly that: the hash covers what the
+    // package states about the month, never where the practice stands now (Increment 1.36).
     const afterExport = await tx((d) => computeMonthPackage(d, tenantId, month));
     expect(afterExport.chain.headSeq).toBe((before.chain.headSeq ?? 0) + 1);
     expect(afterExport.chain.headHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(afterExport.chain.eventsInMonth).toBe(before.chain.eventsInMonth + 1);
     expect(packageHash(afterExport)).not.toBe(hash);
+    expect(packageHash(await tx((d) => computeMonthPackage(d, tenantId, "2020-01")))).toBe(endedMonthHash);
     // Compute it twice with nothing between: the same rows give the same hash.
     expect(packageHash(await tx((d) => computeMonthPackage(d, tenantId, month)))).toBe(packageHash(afterExport));
 
