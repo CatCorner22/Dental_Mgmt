@@ -72,11 +72,18 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await b.audit("sign-in");
 
     await b.signIn("ridgeview-owner", "/home");
-    await page().getByRole("heading", { name: "Nothing on the Board yet" }).waitFor({ timeout: 60_000 });
+    await page().getByRole("heading", { name: "Today's board" }).waitFor({ timeout: 60_000 });
+    // Before any statement: no green state without a bank record; the seeded $75 write-off waits on the owner.
+    await page().getByRole("heading", { name: "No bank record yet" }).waitFor({ timeout: 60_000 });
+    expect(await page().getByText(/A day sheet on its own is a self-assertion/).count()).toBe(1);
+    const approvals = page().locator("div", { has: page().getByText("Approvals only you can give") }).last();
+    expect(await approvals.innerText()).toMatch(/1[\s\S]*\$75\.00 held until a second person decides/);
+    expect(await page().getByText(/No control decision comes up for review/).count()).toBe(1);
+    expect(await page().getByText(/Segregation health\. COSO overall \d+/).count()).toBe(1);
     for (const name of ["Open ledger", "Post payment", "Bank reconciliation", "Day close", "Statements", "Approvals inbox", "Practice Risk"]) {
-      expect(await page().locator("main").getByRole("link", { name }).count()).toBe(1);
+      expect(await page().locator("main").getByRole("link", { name, exact: true }).count()).toBe(1);
     }
-    await b.audit("home (owner)");
+    await b.audit("home (owner, no bank record)");
 
     await page().goto(`${app.base}/ledger`);
     await page().getByRole("heading", { name: "Ledger" }).waitFor();
@@ -223,4 +230,21 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await page().getByText(/As of .* · Issued/).count()).toBe(1);
     await b.audit("statement issued");
   }, 90_000);
+
+  it("shows the front desk the links only, and the owner a board that reflects the day", async () => {
+    await page().goto(`${app.base}/home`);
+    await page().getByRole("heading", { name: "Today's board" }).waitFor({ timeout: 60_000 });
+    await page().getByText(/The board is for the manager and owner seats/).waitFor({ timeout: 30_000 });
+    expect(await page().getByRole("heading", { name: "No bank record yet" }).count()).toBe(0);
+    await b.audit("home (front desk)");
+
+    await b.signIn("ridgeview-owner", "/home");
+    await page().getByRole("heading", { name: "Tied · needs a second look" }).waitFor({ timeout: 60_000 });
+    expect(await page().getByText(/^The same hands posted or prepared deposits and cleared the bank reconciliation\./).count()).toBe(1);
+    expect(await page().getByText(/Bank matching: 100% within 48 hours · detection lag 2 days \(median\)/).count()).toBe(1);
+    const approvals = page().locator("div", { has: page().getByText("Approvals only you can give") }).last();
+    expect(await approvals.innerText()).toMatch(/0[\s\S]*Nothing is waiting on you/);
+    expect(await page().getByRole("link", { name: "See who can clear independently" }).getAttribute("href")).toBe("/risk");
+    await b.audit("home (owner, tied with a second look)");
+  }, 120_000);
 });
