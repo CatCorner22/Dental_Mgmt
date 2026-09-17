@@ -106,6 +106,8 @@ const EVENT_FIELDS: Record<string, string> = {
   "role.granted": "access.granted",
   "role.revoked": "access.revoked",
   "control.policy_changed": "access.policyChanges",
+  /** A location's business hours moved (Increment 1.32): the after-hours hold's window changed with them. */
+  "location.hours_changed": "access.policyChanges",
   "digest.acknowledged": "chain.acknowledgments",
 };
 
