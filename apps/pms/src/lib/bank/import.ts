@@ -248,6 +248,38 @@ async function upsertBankTransaction(
   return { id: existing.id, inserted: false };
 }
 
+type PriorDisposition = { status: string; kind: string; matchRef: Record<string, unknown> | null };
+
+/**
+ * How an already-known bank line was last settled: matched to a deposit, or
+ * cleared/waived by a reconciler. A statement that overlaps an earlier import
+ * repeats such lines; they keep that disposition instead of reopening.
+ */
+async function priorDisposition(
+  db: AppDb,
+  tenantId: string,
+  bankTransactionId: string
+): Promise<PriorDisposition | null> {
+  const [row] = await db
+    .select({
+      status: reconciliationVariances.status,
+      kind: reconciliationVariances.kind,
+      matchRef: reconciliationVariances.matchRef,
+    })
+    .from(reconciliationVariances)
+    .where(
+      and(
+        eq(reconciliationVariances.tenantId, tenantId),
+        eq(reconciliationVariances.bankTransactionId, bankTransactionId),
+        sql`${reconciliationVariances.status} <> 'open'`
+      )
+    )
+    .orderBy(sql`${reconciliationVariances.createdAt} desc`)
+    .limit(1);
+  if (!row) return null;
+  return { status: row.status, kind: row.kind, matchRef: (row.matchRef ?? null) as Record<string, unknown> | null };
+}
+
 export async function createBankStatementImport(
   db: AppDb,
   input: CreateBankStatementImportInput
@@ -303,7 +335,13 @@ export async function createBankStatementImport(
   let matchedCents = 0;
   let varianceCents = 0;
   let newBankLineCount = 0;
-  const transactionIds: { id: string; staged: (typeof staged)[number]; match: DepositCandidate | null }[] = [];
+  let carriedCount = 0;
+  const transactionIds: {
+    id: string;
+    staged: (typeof staged)[number];
+    match: DepositCandidate | null;
+    carried: PriorDisposition | null;
+  }[] = [];
 
   for (const row of staged) {
     const txn = await upsertBankTransaction(db, {
@@ -315,6 +353,14 @@ export async function createBankStatementImport(
       now,
     });
     if (txn.inserted) newBankLineCount += 1;
+
+    const carried = txn.inserted ? null : await priorDisposition(db, input.tenantId, txn.id);
+    if (carried) {
+      carriedCount += 1;
+      if (carried.status === "matched") matchedCents += Math.abs(row.payload.amountCents);
+      transactionIds.push({ id: txn.id, staged: row, match: null, carried });
+      continue;
+    }
 
     const match = findDepositMatch(
       depositCandidates.filter((c) => !usedDeposits.has(c.key)),
@@ -328,13 +374,13 @@ export async function createBankStatementImport(
     } else {
       varianceCents += Math.abs(row.payload.amountCents);
     }
-    transactionIds.push({ id: txn.id, staged: row, match });
+    transactionIds.push({ id: txn.id, staged: row, match, carried: null });
   }
 
   const periodStart = summary.periodStart ?? staged[0]?.payload.postedDate ?? now.toISOString().slice(0, 10);
   const periodEnd = summary.periodEnd ?? staged.at(-1)?.payload.postedDate ?? periodStart;
   const reconciliationRunId = uuidv7(now.getTime() + 99_999);
-  const openVarianceCount = transactionIds.filter((row) => !row.match).length;
+  const openVarianceCount = transactionIds.filter((row) => !row.match && !row.carried).length;
   const reconciliationStatus = openVarianceCount === 0 ? "matched" : "variance";
 
   await db.insert(reconciliationRuns).values({
@@ -356,6 +402,7 @@ export async function createBankStatementImport(
       openVarianceCount,
       matchedDepositCount,
       newBankLineCount,
+      carriedCount,
     },
     createdAt: now,
     createdById: input.actorUserId,
@@ -369,11 +416,11 @@ export async function createBankStatementImport(
         tenantId: input.tenantId,
         runId: reconciliationRunId,
         bankTransactionId: row.id,
-        kind: row.match ? "matched_deposit" : "unmatched_bank",
+        kind: row.carried ? row.carried.kind : row.match ? "matched_deposit" : "unmatched_bank",
         amountCents: row.staged.payload.amountCents,
         description: row.staged.payload.description,
-        status: row.match ? "matched" : "open",
-        matchRef: row.match ? row.match.matchRef : null,
+        status: row.carried ? row.carried.status : row.match ? "matched" : "open",
+        matchRef: row.carried ? row.carried.matchRef : row.match ? row.match.matchRef : null,
         createdAt: now,
       }))
     );
@@ -388,6 +435,7 @@ export async function createBankStatementImport(
     reconciliationStatus,
     matchedDepositCount,
     openVarianceCount,
+    carriedCount,
   }, now);
 
   return {

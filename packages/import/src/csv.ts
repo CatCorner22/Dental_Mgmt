@@ -68,25 +68,48 @@ export function requireColumns(headers: string[], required: string[][]): string[
 export function parseMoneyToCents(raw: string): number | null {
   const trimmed = raw.trim();
   if (!trimmed) return null;
-  const negative = trimmed.startsWith("(") && trimmed.endsWith(")");
-  const normalized = trimmed.replace(/[$,()]/g, "").trim();
+  const parens = trimmed.startsWith("(") && trimmed.endsWith(")");
+  let normalized = trimmed.replace(/[$,()]/g, "").trim();
   if (!normalized) return null;
-  const parts = normalized.split(".");
-  if (parts.length > 2) return null;
-  const dollars = Number(parts[0]);
-  if (!Number.isFinite(dollars)) return null;
-  const centsPart = parts[1] ?? "00";
-  if (!/^\d{1,2}$/.test(centsPart)) return null;
-  const cents = dollars * 100 + Number(centsPart.padEnd(2, "0"));
+  let negative = parens;
+  if (normalized.startsWith("-") || normalized.startsWith("+")) {
+    negative = negative !== normalized.startsWith("-");
+    normalized = normalized.slice(1).trim();
+  }
+  // Plain decimal digits only: no exponent, radix prefix, sign or whitespace inside.
+  const match = normalized.match(/^(\d+)(?:\.(\d{1,2}))?$/);
+  if (!match) return null;
+  const cents = Number(match[1]) * 100 + Number((match[2] ?? "00").padEnd(2, "0"));
+  if (!Number.isSafeInteger(cents)) return null;
   return negative ? -cents : cents;
+}
+
+function calendarDate(year: number, month: number, day: number): string | null {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day) return null;
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 export function parseIsoDate(raw: string): string | null {
   const trimmed = raw.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return calendarDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
   const mdy = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!mdy) return null;
-  const month = mdy[1].padStart(2, "0");
-  const day = mdy[2].padStart(2, "0");
-  return `${mdy[3]}-${month}-${day}`;
+  return calendarDate(Number(mdy[3]), Number(mdy[1]), Number(mdy[2]));
+}
+
+/**
+ * Records a data line the parser could not turn into a row. `lineNumber` is
+ * the 1-based data line (the header is line 0), so an operator can find it in
+ * the file; the code is stable for validators and tests.
+ */
+export function skipRow(
+  warnings: string[],
+  lineNumber: number,
+  code: string,
+  detail: string
+): void {
+  warnings.push(`Row ${lineNumber} skipped (${code}): ${detail}`);
 }

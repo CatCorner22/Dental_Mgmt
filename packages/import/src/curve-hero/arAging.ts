@@ -1,7 +1,7 @@
-import { headerIndex, parseCsv, parseMoneyToCents, requireColumns } from "../csv";
+import { headerIndex, parseCsv, parseMoneyToCents, requireColumns, skipRow } from "../csv";
 import type { ArAgingRow } from "../types";
 
-export function parseCurveHeroArAging(content: string): ArAgingRow[] {
+export function parseCurveHeroArAging(content: string, warnings: string[] = []): ArAgingRow[] {
   const table = parseCsv(content);
   if (table.length === 0) return [];
   const headers = table[0];
@@ -29,9 +29,9 @@ export function parseCurveHeroArAging(content: string): ArAgingRow[] {
   const totalIdx = headerIndex(headers, ["Total"]);
 
   const rows: ArAgingRow[] = [];
-  for (const cells of table.slice(1)) {
+  table.slice(1).forEach((cells, i) => {
     const patientMrn = (cells[mrnIdx] ?? "").trim();
-    if (!patientMrn) continue;
+    if (!patientMrn) return skipRow(warnings, i + 1, "patient_mrn_required", "blank patient MRN");
     const currentCents = parseMoneyToCents(cells[currentIdx] ?? "") ?? 0;
     const days30Cents = parseMoneyToCents(cells[d30Idx] ?? "") ?? 0;
     const days60Cents = parseMoneyToCents(cells[d60Idx] ?? "") ?? 0;
@@ -49,6 +49,6 @@ export function parseCurveHeroArAging(content: string): ArAgingRow[] {
       days120PlusCents,
       totalCents: totalCents ?? currentCents + days30Cents + days60Cents + days90Cents + days120PlusCents,
     });
-  }
+  });
   return rows;
 }
