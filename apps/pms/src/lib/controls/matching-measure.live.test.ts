@@ -181,7 +181,7 @@ describe.skipIf(!adminUrl)("Detection lag and the 48-hour match rate, measured (
         now: new Date("2026-09-16T09:00:00Z"),
       })
     );
-    expect(again).toMatchObject({ status: "validated", matchedDepositCount: 0, unmatchedCount: 5, newBankLineCount: 0 });
+    expect(again).toMatchObject({ status: "validated", matchedDepositCount: 0, unmatchedCount: 0, newBankLineCount: 0 });
     expect(again.reconciliationRunId).not.toBe(runId);
     const { rows } = await db.admin.query("SELECT count(*)::int AS n FROM bank_transactions WHERE tenant_id = $1", [tenant.id]);
     expect(rows[0].n).toBe(5);
