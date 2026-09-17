@@ -34,8 +34,12 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
     // draft on currentUser().id + '|' + aid. Alex (dp-1, PIN 8001) types $20.00 card and his PIN into Checkout; the pad
     // switches the author to Casey (dp-2, 8002) — sessions and the chip now say Casey — yet Casey's Checkout still holds
     // Alex's $20.00 and Alex's PIN 8001, and Post freezes "Alex Rivera" on the payment and the collection decision.
-    // Negative control: once the draft is keyed per pass (or the temp id is per pass), Casey's Checkout opens fresh
-    // (pin '' / no amount) or the posting carries Casey Morgan; draftPinSeenByCasey !== '8001' or paymentActor !== 'Alex Rivera'.
+    // Two causes, both needed (verified by patching each alone — still YES — and both — no): (1) the shared key, and (2) shell.js's
+    // pad submit assigns location.hash a value equal to the current hash for a temp→temp switch (same persona, same route), so no
+    // hashchange fires and the canvas is never repainted — the old author's inputs and Post closure stay on screen. Existing
+    // S-checkout-screen-7 / S-controls-5 cover permanent-user switches (distinct ids, persona hash change), not two passes.
+    // Negative control: keying the draft per pass AND repainting the canvas on a same-hash switch (Proto.router.render(), as
+    // router.go does) makes Casey's Checkout open fresh (pin '', amount 44.00) and nothing posts under Alex → 'no'.
     async 'S2-identity-pin-passes-1'(b) {
       const { c, p, errs } = await ctx(b);
       try {
@@ -58,11 +62,12 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const ses = await sessions(p); const seatAfterPost = await who(p); const chipAfterPost = await chip(p);
         const gate = await refusalsDom(p);
         const paymentActor = payments.length === 1 ? payments[0].actor : null;
-        const reproduced = alex.ok && casey.ok && seatAlex.id === 'u-temp' && seatCasey.id === 'u-temp' && seatCasey.name === 'Casey Morgan' && chipCasey.text === 'CM'
-          && hash === '#/temp/checkout/a-1044' && draftSeenByCasey.pin === (alex.pin || '8001') && draftSeenByCasey.amount === '20.00'
-          && before.length === 0 && paymentActor === 'Alex Rivera' && decisions.some((d) => d.decidedBy === 'Alex Rivera') && gate.length === 0;
+        const caseyIsAuthor = seatCasey.name === 'Casey Morgan' && chipCasey.text === 'CM' && ses.some((s) => /Casey Morgan:open$/.test(s));
+        const draftLeaked = draftSeenByCasey.pin === (alex.pin || '8001') && draftSeenByCasey.amount === '20.00';
+        const postedUnderAlex = before.length === 0 && paymentActor === 'Alex Rivera' && decisions.some((d) => d.decidedBy === 'Alex Rivera') && gate.length === 0;
+        const reproduced = alex.ok && casey.ok && seatAlex.name === 'Alex Rivera' && hash === '#/temp/checkout/a-1044' && caseyIsAuthor && (draftLeaked || postedUnderAlex);
         rec('S2-identity-pin-passes-1', 'Two day-pass holders share one principal u-temp, so on the shared desk Casey Morgan\'s Checkout opens on Alex Rivera\'s draft — his $20.00 and his PIN 8001 still in the fields — and Post, with Casey on the chip and on the open session, freezes "Alex Rivera" on the payment and the collection decision', 'A2 (actor is the PIN\'s owner), B3 (draft keyed per author) — store.js passUser `id: \'u-temp\'`, checkout.js `Proto.store.currentUser().id + \'|\' + aid`; docs/13 §30 wrong-author on a shared device',
-          reproduced, { passes: { alex, casey }, seatAlex, chipAlex, draftAlex, seatCasey, chipCasey, hash, draftSeenByCasey, paymentsBefore: before, paymentsAfter: payments, paymentActor, decisions, sessionsAfter: ses, seatAfterPost, chipAfterPost, refusals: gate, writes: writes(ev), refusalEvents: refusalEv(ev), seqRange: range(ev, seq0), pageErrors: errs });
+          reproduced, { passes: { alex, casey }, seatAlex, chipAlex, draftAlex, seatCasey, chipCasey, hash, draftSeenByCasey, draftLeaked, postedUnderAlex, paymentsBefore: before, paymentsAfter: payments, paymentActor, decisions, sessionsAfter: ses, seatAfterPost, chipAfterPost, refusals: gate, writes: writes(ev), refusalEvents: refusalEv(ev), seqRange: range(ev, seq0), pageErrors: errs });
       } finally { await c.close(); }
     },
 
@@ -144,7 +149,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const afterB = await p.evaluate((id) => { const a = window.__proto.state().approvals.find((x) => x.id === id); return { status: a.status, decidedBy: a.decidedBy || null }; }, req2.requestId);
         const writeoffsB = await ledgerRows(p, 'p-306', 'write_off');
         legs.temp = { request: req2, pass: temp, approver: seat, result: tempRes, after: afterB, writeoffs: writeoffsB, writes: writes(evB), seqRange: range(evB, seqB) };
-        const tempApproved = req2.held && temp.ok && seat.id === 'u-temp' && !seat.entitlements.includes('approve_second') && tempRes.ok && afterB.status === 'approved' && afterB.decidedBy === 'Casey Morgan'
+        const tempApproved = req2.held && temp.ok && seat.name === 'Casey Morgan' && !seat.entitlements.includes('approve_second') && tempRes.ok && afterB.status === 'approved' && afterB.decidedBy === 'Casey Morgan'
           && writeoffsB.some((e) => e.approvalRequestId === req2.requestId && e.amountCents === -41000 && e.secondApprover === 'Casey Morgan');
         rec('S2-identity-pin-passes-3', 'decideApproval never checks that the approver may second: Bree Lawson (hygienist, no approve_second, not on the eligible list) approves the held $410 write-off with her own PIN 1111 and the -$410 posts with secondApprover "Bree Lawson"; a front-desk temp with a day pass does the same with PIN 8002. The existing checks S-controls-4 / S-moneydesk-close-9 pass a bare `true` step-up and are stopped by the PIN challenge, so they never reach this gate', 'B3 dual release needs a distinct, entitled second approver — store.js decideApproval `approver = user(approverId) || currentUser()` with no approve_second / eligible test; requestApproval\'s eligible list names Dana or Dr. Reagan; docs/05 dual release',
           breeApproved && tempApproved, { legs, breeApproved, tempApproved, pageErrors: errs });
@@ -175,8 +180,8 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const statusAfter = await p.evaluate((id) => window.__proto.state().approvals.find((x) => x.id === id).status, req.requestId);
         await hop(p, '#/temp/phone');
         const phoneHead = await p.evaluate(() => { const m = document.querySelector('main'); return m ? m.innerText.replace(/\s+/g, ' ').slice(0, 220) : null; });
-        const reproduced = alex.ok && casey.ok && alex.id !== casey.id && alexSeat.name === 'Alex Rivera' && caseySeat.name === 'Casey Morgan' && alexSeat.id === caseySeat.id
-          && req.held && request && request.requestedBy === 'Alex Rivera' && request.requestedById === 'u-temp' && caseySeat.entitlements.includes('approve_second')
+        const reproduced = alex.ok && casey.ok && alex.id !== casey.id && alexSeat.name === 'Alex Rivera' && caseySeat.name === 'Casey Morgan'
+          && req.held && request && request.requestedBy === 'Alex Rivera' && caseySeat.entitlements.includes('approve_second')
           && !pendingForCasey.includes(req.requestId) && caseyResult.code === 'blocked_same_person' && statusAfter === 'pending' && /Nothing waiting for you/.test(phoneHead || '');
         rec('S2-identity-pin-passes-4', 'The same-person control conflates two day-pass holders: Casey Morgan, an eligible second approver on her own pass, is refused Alex Rivera\'s held write-off with "You requested it" (blocked_same_person) and her Approvals screen says "Nothing waiting for you", because both passes resolve to the one principal u-temp', 'B3 independence is a property of two people, not of one seat id — store.js passUser `id: \'u-temp\'`; decideApproval `r.requestedById === approver.id`; pendingApprovalsFor `a.requestedById !== u.id`',
           reproduced, { passes: { alex, casey }, alexSeat, request, caseySeat, pendingForCasey, caseyResult, statusAfter, phoneHead, events: ev.length, seqRange: range(ev, seq0), pageErrors: errs });
