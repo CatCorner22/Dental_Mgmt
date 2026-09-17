@@ -10,6 +10,7 @@ import {
   type LedgerWriter,
   type PostEntryInput,
   type PostResult,
+  validateCents,
 } from "@pms/ledger";
 import { createApprovalRequest } from "../controls/approvals";
 import { staffToPeople } from "../controls/people";
@@ -124,6 +125,7 @@ function mapLedgerRow(row: typeof ledgerEntries.$inferSelect): LedgerEntry {
     coverageId: row.coverageId,
     reversesEntryId: row.reversesEntryId,
     approvalRequestId: row.approvalRequestId,
+    appliedExceptionId: row.appliedExceptionId,
     tender: row.tender as LedgerEntry["tender"],
     memo: row.memo,
     idempotencyKey: row.idempotencyKey,
@@ -164,6 +166,7 @@ export function makePostgresWriter(db: AppDb, tenantId: string): LedgerWriter {
         coverageId: entry.coverageId ?? null,
         reversesEntryId: entry.reversesEntryId ?? null,
         approvalRequestId: entry.approvalRequestId ?? null,
+        appliedExceptionId: entry.appliedExceptionId ?? null,
         tender: entry.tender ?? null,
         memo: entry.memo ?? null,
         idempotencyKey: entry.idempotencyKey,
@@ -261,6 +264,8 @@ export async function postLedgerEntry(
 ): Promise<PostLedgerResult> {
   const { tenantId, actorId, actorName, post } = input;
   const now = input.now ?? new Date();
+  const centsError = validateCents(post.amountCents);
+  if (centsError) return mapPostRefusal(centsError)!;
   const amountCents = normalizeAmountCents(post.kind, post.amountCents);
 
   if (post.kind === "charge" && !post.procedureId) {

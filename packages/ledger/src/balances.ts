@@ -36,13 +36,16 @@ export function allocatePatientLedger(
   allocations: PaymentAllocation[] = [],
   asOf?: string
 ): { charges: ChargeState[]; balances: AccountBalances } {
-  const rows = entries
-    .filter((e) => e.patientId === patientId && (!asOf || e.effectiveDate <= asOf))
-    .slice()
-    .sort(
-      (a, b) =>
-        a.effectiveDate.localeCompare(b.effectiveDate) || a.id.localeCompare(b.id)
-    );
+  const visible = entries.filter((e) => e.patientId === patientId && (!asOf || e.effectiveDate <= asOf));
+  const byId = new Map(visible.map((e) => [e.id, e]));
+  // A reversal is walked right after the row it reverses, whatever its own
+  // effective date: it can only undo a row that has already been applied.
+  const orderKey = (e: LedgerEntry, depth = 0): string => {
+    const own = `${e.effectiveDate}|${e.id}`;
+    const orig = e.reversesEntryId && depth < 8 ? byId.get(e.reversesEntryId) : undefined;
+    return orig && orig !== e ? `${orderKey(orig, depth + 1)}|~${e.id}` : own;
+  };
+  const rows = visible.slice().sort((a, b) => orderKey(a).localeCompare(orderKey(b)));
 
   const charges: ChargeState[] = rows
     .filter((e) => e.kind === "charge")
@@ -73,6 +76,9 @@ export function allocatePatientLedger(
   };
 
   let unapplied = 0;
+  // Money returned that no credit and no applied charge can absorb: a refund
+  // larger than what was ever paid. It is owed by the patient, not forgotten.
+  let shortfall = 0;
 
   for (const e of rows) {
     if (e.kind === "charge") continue;
@@ -83,12 +89,14 @@ export function allocatePatientLedger(
       const back =
         charges.find((c) => (c.takes[e.reversesEntryId ?? ""] ?? 0) > 0) ??
         charges.slice().reverse().find((c) => c.applied.length);
-      const orig = rows.find((x) => x.id === e.reversesEntryId);
+      const orig = e.reversesEntryId ? byId.get(e.reversesEntryId) : undefined;
       if (back && e.amountCents - t > 0) {
         take(back, e, t - e.amountCents);
         if (orig && insurerMoney(orig)) {
           back.insPaid = Math.max(0, back.insPaid - (e.amountCents - t));
         }
+      } else if (e.amountCents - t > 0) {
+        shortfall += e.amountCents - t;
       }
       continue;
     }
@@ -108,14 +116,12 @@ export function allocatePatientLedger(
       if (c.open <= 0) continue;
       rem -= take(c, e, Math.min(rem, c.open));
     }
-    if (rem > 0) {
-      const last = pool[pool.length - 1];
-      if (last) take(last, e, rem);
-      else unapplied += rem;
-    }
+    // Whatever no open charge can absorb is credit on the account, never an
+    // allocation beyond a charge's amount.
+    if (rem > 0) unapplied += rem;
   }
 
-  let patientDue = 0;
+  let patientDue = shortfall;
   let insurancePending = 0;
   for (const c of charges) {
     if (c.open <= 0) continue;

@@ -67,6 +67,33 @@ export type LedgerWriter = {
   listPatientEntries(patientId: string): Promise<LedgerEntry[]>;
 };
 
+/**
+ * The cents model every posting must fit: a non-zero safe integer, as the
+ * ledger_entries.amount_cents bigint CHECK (<> 0) stores it. Anything else is
+ * refused before a sign rule or the database ever sees it.
+ */
+export function validateCents(amountCents: number): PostRefusal | null {
+  if (!Number.isSafeInteger(amountCents)) {
+    return {
+      ok: false,
+      code: "invalid_amount",
+      verb: "Enter an amount in whole cents",
+      control: "Amount",
+      why: "Amounts are stored as whole cents within the safe integer range.",
+    };
+  }
+  if (amountCents === 0) {
+    return {
+      ok: false,
+      code: "invalid_amount",
+      verb: "Enter a non-zero amount",
+      control: "Amount",
+      why: "A posting must move money; zero cents posts nothing.",
+    };
+  }
+  return null;
+}
+
 function validateSign(kind: LedgerKind, amountCents: number): PostRefusal | null {
   if (kind === "charge" && amountCents <= 0) {
     return {
@@ -120,11 +147,10 @@ export function makeInMemoryWriter(store: {
 
 export function createPostEntry(writer: LedgerWriter): PostEntryFn {
   return async (input) => {
-    const signError = validateSign(input.kind, input.amountCents);
+    const signError = validateCents(input.amountCents) ?? validateSign(input.kind, input.amountCents);
     if (signError) return signError;
 
-    const idempotencyKey =
-      input.idempotencyKey ??
+    const naturalKey = (supersedes?: string) =>
       buildIdempotencyKey({
         tenantId: input.tenantId,
         kind: input.kind,
@@ -133,9 +159,24 @@ export function createPostEntry(writer: LedgerWriter): PostEntryFn {
         effectiveDate: input.effectiveDate,
         procedureId: input.procedureId,
         reversesEntryId: input.reversesEntryId,
+        tender: input.tender ?? null,
+        supersedes,
       });
 
-    const existing = await writer.findByIdempotencyKey(input.tenantId, idempotencyKey);
+    let idempotencyKey = input.idempotencyKey ?? naturalKey();
+    let existing = await writer.findByIdempotencyKey(input.tenantId, idempotencyKey);
+    if (existing && !input.idempotencyKey) {
+      // A natural key names the posting, not the attempt. Once the earlier
+      // posting has been reversed, the same posting again is the documented
+      // reverse-and-repost correction, not a retry: it chains a fresh key.
+      const prior = await writer.listPatientEntries(input.patientId);
+      for (let hops = 0; existing && hops < 64; hops++) {
+        const reversedId = existing.id;
+        if (!prior.some((e) => e.kind === "reversal" && e.reversesEntryId === reversedId)) break;
+        idempotencyKey = naturalKey(reversedId);
+        existing = await writer.findByIdempotencyKey(input.tenantId, idempotencyKey);
+      }
+    }
     if (existing) {
       return { ok: true, entry: existing, allocations: [], duplicate: true };
     }
