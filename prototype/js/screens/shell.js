@@ -246,7 +246,8 @@
       if (!res.ok) { showStoreRefusal(res); return; }
       field._setError(null); digits = ''; paint();
       const who = res.user;
-      const persona = Object.entries(S.personaUser).find(([, uid]) => uid === who.id);   // the day-pass holder is the temp persona's user
+      // A pass holder is their own principal; whichever pass holds the seat is the temp persona's user.
+      const persona = who.dayPass ? ['temp', who.id] : Object.entries(S.personaUser).find(([, uid]) => uid === who.id);
       if (!persona) {
         // No chart persona for this account in the prototype: refuse rather than write a session that changes nothing.
         showRefusal({ code: 'no_chart_session', verb: 'Keep the current author — no charting session', control: 'Keep current author', onControl: () => close(), why: who.short + ' can approve and post but does not chart, so there is nothing for that account to open on this screen. The author stays as it was and nothing was written.', severity: 'info' });
@@ -259,7 +260,10 @@
       if (opts.onSwitch) opts.onSwitch(who);
       close();
       const p = persona[0]; P.set({ persona: p });
-      location.hash = '#/' + p + '/' + (r.route === 'signin' ? Proto.router.HOME[p] : r.route) + (r.id ? '/' + r.id : '');
+      const hash = '#/' + p + '/' + (r.route === 'signin' ? Proto.router.HOME[p] : r.route) + (r.id ? '/' + r.id : '');
+      // Two pass holders share one persona and one hash, so the repaint under the new name is explicit: the chip
+      // reads currentUser() and the canvas rebuilds, whether or not the browser sees a hash change.
+      if (location.hash === hash) { renderTopbar(r); renderAndon(r); Proto.router.render(); } else location.hash = hash;
       Proto.router.announce('Now charting as ' + who.name);
     }
     const type = (d) => { if (digits.length < 6) { digits += d; paint(); } };

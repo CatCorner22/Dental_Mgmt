@@ -45,7 +45,8 @@
   /* One PIN rule for every posting verb, the author switch and the phone's step-up: the digits name their owner (an
      account or the day-pass holder) or they refuse. Misses count per device, not per account; the third locks the
      pad for five minutes and writes a practice finding, so a guessed PIN never posts. forUserId: the PIN must be
-     that person's own — a step-up carrying somebody else's PIN is a miss. */
+     that person's own — a step-up carrying somebody else's PIN is a miss. Verifying only reads: the seat moves in
+     the verb that succeeds (openSession), so a refused verb leaves the author where it found it. */
   const PIN_LOCK_MS = 5 * 60 * 1000;
   const PIN_WHY = 'No account carries that PIN. The posting freezes the poster the PIN names, so it cannot post under a guess. Three misses lock this device for five minutes.';
   const lockedOut = () => refuse('pin_locked', 'Wait five minutes — device locked', 'Close', 'Three PINs in a row matched nobody, so this device takes no PIN for five minutes. The lock is on the device, not on any account, and the misses are on record as a practice finding.');
@@ -58,7 +59,7 @@
     // without saying so, and the first temp's 8001 then counted as a miss toward the device lock.
     const pass = livePasses().find((d) => d.pin === pin);
     const who = S.users.find((x) => x.pin && x.pin === pin) || (pass ? passUser(pass) : null);
-    if (who && (!forUserId || who.id === forUserId)) { lock.misses = 0; if (pass) S.tempUser = who; return { ok: true, user: who }; }
+    if (who && (!forUserId || who.id === forUserId)) { lock.misses = 0; return { ok: true, user: who }; }
     lock.misses += 1;
     if (lock.misses >= 3) { lock.misses = 0; lock.until = Date.now() + PIN_LOCK_MS; pinLockout(); return lockedOut(); }
     return refuse('pin_no_match', 'Retype the PIN — no match', 'Enter PIN', PIN_WHY);
@@ -79,8 +80,9 @@
   const patient = (pid) => S.patients.find((p) => p.id === pid);
   const appt = (aid) => S.appointments.find((a) => a.id === aid);
   const encounter = (eid) => S.encounters.find((e) => e.id === eid);
-  // The pass holder is an account too: the pad verified 8001 and then refused the session it names.
-  const user = (uid) => S.users.find((u) => u.id === uid) || (S.tempUser && S.tempUser.id === uid ? tempSeat() : null);
+  // The pass holder is an account too: the pad verified 8001 and then refused the session it names. Every live pass
+  // resolves by its own id, not only the one in the seat, so a second approver on another pass is a person here.
+  const user = (uid) => S.users.find((u) => u.id === uid) || (S.tempUser && S.tempUser.id === uid ? tempSeat() : null) || (String(uid || '').startsWith(PASS_ID) ? livePasses().filter((d) => PASS_ID + d.id === uid).map(passUser)[0] || null : null);
   const carrierName = (cid) => (S.carriers.find((c) => c.id === cid) || {}).name || '—';
   const NOT_FOUND = { appointment: 'Open a scheduled appointment', encounter: 'Open a chart from the Board', patient: 'Search for the patient', claim: 'Open a claim from Money Desk', request: 'Open a request from Approvals' };
   const notFound = (what) => refuse('notfound', 'Open ' + what + ' from a list', NOT_FOUND[what] || 'Go back', 'The id in the address does not name a row in this practice. Nothing was read and nothing was written.');
@@ -89,14 +91,16 @@
   const NO_PASS = { id: 'u-temp', name: 'No day pass issued', short: 'No day pass', role: 'temp', entitlements: [], noPass: true };
   /* Which passes are live is the store's to say, once: a pass is live until it is revoked or its shift end plus the
      30-minute grace has passed on the store clock. Roles prints this state on each pass row and verifyPin accepts every
-     live pass's PIN; the temp seat (u-temp, the one persona every pass holder shares) is whichever holder's PIN last
-     verified, the newest pass until one does. */
+     live pass's PIN; the temp seat (the one persona every pass holder shares) is whichever holder the pad last opened a
+     session for, the newest pass until one does. Each pass is its own principal: drafts, sessions, decisions and the
+     same-person rule key on u-pass-<dayPassId>, never on the shared persona. */
   const GRACE_MIN = 30;
+  const PASS_ID = 'u-pass-';
   const passEnds = (dp) => { const [hh, mm] = String(dp.shiftEnd || '23:59').split(':').map(Number); const t = hh * 60 + mm + GRACE_MIN; return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); };
   const passState = (dp) => (dp.revokedAt ? 'revoked' : passEnds(dp) <= S.clock.time ? 'ended' : 'live');
   const passLive = (dp) => passState(dp) === 'live';
   const livePasses = () => S.dayPasses.filter(passLive);
-  const passUser = (dp) => ({ id: 'u-temp', name: dp.name, short: dp.name.split(' ')[0], role: dp.role, entitlements: dp.entitlements, dayPass: dp.id, pin: dp.pin });
+  const passUser = (dp) => ({ id: PASS_ID + dp.id, name: dp.name, short: dp.name.split(' ')[0], role: dp.role, entitlements: dp.entitlements, dayPass: dp.id, pin: dp.pin });
   // A seat whose pass has ended is nobody again, so the gates that need a pass refuse as before it was issued.
   const tempSeat = () => (S.tempUser && S.dayPasses.some((d) => d.id === S.tempUser.dayPass && passLive(d)) ? S.tempUser : null);
   const currentUser = () => { const p = window.__proto && window.__proto.persona; if (p === 'temp') return tempSeat() || NO_PASS; return user(S.personaUser[p]) || S.users[0]; };
@@ -642,6 +646,8 @@
     const prior = S.sessions.filter((x) => !x.endedAt).pop() || null;
     if (prior) { prior.endedAt = S.clock.time; prior.endedBy = who.name; touch('sessions', prior.id); }
     const row = write('sessions', { id: 'ses-' + nextId.ses++, userId: who.id, actor: who.name, device: (window.__proto && window.__proto.device) || 'desk', startedAt: S.clock.time, supersedes: prior ? prior.id : null, endedAt: null });
+    // The temp seat moves in the same transaction as the session row: no refused verb, and no PIN that only verified, moves it.
+    if (who.dayPass) S.tempUser = who;
     return { ok: true, session: row };
   }
   /* The approvals one person is waiting on. Four surfaces counted this and disagreed: the Andon filtered by
@@ -947,7 +953,7 @@
     // nobody else's; the pad shows it once, at issue. Minted past every seeded PIN, so it collides with none.
     const pin = '80' + String(nextId.dp).padStart(2, '0');
     const dp = write('dayPasses', { id: 'dp-' + nextId.dp++, name: form.name, role, requestedRole: form.role, locationId: form.location, shiftEnd: form.end, entitlements: ents, expiresAt: form.end + ' + 30 min grace', createdBy: currentUser().name, credentialId: pv.credential ? pv.credential.id : null, sodDecision: decision || null, pin });
-    write('userEntitlements', { id: 'ue-' + nextId.ue++, userId: 'u-temp', entitlements: ents, expiresAt: dp.expiresAt, grantedBy: currentUser().name });
+    write('userEntitlements', { id: 'ue-' + nextId.ue++, userId: PASS_ID + dp.id, entitlements: ents, expiresAt: dp.expiresAt, grantedBy: currentUser().name });
     if (decision) for (const c of (blocking.length ? blocking : pv.conflicts)) write('controlDecisions', { id: 'dec-' + nextId.dec++, kind: decision, ruleId: c.id, rulePair: c.pair, severity: c.severity, dayPassId: dp.id, reviewBy: '2026-10-03', by: currentUser().name });
     // The newest pass takes the temp seat; the earlier passes stay live and their PINs still name their holders.
     S.tempUser = passUser(dp);
