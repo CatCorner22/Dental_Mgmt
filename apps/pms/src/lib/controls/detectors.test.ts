@@ -1,20 +1,26 @@
 import { describe, expect, it } from "vitest";
 import type { ControlDecision } from "@pms/controls-engine";
+import type { DualReleasePolicy } from "@pms/controls-engine";
 import {
+  backdatedPostingCandidates,
   DEGRADED_CLEARANCE_KIND,
   DECISION_UNREVIEWED_KIND,
   degradedRunCandidate,
   degradedRunSentence,
+  duplicatePaymentCandidates,
   lineDetail,
   lineSentence,
   overdueDecisionCandidate,
   overdueDecisions,
   planFindings,
   planUnmatchedFindings,
+  releaseWithoutApprovalCandidates,
   severityForAge,
+  severityForBackdate,
   severityForOverdue,
   UNMATCHED_BANK_LINE_KIND,
   type ControlFindingRow,
+  type LedgerEntryFacts,
   type OpenBankLine,
 } from "./detectors";
 
@@ -144,5 +150,90 @@ describe("unreviewed decision detector", () => {
       'A "Accept residual" decision on sod finding u-1:rule-cash-rec was due for review on 2026-09-01 and has been past that date for 16 days. It still governs until a new decision supersedes it.'
     );
     expect(String(c.detail.sentence)).not.toMatch(/Riley/);
+  });
+});
+
+function entry(over: Partial<LedgerEntryFacts>): LedgerEntryFacts {
+  return {
+    id: "e1",
+    accountId: "acct-1",
+    kind: "write_off",
+    amountCents: -50_000,
+    effectiveDate: "2026-09-10",
+    postedOn: "2026-09-10",
+    approvalRequestId: null,
+    appliedExceptionId: null,
+    reversesEntryId: null,
+    ...over,
+  };
+}
+
+const policy: DualReleasePolicy = {
+  enabled: true,
+  ownerCanSecondAny: true,
+  hardBlockWithoutSecond: false,
+  rules: [
+    { channel: "writeoff", label: "Write-offs", enabled: true, thresholdUsd: 150, requireDistinctPeople: true, firstApproverRoles: [], secondApproverRoles: [], mitigatesRuleIds: [], processIds: [], description: "" },
+    { channel: "check", label: "Checks", enabled: false, thresholdUsd: 500, requireDistinctPeople: true, firstApproverRoles: [], secondApproverRoles: [], mitigatesRuleIds: [], processIds: [], description: "" },
+  ],
+  exceptions: [],
+};
+
+describe("release without approval detector", () => {
+  it("alarms only on a guarded, enabled channel above threshold with neither an approval nor an exception", () => {
+    const out = releaseWithoutApprovalCandidates(
+      [
+        entry({}), // $500 write-off, nothing cited: alarm
+        entry({ id: "ok-approved", approvalRequestId: "req-1" }),
+        entry({ id: "ok-exception", appliedExceptionId: "x-1" }),
+        entry({ id: "ok-small", amountCents: -15_000 }), // at the threshold, not above
+        entry({ id: "ok-charge", kind: "charge", amountCents: 90_000 }), // not a guarded channel
+        entry({ id: "ok-check-off", kind: "refund", amountCents: -90_000 }), // channel rule disabled
+      ],
+      policy
+    );
+    expect(out.map((c) => c.subjectId)).toEqual(["e1"]);
+    expect(out[0]).toMatchObject({ severity: "high", detail: { channel: "writeoff", thresholdUsd: 150, amountCents: -50_000 } });
+    expect(out[0]!.detail.sentence).toBe(
+      "A $500.00 write-off posted 2026-09-10 cites neither an approved request nor a policy exception, and the active policy holds the writeoff channel to dual release above $150.00. The database trigger should have refused this row; treat it as a chain-integrity alarm."
+    );
+    expect(releaseWithoutApprovalCandidates([entry({})], null)).toEqual([]);
+    expect(releaseWithoutApprovalCandidates([entry({})], { ...policy, enabled: false })).toEqual([]);
+  });
+});
+
+describe("backdated posting detector", () => {
+  it("flags reversals, adjustments, and write-offs posted more than seven days after their effective date", () => {
+    const out = backdatedPostingCandidates([
+      entry({}), // same day
+      entry({ id: "week", effectiveDate: "2026-09-03", postedOn: "2026-09-10" }), // exactly seven days: not flagged
+      entry({ id: "late", kind: "adjustment", amountCents: -2_000, effectiveDate: "2026-08-20", postedOn: "2026-09-10" }), // 21 days
+      entry({ id: "old", kind: "reversal", amountCents: 10_000, effectiveDate: "2026-07-01", postedOn: "2026-09-10" }), // 71 days
+      entry({ id: "payment", kind: "patient_payment", amountCents: -10_000, effectiveDate: "2026-07-01", postedOn: "2026-09-10" }), // not a corrected kind
+    ]);
+    expect(out.map((c) => [c.subjectId, c.severity])).toEqual([
+      ["late", "medium"],
+      ["old", "high"],
+    ]);
+    expect(out[0]!.detail.sentence).toBe("A $20.00 adjustment effective 2026-08-20 was posted on 2026-09-10, 21 days after its effective date.");
+    expect(severityForBackdate(30)).toBe("medium");
+    expect(severityForBackdate(31)).toBe("high");
+  });
+});
+
+describe("duplicate patient payment detector", () => {
+  it("flags the later of two same-amount same-day payments on one account, and stops once one is reversed", () => {
+    const a = entry({ id: "p1", kind: "patient_payment", amountCents: -10_000, effectiveDate: "2026-09-14", postedOn: "2026-09-14" });
+    const b = entry({ id: "p2", kind: "patient_payment", amountCents: -10_000, effectiveDate: "2026-09-14", postedOn: "2026-09-15" });
+    const other = entry({ id: "p3", kind: "patient_payment", amountCents: -10_000, effectiveDate: "2026-09-14", postedOn: "2026-09-14", accountId: "acct-2" });
+    const diff = entry({ id: "p4", kind: "patient_payment", amountCents: -12_000, effectiveDate: "2026-09-14", postedOn: "2026-09-14" });
+    const out = duplicatePaymentCandidates([b, a, other, diff]);
+    expect(out.map((c) => c.subjectId)).toEqual(["p2"]);
+    expect(out[0]).toMatchObject({ severity: "low", detail: { firstEntryId: "p1", count: 2 } });
+    expect(out[0]!.detail.sentence).toBe(
+      "2 patient payments of $100.00 on one account carry the effective date 2026-09-14, and none has been reversed. This row is the later one; the first stands as posted."
+    );
+    const reversal = entry({ id: "r1", kind: "reversal", amountCents: 10_000, reversesEntryId: "p2", effectiveDate: "2026-09-15", postedOn: "2026-09-15" });
+    expect(duplicatePaymentCandidates([a, b, reversal])).toEqual([]);
   });
 });
