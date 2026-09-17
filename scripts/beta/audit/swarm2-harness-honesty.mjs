@@ -16,7 +16,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '../../..');
 
 export default (H) => {
-  const { ctx, go, hop, press, click, txt, state, events, rec } = H;
+  const { ctx, go, hop, press, click, clickOnce, txt, state, events, rec } = H;
   const fill = (p, tid, v) => p.fill(`[data-testid="${tid}"]`, v);
   const has = (p, tid) => p.evaluate((t) => !!document.querySelector('[data-testid="' + t + '"]'), tid);
   const attr = (p, tid, name) => p.evaluate(([t, n]) => { const e = document.querySelector('[data-testid="' + t + '"]'); return e ? e.getAttribute(n) : null; }, [tid, name]);
@@ -258,6 +258,55 @@ export default (H) => {
         rec('S2-harness-honesty-6', 'verify-docs.sh §9 still prints PASS after the Board card Check out builder is renamed to .pay, although task ' + tasks.join(',') + ' names board.card.a-1044.checkout and the mutated board no longer renders it: head and tail are matched as independent substrings of all prototype JS',
           'harness honesty · scripts/verify-docs.sh:125-141 §9 ok = (head in js) and (tail-ish in js)', reproduced, evidence);
       } finally { await c.close(); fs.rmSync(tmp, { recursive: true, force: true }); }
+    },
+
+    // S2-harness-honesty-v1 · checkout.js:142 afterWriteoff() subtracts the typed write-off from the estimate whenever the
+    // write-off row is open, but once the held request is approved the write-off is already on the ledger (the estimate has
+    // dropped by it) and doPost()/readback() zero woCents. So with ar-1 approved for $200.00 on a-1047, Send statement promises
+    // "a statement-due row for $10.00" and the read-back asks to confirm "send a $10.00 statement", while Post writes a
+    // statementsDue row of 21000 and the Posted card reads "Statement due $210.00". S-checkout-screen-3 was written for this
+    // promise-vs-row pair but requires row === 41000, so it cannot see the $10.00/$210.00 disagreement.
+    // Negative control: when afterWriteoff() ignores the typed write-off once the request is approved (or after the row is
+    // dismissed), the promise, the read-back and the row all carry $210.00 and this check reports false.
+    async 'S2-harness-honesty-v1'(b) {
+      const { c, p, errs } = await ctx(b);
+      try {
+        await go(p, '#/frontdesk/checkout/a-1047');
+        await click(p, 'checkout.tender.card'); await fill(p, 'checkout.amount', '210');
+        await click(p, 'checkout.writeoff.add'); await fill(p, 'checkout.writeoff.amount', '200'); await click(p, 'checkout.writeoff.reason.courtesy');
+        await click(p, 'checkout.post'); await p.waitForTimeout(150);
+        await click(p, 'refusal.control'); await p.waitForTimeout(150);
+        const req = await p.evaluate(() => { const a = window.__proto.state().approvals.slice(-1)[0]; return a ? { id: a.id, status: a.status, amountCents: a.amountCents } : null; });
+        if (!req) throw new Error('setup: no write-off request was raised on a-1047');
+        await hop(p, '#/owner/phone'); await p.waitForTimeout(200);
+        await click(p, 'phone.request.' + req.id + '.approve');
+        for (const d of ['2', '4', '6', '8']) await click(p, 'phone.stepup.' + d);
+        await click(p, 'phone.stepup.submit'); await p.waitForTimeout(200);
+        const approved = await p.evaluate((id) => { const a = window.__proto.state().approvals.find((x) => x.id === id); return a ? { status: a.status, postedCents: a.postedCents == null ? null : a.postedCents, decidedBy: a.decidedBy || null } : null; }, req.id);
+        if (!approved || approved.status !== 'approved') throw new Error('setup: ' + req.id + ' was not approved (' + JSON.stringify(approved) + ')');
+        await hop(p, '#/frontdesk/checkout/a-1047'); await p.waitForTimeout(200);
+        const canvas = () => p.evaluate(() => (document.getElementById('canvas') || {}).textContent.replace(/\s+/g, ' '));
+        const heldChip = ((await canvas()).match(/Write-off \$[\d,.]+ approved by Dr\. Blake Reagan/) || [null])[0];
+        const est = await p.evaluate(() => Proto.store.windowEstimate('a-1047').patientCents);
+        await click(p, 'checkout.collect.seg.send-statement'); await p.waitForTimeout(150);
+        const promise = ((await canvas()).match(/statement-due row for \$[\d,.]+/) || [null])[0];
+        const seq0 = await lastSeq(p);
+        await clickOnce(p, 'checkout.post'); await p.waitForTimeout(200);
+        const readback = ((await canvas()).match(/send a \$[\d,.]+ statement/) || [null])[0];
+        await click(p, 'checkout.post.confirm'); await p.waitForTimeout(200);
+        const S = await state(p);
+        const row = S.statementsDue.filter((x) => x.patientId === 'p-306').pop() || null;
+        const card = ((await canvas()).match(/Statement due \$[\d,.]+/) || [null])[0];
+        const codes = refusalsSince(await events(p), seq0);
+        const dollars = (cents) => '$' + (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2 });
+        const money = (s) => { const m = (s || '').match(/\$([\d,]+\.\d\d)/); return m ? Math.round(Number(m[1].replace(/,/g, '')) * 100) : null; };
+        const evidence = { request: req, approved, heldChip, estimateAfterApproval: est, promise, readback, refusalCodesSincePost: codes, statementsDueRow: row && { id: row.id, amountCents: row.amountCents }, postedCard: card, pageErrors: errs };
+        const rowCents = row ? row.amountCents : null;
+        const reproduced = !!heldChip && est === 21000 && !!row && rowCents === 21000 && !!card && card.includes(dollars(21000))
+          && !!promise && money(promise) !== null && money(promise) !== rowCents && !!readback && money(readback) === money(promise);
+        rec('S2-harness-honesty-v1', 'With the $200.00 write-off on a-1047 approved and already on the ledger, Checkout\'s Send statement promises "a statement-due row for ' + (promise ? dollars(money(promise)) : '?') + '" and its read-back confirms a statement for the same figure, while Post writes statementsDue ' + rowCents + ' and the Posted card reads "' + card + '": checkout.js:142 afterWriteoff() subtracts the typed write-off a second time after approval',
+          'A2/C5 · checkout.js:142 afterWriteoff ignores heldReq.status; :131 readback, :277 promise', reproduced, evidence);
+      } finally { await c.close(); }
     },
   };
 };
