@@ -132,6 +132,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [16, "bank_reconciliation", "app_migrate"],
         [17, "day_close_deposits", "app_migrate"],
         [18, "statements", "app_migrate"],
+        [19, "control_findings", "app_migrate"],
       ]);
       const owners = await db.admin.query(
         "SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'"
@@ -142,7 +143,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
     it("is a no-op the second time", async () => {
       const result = await applyMigrations(db.admin);
       expect(result.applied).toEqual([]);
-      expect(result.alreadyApplied).toBe(18);
+      expect(result.alreadyApplied).toBe(19);
     });
 
     it("left domain_event with RLS forced after the seq backfill", async () => {
@@ -740,6 +741,56 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
       const remove = await attempt("app_rw", ridgeview, "DELETE FROM sod_findings WHERE id = $1", [findingId]);
       expect(remove).toMatchObject({ code: "42501" });
       const otherTenant = await attempt("app_rw", oakridge, "SELECT id FROM sod_findings");
+      expect(otherTenant).toEqual({ rows: [] });
+    });
+
+    it("records a detector finding on (kind, subject), closes it with a reason, and never deletes it", async () => {
+      const findingId = uuidv7(5_010);
+      const subject = uuidv7(5_011);
+      const insert = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO control_findings (
+           id, tenant_id, kind, subject_kind, subject_id, severity, detail, detector_version, first_seen_at, last_seen_at
+         ) VALUES ($1, $2, 'unmatched_bank_line_48h', 'bank_transaction', $3, 'low', '{}'::jsonb, 'detectors-v1', now(), now())`,
+        [findingId, ridgeview.id, subject]
+      );
+      expect(insert).toEqual({ rows: [] });
+      const duplicate = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO control_findings (
+           id, tenant_id, kind, subject_kind, subject_id, severity, detail, detector_version, first_seen_at, last_seen_at
+         ) VALUES ($1, $2, 'unmatched_bank_line_48h', 'bank_transaction', $3, 'medium', '{}'::jsonb, 'detectors-v1', now(), now())`,
+        [uuidv7(5_012), ridgeview.id, subject]
+      );
+      expect(duplicate).toMatchObject({ code: "23505" });
+      const unknownKind = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO control_findings (
+           id, tenant_id, kind, subject_kind, subject_id, severity, detail, detector_version, first_seen_at, last_seen_at
+         ) VALUES ($1, $2, 'accusation', 'bank_transaction', $3, 'low', '{}'::jsonb, 'detectors-v1', now(), now())`,
+        [uuidv7(5_013), ridgeview.id, uuidv7(5_014)]
+      );
+      expect(unknownKind).toMatchObject({ code: "23514" });
+      const closeWithoutReason = await attempt(
+        "app_rw",
+        ridgeview,
+        "UPDATE control_findings SET status = 'closed', closed_at = now() WHERE id = $1",
+        [findingId]
+      );
+      expect(closeWithoutReason).toMatchObject({ code: "23514" });
+      const close = await attempt(
+        "app_rw",
+        ridgeview,
+        "UPDATE control_findings SET status = 'closed', closed_at = now(), closed_reason = 'matched' WHERE id = $1",
+        [findingId]
+      );
+      expect(close).toEqual({ rows: [] });
+      const remove = await attempt("app_rw", ridgeview, "DELETE FROM control_findings WHERE id = $1", [findingId]);
+      expect(remove).toMatchObject({ code: "42501" });
+      const otherTenant = await attempt("app_rw", oakridge, "SELECT id FROM control_findings");
       expect(otherTenant).toEqual({ rows: [] });
     });
 

@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { takeControlSnapshot, type ControlSnapshot } from "@pms/controls-engine";
 import { controlSnapshots, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
+import { runDetectors } from "./detectors";
 import { appendControlEvent } from "./events";
 import { refreshSodFindings } from "./findings";
 import { loadControlsContext, type ControlsContext } from "./practiceState";
@@ -38,8 +39,9 @@ export async function computeSnapshot(db: AppDb, tenantId: string, now: Date = n
 }
 
 /**
- * Freezes the scores into control_snapshots, refreshes the findings table
- * so the two agree, and appends control.snapshot with the headline only.
+ * Freezes the scores into control_snapshots, refreshes the SoD findings
+ * table so the two agree, runs the detectors so their findings are current
+ * on the same clock, and appends control.snapshot with the headline only.
  */
 export async function takeSnapshot(
   db: AppDb,
@@ -48,6 +50,7 @@ export async function takeSnapshot(
   const now = input.now ?? new Date();
   const { ctx, snapshot } = await computeSnapshot(db, input.tenantId, now);
   await refreshSodFindings(db, input.tenantId, ctx.built.sod, now, ctx.decisions);
+  await runDetectors(db, input.tenantId, now);
 
   const id = uuidv7(now.getTime());
   await db.insert(controlSnapshots).values({

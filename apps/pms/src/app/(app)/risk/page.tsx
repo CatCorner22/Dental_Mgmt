@@ -54,7 +54,34 @@ type ExceptionsResponse = {
 
 type Me = { ok: boolean; role?: string; displayName?: string };
 
-type Loaded = { risk: RiskResponse; sod: SodResponse; decisions: DecisionsResponse; exceptions: ExceptionsResponse };
+type FindingItem = {
+  id: string;
+  kind: string;
+  kindLabel: string;
+  subjectKind: string;
+  subjectId: string;
+  severity: "low" | "medium" | "high";
+  status: "open" | "closed";
+  detail: Record<string, unknown>;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  closedAt: string | null;
+  closedReason: string | null;
+  reopenedCount: number;
+};
+
+type FindingsResponse = {
+  items: FindingItem[];
+  summary: { open: number; closed: number; high: number; medium: number; low: number };
+};
+
+type Loaded = {
+  risk: RiskResponse;
+  sod: SodResponse;
+  decisions: DecisionsResponse;
+  exceptions: ExceptionsResponse;
+  findings: FindingsResponse;
+};
 
 type LoadState =
   | { status: "loading" }
@@ -93,13 +120,14 @@ export default function PracticeRiskPage() {
   const [grantRefused, setGrantRefused] = useState<(RefusalContent & { canLicense: boolean }) | null>(null);
 
   const load = useCallback(async (fresh = false) => {
-    const [risk, sod, decisions, exceptions] = await Promise.all([
+    const [risk, sod, decisions, exceptions, findings] = await Promise.all([
       getJson<RiskResponse>(`/api/controls/risk${fresh ? "?fresh=1" : ""}`),
       getJson<SodResponse>("/api/controls/sod"),
       getJson<DecisionsResponse>("/api/controls/decisions"),
       getJson<ExceptionsResponse>("/api/controls/exceptions"),
+      getJson<FindingsResponse>("/api/controls/findings"),
     ]);
-    return { risk, sod, decisions, exceptions };
+    return { risk, sod, decisions, exceptions, findings };
   }, []);
 
   useEffect(() => {
@@ -325,7 +353,7 @@ function RiskBody({
   grantForm: GrantFormState;
   onRevoke: (person: RoleAssignment, entitlement: string) => void;
 }) {
-  const { risk, sod, decisions, exceptions } = data;
+  const { risk, sod, decisions, exceptions, findings } = data;
   const s = risk.snapshot;
   const conflicts = [...sod.conflicts]
     .filter((c) => showFamily || c.severity !== "family")
@@ -699,6 +727,63 @@ function RiskBody({
                       {overdue.has(d.id) && (
                         <span className="ml-2 rounded-md bg-[var(--review-soft)] px-2 py-0.5 text-xs font-semibold text-[var(--review-ink)]">
                           Overdue
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section aria-labelledby="detectors" className="mb-10">
+        <h2 id="detectors" className="mb-1 text-lg font-semibold">
+          Detector findings
+        </h2>
+        <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
+          Recorded, never enforced. The detectors run on every frozen snapshot, nightly and on demand, and
+          keep one row per condition: open while it holds, closed with the reason when it clears, reopened
+          if it returns. {findings.summary.open} open ({findings.summary.high} high, {findings.summary.medium}{" "}
+          medium, {findings.summary.low} low), {findings.summary.closed} closed. A finding describes a line or
+          a process, never a person.
+        </p>
+        {findings.items.length === 0 ? (
+          <p className="text-sm text-[var(--ink-2)]">No detector findings yet. Freeze a snapshot to run the detectors now.</p>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-[var(--line)] bg-[var(--surface)]">
+            <table className="min-w-full text-left text-sm">
+              <thead className="border-b border-[var(--line)] bg-[var(--cream)] text-[var(--ink-2)]">
+                <tr>
+                  <th className="px-4 py-3 font-semibold">Finding</th>
+                  <th className="px-4 py-3 font-semibold">Severity</th>
+                  <th className="px-4 py-3 font-semibold">What the rows say</th>
+                  <th className="px-4 py-3 font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {findings.items.map((f) => (
+                  <tr key={f.id} className="border-b border-[var(--line)] last:border-0 align-top">
+                    <td className="px-4 py-3">
+                      <p>{f.kindLabel}</p>
+                      <p className="text-xs text-[var(--ink-3)]" title={f.subjectId}>
+                        {f.subjectKind.replace(/_/g, " ")} {shortId(f.subjectId)} · first seen{" "}
+                        {new Date(f.firstSeenAt).toLocaleDateString()}
+                        {f.reopenedCount > 0 ? ` · reopened ${f.reopenedCount}×` : ""}
+                      </p>
+                    </td>
+                    <td className="px-4 py-3 capitalize">{f.severity}</td>
+                    <td className="max-w-prose px-4 py-3">{typeof f.detail.sentence === "string" ? f.detail.sentence : "—"}</td>
+                    <td className="px-4 py-3">
+                      {f.status === "open" ? (
+                        <span className="rounded-md bg-[var(--review-soft)] px-2 py-0.5 text-xs font-semibold text-[var(--review-ink)]">
+                          Open
+                        </span>
+                      ) : (
+                        <span className="text-[var(--ink-2)]">
+                          Closed{f.closedAt ? ` ${new Date(f.closedAt).toLocaleDateString()}` : ""}
+                          {f.closedReason ? ` · ${f.closedReason}` : ""}
                         </span>
                       )}
                     </td>

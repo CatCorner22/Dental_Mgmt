@@ -98,6 +98,8 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await flash(/Snapshot frozen/).waitFor({ timeout: 30_000 });
     expect(await provenance().innerText()).toMatch(/^Frozen /);
     expect(await page().getByText(/^Independent bank reconciliation:/).innerText()).toMatch(/stale import/);
+    // The detectors ran on the freeze; with no bank line in the tenant they have nothing to record.
+    expect(await page().locator("section[aria-labelledby=detectors]").innerText()).toMatch(/0 open \(0 high, 0 medium, 0 low\), 0 closed[\s\S]*No detector findings yet/);
     await b.audit("practice risk, frozen snapshot with decisions");
 
     await page().getByRole("button", { name: "Revoke Reconcile bank to PMS from Finn Front" }).click();
