@@ -1,4 +1,6 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { authorizeCredentials } from "./auth/authorize";
@@ -27,7 +29,8 @@ function loginReq(ip = "203.0.113.9"): Request {
 }
 
 describe("S2 pms-app-authz", () => {
-  // Negative control: the second sign-in uses a *different* (next-step) code and is accepted.
+  // Control: a sign-in with the *next-step* code (t0 + 30 s) is still accepted, so a fix
+  // that refuses everything would fail this test too.
   it("S2-pms-app-authz-1: a TOTP code that already opened a session is refused when replayed", async () => {
     const store = await createMemoryStore({ now: t0, env, password: DEV_PASSWORD, mfaSecret: DEV_MFA_SECRET });
     const code = currentCodeForTest("ridgeview-owner", DEV_MFA_SECRET, t0.getTime());
@@ -40,6 +43,16 @@ describe("S2 pms-app-authz", () => {
     // must not accept a second attempt of the same OTP.
     const replay = await authorizeCredentials(store, creds, loginReq(), new Date(t0.getTime() + 1000), env);
     expect(replay).toEqual({ ok: false, reason: "credentials" });
+
+    // The code stays inside verifyMfaCode's ±1-step window for up to ~90 s; it must stay refused.
+    const late = await authorizeCredentials(store, creds, loginReq(), new Date(t0.getTime() + 29_000), env);
+    expect(late).toEqual({ ok: false, reason: "credentials" });
+
+    const t1 = new Date(t0.getTime() + 30_000);
+    const nextCode = currentCodeForTest("ridgeview-owner", DEV_MFA_SECRET, t1.getTime());
+    expect(nextCode).not.toBe(code);
+    const next = await authorizeCredentials(store, { ...creds, totp: nextCode }, loginReq(), t1, env);
+    expect(next.ok).toBe(true);
   });
 
   // Negative control: lockMsFor(8) with the module defaults is 60 s and lockMsFor(9) is 120 s, so the
@@ -74,36 +87,54 @@ describe("S2 pms-app-authz", () => {
     expect(Math.max(...locks)).toBeGreaterThan(60);
   });
 
-  // Negative control: apps/pms/src/app/api/me/route.ts is a route.ts under src/app and is walked by the checker.
-  it("S2-pms-app-authz-3: check:routes walks every server-action module, not only src/app/**/route.ts and *.action.ts", () => {
+  // Runs the real checker (scripts/check-route-guards.mjs) against a planted tree instead of
+  // mirroring its selection logic. Positive control: a bare `export async function GET` in a
+  // src/app/**/route.ts is caught (exit 1). The breach: a bare server action is not, whether
+  // it lives in a *.action.ts the checker does walk (its regexes only match HTTP verb names)
+  // or in a "use server" module outside src/app (never walked, never allowlisted).
+  it("S2-pms-app-authz-3: check:routes fails on a bare server action, not only on bare HTTP-verb route handlers", () => {
     const appDir = path.resolve(__dirname, "..", "..");
-    const src = path.join(appDir, "src");
-    const checker = readFileSync(path.join(appDir, "scripts/check-route-guards.mjs"), "utf8");
+    const tmp = mkdtempSync(path.join(os.tmpdir(), "route-guards-"));
+    const run = () =>
+      spawnSync(process.execPath, [path.join(tmp, "scripts/check-route-guards.mjs")], { encoding: "utf8" });
+    try {
+      mkdirSync(path.join(tmp, "scripts"));
+      copyFileSync(path.join(appDir, "scripts/check-route-guards.mjs"), path.join(tmp, "scripts/check-route-guards.mjs"));
+      mkdirSync(path.join(tmp, "src/app/api/planted"), { recursive: true });
+      mkdirSync(path.join(tmp, "src/lib"), { recursive: true });
 
-    const walk = (dir: string): string[] =>
-      readdirSync(dir).flatMap((name) => {
-        const full = path.join(dir, name);
-        return statSync(full).isDirectory() ? walk(full) : [full];
-      });
-    const serverActionModules = walk(src).filter(
-      (f) => /\.tsx?$/.test(f) && /^\s*["']use server["']/m.test(readFileSync(f, "utf8"))
-    );
-    expect(serverActionModules.length).toBeGreaterThan(0);
+      writeFileSync(
+        path.join(tmp, "src/app/api/planted/route.ts"),
+        `export async function GET() { return new Response("x"); }\n`
+      );
+      const control = run();
+      expect(control.status, `positive control: ${control.stdout}${control.stderr}`).toBe(1);
+      expect(control.stderr).toMatch(/planted\/route\.ts/);
+      rmSync(path.join(tmp, "src/app/api/planted/route.ts"));
+      expect(run().status).toBe(0);
 
-    // Mirror the checker's own selection: it only walks src/app and only picks
-    // route.ts or *.action.ts, so anything else with "use server" is invisible to it
-    // unless the checker text names the file explicitly (allowlist).
-    const invisible = serverActionModules
-      .filter((f) => {
-        const rel = path.relative(src, f);
-        const underApp = rel.startsWith(`app${path.sep}`);
-        const base = path.basename(f);
-        const picked = underApp && (base === "route.ts" || base.endsWith(".action.ts"));
-        const named = checker.includes(path.relative(appDir, f)) || checker.includes(base);
-        return !picked && !named;
-      })
-      .map((f) => path.relative(appDir, f));
+      writeFileSync(
+        path.join(tmp, "src/app/api/planted/save.action.ts"),
+        `"use server";\nexport async function saveThing(formData: FormData) { return formData; }\n`
+      );
+      const actionFile = run();
+      expect(
+        actionFile.status,
+        `bare server action in a walked *.action.ts passed: ${actionFile.stdout}${actionFile.stderr}`
+      ).toBe(1);
+      rmSync(path.join(tmp, "src/app/api/planted/save.action.ts"));
 
-    expect(invisible).toEqual([]);
+      writeFileSync(
+        path.join(tmp, "src/lib/planted.ts"),
+        `"use server";\nexport async function plantedAction() { return 1; }\n`
+      );
+      const libModule = run();
+      expect(
+        libModule.status,
+        `bare "use server" module outside src/app passed: ${libModule.stdout}${libModule.stderr}`
+      ).toBe(1);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
