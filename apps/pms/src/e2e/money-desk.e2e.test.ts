@@ -98,6 +98,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().getByText("Explain this balance").waitFor({ timeout: 30_000 });
     expect(await page().getByRole("heading", { name: "Jane Doe" }).count()).toBe(1);
     expect(await page().locator("section:has(h2:text('Running ledger')) tbody tr").count()).toBeGreaterThanOrEqual(2);
+    expect(await page().getByText(/A posted entry is never edited/).count()).toBe(1);
     await b.audit("account explanation");
   }, 90_000);
 
@@ -464,4 +465,48 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().getByRole("button", { name: "Cancel" }).click();
     expect(await page().getByRole("button", { name: "Close it for good" }).count()).toBe(0);
   }, 150_000);
+  it("corrects a posted entry as a reversal-and-repost pair, or says why a second person must release it", async () => {
+    await b.signIn("ridgeview-front", "/ledger");
+    await page().getByRole("heading", { name: "Ledger" }).waitFor({ timeout: 60_000 });
+    await page().getByRole("link", { name: "Jane Doe" }).click();
+    await page().getByText("Explain this balance").waitFor({ timeout: 30_000 });
+
+    const ledger = page().locator("section:has(h2:text('Running ledger'))");
+    const before = await ledger.locator("tbody tr").count();
+    const correct = ledger.getByRole("button", { name: "Correct" }).first();
+    await correct.waitFor({ timeout: 30_000 });
+    await correct.click();
+    const amount = page().getByLabel("Corrected amount");
+    await amount.waitFor({ timeout: 30_000 });
+    // The form opens on the figure the entry carries, so the correction states the new one.
+    expect(await amount.inputValue()).toMatch(/^-?\d+\.\d{2}$/);
+    await amount.fill("-45.00");
+    await page().getByLabel("Reason").fill("posted twice");
+    await b.audit("account explanation (correcting)");
+    await page().getByRole("button", { name: "Reverse and repost" }).click();
+
+    // Which way this lands is the clock's to decide: the after-hours hold forces a second person on
+    // this channel outside the location's business hours, and CI runs at every hour. Both outcomes
+    // are the product working; each has to say plainly which one happened.
+    const done = page().getByText(/the entry is reversed and reposted/);
+    const refused = page().getByText(/needs a second person, and a pair has to land in one transaction/);
+    await Promise.race([done.waitFor({ timeout: 30_000 }), refused.waitFor({ timeout: 30_000 })]);
+
+    if (await refused.count()) {
+      // Refused: the pair never half-lands, so the ledger is exactly as it was.
+      expect(await ledger.locator("tbody tr").count()).toBe(before);
+      await b.audit("account explanation (correction needs a second person)");
+      return;
+    }
+
+    // Written: two rows appear, and each says what it is.
+    await expect.poll(async () => ledger.locator("tbody tr").count(), { timeout: 30_000 }).toBe(before + 2);
+    const text = await ledger.innerText();
+    expect(text).toMatch(/Reverses the/);
+    expect(text).toMatch(/Reposts the/);
+    // Neither half offers a Correct control: a correction is corrected through its repost, never in place.
+    expect(await ledger.locator("tr", { hasText: "Reverses the" }).getByRole("button", { name: "Correct" }).count()).toBe(0);
+    expect(await ledger.locator("tr", { hasText: "Reposts the" }).getByRole("button", { name: "Correct" }).count()).toBe(0);
+    await b.audit("account explanation (corrected)");
+  }, 90_000);
 });

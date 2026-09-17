@@ -37,6 +37,7 @@ const afterHoursHoldSql = readFileSync(join(here, "../migrations/0026_after_hour
 const hardEventAcksSql = readFileSync(join(here, "../migrations/0027_hard_event_acks.sql"), "utf8");
 const glMappingsSql = readFileSync(join(here, "../migrations/0028_gl_mappings.sql"), "utf8");
 const monthClosesSql = readFileSync(join(here, "../migrations/0029_month_closes.sql"), "utf8");
+const correctionPairsSql = readFileSync(join(here, "../migrations/0030_correction_pairs.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -276,6 +277,35 @@ describe("Increment 1.36 month close and the prior-period refusal", () => {
     expect(monthClosesSql).toMatch(/RAISE EXCEPTION\s+'month_closed:/);
     expect(monthClosesSql).toMatch(/CREATE TRIGGER ledger_entries_month_not_closed\s+BEFORE INSERT ON ledger_entries/);
     expect(TENANT_SCOPED_TABLES).toContain("month_closes");
+  });
+});
+
+describe("Increment 1.37 the reversal-and-repost correction pair", () => {
+  it("links a correction to the entry it replaces and mirrors the amount", () => {
+    expect(correctionPairsSql).toMatch(/ALTER TABLE ledger_entries ADD COLUMN corrects_entry_id uuid REFERENCES ledger_entries\(id\)/);
+    // A reversal that corrects an entry reverses that same entry; nothing else may claim to.
+    expect(correctionPairsSql).toMatch(/CONSTRAINT ledger_entries_reversal_corrects_its_original/);
+    expect(correctionPairsSql).toMatch(/reverses_entry_id = corrects_entry_id/);
+    expect(correctionPairsSql).toMatch(/CREATE OR REPLACE FUNCTION ledger_entries_correction_pair/);
+    expect(correctionPairsSql).toMatch(/CREATE TRIGGER ledger_entries_correction_pair\s+BEFORE INSERT ON ledger_entries/);
+  });
+
+  it("refuses a reversal of a reversal, a second reversal of one entry, an unmirrored amount, and an unbacked repost", () => {
+    expect(correctionPairsSql).toMatch(/RAISE EXCEPTION\s+'reversal_original_missing:/);
+    expect(correctionPairsSql).toMatch(/RAISE EXCEPTION\s+'reversal_of_reversal:/);
+    expect(correctionPairsSql).toMatch(/RAISE EXCEPTION\s+'already_reversed:/);
+    expect(correctionPairsSql).toMatch(/RAISE EXCEPTION\s+'reversal_not_mirrored:/);
+    expect(correctionPairsSql).toMatch(/NEW\.amount_cents <> -original\.amount_cents/);
+    expect(correctionPairsSql).toMatch(/RAISE EXCEPTION\s+'repost_without_reversal:/);
+  });
+
+  it("tightens the closed-month refusal from a label to the pair itself", () => {
+    expect(correctionPairsSql).toMatch(/CREATE OR REPLACE FUNCTION ledger_entries_month_not_closed/);
+    expect(correctionPairsSql).toMatch(/NEW\.reason_code IS DISTINCT FROM 'prior_period' OR NEW\.corrects_entry_id IS NULL/);
+    expect(correctionPairsSql).toMatch(/RAISE EXCEPTION\s+'month_closed:/);
+    // The trigger itself is not re-created: migration 0029 already attached it to the same function.
+    expect(correctionPairsSql).not.toMatch(/CREATE TRIGGER ledger_entries_month_not_closed/);
+    expect(correctionPairsSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
   });
 });
 

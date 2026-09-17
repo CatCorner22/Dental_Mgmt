@@ -280,6 +280,8 @@ export const ledgerEntries = pgTable(
     claimId: uuid("claim_id"),
     coverageId: uuid("coverage_id"),
     reversesEntryId: uuid("reverses_entry_id"),
+    /** The entry this row corrects: set on a reversal and on the repost written with it (Increment 1.37). */
+    correctsEntryId: uuid("corrects_entry_id"),
     approvalRequestId: uuid("approval_request_id"),
     /** The policy exception that licensed a single release above threshold. */
     appliedExceptionId: text("applied_exception_id"),

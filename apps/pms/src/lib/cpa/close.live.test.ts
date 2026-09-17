@@ -6,6 +6,7 @@ import { uuidv7 } from "@pms/db";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { listHardEvents } from "../alerts/hardEvents";
 import { closeMonth, listMonthCloses, loadMonthClose, PRIOR_PERIOD_REASON } from "./close";
+import { correctEntry } from "../ledger/correct";
 import { decideMapping, proposeMapping } from "./mappings";
 import { computeMonthPackage, packageHash } from "./package";
 
@@ -29,6 +30,8 @@ const asFront = { id: front.id, name: front.displayName };
 /** A month that has ended, whatever day this suite runs. */
 const CLOSED_MONTH = "2026-08";
 const now = new Date("2026-09-17T15:00:00Z");
+/** The one write-off this suite seeds inside the month it closes. */
+const SEEDED_AUGUST_ENTRY = uuidv7(37_001);
 
 describe.skipIf(!adminUrl)("Month close (live)", () => {
   let db: LiveDatabase;
@@ -65,7 +68,7 @@ describe.skipIf(!adminUrl)("Month close (live)", () => {
     env = { POSTGRES_URL: await db.loginAs("app_rw"), APPEND_ROLE_DSN: await db.loginAs("app_append"), BCRYPT_COST: "4" };
     await db.admin.query("INSERT INTO reason_codes (tenant_id, code, kind, label) VALUES ($1, $2, 'adjustment', 'Prior period correction') ON CONFLICT DO NOTHING", [tenantId, PRIOR_PERIOD_REASON]);
     // One write-off posted inside the month this suite closes, so the month has a journal to freeze.
-    await insertEntry({ id: uuidv7(37_001), effectiveDate: "2026-08-14", postedAt: "2026-08-14T15:00:00Z", reasonCode: "courtesy" });
+    await insertEntry({ id: SEEDED_AUGUST_ENTRY, effectiveDate: "2026-08-14", postedAt: "2026-08-14T15:00:00Z", reasonCode: "courtesy" });
   }, 90_000);
 
   afterAll(async () => {
@@ -133,32 +136,41 @@ describe.skipIf(!adminUrl)("Month close (live)", () => {
     await expect(db.admin.query("DELETE FROM month_closes WHERE id = $1", [closed.close.id])).rejects.toThrow(/never re-opened/);
   });
 
-  it("refuses a later entry effective-dated into the closed month unless it carries reason prior_period", async () => {
+  it("refuses a later entry effective-dated into the closed month unless it corrects the entry it replaces", async () => {
     const today = now.toISOString();
     await expect(insertEntry({ id: uuidv7(37_010), effectiveDate: "2026-08-20", postedAt: today, reasonCode: "courtesy" })).rejects.toThrow(
-      /month_closed: write_off effective 2026-08-20 falls in 2026-08, closed to the accountant; post it today with reason prior_period instead/
+      /month_closed: write_off effective 2026-08-20 falls in 2026-08, closed to the accountant; correct the entry it replaces/
     );
+    // Since Increment 1.37 the reason code alone is not enough: a bare row wearing the label is
+    // refused too, because the label names the intent and the link proves the arithmetic.
+    await expect(
+      insertEntry({ id: uuidv7(37_011), effectiveDate: "2026-08-20", postedAt: today, reasonCode: PRIOR_PERIOD_REASON, kind: "adjustment" })
+    ).rejects.toThrow(/month_closed: adjustment effective 2026-08-20 falls in 2026-08/);
     // A month with no close is untouched by the trigger.
-    await insertEntry({ id: uuidv7(37_011), effectiveDate: "2026-07-20", postedAt: today, reasonCode: "courtesy" });
+    await insertEntry({ id: uuidv7(37_012), effectiveDate: "2026-07-20", postedAt: today, reasonCode: "courtesy" });
 
-    // The labelled correction goes through. It posts today, so it lands in today's journal, not in
-    // the closed month's: the frozen hash still reproduces, and the accountant reads the correction
-    // in the month it was posted, where the reason code names the period it belongs to.
+    // The correction pair goes through. It posts today, so it lands in today's journal, not in the
+    // closed month's: the frozen hash still reproduces, and the accountant reads the correction in
+    // the month it was posted, where the reason code names the period it belongs to.
     const frozen = (await tx((d) => loadMonthClose(d, tenantId, CLOSED_MONTH)))!.packageHash;
-    const correctionId = uuidv7(37_012);
-    await insertEntry({ id: correctionId, effectiveDate: "2026-08-21", postedAt: today, reasonCode: PRIOR_PERIOD_REASON, kind: "adjustment" });
+    const corrected = await tx(
+      (d) => correctEntry(d, { tenantId, actorId: front.id, actorName: front.displayName, entryId: SEEDED_AUGUST_ENTRY, amountCents: -2500, reasonCode: "courtesy", now }),
+      front
+    );
+    expect(corrected).toMatchObject({ ok: true, reasonCode: PRIOR_PERIOD_REASON, closedMonth: CLOSED_MONTH });
+    if (!corrected.ok) return;
     expect(packageHash(await tx((d) => computeMonthPackage(d, tenantId, CLOSED_MONTH)))).toBe(frozen);
     const thisMonth = await tx((d) => computeMonthPackage(d, tenantId, now.toISOString().slice(0, 7)));
-    expect(thisMonth.reasons.rows.find((r) => r.code === PRIOR_PERIOD_REASON)).toMatchObject({ kind: "adjustment", count: 1 });
+    expect(thisMonth.reasons.rows.find((r) => r.code === PRIOR_PERIOD_REASON)).toMatchObject({ kind: "reversal", count: 1 });
 
     // A correction reaching this far back is also a retroactive-dated entry, so the owner's alert
     // board raises it the moment it posts: the close routes the correction, the hard event announces
     // it. The rule is the gap, not the close — an entry effective inside the seven days before it
     // posted raises nothing, however recently the month closed (Increment 1.29's BACKDATE_DAYS).
     const hard = await tx((d) => listHardEvents(d, tenantId, { since: new Date("2026-08-01T00:00:00Z"), now }));
-    expect(hard.find((e) => e.subjectId === correctionId)).toMatchObject({
+    expect(hard.find((e) => e.subjectId === corrected.repostId)).toMatchObject({
       kind: "retroactive_entry",
-      sentence: "A $10.00 adjustment effective 2026-08-21 was posted on 2026-09-17, 27 days after its effective date.",
+      sentence: "A $25.00 write-off effective 2026-08-14 was posted on 2026-09-17, 34 days after its effective date.",
     });
   });
 

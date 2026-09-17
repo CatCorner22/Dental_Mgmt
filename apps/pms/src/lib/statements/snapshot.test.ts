@@ -32,6 +32,8 @@ const janeDetail: LedgerAccountDetail = {
       reasonLabel: null,
       posterName: "Finn Front",
       memo: null,
+      correctsEntryId: null,
+      reversesEntryId: null,
     },
     {
       entryId: "pay-jane",
@@ -44,6 +46,8 @@ const janeDetail: LedgerAccountDetail = {
       reasonLabel: null,
       posterName: "Finn Front",
       memo: null,
+      correctsEntryId: null,
+      reversesEntryId: null,
     },
   ],
 };
@@ -93,6 +97,8 @@ describe("statement snapshot", () => {
           reasonLabel: null,
           posterName: "Finn Front",
           memo: null,
+          correctsEntryId: null,
+          reversesEntryId: null,
         },
       ],
     };
