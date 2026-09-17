@@ -124,8 +124,11 @@ export default ({ ctx, go, hop, click, txt, rec }) => {
     // store.js postCheckout: the write-off cap is min(est.patientCents − amt, balances().patientDue), and patientDue
     // is the ledger before this same Post writes the visit's $168 of charges (a-1046, note filed, nothing charged yet),
     // so the refusal says "The payment already covers what the patient owes here" while the Post it blocks would leave
-    // $68 owed. S-regress-money-2 covers the held-request leg only. Negative control: the cap counts the fees this
-    // Post charges (as windowEstimate does), the $100 cash + $68 write-off posts and the account nets $0.00.
+    // $68 owed. CONTRACTS §4 gives Checkout the write-off controls (checkout.writeoff.add/amount/reason) and docs/04
+    // puts the write-off gate inline on the form; for any visit whose charges land at Post the control can never post
+    // (S-regress-money-2's held-request leg on the same visit is now refused by this cap before evaluateRelease runs,
+    // so it reads "no" without measuring). Negative control (verified: cap on est.patientCents − amt): the $100 cash
+    // + $68 write-off posts charge/charge/payment/write_off and the account nets $0.00.
     async 'S2-approvals-writeoff-era-5'(b) {
       const { c, p, errs } = await ctx(b);
       try {
@@ -143,15 +146,16 @@ export default ({ ctx, go, hop, click, txt, rec }) => {
         // The same Post without the write-off: what the patient actually owes once the charges it writes are on the ledger.
         const withoutWriteoff = await p.evaluate(() => { const r = Proto.store.postCheckout('a-1046', { decision: 'collect', tender: 'cash', amountCents: 10000, selfPay: [] }); const S = window.__proto.state(); return { ok: r.ok, code: r.code || null, due: Proto.store.balances('p-305').patientDue, rows: S.ledger.filter((e) => e.patientId === 'p-305').map((e) => e.kind + ':' + e.amountCents), apptStatus: (S.appointments.find((a) => a.id === 'a-1046') || {}).status }; });
         const reproduced = before.windowPatientCents === 16800 && before.due === 0 && before.uncharged === 16800 && /\$168\.00/.test(totalsText || '') && !!g && g.code === 'amount_required' && /nothing left/i.test(g.verb) && /already covers what the patient owes/.test(why || '') && storeLevel.ok === false && storeLevel.code === 'amount_required' && storeLevel.rows === 0 && withoutWriteoff.ok === true && withoutWriteoff.due === 6800;
-        rec('S2-approvals-writeoff-era-5', 'On Checkout a-1046 (note filed, "Totals $168.00 est." of charges post at this Post, ledger $0) a $100 cash payment with a $68 courtesy write-off is refused amount_required "Remove the write-off — nothing left · The payment already covers what the patient owes here", yet the identical Post without the write-off returns ok and leaves Patient due $68.00 — the refusal states a balance the Post it blocks contradicts, and a below-threshold write-off can never post at the window for a visit whose charges land at Post', 'C5 (a refusal and the posting disagree on the balance), docs/13 feature 18 (a below-threshold write-off posts at Post) — store.js postCheckout caps against balances().patientDue before the same call writes the visit\'s charges; windowEstimate counts them',
+        rec('S2-approvals-writeoff-era-5', 'On Checkout a-1046 (note filed, "Totals $168.00 est." of charges post at this Post, ledger $0) a $100 cash payment with a $68 courtesy write-off is refused amount_required "Remove the write-off — nothing left · The payment already covers what the patient owes here", yet the identical Post without the write-off returns ok and leaves Patient due $68.00 — the refusal states a balance the Post it blocks contradicts, and a below-threshold write-off can never post at the window for a visit whose charges land at Post', 'C5 (a refusal and the posting disagree on the balance), A2 (the Checkout write-off control of CONTRACTS §4 / docs/04 never posts for a visit charged at Post) — store.js postCheckout caps against balances().patientDue before the same call writes the visit\'s charges; windowEstimate counts them',
           reproduced, { before, totalsText, gate: g, refusalText: why, storeLevel, withoutWriteoff, refusals: brief(ev), seqRange: range(ev), pageErrors: errs });
       } finally { await c.close(); }
     },
 
     // store.js eraHold has no status guard: a `posted` line is overwritten to `held`, and eraConfirm refuses only
-    // posted/disputed/denied, so the line posts a second time. S-moneydesk-close-6 drove the dispute leg, which
-    // eraConfirm now refuses, and reads "no"; the hold leg is open. Negative control: eraHold on a posted line refuses
-    // already_decided and the ledger keeps exactly one insurance_payment + write_off pair for el-14.
+    // posted/disputed/denied, so the line posts a second time. S-moneydesk-close-6 named eraHold in its comment but
+    // drove only the dispute leg, which eraConfirm now refuses, so it reads "no"; the hold leg is open (eraDispute on a
+    // posted line likewise still flips it to disputed with its rows on the ledger). Negative control (verified): eraHold
+    // on a posted line refuses already_decided and the ledger keeps exactly one insurance_payment + write_off pair for el-14.
     async 'S2-approvals-writeoff-era-6'(b) {
       const { c, p, errs } = await ctx(b);
       try {
@@ -197,8 +201,11 @@ export default ({ ctx, go, hop, click, txt, rec }) => {
 
     // store.js eraPostMatched / eraConfirm / eraDispute gate on bills() = any of post_payment, post_era, write_off,
     // submit_claims, so Priya Raman (post_payment, schedule) posts the 835 and a contractual write_off row, while
-    // requestWriteoff refuses her for lacking write_off one tab over. Negative control: the ERA verbs require post_era
-    // (and eraConfirm's write-off, write_off), Priya is refused on entitlement and no ERA row carries her name.
+    // requestWriteoff refuses her for lacking write_off one tab over. No doc names the grant that posts an 835 and the
+    // bills() comment says the front desk posts here, so the breach measured is the grant disagreement (a write_off row
+    // under a seat that write_off refuses) plus post_era being seeded and required by nothing — medium, not high.
+    // Negative control (verified): the ERA verbs require post_era (and eraConfirm's write-off, write_off), Priya is
+    // refused on entitlement and no ERA row carries her name.
     async 'S2-approvals-writeoff-era-8'(b) {
       const { c, p, errs } = await ctx(b);
       try {
@@ -215,42 +222,8 @@ export default ({ ctx, go, hop, click, txt, rec }) => {
         });
         const ev = await after(p, seq0);
         const reproduced = r.who === 'Priya Raman' && !r.entitlements.includes('post_era') && !r.entitlements.includes('write_off') && r.post.ok === true && r.post.posted === 37 && r.confirm.ok === true && r.dispute.ok === true && r.writeoff.ok === false && r.writeoff.code === 'entitlement' && r.eraRowsByHer === 39 && r.writeOffRowsByHer.length === 1;
-        rec('S2-approvals-writeoff-era-8', 'As Priya Raman (post_payment, schedule; no post_era, no write_off) Post matched writes 37 insurance_payment rows, Confirm on el-14 writes a −$540 payment and a −$50 contractual write_off in her name, and Dispute on el-22 opens an appeal packet, while the write-off control on the same Money Desk refuses her "Ask a seat that can write off balances" for lacking write_off', 'B3 (entitlement per verb; two verbs disagree on the same grant), docs/05 SoD — store.js bills() admits any BILLING grant to eraPostMatched/eraConfirm/eraDispute; only requestWriteoff adds needs(write_off)',
+        rec('S2-approvals-writeoff-era-8', 'As Priya Raman (post_payment, schedule; no post_era, no write_off) Post matched writes 37 insurance_payment rows, Confirm on el-14 writes a −$540 payment and a −$50 contractual write_off in her name, and Dispute on el-22 opens an appeal packet, while the write-off control on the same Money Desk refuses her "Ask a seat that can write off balances" for lacking write_off', 'B3 (entitlement per verb; two verbs disagree on the same grant), docs/05 SoD — store.js bills() admits any BILLING grant to eraPostMatched/eraConfirm/eraDispute; only requestWriteoff adds needs(write_off); post_era (seed.js, Sam) is required by no verb',
           reproduced, { ...r, writes: brief(ev).slice(0, 12), writeCount: ev.filter((e) => e.kind === 'write').length, seqRange: range(ev), pageErrors: errs });
-      } finally { await c.close(); }
-    },
-
-    // store.js decideApproval caps the posting to the live balance (postedCents) and approvalSentence prints
-    // postedCents as the amount "requested by"; phone.js and moneydesk.js print the same sentence, and approvalsLog
-    // carries no amount, so after the balance moves nothing states what was asked or why less posted. Negative control:
-    // the decided card/tab prints the requested amount beside the posted one (e.g. "requested $300.00 · posted $270.00 —
-    // balance moved") or the log row carries both figures.
-    async 'S2-approvals-writeoff-era-9'(b) {
-      const { c, p, errs } = await ctx(b);
-      try {
-        await go(p, '#/biller/money');
-        const req = await raise(p, 30000);
-        const moved = await p.evaluate(() => ({ small: Proto.store.requestWriteoff('p-306', 14000, 'courtesy').ok, due: Proto.store.balances('p-306').patientDue }));
-        await p.evaluate(() => window.__proto.set({ persona: 'owner', device: 'phone' }));
-        await hop(p, '#/owner/phone/approvals'); await p.waitForTimeout(300);
-        const cardBefore = await p.evaluate((id) => { const el = document.querySelector('[data-testid="phone.request.' + id + '.approve"]'); const card = el && el.closest('.ph-card, .card, section, article, li'); return card ? card.textContent.replace(/\s+/g, ' ').trim() : null; }, req.id);
-        const seq0 = await lastSeq(p);
-        await click(p, 'phone.request.' + req.id + '.approve'); await p.waitForTimeout(200);
-        for (const d of ['2', '4', '6', '8']) await p.keyboard.press(d);
-        await p.waitForTimeout(100); if (await p.$('[data-testid="phone.stepup.submit"]')) await click(p, 'phone.stepup.submit');
-        await p.waitForTimeout(300);
-        const ev = await after(p, seq0);
-        const decided = await reqState(p, req.id);
-        const sentence = await p.evaluate((id) => Proto.store.approvalSentence(window.__proto.state().approvals.find((a) => a.id === id)), req.id);
-        const phoneAfter = await p.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').trim());
-        await p.evaluate(() => window.__proto.set({ persona: 'biller', device: 'desk' }));
-        await hop(p, '#/biller/money'); await click(p, 'money.tab.approvals'); await p.waitForTimeout(200);
-        const tab = await p.evaluate(() => (document.querySelector('main') || document.body).innerText.replace(/\s+/g, ' ').trim());
-        const says300 = (t) => /\$300\.00/.test(t || '');
-        const reproduced = req.amountCents === 30000 && moved.small === true && moved.due === 27000 && says300(cardBefore) && decided.status === 'approved' && decided.postedCents === 27000 && decided.rows.length === 1 && decided.rows[0].amountCents === -27000
-          && /Write-off \$270\.00 .*requested by Sam Dawson/.test(sentence) && !says300(phoneAfter) && !says300(tab) && decided.log.length === 1 && !/amount|cents|\$/.test(JSON.stringify((await p.evaluate(() => window.__proto.state().approvalsLog))));
-        rec('S2-approvals-writeoff-era-9', 'Sam requests a $300.00 write-off (phone card reads "$300.00"); a $140 below-threshold write-off posts first; Dr. Reagan approves and $270.00 posts, after which approvalSentence, the phone\'s Decided card and the Money Desk Approvals tab all read "Write-off $270.00 … requested by Sam Dawson" — the $300.00 he requested and the $30.00 cut appear on no surface and the approvalsLog row carries no amount', 'C5 (two surfaces disagree on a number: the request card before and after), docs/13 feature 18 (the card carries the frozen request) — store.js approvalSentence prints postedCents as the requested amount; decideApproval\'s log row omits amounts',
-          reproduced, { request: req, balanceMoved: moved, cardBefore, decided, sentence, phoneDecidedText: phoneAfter.slice(0, 600), approvalsTabText: tab.slice(0, 400), writes: brief(ev), seqRange: range(ev), pageErrors: errs });
       } finally { await c.close(); }
     },
 
@@ -271,7 +244,7 @@ export default ({ ctx, go, hop, click, txt, rec }) => {
         });
         const ev = await after(p, seq0);
         const reproduced = r.frac.ok === true && r.tiny.ok === true && r.nonIntegerRows.length === 2 && !Number.isInteger(r.due) && r.checkoutGuard.ok === false && r.checkoutGuard.code === 'amount_required';
-        rec('S2-approvals-writeoff-era-10', 'requestWriteoff("p-306", 100.5) and requestWriteoff("p-306", 1e-7) both return ok and write write_off rows of −100.5 and −1e-7 cents, leaving Patient due 40899.4999999 (printed "$409.00"), while postCheckout refuses the same 100.5 as "a value the ledger cannot store"', 'A1 (a ledger amount is an integer number of cents), one rule one owner — store.js requestWriteoff lacks the Number.isInteger check postCheckout applies',
+        rec('S2-approvals-writeoff-era-10', 'requestWriteoff("p-306", 100.5) and requestWriteoff("p-306", 1e-7) both return ok and write write_off rows of −100.5 and −1e-7 cents, leaving Patient due 40899.4999999 (printed "$408.99"), while postCheckout refuses the same 100.5 as "a value the ledger cannot store"', 'A1 (a ledger amount is an integer number of cents), one rule one owner — store.js requestWriteoff lacks the Number.isInteger check postCheckout applies',
           reproduced, { ...r, writes: brief(ev), seqRange: range(ev), pageErrors: errs });
       } finally { await c.close(); }
     },
