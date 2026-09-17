@@ -170,7 +170,8 @@ export function OwnerBoard() {
             Segregation health. COSO overall {b.health.cosoOverall}. {b.health.openConflicts} open duty combination
             {b.health.openConflicts === 1 ? "" : "s"}, {b.health.conflictsWithoutDecision} without a decision,{" "}
             {b.health.unmitigatedCritical} critical unmitigated. {b.detectorFindingsOpen} detector finding
-            {b.detectorFindingsOpen === 1 ? "" : "s"} open as of the last frozen snapshot.
+            {b.detectorFindingsOpen === 1 ? "" : "s"} open as of the last frozen snapshot, {b.detectorFindingsUndecided} without a
+            decision.
           </p>
           {b.health.levers.length > 0 && (
             <p className="mt-1 text-sm text-[var(--ink-2)]">

@@ -4,11 +4,13 @@ import { uuidv7 } from "@pms/db";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { createBankStatementImport } from "../bank/import";
 import { clearReconciliationRun } from "../reconciliation/clear";
+import { listDecisions, recordDecision } from "./decisions";
 import {
   countOpenControlFindings,
   DECISION_UNREVIEWED_KIND,
   DEGRADED_CLEARANCE_KIND,
   DEPOSIT_NOT_BANKED_KIND,
+  governingFindingDecision,
   listControlFindings,
   listOpenBankLines,
   refreshDegradedClearanceFindings,
@@ -17,6 +19,7 @@ import {
   refreshUnmatchedBankLineFindings,
   refreshUnreviewedDecisionFindings,
   SOLE_HOLDER_KIND,
+  summarizeFindings,
   UNMATCHED_BANK_LINE_KIND,
 } from "./detectors";
 import { seedControlPolicy } from "./policy";
@@ -282,6 +285,41 @@ describe.skipIf(!adminUrl)("Unmatched bank line detector (live)", () => {
     expect(after).toMatchObject({ closed: 1, open: 0 });
     const closed = (await tx((d) => listControlFindings(d, tenant.id))).find((r) => r.subjectId === lateDeposit);
     expect(closed).toMatchObject({ status: "closed", closedReason: "matched at the bank or outside the 45-day window" });
+  });
+
+  it("records a decision on an open finding, refuses one on a closed finding or from the hands the row is about", async () => {
+    const all = await tx((d) => listControlFindings(d, tenant.id));
+    const ownDuty = all.find((r) => r.kind === SOLE_HOLDER_KIND && r.subjectId === "bank_reconcile")!; // held by the owner alone
+    const frontDuty = all.find((r) => r.kind === SOLE_HOLDER_KIND && r.subjectId === "prepare_deposit")!; // held by the front desk alone
+    const closedDeposit = all.find((r) => r.kind === DEPOSIT_NOT_BANKED_KIND)!; // closed in the case above
+    const actor = { id: owner.id, name: owner.name };
+    const base = { tenantId: tenant.id, actor, subjectKind: "detector_finding", note: "Decided for the live test with a reason.", now };
+
+    const unknown = await tx((d) => recordDecision(d, { ...base, subjectId: uuidv7(33_700), kind: "monitor" }));
+    expect(unknown).toEqual({ ok: false, errors: ["The finding was not found."] });
+
+    const closed = await tx((d) => recordDecision(d, { ...base, subjectId: closedDeposit.id, kind: "monitor" }));
+    expect(closed.ok).toBe(false);
+    expect((closed as { errors: string[] }).errors[0]).toMatch(/^The finding is closed/);
+
+    // The owner is the one holder of bank_reconcile: accepting its residual is self-licensing; watching it is not.
+    const self = await tx((d) => recordDecision(d, { ...base, subjectId: ownDuty.id, kind: "accept_residual", reviewBy: "2026-12-31" }));
+    expect(self.ok).toBe(false);
+    expect((self as { errors: string[] }).errors[0]).toMatch(/cannot accept or compensate a finding about your own work/);
+    const watch = await tx((d) => recordDecision(d, { ...base, subjectId: ownDuty.id, kind: "monitor", reviewBy: "2026-12-31" }));
+    expect(watch.ok).toBe(true);
+
+    // The front desk's duty is someone else's work, so the owner may accept its residual.
+    const accepted = await tx((d) => recordDecision(d, { ...base, subjectId: frontDuty.id, kind: "accept_residual", reviewBy: "2026-12-31" }));
+    expect(accepted.ok).toBe(true);
+
+    const decisions = await tx((d) => listDecisions(d, tenant.id));
+    expect(governingFindingDecision(ownDuty.id, decisions)).toMatchObject({ kind: "monitor", subjectKind: "detector_finding" });
+    expect(governingFindingDecision(frontDuty.id, decisions)).toMatchObject({ kind: "accept_residual" });
+    const summary = summarizeFindings(await tx((d) => listControlFindings(d, tenant.id)), decisions);
+    expect(summary).toMatchObject({ open: 2, decided: 2, undecided: 0 });
+    // The detector still owns the row: recording a decision changed no status.
+    expect((await tx((d) => listControlFindings(d, tenant.id))).filter((r) => r.kind === SOLE_HOLDER_KIND).every((r) => r.status === "open")).toBe(true);
   });
 
   it("flags each highest-weight duty held by one active person and closes it once a second holder is live", async () => {

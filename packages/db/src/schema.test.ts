@@ -29,6 +29,7 @@ const statementsSql = readFileSync(join(here, "../migrations/0018_statements.sql
 const controlFindingsSql = readFileSync(join(here, "../migrations/0019_control_findings.sql"), "utf8");
 const ledgerFindingsSql = readFileSync(join(here, "../migrations/0020_control_findings_ledger.sql"), "utf8");
 const coverageFindingsSql = readFileSync(join(here, "../migrations/0021_control_findings_coverage.sql"), "utf8");
+const decisionSubjectsSql = readFileSync(join(here, "../migrations/0022_control_decisions_detector_finding.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -180,6 +181,12 @@ describe("Increment 1.22 detector findings", () => {
     expect(coverageFindingsSql).toMatch(/'deposit_not_banked', 'sole_holder_critical_duty'/);
     expect(coverageFindingsSql).toMatch(/'ledger_entry', 'deposit', 'entitlement'\)/);
     expect(coverageFindingsSql).not.toMatch(/GRANT|DROP TABLE|DELETE/);
+  });
+
+  it("lets a control decision name a detector finding as its subject", () => {
+    expect(decisionSubjectsSql).toMatch(/DROP CONSTRAINT control_decisions_subject_kind_check/);
+    expect(decisionSubjectsSql).toMatch(/'scenario', 'knowledge', 'detector_finding'\)/);
+    expect(decisionSubjectsSql).not.toMatch(/GRANT|DROP TABLE|DELETE|UPDATE/);
   });
 });
 

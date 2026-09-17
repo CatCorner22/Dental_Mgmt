@@ -10,6 +10,8 @@ import {
   depositNotBankedCandidates,
   duplicatePaymentCandidates,
   dutyHolders,
+  governingFindingDecision,
+  summarizeFindings,
   soleHolderCandidates,
   severityForBankingGap,
   lineDetail,
@@ -286,5 +288,34 @@ describe("sole holder detector", () => {
       '"Approve write-offs / adjustments" is held by one active person only. If that person is away, no one can perform it and no one can check it: the practice depends on one set of hands for this duty.'
     );
     expect(String(out[0]!.detail.sentence)).not.toMatch(/Riley|Finn/);
+  });
+});
+
+describe("decisions on findings", () => {
+  const rows = [
+    { id: "f1", status: "open", severity: "high" },
+    { id: "f2", status: "open", severity: "medium" },
+    { id: "f3", status: "closed", severity: "low" },
+  ] as const;
+
+  it("takes the latest active decision on the finding and ignores superseded, other-subject, and other-kind rows", () => {
+    const decisions = [
+      decision({ id: "old", subjectKind: "detector_finding", subjectId: "f1", kind: "monitor", decidedAt: "2026-09-01T12:00:00Z" }),
+      decision({ id: "new", subjectKind: "detector_finding", subjectId: "f1", kind: "accept_residual", supersedesDecisionId: "old", decidedAt: "2026-09-10T12:00:00Z" }),
+      decision({ id: "other", subjectKind: "detector_finding", subjectId: "f9", kind: "monitor" }),
+      decision({ id: "sod", subjectKind: "sod_finding", subjectId: "f2", kind: "monitor" }),
+    ];
+    expect(governingFindingDecision("f1", decisions)?.id).toBe("new");
+    expect(governingFindingDecision("f2", decisions)).toBeUndefined();
+    expect(governingFindingDecision("f3", decisions)).toBeUndefined();
+  });
+
+  it("splits the open rows by whether a decision governs them, and leaves closed rows out of both counts", () => {
+    const decisions = [
+      decision({ id: "d-f1", subjectKind: "detector_finding", subjectId: "f1", kind: "monitor" }),
+      decision({ id: "d-f3", subjectKind: "detector_finding", subjectId: "f3", kind: "monitor" }),
+    ];
+    expect(summarizeFindings([...rows], decisions)).toEqual({ open: 2, closed: 1, high: 1, medium: 1, low: 0, decided: 1, undecided: 1 });
+    expect(summarizeFindings([...rows], [])).toMatchObject({ decided: 0, undecided: 2 });
   });
 });
