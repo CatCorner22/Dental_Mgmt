@@ -3,6 +3,9 @@
 // balances that moved. Files: prototype/js/store.js (decideApproval, chartPaint, postCheckout/writeoffCap).
 // Default position is NOT reproduced: every check measures the breach it claims and carries the measured values.
 // Every check closes its browser context in `finally` so one failure cannot hang the run.
+// Verified (swarm2/verified-store-rewrites): each check reproduced independently on f4032b3 and flipped to "no" under a
+// temporary source patch of the named function (approver from session/PIN + approve_second gate; tooth/surface
+// normalisation after validation; cap over the balance the transaction leaves), so none is a tautology.
 export default ({ ctx, go, click, rec }) => {
   const tid = (t) => `[data-testid="${t}"]`;
   const fill = async (p, t, v) => { if (!(await p.$(tid(t)))) return false; await p.fill(tid(t), v); await p.waitForTimeout(60); return true; };
@@ -17,7 +20,7 @@ export default ({ ctx, go, click, rec }) => {
     // credential at all. S-controls-4 stopped measuring this: it passes stepup=true without a PIN and now reads the
     // needsStepup refusal as "fixed". Leg A: Bree Lawson (entitlements []) approves the $410 request with her own PIN
     // and -$410 posts with secondApprover "Bree Lawson". Leg B: from the requesting biller's own session, passing
-    // 'u-dr-1' with no PIN records the request as rejected by Dr. Blake Reagan. Negative control: leg A refuses on
+    // 'u-dr-1' with no PIN records the request as declined (sent back) by Dr. Blake Reagan. Negative control: leg A refuses on
     // entitlement (no approvalsLog or ledger row), leg B refuses (blocked_same_person / pin_required) and decidedBy
     // stays empty, so the check reports false.
     async 'S2-store-rewrites-1'(b) {
@@ -28,10 +31,11 @@ export default ({ ctx, go, click, rec }) => {
         const r = await p.evaluate(() => {
           const st = window.Proto.store; const live = st.get();
           const pick = (a) => a && { id: a.id, status: a.status, amountCents: a.amountCents, requestedBy: a.requestedBy, requestedById: a.requestedById, decidedBy: a.decidedBy || null, postedCents: a.postedCents || null };
-          // Leg B first, while the $410 balance still stands: the requester rejects his own $200 request as Dr. Reagan, no PIN.
+          // Leg B first, while the $410 balance still stands: the requester sends back his own $200 request as Dr. Reagan, no
+          // PIN, using the product's own decision word ('declined', phone.js) so the leg measures identity, not vocabulary.
           const sam = st.currentUser();
           const req2 = st.requestWriteoff('p-306', 20000, 'courtesy', {});
-          const legB = st.decideApproval(req2.requestId, 'u-dr-1', 'rejected', {}, 'not today');
+          const legB = st.decideApproval(req2.requestId, 'u-dr-1', 'declined', {}, 'not today');
           const rowB = live.approvals.find((a) => a.id === req2.requestId) || null;
           // Leg A: the hygienist, from her own persona, approves the $410 request with her own PIN.
           const req = st.requestWriteoff('p-306', 41000, 'courtesy', {});
@@ -52,8 +56,8 @@ export default ({ ctx, go, click, rec }) => {
         const writes = await writesAfter(p, seq0);
         const postedByBree = r.legA.writeOffs.find((e) => e.amountCents === -41000 && e.secondApprover === 'Bree Lawson') || null;
         const legA = r.legA.result.ok === true && r.legA.row && r.legA.row.status === 'approved' && r.legA.row.decidedBy === 'Bree Lawson' && !!postedByBree && r.legA.actor.entitlements.length === 0;
-        const legB = r.legB.result.ok === true && r.legB.row && r.legB.row.status === 'rejected' && r.legB.row.decidedBy === 'Dr. Blake Reagan' && r.legB.row.requestedById === r.legB.actor.id;
-        rec('S2-store-rewrites-1', 'decideApproval still takes the approver from its argument and never checks approve_second: Bree Lawson (no entitlements) approves the $410 write-off with her own PIN and -$410 posts with her as second approver, and the requesting biller records his own $200 request as rejected by Dr. Blake Reagan with no PIN at all; S-controls-4 passes stepup=true and reads the needsStepup refusal as fixed', 'B3, CONTRACTS §6 blocked_same_person "enforced on the posting itself"; docs/05 dual release — store.js decideApproval (`user(approverId) || currentUser()`, PIN only on approved, no approve_second)',
+        const legB = r.legB.result.ok === true && r.legB.row && r.legB.row.status === 'declined' && r.legB.row.decidedBy === 'Dr. Blake Reagan' && r.legB.row.requestedById === r.legB.actor.id;
+        rec('S2-store-rewrites-1', 'decideApproval still takes the approver from its argument and never checks approve_second: Bree Lawson (no entitlements) approves the $410 write-off with her own PIN and -$410 posts with her as second approver, and the requesting biller records his own $200 request as sent back (declined) by Dr. Blake Reagan with no PIN at all; S-controls-4 passes stepup=true and reads the needsStepup refusal as fixed', 'B3, CONTRACTS §6 blocked_same_person "enforced on the posting itself"; docs/05 dual release — store.js decideApproval (`user(approverId) || currentUser()`, PIN only on approved, no approve_second)',
           legA || legB, { ...r, writes, legAReproduced: legA, legBReproduced: legB, pageErrors: errs });
       } finally { await c.close(); }
     },
