@@ -1,4 +1,4 @@
-// Swarm 2 · shell-board-a11y lens: the shell in deep states (phone width, a dialog open across a route change,
+// Swarm 2 · shell-board-a11y lens (verified: each check reproduces on f4032b3 and flips to no under a local fix of the named line): the shell in deep states (phone width, a dialog open across a route change,
 // the patient rail's way out). Files: prototype/css/components.css (.topbar .btn.navmenu), prototype/js/ui.js
 // (dialog close on hashchange → landFocus), prototype/js/screens/rail.js (rail.close handler).
 // Default position is NOT reproduced: every check measures the breach it claims and carries the measured values.
@@ -23,7 +23,7 @@ export default ({ ctx, go, hop, rec }) => {
     // ≥ 44 px), the nav.<route> row is hidden, and pressing nav.menu opens the "Go to" dialog with nav.menu.board.
     async 'S2-shell-board-a11y-1'(b) {
       const out = {};
-      for (const [w, hh] of [[420, 860], [640, 900], [820, 900]]) {
+      for (const [w, hh] of [[320, 860], [420, 860], [640, 900], [820, 900]]) {
         const { c, p, errs } = await ctx(b, w, hh);
         try {
           await go(p, '#/frontdesk/board' + (w <= 640 ? '?device=phone' : ''));
@@ -44,16 +44,16 @@ export default ({ ctx, go, hop, rec }) => {
           out[w] = { ...m, pressNavMenu: pressed, dialogsAfterPress: await dialogs(p), errs };
         } finally { await c.close(); }
       }
-      const phone = out[420], mid = out[640], tablet = out[820];
+      const narrow = out[320], phone = out[420], mid = out[640], tablet = out[820];
       const breach = (o) => o && o.menuInDom && o.destinationsReachable.length === 0 && o.menu && !o.menu.visible && o.menu.display === 'none' && o.routes.length > 0 && o.routes.every((r) => !r.visible);
       rec('S2-shell-board-a11y-1', 'Below 640 px the topbar hides the nav.<route> row and also hides nav.menu (components.css:542 overrides the media rule at :478), so the shell offers no control that reaches another screen',
         'CONTRACTS §4 nav.menu collapses the destinations into one control below 640 px; docs/16 WCAG 2.1.1 / 1.4.10 — every destination stays reachable; components.css comment "The CSS shows exactly one of the two"',
-        breach(phone) && breach(mid) && !!tablet && tablet.destinationsReachable.length > 0, out);
+        breach(narrow) && breach(phone) && breach(mid) && !!tablet && tablet.destinationsReachable.length > 0, out);
     },
 
     // ui.js dialog(): a hashchange closes the dialog and close() ends with landFocus(prev, prevId), the opener
-    // (topbar.settings / topbar.author / topbar.search) that is still in the DOM — after app.js has already rendered
-    // the new screen and focused its h1. So Back (or Forward) with Settings, the author PIN pad or the palette open
+    // (topbar.settings / topbar.author / topbar.search) that is still in the DOM — after app.js:110 has already rendered
+    // the new screen and focused its h1 (focusHead, app.js:83). So Back (or Forward) with Settings, the author PIN pad or the palette open
     // leaves focus on a top-bar button of the old gesture instead of the heading of the screen that just arrived.
     // Negative control: after Back with each dialog open, document.activeElement is the #canvas h1 (or first
     // control) of the destination screen and no dialog remains.
