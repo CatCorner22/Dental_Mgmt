@@ -14,8 +14,17 @@ export const DECISION_KINDS = [
   "accept_residual",
   "monitor",
   "insure",
+  /**
+   * The decision it supersedes no longer stands and nothing replaces it
+   * (Increment 1.27). A retired subject reads as undecided again. Only
+   * written by a review; never offered as a first decision.
+   */
+  "retire",
 ] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];
+
+/** The kinds an owner may choose when first deciding; retire comes only from a review. */
+export const FIRST_DECISION_KINDS = DECISION_KINDS.filter((k) => k !== "retire") as Exclude<DecisionKind, "retire">[];
 
 export const DECISION_SUBJECT_KINDS = [
   "sod_finding",
@@ -35,6 +44,7 @@ export const DECISION_KIND_LABEL: Record<DecisionKind, string> = {
   accept_residual: "Accept residual",
   monitor: "Monitor",
   insure: "Transfer / insure",
+  retire: "Retired",
 };
 
 export interface ControlDecision {
@@ -99,6 +109,9 @@ export function validateDecision(
   if (typeof input.note !== "string" || input.note.trim().length < MIN_NOTE_LENGTH) {
     errors.push(`Decision note must say why, in at least ${MIN_NOTE_LENGTH} characters.`);
   }
+  if (input.kind === "retire" && input.reviewBy != null) {
+    errors.push("A retired decision carries no review date; nothing is left to review.");
+  }
   if (input.reviewBy != null) {
     if (!isIsoDate(input.reviewBy)) {
       errors.push("Review date must be an ISO date (YYYY-MM-DD).");
@@ -141,14 +154,80 @@ export function activeDecisions(decisions: ControlDecision[]): ControlDecision[]
   return decisions.filter((d) => !superseded.has(d.id));
 }
 
+/**
+ * The decision that governs a subject: the latest active one. A retirement
+ * is itself the latest active row, and it says nothing governs, so the
+ * subject reads as undecided.
+ */
 export function latestDecisionFor(
   decisions: ControlDecision[],
   subjectKind: DecisionSubjectKind,
   subjectId: string,
 ): ControlDecision | undefined {
-  return activeDecisions(decisions)
+  const latest = activeDecisions(decisions)
     .filter((d) => d.subjectKind === subjectKind && d.subjectId === subjectId)
     .sort((a, b) => (a.decidedAt < b.decidedAt ? 1 : a.decidedAt > b.decidedAt ? -1 : 0))[0];
+  return latest?.kind === "retire" ? undefined : latest;
+}
+
+// ---------------------------------------------------------------------------
+// Reviewing a decision that has come due (docs/13 item 21)
+// ---------------------------------------------------------------------------
+
+export const REVIEW_ACTIONS = ["keep", "tighten", "retire"] as const;
+export type ReviewAction = (typeof REVIEW_ACTIONS)[number];
+
+/** Keep: the same decision, reviewed again this many days out. */
+export const KEEP_DAYS = 90;
+/** Tighten: remediate, reviewed again this many days out. */
+export const TIGHTEN_DAYS = 30;
+
+export function isReviewAction(value: string): value is ReviewAction {
+  return (REVIEW_ACTIONS as readonly string[]).includes(value);
+}
+
+export type ReviewPlan = {
+  kind: DecisionKind;
+  note: string;
+  reviewBy?: string;
+  supersedesDecisionId: string;
+};
+
+/**
+ * What a review writes, as one superseding row. Keep carries the kind and
+ * the note forward for KEEP_DAYS (reversible: the next review can change
+ * it). Tighten replaces it with remediate, the one response that licenses
+ * nothing, for TIGHTEN_DAYS, and needs a note saying what tightens. Retire
+ * ends it: a retire row with a note and no review date, after which the
+ * subject is undecided again. Nothing here renews anything on its own.
+ */
+export function reviewPlan(
+  prior: Pick<ControlDecision, "id" | "kind" | "note">,
+  action: ReviewAction,
+  asOf: string,
+  note?: string,
+): { ok: true; plan: ReviewPlan } | { ok: false; errors: string[] } {
+  if (prior.kind === "retire") {
+    return { ok: false, errors: ["A retired decision cannot be reviewed; record a new decision on the subject instead."] };
+  }
+  const given = note?.trim() ?? "";
+  switch (action) {
+    case "keep":
+      return {
+        ok: true,
+        plan: { kind: prior.kind, note: given.length >= MIN_NOTE_LENGTH ? given : prior.note, reviewBy: addDays(asOf, KEEP_DAYS), supersedesDecisionId: prior.id },
+      };
+    case "tighten":
+      if (given.length < MIN_NOTE_LENGTH) {
+        return { ok: false, errors: [`Tightening needs a note saying what tightens, in at least ${MIN_NOTE_LENGTH} characters.`] };
+      }
+      return { ok: true, plan: { kind: "remediate", note: given, reviewBy: addDays(asOf, TIGHTEN_DAYS), supersedesDecisionId: prior.id } };
+    case "retire":
+      if (given.length < MIN_NOTE_LENGTH) {
+        return { ok: false, errors: [`Retiring needs a note saying why, in at least ${MIN_NOTE_LENGTH} characters.`] };
+      }
+      return { ok: true, plan: { kind: "retire", note: given, supersedesDecisionId: prior.id } };
+  }
 }
 
 /** Active decisions whose review date has passed. */

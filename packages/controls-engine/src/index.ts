@@ -52,11 +52,16 @@ export type { EntitlementId, ConflictRule, DutyFamily } from "./sod/conflict-rul
 
 export {
   DECISION_KINDS,
+  FIRST_DECISION_KINDS,
   DECISION_SUBJECT_KINDS,
   DECISION_KIND_LABEL,
   MAX_REVIEW_DAYS,
+  REVIEW_ACTIONS,
+  KEEP_DAYS,
+  TIGHTEN_DAYS,
   isDecisionKind,
   isDecisionSubjectKind,
+  isReviewAction,
   isIsoDate,
   addDays,
   validateDecision,
@@ -66,6 +71,7 @@ export {
   overdueReviews,
   decisionCoverage,
   governingDecision,
+  reviewPlan,
 } from "./decisions";
 export type {
   DecisionKind,
@@ -73,6 +79,8 @@ export type {
   ControlDecision,
   DecisionInput,
   DecisionCoverage,
+  ReviewAction,
+  ReviewPlan,
 } from "./decisions";
 
 export {

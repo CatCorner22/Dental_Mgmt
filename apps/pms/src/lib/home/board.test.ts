@@ -104,10 +104,22 @@ describe("decisionsDue", () => {
       asOf
     );
     expect(due.map((d) => d.id)).toEqual(["d2", "d1"]);
-    expect(due[0]).toMatchObject({ overdue: true, kindLabel: "Accept residual", reviewBy: "2026-09-10" });
+    expect(due[0]).toMatchObject({ overdue: true, kindLabel: "Accept residual", reviewBy: "2026-09-10", decidedAt: "2026-09-01T12:00:00Z" });
     expect(due[1]).toMatchObject({ overdue: false, reviewBy: "2026-10-01" });
     expect(daysAfter(asOf, 30)).toBe("2026-10-17");
     expect(dayBefore(asOf)).toBe("2026-09-16");
+  });
+
+  it("drops a decision once a retirement supersedes it, and never lists the retirement itself", () => {
+    const due = decisionsDue(
+      [
+        decision({ id: "d1", reviewBy: "2026-09-20" }),
+        decision({ id: "d1-retired", kind: "retire", reviewBy: undefined, supersedesDecisionId: "d1", note: "The duty moved to the bookkeeper." }),
+        decision({ id: "d2", reviewBy: "2026-09-25", subjectId: "u-2:rule-writeoff" }),
+      ],
+      asOf
+    );
+    expect(due.map((d) => d.id)).toEqual(["d2"]);
   });
 });
 

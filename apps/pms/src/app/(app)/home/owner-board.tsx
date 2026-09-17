@@ -12,7 +12,9 @@ type LoadState =
   | { status: "loading" }
   | { status: "not_for_seat" }
   | { status: "error"; message: string }
-  | { status: "ready"; board: Board };
+  | { status: "ready"; board: Board; isAdmin: boolean };
+
+type ReviewAction = "keep" | "tighten" | "retire";
 
 /** One shape, readable in grayscale; the words beside it carry the meaning. */
 function Shape({ shape }: { shape: TileShape }) {
@@ -39,17 +41,30 @@ function Shape({ shape }: { shape: TileShape }) {
   );
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function Card({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
-      <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">{title}</p>
+    <section aria-labelledby={id} className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+      <p id={id} className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">
+        {title}
+      </p>
       {children}
-    </div>
+    </section>
   );
+}
+
+async function loadBoard(): Promise<Board> {
+  const res = await fetch("/api/home/board");
+  const body = (await res.json().catch(() => ({}))) as Board & { error?: string };
+  if (!res.ok) throw new Error(body.error ?? "Could not load the board.");
+  return body;
 }
 
 export function OwnerBoard() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [message, setMessage] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  // The review being composed: which decision, which action, and the note so far.
+  const [review, setReview] = useState<{ id: string; action: ReviewAction; note: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,10 +76,8 @@ export function OwnerBoard() {
         if (!cancelled) setState({ status: "not_for_seat" });
         return;
       }
-      const res = await fetch("/api/home/board");
-      const body = (await res.json().catch(() => ({}))) as Board & { error?: string };
-      if (!res.ok) throw new Error(body.error ?? "Could not load the board.");
-      if (!cancelled) setState({ status: "ready", board: body });
+      const board = await loadBoard();
+      if (!cancelled) setState({ status: "ready", board, isAdmin: meetsRole(role, "admin") });
     })().catch((err: unknown) => {
       if (!cancelled) setState({ status: "error", message: err instanceof Error ? err.message : "Could not load the board." });
     });
@@ -72,6 +85,29 @@ export function OwnerBoard() {
       cancelled = true;
     };
   }, []);
+
+  /** One superseding row per review; the board is re-read from rows afterwards. */
+  async function submitReview(id: string, action: ReviewAction, note: string) {
+    if (state.status !== "ready") return;
+    setBusy(id);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/controls/decisions/review", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decisionId: id, action, note: note || undefined }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { sentence?: string; error?: string; errors?: string[] };
+      if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      setReview(null);
+      setState({ ...state, board: await loadBoard() });
+      setMessage(body.sentence ?? "Review recorded.");
+    } catch (err: unknown) {
+      setMessage(err instanceof Error ? err.message : "The review was not recorded.");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   if (state.status === "loading") return <p className="text-sm text-[var(--ink-2)]">Reading yesterday's rows…</p>;
   if (state.status === "not_for_seat") {
@@ -87,6 +123,11 @@ export function OwnerBoard() {
   const lag = b.matching.medianLagDays;
   return (
     <div className="grid gap-4">
+      {message && (
+        <p className="text-sm text-[var(--ink-2)]" aria-live="polite">
+          {message}
+        </p>
+      )}
       <section
         aria-labelledby="yesterday"
         className="rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] p-6"
@@ -116,7 +157,7 @@ export function OwnerBoard() {
       </section>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Card title="Approvals only you can give">
+        <Card id="approvals-card" title="Approvals only you can give">
           <p className="mt-1 text-2xl font-semibold tabular-nums">{b.approvals.waiting}</p>
           <p className="mt-1 text-sm text-[var(--ink-2)]">
             {b.approvals.waiting === 0
@@ -128,17 +169,94 @@ export function OwnerBoard() {
           </p>
         </Card>
 
-        <Card title="Decisions due for review">
+        <Card id="decisions-due" title="Decisions due for review">
           <p className="mt-1 text-2xl font-semibold tabular-nums">{b.decisionsDue.length}</p>
           {b.decisionsDue.length === 0 ? (
             <p className="mt-1 text-sm text-[var(--ink-2)]">No control decision comes up for review in the next 30 days.</p>
           ) : (
-            <ul className="mt-1 space-y-1 text-sm text-[var(--ink-2)]">
-              {b.decisionsDue.slice(0, 3).map((d) => (
-                <li key={d.id}>
-                  {d.kindLabel} on {d.subjectId} · {d.overdue ? `review was due ${d.reviewBy}` : `review by ${d.reviewBy}`}
-                </li>
-              ))}
+            <ul className="mt-1 space-y-3 text-sm text-[var(--ink-2)]">
+              {b.decisionsDue.slice(0, 3).map((d) => {
+                const composing = review?.id === d.id ? review : null;
+                const noteOk = (composing?.note.trim().length ?? 0) >= 10;
+                return (
+                  <li key={d.id} className="border-t border-[var(--line)] pt-2 first:border-0 first:pt-0">
+                    <p className="font-semibold text-[var(--ink)]">
+                      {d.kindLabel} on {d.subjectKind.replace(/_/g, " ")} · {d.overdue ? `review was due ${d.reviewBy}` : `review by ${d.reviewBy}`}
+                    </p>
+                    <p className="text-xs text-[var(--ink-3)]" title={d.subjectId}>
+                      Why, when decided: {d.note}
+                    </p>
+                    {d.effect && <p className="mt-1">{d.effect}</p>}
+                    {state.isAdmin && !composing && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-3 py-1 text-sm font-semibold text-[var(--ink)] disabled:opacity-50"
+                          disabled={busy !== null}
+                          onClick={() => void submitReview(d.id, "keep", "")}
+                          aria-label={`Keep ${d.kindLabel} 90 more days`}
+                        >
+                          {busy === d.id ? "Recording…" : "Keep 90 more days"}
+                        </button>
+                        <button
+                          type="button"
+                          className="min-h-[var(--target)] rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-sm font-semibold text-[var(--ink)] disabled:opacity-50"
+                          disabled={busy !== null}
+                          onClick={() => setReview({ id: d.id, action: "tighten", note: "" })}
+                          aria-label={`Tighten ${d.kindLabel}`}
+                        >
+                          Tighten
+                        </button>
+                        <button
+                          type="button"
+                          className="min-h-[var(--target)] rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-sm font-semibold text-[var(--ink)] disabled:opacity-50"
+                          disabled={busy !== null}
+                          onClick={() => setReview({ id: d.id, action: "retire", note: "" })}
+                          aria-label={`Retire ${d.kindLabel}`}
+                        >
+                          Retire
+                        </button>
+                      </div>
+                    )}
+                    {composing && (
+                      <form
+                        className="mt-2 flex flex-wrap items-end gap-2"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          if (noteOk) void submitReview(d.id, composing.action, composing.note.trim());
+                        }}
+                      >
+                        <label className="flex min-w-[14rem] flex-1 flex-col text-sm">
+                          <span className="mb-1 font-semibold text-[var(--ink-2)]">
+                            {composing.action === "tighten"
+                              ? "What tightens (at least ten characters). The decision becomes Remediate, reviewed in 30 days."
+                              : "Why it ends (at least ten characters). Retiring cannot be undone; the subject reads as undecided again."}
+                          </span>
+                          <input
+                            className="rounded-md border border-[var(--line)] bg-[var(--bg)] px-3 py-2"
+                            value={composing.note}
+                            onChange={(e) => setReview({ ...composing, note: e.target.value })}
+                          />
+                        </label>
+                        <button
+                          type="submit"
+                          className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-3 py-1 text-sm font-semibold text-[var(--ink)] disabled:opacity-50"
+                          disabled={busy !== null || !noteOk}
+                        >
+                          {busy === d.id ? "Recording…" : composing.action === "tighten" ? "Tighten with this note" : "Retire for good"}
+                        </button>
+                        <button
+                          type="button"
+                          className="min-h-[var(--target)] rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-sm font-semibold text-[var(--ink)]"
+                          onClick={() => setReview(null)}
+                        >
+                          Cancel
+                        </button>
+                      </form>
+                    )}
+                  </li>
+                );
+              })}
               {b.decisionsDue.length > 3 && <li>and {b.decisionsDue.length - 3} more</li>}
             </ul>
           )}
@@ -149,7 +267,7 @@ export function OwnerBoard() {
           </p>
         </Card>
 
-        <Card title="Exceptions expiring">
+        <Card id="exceptions-expiring" title="Exceptions expiring">
           <p className="mt-1 text-2xl font-semibold tabular-nums">{b.expiringExceptions.length}</p>
           {b.expiringExceptions.length === 0 ? (
             <p className="mt-1 text-sm text-[var(--ink-2)]">No standing exception ends in the next 14 days.</p>
@@ -164,7 +282,7 @@ export function OwnerBoard() {
           )}
         </Card>
 
-        <Card title="Practice health">
+        <Card id="practice-health" title="Practice health">
           <p className="mt-1 text-2xl font-semibold tabular-nums">{b.health.segregationHealth} / 100</p>
           <p className="mt-1 text-sm text-[var(--ink-2)]">
             Segregation health. COSO overall {b.health.cosoOverall}. {b.health.openConflicts} open duty combination

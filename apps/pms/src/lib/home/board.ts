@@ -17,6 +17,7 @@ import { measurementSummary } from "../controls/reconciliationMeasure";
 import { computeSnapshot } from "../controls/snapshots";
 import { getDayCloseSnapshot } from "../day-close/service";
 import { listReconciliationRuns } from "../reconciliation/queries";
+import { measuredEffectSentence, measuredEffectSince } from "./measuredEffect";
 
 /**
  * The owner's home board (docs/04, Owner row; docs/13 items 15 and 21),
@@ -154,6 +155,10 @@ export type DecisionDue = {
   overdue: boolean;
   note: string;
   decidedByName: string;
+  /** ISO timestamp the decision was made; the measured-effect window starts here. */
+  decidedAt: string;
+  /** One practice-wide sentence on what happened since; filled by the board from rows. */
+  effect?: string;
 };
 
 /** Active decisions whose review date has passed or falls within the horizon; overdue first. */
@@ -171,6 +176,7 @@ export function decisionsDue(decisions: ControlDecision[], asOf: string, horizon
       overdue: d.reviewBy < asOf,
       note: d.note,
       decidedByName: d.decidedByName,
+      decidedAt: d.decidedAt,
     }))
     .sort((a, b) => (a.overdue === b.overdue ? (a.reviewBy < b.reviewBy ? -1 : 1) : a.overdue ? -1 : 1));
 }
@@ -277,12 +283,19 @@ export async function buildOwnerBoard(db: AppDb, tenantId: string, viewerId: str
   const inbox = (await listInboxApprovals(db, tenantId, viewerId)).filter((r) => r.status === "pending");
   const findings = summarizeFindings(await listControlFindings(db, tenantId), ctx.decisions);
 
+  // Each decision due carries what happened since it was made, so the owner
+  // reviews what the rows say rather than what they remember (docs/13 item 21).
+  const due = decisionsDue(ctx.decisions, asOf);
+  for (const d of due) {
+    d.effect = measuredEffectSentence(await measuredEffectSince(db, tenantId, new Date(d.decidedAt)));
+  }
+
   return {
     asOf,
     computedAt: now.toISOString(),
     yesterday: yesterdayTile({ asOf, closes, runs, reconciliation: measurementSummary(ctx.reconciliation) }),
     approvals: { waiting: inbox.length, totalCents: inbox.reduce((n, r) => n + Number(r.amountCents), 0) },
-    decisionsDue: decisionsDue(ctx.decisions, asOf),
+    decisionsDue: due,
     expiringExceptions: expiringExceptions(ctx.active?.policy.exceptions ?? [], asOf),
     health: healthCard(snapshot),
     detectorFindingsOpen: findings.open,
