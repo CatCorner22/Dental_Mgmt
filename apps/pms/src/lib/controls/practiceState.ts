@@ -9,6 +9,7 @@ import type { AppDb } from "../db/client";
 import { listDecisions } from "./decisions";
 import { ENFORCEMENT } from "./enforcement";
 import { loadActivePolicy, type ActivePolicy } from "./policy";
+import { measureMatchingLive, type MatchingMeasurement } from "./matchingMeasure";
 import { measureReconciliation, type ReconciliationMeasurement } from "./reconciliationMeasure";
 import { loadStaff, type LoadedStaff } from "./staff";
 
@@ -23,6 +24,8 @@ export type ControlsContext = {
   decisions: ControlDecision[];
   /** Independent bank reconciliation as measured from cleared runs; never assumed. */
   reconciliation: ReconciliationMeasurement;
+  /** Detection lag and the 48-hour match rate from bank lines; recorded, not scored. */
+  matching: MatchingMeasurement;
   built: BuiltPracticeState;
 };
 
@@ -37,6 +40,7 @@ export async function loadControlsContext(db: AppDb, tenantId: string, now: Date
   const staff = await loadStaff(db, tenantId, now);
   const decisions = await listDecisions(db, tenantId);
   const reconciliation = await measureReconciliation(db, tenantId, now);
+  const matching = await measureMatchingLive(db, tenantId, now);
   const policy = active?.policy ?? mergeDualReleasePolicy({ enabled: false, exceptions: [] });
   const asOf = now.toISOString().slice(0, 10);
   const built = buildPracticeState({
@@ -48,5 +52,5 @@ export async function loadControlsContext(db: AppDb, tenantId: string, now: Date
     asOf,
     independentBankRec: reconciliation.independentBankRec,
   });
-  return { tenantId, now, asOf, active, policy, staff, decisions, reconciliation, built };
+  return { tenantId, now, asOf, active, policy, staff, decisions, reconciliation, matching, built };
 }

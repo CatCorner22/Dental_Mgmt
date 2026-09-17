@@ -35,6 +35,7 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     expect(await provenance().innerText()).toMatch(/Directional until a CPA calibrates/);
     expect(await page().locator("section[aria-labelledby=coverage] tbody tr").count()).toBe(6);
     expect(await page().getByText(/^Independent bank reconciliation:/).innerText()).toMatch(/stale import|not measured/);
+    expect(await page().getByText(/^Bank matching:/).innerText()).toMatch(/no rate yet[\s\S]*nothing to measure/);
     expect(await page().getByText(/outside the rulebook/).innerText()).toMatch(/2 grant row/);
     expect(app.serverLog()).toMatch(/\[boot\] database role .*not superuser, not BYPASSRLS, owns no tables/);
   }, 90_000);

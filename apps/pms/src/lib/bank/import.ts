@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import {
   bankStatementImports,
   bankTransactions,
+  deposits,
   domainEvent,
   GENESIS_HASH,
   hashDomainEvent,
@@ -39,15 +40,21 @@ export type BankStatementImportResult = {
   reconciliationStatus: "matched" | "variance";
   unmatchedCount: number;
   matchedDepositCount: number;
+  /** Bank lines this import added; a statement imported twice adds none the second time. */
+  newBankLineCount: number;
 };
 
-type DepositSlipCandidate = {
-  stagedRowId: string;
-  importRunId: string;
+/**
+ * Something the practice says it put in the bank: a deposit it prepared in
+ * the product (the day-close path), or a Curve Hero deposit-slip row it
+ * staged. A bank credit matches the first candidate with the same date and
+ * amount; a candidate matches once across every run.
+ */
+type DepositCandidate = {
+  key: string;
   depositDate: string;
   amountCents: number;
-  method: string;
-  reference: string | null;
+  matchRef: Record<string, unknown>;
 };
 
 async function appendEvent(
@@ -88,7 +95,53 @@ async function appendEvent(
   });
 }
 
-async function loadDepositSlipCandidates(db: AppDb, tenantId: string): Promise<DepositSlipCandidate[]> {
+/** Candidate keys already matched by an earlier run, so a deposit explains one bank credit only. */
+async function loadMatchedCandidateKeys(db: AppDb, tenantId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ matchRef: reconciliationVariances.matchRef })
+    .from(reconciliationVariances)
+    .where(and(eq(reconciliationVariances.tenantId, tenantId), eq(reconciliationVariances.kind, "matched_deposit")));
+  const keys = new Set<string>();
+  for (const row of rows) {
+    const ref = (row.matchRef ?? {}) as { depositId?: string; stagedRowId?: string };
+    if (ref.depositId) keys.add(`deposit:${ref.depositId}`);
+    if (ref.stagedRowId) keys.add(`slip:${ref.stagedRowId}`);
+  }
+  return keys;
+}
+
+async function loadDepositCandidates(db: AppDb, tenantId: string, bankAccountId: string): Promise<DepositCandidate[]> {
+  const candidates: DepositCandidate[] = [];
+
+  // Deposits the practice prepared in the product for this bank account, oldest first.
+  const prepared = await db
+    .select({
+      id: deposits.id,
+      businessDate: deposits.businessDate,
+      amountCents: deposits.amountCents,
+      method: deposits.method,
+      reference: deposits.reference,
+      preparedByName: deposits.preparedByName,
+    })
+    .from(deposits)
+    .where(and(eq(deposits.tenantId, tenantId), eq(deposits.bankAccountId, bankAccountId)))
+    .orderBy(deposits.createdAt);
+  for (const row of prepared) {
+    candidates.push({
+      key: `deposit:${row.id}`,
+      depositDate: String(row.businessDate),
+      amountCents: Number(row.amountCents),
+      matchRef: {
+        source: "deposit",
+        depositId: row.id,
+        method: row.method,
+        reference: row.reference,
+        preparedByName: row.preparedByName,
+      },
+    });
+  }
+
+  // Curve Hero deposit-slip rows staged for the tenant.
   const rows = await db
     .select({
       stagedRowId: importStagedRows.id,
@@ -100,8 +153,6 @@ async function loadDepositSlipCandidates(db: AppDb, tenantId: string): Promise<D
     .where(
       and(eq(importStagedRows.tenantId, tenantId), eq(importRuns.reportKind, "deposit_slip"))
     );
-
-  const candidates: DepositSlipCandidate[] = [];
   for (const row of rows) {
     const payload = row.payload as {
       kind?: string;
@@ -112,22 +163,28 @@ async function loadDepositSlipCandidates(db: AppDb, tenantId: string): Promise<D
     };
     if (payload.kind !== "deposit_slip" || !payload.depositDate || !payload.amountCents) continue;
     candidates.push({
-      stagedRowId: row.stagedRowId,
-      importRunId: row.importRunId,
+      key: `slip:${row.stagedRowId}`,
       depositDate: payload.depositDate,
       amountCents: payload.amountCents,
-      method: payload.method ?? "",
-      reference: payload.reference ?? null,
+      matchRef: {
+        source: "deposit_slip",
+        importRunId: row.importRunId,
+        stagedRowId: row.stagedRowId,
+        method: payload.method ?? "",
+        reference: payload.reference ?? null,
+      },
     });
   }
-  return candidates;
+
+  const used = await loadMatchedCandidateKeys(db, tenantId);
+  return candidates.filter((c) => !used.has(c.key));
 }
 
 function findDepositMatch(
-  candidates: DepositSlipCandidate[],
+  candidates: DepositCandidate[],
   postedDate: string,
   amountCents: number
-): DepositSlipCandidate | null {
+): DepositCandidate | null {
   if (amountCents <= 0) return null;
   return (
     candidates.find(
@@ -135,6 +192,58 @@ function findDepositMatch(
         candidate.depositDate === postedDate && candidate.amountCents === amountCents
     ) ?? null
   );
+}
+
+/**
+ * Inserts the bank line, or finds the one an earlier import of the same
+ * statement already holds: bank_transactions is append-only and unique per
+ * (tenant, account, external key), so the second import must point its
+ * variance rows at the existing line rather than at an id that was never
+ * written.
+ */
+async function upsertBankTransaction(
+  db: AppDb,
+  input: {
+    id: string;
+    tenantId: string;
+    bankAccountId: string;
+    importId: string;
+    row: ReturnType<typeof stageBankRows>[number];
+    now: Date;
+  }
+): Promise<{ id: string; inserted: boolean }> {
+  const inserted = await db
+    .insert(bankTransactions)
+    .values({
+      id: input.id,
+      tenantId: input.tenantId,
+      bankAccountId: input.bankAccountId,
+      importId: input.importId,
+      postedDate: input.row.payload.postedDate,
+      description: input.row.payload.description,
+      amountCents: input.row.payload.amountCents,
+      externalKey: input.row.externalKey,
+      payload: input.row.payload,
+      createdAt: input.now,
+    })
+    .onConflictDoNothing({
+      target: [bankTransactions.tenantId, bankTransactions.bankAccountId, bankTransactions.externalKey],
+    })
+    .returning({ id: bankTransactions.id });
+  if (inserted[0]) return { id: inserted[0].id, inserted: true };
+  const [existing] = await db
+    .select({ id: bankTransactions.id })
+    .from(bankTransactions)
+    .where(
+      and(
+        eq(bankTransactions.tenantId, input.tenantId),
+        eq(bankTransactions.bankAccountId, input.bankAccountId),
+        eq(bankTransactions.externalKey, input.row.externalKey)
+      )
+    )
+    .limit(1);
+  if (!existing) throw new Error("Bank line neither inserted nor found after conflict.");
+  return { id: existing.id, inserted: false };
 }
 
 export async function createBankStatementImport(
@@ -181,49 +290,42 @@ export async function createBankStatementImport(
       reconciliationStatus: "variance",
       unmatchedCount: summary.errorCount,
       matchedDepositCount: 0,
+      newBankLineCount: 0,
     };
   }
 
-  const depositCandidates = await loadDepositSlipCandidates(db, input.tenantId);
+  const depositCandidates = await loadDepositCandidates(db, input.tenantId, input.bankAccountId);
   const usedDeposits = new Set<string>();
   let matchedDepositCount = 0;
   let matchedCents = 0;
   let varianceCents = 0;
-  const transactionIds: { id: string; staged: (typeof staged)[number]; match: DepositSlipCandidate | null }[] = [];
+  let newBankLineCount = 0;
+  const transactionIds: { id: string; staged: (typeof staged)[number]; match: DepositCandidate | null }[] = [];
 
   for (const row of staged) {
-    const txnId = uuidv7(now.getTime() + row.rowNumber);
-    await db
-      .insert(bankTransactions)
-      .values({
-        id: txnId,
-        tenantId: input.tenantId,
-        bankAccountId: input.bankAccountId,
-        importId,
-        postedDate: row.payload.postedDate,
-        description: row.payload.description,
-        amountCents: row.payload.amountCents,
-        externalKey: row.externalKey,
-        payload: row.payload,
-        createdAt: now,
-      })
-      .onConflictDoNothing({
-        target: [bankTransactions.tenantId, bankTransactions.bankAccountId, bankTransactions.externalKey],
-      });
+    const txn = await upsertBankTransaction(db, {
+      id: uuidv7(now.getTime() + row.rowNumber),
+      tenantId: input.tenantId,
+      bankAccountId: input.bankAccountId,
+      importId,
+      row,
+      now,
+    });
+    if (txn.inserted) newBankLineCount += 1;
 
     const match = findDepositMatch(
-      depositCandidates.filter((c) => !usedDeposits.has(c.stagedRowId)),
+      depositCandidates.filter((c) => !usedDeposits.has(c.key)),
       row.payload.postedDate,
       row.payload.amountCents
     );
     if (match) {
-      usedDeposits.add(match.stagedRowId);
+      usedDeposits.add(match.key);
       matchedDepositCount += 1;
       matchedCents += Math.abs(row.payload.amountCents);
     } else {
       varianceCents += Math.abs(row.payload.amountCents);
     }
-    transactionIds.push({ id: txnId, staged: row, match });
+    transactionIds.push({ id: txn.id, staged: row, match });
   }
 
   const periodStart = summary.periodStart ?? staged[0]?.payload.postedDate ?? now.toISOString().slice(0, 10);
@@ -250,6 +352,7 @@ export async function createBankStatementImport(
       debitCents: summary.totals.debitCents,
       openVarianceCount,
       matchedDepositCount,
+      newBankLineCount,
     },
     createdAt: now,
     createdById: input.actorUserId,
@@ -267,14 +370,7 @@ export async function createBankStatementImport(
         amountCents: row.staged.payload.amountCents,
         description: row.staged.payload.description,
         status: row.match ? "matched" : "open",
-        matchRef: row.match
-          ? {
-              importRunId: row.match.importRunId,
-              stagedRowId: row.match.stagedRowId,
-              method: row.match.method,
-              reference: row.match.reference,
-            }
-          : null,
+        matchRef: row.match ? row.match.matchRef : null,
         createdAt: now,
       }))
     );
@@ -285,6 +381,7 @@ export async function createBankStatementImport(
     reconciliationRunId,
     bankAccountId: input.bankAccountId,
     rowCount: summary.rowCount,
+    newBankLineCount,
     reconciliationStatus,
     matchedDepositCount,
     openVarianceCount,
@@ -298,5 +395,6 @@ export async function createBankStatementImport(
     reconciliationStatus,
     unmatchedCount: openVarianceCount,
     matchedDepositCount,
+    newBankLineCount,
   };
 }

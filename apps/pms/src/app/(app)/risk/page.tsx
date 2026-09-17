@@ -400,6 +400,24 @@ function RiskBody({
             <>not measured in this snapshot; treated as absent.</>
           )}
         </p>
+        <p className="mt-2 max-w-prose text-sm text-[var(--ink-2)]">
+          Bank matching:{" "}
+          {s.measurements?.matching ? (
+            <>
+              <span className="font-semibold text-[var(--ink)]">
+                {s.measurements.matching.matchRate48hPct === null
+                  ? "no rate yet"
+                  : `${s.measurements.matching.matchRate48hPct}% within 48 hours`}
+                {s.measurements.matching.medianLagDays === null
+                  ? ""
+                  : `, median lag ${s.measurements.matching.medianLagDays} ${s.measurements.matching.medianLagDays === 1 ? "day" : "days"}`}
+              </span>{" "}
+              (measured over the last {s.measurements.matching.windowDays} days; recorded, not scored). {s.measurements.matching.why}
+            </>
+          ) : (
+            <>not measured in this snapshot.</>
+          )}
+        </p>
       </section>
 
       <section aria-labelledby="coverage" className="mb-10">

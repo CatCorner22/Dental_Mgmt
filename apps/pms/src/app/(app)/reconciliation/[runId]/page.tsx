@@ -19,7 +19,7 @@ function varianceLabel(kind: string): string {
     case "unmatched_bank":
       return "Unmatched bank line";
     case "matched_deposit":
-      return "Matched deposit slip";
+      return "Matched deposit";
     case "unmatched_ledger":
       return "Unmatched ledger";
     case "amount_mismatch":

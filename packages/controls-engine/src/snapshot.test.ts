@@ -92,6 +92,19 @@ describe("takeControlSnapshot", () => {
           latestClearedAt: "2026-09-08T18:00:00Z",
           why: "1 of 2 runs cleared in the last 45 days was cleared by someone who prepared deposits or posted payments in the period.",
         },
+        matching: {
+          windowDays: 45,
+          dueDays: 2,
+          linesInWindow: 3,
+          creditsInWindow: 2,
+          creditsMatched: 2,
+          creditsMatchedWithinDue: 2,
+          matchRate48hPct: 100,
+          medianLagDays: 2,
+          maxLagDays: 3,
+          openLines: 0,
+          why: "2 of 2 bank credits matched a practice deposit within 48 hours (100%); median detection lag 2 days across 3 bank lines.",
+        },
       },
     });
     expect(measured.measurements?.reconciliation?.grade).toBe("same_hands");
@@ -99,6 +112,9 @@ describe("takeControlSnapshot", () => {
     expect(measured.assumptions.find((a) => /bank reconciliation is measured/.test(a))).toMatch(
       /absent \(same hands\): 1 of 2 runs/
     );
+    // Matching is recorded, not scored, and the assumptions list says so; unmeasured, it is not an assumption the scores make.
+    expect(measured.assumptions.find((a) => /48-hour match rate/.test(a))).toMatch(/recorded, not scored: 2 of 2 bank credits/);
+    expect(unmeasured.assumptions.some((a) => /48-hour match rate/.test(a))).toBe(false);
   });
 
   it("is deterministic and finite", () => {

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import type { MatchingMeasurementSummary, ReconciliationMeasurementSummary } from "@pms/controls-engine";
 import { formatCents } from "@/lib/ledger/format";
 import {
   independenceSourceLabel,
@@ -9,10 +10,24 @@ import {
   type ReconciliationRunSummary,
 } from "@/lib/reconciliation/types";
 
+type Measurements = {
+  reconciliation?: ReconciliationMeasurementSummary;
+  matching?: MatchingMeasurementSummary;
+};
+
 type LoadState =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; runs: ReconciliationRunSummary[]; accounts: BankAccountOption[] };
+  | { status: "ready"; runs: ReconciliationRunSummary[]; accounts: BankAccountOption[]; measurements: Measurements };
+
+function gradeLabel(grade: ReconciliationMeasurementSummary["grade"]): string {
+  return grade === "independent" ? "Independent" : grade === "same_hands" ? "Same hands" : "Stale import";
+}
+
+function lagLabel(days: number | null): string {
+  if (days === null) return "no lines yet";
+  return `${days} ${days === 1 ? "day" : "days"}`;
+}
 
 function statusLabel(status: string): string {
   switch (status) {
@@ -39,13 +54,18 @@ export default function ReconciliationPage() {
       fetch("/api/reconciliation/runs"),
       fetch("/api/bank/accounts"),
     ]);
-    const runsBody = (await runsRes.json()) as { runs?: ReconciliationRunSummary[]; error?: string };
+    const runsBody = (await runsRes.json()) as {
+      runs?: ReconciliationRunSummary[];
+      measurements?: Measurements;
+      error?: string;
+    };
     const accountsBody = (await accountsRes.json()) as { accounts?: BankAccountOption[]; error?: string };
     if (!runsRes.ok) throw new Error(runsBody.error ?? "Could not load reconciliation runs.");
     if (!accountsRes.ok) throw new Error(accountsBody.error ?? "Could not load bank accounts.");
     return {
       runs: runsBody.runs ?? [],
       accounts: accountsBody.accounts ?? [],
+      measurements: runsBody.measurements ?? {},
     };
   }
 
@@ -112,10 +132,44 @@ export default function ReconciliationPage() {
     <main>
       <p className="mb-2 text-sm font-semibold tracking-wide text-teal">Money Desk</p>
       <h1 className="mb-2">Bank reconciliation</h1>
-      <p className="mb-8 max-w-prose text-[var(--ink-2)]">
-        Independent ground truth from statement import. Each run opens a variance queue;
-        deposits auto-match when a Curve Hero deposit slip was staged for the same date and amount.
+      <p className="mb-6 max-w-prose text-[var(--ink-2)]">
+        Independent ground truth from statement import. Each run opens a variance queue; a bank credit
+        matches when the practice prepared a deposit, or staged a Curve Hero deposit slip, for the same
+        date and amount.
       </p>
+
+      {state.status === "ready" && (state.measurements.reconciliation || state.measurements.matching) && (
+        <section aria-labelledby="measured" className="mb-8 grid gap-4 md:grid-cols-2">
+          <h2 id="measured" className="sr-only">
+            Measured from these runs
+          </h2>
+          {state.measurements.reconciliation && (
+            <div className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">
+                Independent reconciliation · last {state.measurements.reconciliation.windowDays} days
+              </p>
+              <p className="mt-1 text-xl font-semibold">{gradeLabel(state.measurements.reconciliation.grade)}</p>
+              <p className="mt-1 text-sm text-[var(--ink-2)]">{state.measurements.reconciliation.why}</p>
+            </div>
+          )}
+          {state.measurements.matching && (
+            <div className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">
+                Bank matching · last {state.measurements.matching.windowDays} days
+              </p>
+              <p className="mt-1 text-xl font-semibold tabular-nums">
+                {state.measurements.matching.matchRate48hPct === null
+                  ? "No rate yet"
+                  : `${state.measurements.matching.matchRate48hPct}% within 48 hours`}
+                <span className="text-base font-normal text-[var(--ink-2)]">
+                  {" "}· median lag {lagLabel(state.measurements.matching.medianLagDays)}
+                </span>
+              </p>
+              <p className="mt-1 text-sm text-[var(--ink-2)]">{state.measurements.matching.why}</p>
+            </div>
+          )}
+        </section>
+      )}
 
       {state.status === "ready" && state.accounts.length > 0 && (
         <section className="mb-10 rounded-lg border border-[var(--line)] bg-[var(--surface)] p-6">

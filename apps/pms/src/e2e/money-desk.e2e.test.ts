@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { SEED_BANK } from "@pms/db/seed-data";
+import { uuidv7 } from "@pms/db";
 import { assertNoProblems, e2eEnabled, openBrowser, startProductionApp, type E2eApp, type E2eBrowser } from "./harness";
 
 /**
@@ -6,16 +8,32 @@ import { assertNoProblems, e2eEnabled, openBrowser, startProductionApp, type E2e
  * seeded Ridgeview tenant: the ledger and an account's explanation; a
  * payment posted by the front desk and a write-off held for a second
  * approver; the owner approving one request and declining another; a bank
- * statement imported and its run cleared; the day close frozen by a second
- * counter; a statement drafted and issued. See harness.ts for what the run
- * needs.
+ * statement imported, its credits matched to the deposits the front desk
+ * prepared, and its run cleared; the day close frozen by a second counter;
+ * the measured grade, lag, and match rate on the reconciliation screen and
+ * on Practice Risk; a statement drafted and issued. See harness.ts for what
+ * the run needs.
  */
 
+/** YYYY-MM-DD, `days` days before today (UTC), which is the clock the server measures with. */
+function daysAgo(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The bank's side of two days ago, when the front desk banked the drawer and
+ * a check (the deposits the suite prepares below), plus a fee dated the
+ * seeded business day so the run's period covers the owner's own postings.
+ * Imported today, the two credits match within 48 hours; the fee stays open.
+ */
+const DEPOSIT_DAY = daysAgo(2);
 const BANK_CSV = [
   "Date,Description,Amount,Reference",
-  "09/14/2026,DEPOSIT CASH MAIN,250.00,",
-  "09/14/2026,DEPOSIT CHECK 1042,100.00,1042",
-  "09/15/2026,ACH INSURANCE EFT,-150.00,",
+  `${DEPOSIT_DAY},DEPOSIT CASH MAIN,250.00,`,
+  `${DEPOSIT_DAY},DEPOSIT CHECK 1042,100.00,1042`,
+  "2026-09-14,ACH MERCHANT FEE,-150.00,",
 ].join("\n");
 
 describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
@@ -26,6 +44,19 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
 
   beforeAll(async () => {
     app = await startProductionApp();
+    // The front desk prepared two deposits two days ago; the statement below is the bank's record of them.
+    const { rows } = await app.db.admin.query("SELECT id, display_name FROM users WHERE username = 'ridgeview-front'");
+    for (const [method, amount, reference] of [
+      ["cash", 25_000, null],
+      ["check", 10_000, "1042"],
+    ] as const) {
+      await app.db.admin.query(
+        `INSERT INTO deposits (id, tenant_id, location_id, bank_account_id, business_date, method, amount_cents,
+                               reference, status, prepared_by_id, prepared_by_name, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'open', $9, $10, now())`,
+        [uuidv7(), SEED_BANK.tenantId, SEED_BANK.locationId, SEED_BANK.accountId, DEPOSIT_DAY, method, amount, reference, rows[0].id, rows[0].display_name]
+      );
+    }
     b = await openBrowser(app);
   }, 180_000);
 
@@ -100,14 +131,21 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await page().locator("section:has(h2:text('Running ledger')) tbody").innerText()).toMatch(/\$200\.00|-\$200\.00/);
   }, 120_000);
 
-  it("imports a bank statement, opens its run, and clears it as the owner", async () => {
+  it("imports a bank statement, matches its credits to the front desk's deposits, and clears the fee as the owner", async () => {
     await page().goto(`${app.base}/reconciliation`);
     await page().getByRole("heading", { name: "Bank reconciliation" }).waitFor({ timeout: 60_000 });
+    // Nothing measured yet: no run, no bank line.
+    await page().getByText(/^Stale import$/).waitFor({ timeout: 30_000 });
+    expect(await page().getByText(/^No rate yet/).count()).toBe(1);
+
     await page().getByLabel("CSV content").fill(BANK_CSV);
     await page().getByRole("button", { name: "Import statement" }).click();
     await page().waitForURL(/\/reconciliation\/[0-9a-f-]{36}$/, { timeout: 60_000 });
     await page().getByText(/Independence source: statement import/).waitFor({ timeout: 30_000 });
     expect(await page().locator("tbody tr").count()).toBe(3);
+    expect(await page().locator("tbody tr", { hasText: "Matched deposit" }).count()).toBe(2);
+    expect(await page().locator("tbody tr", { hasText: "Unmatched bank line" }).count()).toBe(1);
+    expect(await page().locator("div", { has: page().getByText(/^Matched$/) }).getByText("$350.00").count()).toBe(1);
 
     // The owner posted the seeded payments, so only owner-only clearance is open to them; it is recorded, not hidden.
     const clear = page().getByRole("button", { name: /^Clear/ });
@@ -116,6 +154,17 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await flash(/Cleared\.|Variances cleared\./).waitFor({ timeout: 30_000 });
     await page().getByText(/^Cleared$/).waitFor({ timeout: 30_000 });
   }, 120_000);
+
+  it("shows the measured grade, match rate, and detection lag over the runs", async () => {
+    await page().goto(`${app.base}/reconciliation`);
+    await page().getByRole("heading", { name: "Bank reconciliation" }).waitFor({ timeout: 60_000 });
+    await page().getByText(/^Same hands$/).waitFor({ timeout: 30_000 });
+    // Both credits matched on import, two days after the bank posted them; the fee cleared today. Median 2 whatever today is.
+    expect(await page().getByText(/^100% within 48 hours/).innerText()).toMatch(/median lag 2 days/);
+    expect(await page().getByText(/2 of 2 bank credits matched a practice deposit within 48 hours/).innerText()).toMatch(
+      /Debits are not matched yet/
+    );
+  }, 90_000);
 
   it("freezes the day close as a second counter, since the front desk prepared the deposits", async () => {
     await page().goto(`${app.base}/day-close`);
@@ -134,6 +183,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().getByRole("button", { name: "Recompute from live rows" }).click();
     await flash(/Recomputed from live rows/).waitFor({ timeout: 30_000 });
     expect(await page().getByText(/^Independent bank reconciliation:/).innerText()).toMatch(/same hands[\s\S]*owner-only clearance recorded as a finding/);
+    expect(await page().getByText(/^Bank matching:/).innerText()).toMatch(/100% within 48 hours, median lag 2 days[\s\S]*recorded, not scored/);
   }, 90_000);
 
   it("lets the front desk draft and issue a statement from the same balances", async () => {
