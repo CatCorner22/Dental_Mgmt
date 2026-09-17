@@ -683,6 +683,23 @@ export const statements = pgTable(
   (t) => [index("statements_tenant_account_as_of_idx").on(t.tenantId, t.accountId, t.asOf)]
 );
 
+export const digestAcks = pgTable(
+  "digest_acks",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    /** sha256 of the canonical digest the acknowledger read. */
+    summaryHash: text("summary_hash").notNull(),
+    eventCount: integer("event_count").notNull(),
+    acknowledgedById: uuid("acknowledged_by_id").notNull(),
+    acknowledgedByName: text("acknowledged_by_name").notNull(),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [uniqueIndex("digest_acks_tenant_period_uidx").on(t.tenantId, t.periodEnd)]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "users",
@@ -715,4 +732,5 @@ export const TENANT_SCOPED_TABLES = [
   "day_closes",
   "statements",
   "control_findings",
+  "digest_acks",
 ] as const;

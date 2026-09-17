@@ -31,6 +31,7 @@ const ledgerFindingsSql = readFileSync(join(here, "../migrations/0020_control_fi
 const coverageFindingsSql = readFileSync(join(here, "../migrations/0021_control_findings_coverage.sql"), "utf8");
 const decisionSubjectsSql = readFileSync(join(here, "../migrations/0022_control_decisions_detector_finding.sql"), "utf8");
 const decisionRetireSql = readFileSync(join(here, "../migrations/0023_control_decisions_retire.sql"), "utf8");
+const digestAcksSql = readFileSync(join(here, "../migrations/0024_digest_acks.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -194,6 +195,22 @@ describe("Increment 1.22 detector findings", () => {
     expect(decisionRetireSql).toMatch(/DROP CONSTRAINT control_decisions_kind_check/);
     expect(decisionRetireSql).toMatch(/'monitor', 'insure', 'retire'\)/);
     expect(decisionRetireSql).not.toMatch(/GRANT|DROP TABLE|DELETE|UPDATE/);
+  });
+});
+
+describe("Increment 1.28 weekly digest acknowledgments", () => {
+  it("stores one append-only, tenant-isolated acknowledgment per period, binding the summary hash", () => {
+    expect(digestAcksSql).toMatch(/CREATE TABLE digest_acks\b/);
+    expect(digestAcksSql).toMatch(/summary_hash text NOT NULL CHECK \(length\(summary_hash\) = 64\)/);
+    expect(digestAcksSql).toMatch(/UNIQUE \(tenant_id, period_end\)/);
+    expect(digestAcksSql).toMatch(/digest_acks_period_order/);
+    expect(digestAcksSql).toMatch(/digest_acks_no_update/);
+    expect(digestAcksSql).toMatch(/digest_acks_no_delete/);
+    expect(digestAcksSql).toMatch(/ALTER TABLE digest_acks FORCE ROW LEVEL SECURITY/);
+    expect(digestAcksSql).toMatch(/CREATE POLICY digest_acks_isolation ON digest_acks/);
+    expect(digestAcksSql).toMatch(/GRANT SELECT, INSERT ON digest_acks TO app_rw/);
+    expect(digestAcksSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*digest_acks/);
+    expect(TENANT_SCOPED_TABLES).toContain("digest_acks");
   });
 });
 

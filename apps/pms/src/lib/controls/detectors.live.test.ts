@@ -6,6 +6,7 @@ import { createBankStatementImport } from "../bank/import";
 import { clearReconciliationRun } from "../reconciliation/clear";
 import { listDecisions, recordDecision, reviewDecision } from "./decisions";
 import { measuredEffectSentence, measuredEffectSince } from "../home/measuredEffect";
+import { acknowledgeDigest, computeDigest, digestHash, loadDigestAck, periodEnding } from "../digest/digest";
 import {
   countOpenControlFindings,
   DECISION_UNREVIEWED_KIND,
@@ -396,5 +397,69 @@ describe.skipIf(!adminUrl)("Unmatched bank line detector (live)", () => {
     );
     expect(bareRetire.ok).toBe(false);
     expect((bareRetire as { errors: string[] }).errors[0]).toMatch(/supersedes an existing decision/);
+  });
+
+  it("counts the week the fixture lived into the digest, practice-wide, and stamps it exactly once", async () => {
+    const period = periodEnding("2026-09-17");
+    const digest = await tx((d) => computeDigest(d, tenant.id, period));
+    // Three statements imported (the CSV twice, then the $40 credit), one run cleared by the owner alone, the
+    // detectors' rows opened and some closed, the decisions and their three reviews, and the chain that recorded it.
+    expect(digest.period).toEqual({ start: "2026-09-11", end: "2026-09-17", days: 7 });
+    // Two cleared runs fall in the window: the CSV run the owner cleared (not owner-only: the owner had neither
+    // prepared nor posted) and the degraded run the clearance case planted; the older planted run lies outside.
+    // The $250 deposit of the 12th was created inside the window, the $40 one of the 8th before it.
+    expect(digest.bank.statementsImported).toBe(3);
+    expect(digest.bank.runsCleared).toBe(2);
+    expect(digest.bank.runsOwnerOnly).toBe(1);
+    expect(digest.bank.depositsPrepared).toBe(1);
+    // Clearing the CSV run cleared its open lines with a reason, which the chain recorded once.
+    expect(digest.bank.variancesClearedWithReason).toBe(1);
+    expect(digest.money).toMatchObject({ postingCount: 0, guardedWithSecond: 0, guardedWithoutSecond: 0 });
+    // Every detector this fixture exercised opened rows inside the week; the bank-line rows were both closed by the
+    // clearance; at week's end only the owner's sole-held duty stays open.
+    expect(digest.findings.opened.map((r) => r.key).sort()).toEqual(
+      ["decision_unreviewed", "degraded_owner_clearance", "deposit_not_banked", "sole_holder_critical_duty", "unmatched_bank_line_48h"]
+    );
+    expect(digest.findings.closed.find((r) => r.key === "unmatched_bank_line_48h")?.count).toBe(2);
+    expect(digest.findings.openNow).toBe(1);
+    // Recorded through the register this week: the watch and its Keep (two monitors), the accepted residual on the
+    // front desk's duty, the Tighten (remediate), and the Retire.
+    const recorded = Object.fromEntries(digest.decisions.recorded.map((r) => [r.key, r.count]));
+    expect(recorded).toMatchObject({ monitor: 2, remediate: 1, retire: 1 });
+    expect(recorded.accept_residual).toBeGreaterThanOrEqual(1);
+    expect(digest.decisions.reviews).toEqual({ keep: 1, tighten: 1, retire: 1 });
+    expect(digest.decisions.snapshotsFrozen).toBe(1);
+    expect(digest.chain.events).toBeGreaterThan(5);
+    expect(digest.chain.firstSeq).toBe(1);
+    expect(digest.chain.acknowledgments).toBe(0);
+    // No person's name anywhere in it ("Owner-only clearance" is a process word, not a person).
+    expect(JSON.stringify(digest)).not.toMatch(/Riley|Jordan|Blake/);
+    const hash = digestHash(digest);
+
+    const actor = { id: owner.id, name: owner.name };
+    const stale = await tx((d) => acknowledgeDigest(d, { tenantId: tenant.id, actor, ending: "2026-09-17", summaryHash: "0".repeat(64), now }));
+    expect(stale).toMatchObject({ ok: false, status: 409 });
+    expect((stale as { errors: string[] }).errors[0]).toMatch(/changed since you read it/);
+    const future = await tx((d) => acknowledgeDigest(d, { tenantId: tenant.id, actor, ending: "2026-09-18", summaryHash: hash, now }));
+    expect(future).toMatchObject({ ok: false, status: 400 });
+
+    const stamped = await tx((d) => acknowledgeDigest(d, { tenantId: tenant.id, actor, ending: "2026-09-17", summaryHash: hash, now }));
+    expect(stamped.ok).toBe(true);
+    expect((stamped as { ack: { periodStart: string; periodEnd: string; eventCount: number; summaryHash: string } }).ack).toMatchObject({
+      periodStart: "2026-09-11",
+      periodEnd: "2026-09-17",
+      eventCount: digest.chain.events,
+      summaryHash: hash,
+    });
+    expect(await tx((d) => loadDigestAck(d, tenant.id, "2026-09-17"))).toMatchObject({ acknowledgedByName: owner.name, summaryHash: hash });
+
+    // The stamp is itself an event inside the week, so the digest moved on; a second stamp is refused before that matters.
+    const again = await tx((d) => acknowledgeDigest(d, { tenantId: tenant.id, actor, ending: "2026-09-17", summaryHash: hash, now }));
+    expect(again).toMatchObject({ ok: false, status: 409 });
+    expect((again as { errors: string[] }).errors[0]).toMatch(/already acknowledged by Riley Owner/);
+    const after = await tx((d) => computeDigest(d, tenant.id, period));
+    expect(after.chain.acknowledgments).toBe(1);
+    expect(after.chain.events).toBe(digest.chain.events + 1);
+    expect(digestHash(after)).not.toBe(hash);
   });
 });

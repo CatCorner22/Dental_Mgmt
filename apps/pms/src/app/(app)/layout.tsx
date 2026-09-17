@@ -31,8 +31,11 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             <Link className="text-[var(--link)] underline-offset-2 hover:underline" href="/risk">
               Practice Risk
             </Link>
+            <Link className="text-[var(--link)] underline-offset-2 hover:underline" href="/digest">
+              Digest
+            </Link>
           </nav>
-          <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.27</p>
+          <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.28</p>
         </div>
       </header>
       <div className="mx-auto max-w-5xl px-6 py-10">{children}</div>
