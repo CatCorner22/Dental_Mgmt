@@ -8,11 +8,16 @@ import {
   countOpenControlFindings,
   DECISION_UNREVIEWED_KIND,
   DEGRADED_CLEARANCE_KIND,
+  DEPOSIT_NOT_BANKED_KIND,
   listControlFindings,
   listOpenBankLines,
   refreshDegradedClearanceFindings,
+  refreshDepositNotBankedFindings,
+  refreshSoleHolderFindings,
   refreshUnmatchedBankLineFindings,
   refreshUnreviewedDecisionFindings,
+  SOLE_HOLDER_KIND,
+  UNMATCHED_BANK_LINE_KIND,
 } from "./detectors";
 import { seedControlPolicy } from "./policy";
 import { takeSnapshot } from "./snapshots";
@@ -132,7 +137,10 @@ describe.skipIf(!adminUrl)("Unmatched bank line detector (live)", () => {
 
     // The snapshot freeze is where the detectors run in the product.
     await tx((d) => takeSnapshot(d, { tenantId: tenant.id, actor: owner, trigger: "manual", now }));
-    const rows = await tx((d) => listControlFindings(d, tenant.id));
+    const all = await tx((d) => listControlFindings(d, tenant.id));
+    // The freeze runs every detector; the sole-holder detector also opens two rows on this fixture (tested below).
+    expect(all.filter((r) => r.kind === SOLE_HOLDER_KIND)).toHaveLength(2);
+    const rows = all.filter((r) => r.kind === UNMATCHED_BANK_LINE_KIND);
     expect(rows).toHaveLength(2);
     const byDesc = new Map(rows.map((r) => [(r.detail as { description: string }).description, r]));
     expect(byDesc.get("ACH MERCHANT FEE")).toMatchObject({ status: "open", severity: "low", kind: "unmatched_bank_line_48h", subjectKind: "bank_transaction" });
@@ -161,7 +169,8 @@ describe.skipIf(!adminUrl)("Unmatched bank line detector (live)", () => {
     expect(cleared.status).toBe("cleared");
     const later = new Date("2026-09-17T16:00:00Z");
     expect(await tx((d) => refreshUnmatchedBankLineFindings(d, tenant.id, later))).toMatchObject({ closed: 2, open: 0 });
-    const rows = await tx((d) => listControlFindings(d, tenant.id));
+    const rows = (await tx((d) => listControlFindings(d, tenant.id))).filter((r) => r.kind === UNMATCHED_BANK_LINE_KIND);
+    expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.status === "closed" && r.closedReason === "matched or cleared" && r.closedAt)).toBe(true);
 
     await tx((d) =>
@@ -179,7 +188,8 @@ describe.skipIf(!adminUrl)("Unmatched bank line detector (live)", () => {
       reopened: 0,
       open: 0,
     });
-    expect(await tx((d) => countOpenControlFindings(d, tenant.id))).toBe(0);
+    // Only the two sole-holder rows from the freeze stay open.
+    expect(await tx((d) => countOpenControlFindings(d, tenant.id))).toBe(2);
   });
 
   it("records owner-only clearance inside the window as a finding and closes it once the run ages out", async () => {
@@ -235,7 +245,63 @@ describe.skipIf(!adminUrl)("Unmatched bank line detector (live)", () => {
     expect(after).toMatchObject({ closed: 1, open: 0 });
     const closed = (await tx((d) => listControlFindings(d, tenant.id))).find((r) => r.subjectId === overdueId);
     expect(closed).toMatchObject({ status: "closed", closedReason: "superseded" });
-    // Everything open across the three detectors is now zero.
-    expect(await tx((d) => countOpenControlFindings(d, tenant.id))).toBe(0);
+    // Nothing but the two sole-holder rows from the freeze stays open.
+    const stillOpen = (await tx((d) => listControlFindings(d, tenant.id))).filter((r) => r.status === "open");
+    expect(stillOpen.map((r) => r.kind)).toEqual([SOLE_HOLDER_KIND, SOLE_HOLDER_KIND]);
+  });
+
+  it("flags a deposit with no bank credit after five days and closes it once a statement matches it", async () => {
+    // The 12th's $250 cash deposit was matched by the first statement; a $40 check from the 8th never reached a statement.
+    const lateDeposit = uuidv7(33_500);
+    await db.admin.query(
+      `INSERT INTO deposits (id, tenant_id, location_id, bank_account_id, business_date, method, amount_cents,
+                             reference, status, prepared_by_id, prepared_by_name, created_at)
+       VALUES ($1, $2, $3, $4, '2026-09-08', 'Check', 4000, '2001', 'open', $5, $6, '2026-09-08T22:00:00Z')`,
+      [lateDeposit, tenant.id, location.id, bank.id, front.id, front.name]
+    );
+    const first = await tx((d) => refreshDepositNotBankedFindings(d, tenant.id, now));
+    expect(first).toMatchObject({ kind: DEPOSIT_NOT_BANKED_KIND, inserted: 1, open: 1 });
+    const row = (await tx((d) => listControlFindings(d, tenant.id))).find((r) => r.kind === DEPOSIT_NOT_BANKED_KIND);
+    expect(row).toMatchObject({ subjectKind: "deposit", subjectId: lateDeposit, severity: "medium", status: "open" });
+    expect((row!.detail as { sentence: string }).sentence).toBe("A $40.00 check deposit prepared for 2026-09-08 has no matching bank credit after 9 days.");
+    expect(JSON.stringify(row!.detail)).not.toMatch(/Jordan|Blake/);
+
+    // The bank's record of it arrives: the matcher pairs the credit with the deposit and the finding closes.
+    const result = await tx((d) =>
+      createBankStatementImport(d, {
+        tenantId: tenant.id,
+        bankAccountId: bank.id,
+        content: ["Date,Description,Amount,Reference", "2026-09-08,DEPOSIT CHECK 2001,40.00,2001"].join("\n"),
+        actorUserId: owner.id,
+        actorName: owner.name,
+        now: new Date("2026-09-17T19:00:00Z"),
+      })
+    );
+    expect(result.matchedDepositCount).toBe(1);
+    const after = await tx((d) => refreshDepositNotBankedFindings(d, tenant.id, new Date("2026-09-17T19:30:00Z")));
+    expect(after).toMatchObject({ closed: 1, open: 0 });
+    const closed = (await tx((d) => listControlFindings(d, tenant.id))).find((r) => r.subjectId === lateDeposit);
+    expect(closed).toMatchObject({ status: "closed", closedReason: "matched at the bank or outside the 45-day window" });
+  });
+
+  it("flags each highest-weight duty held by one active person and closes it once a second holder is live", async () => {
+    // Owner: bank_reconcile, run_import. Front: post_payments, prepare_deposit. Weight-5 duties held by exactly one: two.
+    // The freeze earlier in this file already opened both rows, so this run refreshes them rather than inserting.
+    const first = await tx((d) => refreshSoleHolderFindings(d, tenant.id, now));
+    expect(first).toMatchObject({ kind: SOLE_HOLDER_KIND, inserted: 0, refreshed: 2, open: 2 });
+    const rows = (await tx((d) => listControlFindings(d, tenant.id))).filter((r) => r.kind === SOLE_HOLDER_KIND);
+    expect(rows.map((r) => r.subjectId).sort()).toEqual(["bank_reconcile", "prepare_deposit"]);
+    expect(rows.every((r) => r.subjectKind === "entitlement" && r.severity === "medium")).toBe(true);
+    for (const r of rows) expect(JSON.stringify(r.detail)).not.toMatch(/Riley|Jordan|Owner|Blake/);
+
+    // A second live holder of prepare_deposit closes that finding; bank_reconcile stays with one.
+    await db.admin.query(
+      `INSERT INTO user_entitlements (id, tenant_id, user_id, entitlement, effective_from) VALUES ($1, $2, $3, 'prepare_deposit', now() - interval '1 hour')`,
+      [uuidv7(33_600), tenant.id, owner.id]
+    );
+    const after = await tx((d) => refreshSoleHolderFindings(d, tenant.id, new Date("2026-09-17T20:00:00Z")));
+    expect(after).toMatchObject({ closed: 1, refreshed: 1, open: 1 });
+    const closed = (await tx((d) => listControlFindings(d, tenant.id))).find((r) => r.kind === SOLE_HOLDER_KIND && r.subjectId === "prepare_deposit");
+    expect(closed).toMatchObject({ status: "closed", closedReason: "a second holder is live, or none is" });
   });
 });
