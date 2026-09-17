@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type Page } from "playwright";
 import { createLiveDatabase, liveAdminUrl, type LiveDatabase } from "@pms/db/testing";
@@ -19,6 +20,12 @@ import { currentCodeForTest } from "../lib/auth/totp";
  * Needs a production build (`pnpm --filter @pms/app build`) and Chromium.
  * Suites run only with PMS_E2E=1 and PMS_TEST_POSTGRES_URL; CI sets both
  * after building. PMS_E2E_CHROMIUM may name a Chromium executable.
+ *
+ * Each suite also audits the states it reaches with axe-core (the build the
+ * prototype harness vendors), against WCAG 2.0, 2.1, and 2.2 A and AA plus
+ * axe's best practices. A critical or serious violation fails the suite;
+ * moderate and minor ones are printed. Automated rules cover a minority of
+ * WCAG; the rest stays with the UX audit.
  */
 
 export const adminUrl = liveAdminUrl();
@@ -26,6 +33,8 @@ export const e2eEnabled = process.env.PMS_E2E === "1" && Boolean(adminUrl);
 
 const KEY = "b".repeat(64);
 const appDir = fileURLToPath(new URL("../..", import.meta.url));
+const AXE_PATH = fileURLToPath(new URL("../../../../scripts/vendor/axe-core/axe.min.js", import.meta.url));
+const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa", "best-practice"];
 
 export type E2eApp = {
   base: string;
@@ -108,13 +117,45 @@ export async function startProductionApp(): Promise<E2eApp> {
   };
 }
 
+export type AxeViolation = {
+  id: string;
+  impact: "critical" | "serious" | "moderate" | "minor";
+  help: string;
+  helpUrl: string;
+  tags: string[];
+  /** The first offending nodes: selector, outer HTML head, and axe's summary of what to fix. */
+  nodes: { target: string; html: string; summary: string }[];
+  count: number;
+  /** The suite states (page and moment) this violation was seen in. */
+  states: string[];
+};
+
 export type E2eBrowser = {
   browser: Browser;
   page: Page;
   /** Console errors, page errors, and 5xx responses seen so far; expected refusals are filtered. */
   problems: string[];
+  /** Distinct axe violations seen so far, one per rule and first target. */
+  a11y: AxeViolation[];
+  /** One row per audited state: how many rules passed, failed, or need review, so a silent no-op cannot pass. */
+  audits: { state: string; passes: number; violations: number; incomplete: number }[];
   signIn(username: string, callbackPath: string): Promise<void>;
+  /** Runs axe on the page as it stands and records the violations under `state`. Returns the serious and critical ones. */
+  audit(state: string): Promise<AxeViolation[]>;
   close(): Promise<void>;
+};
+
+type RawAxeResult = {
+  passes: number;
+  incomplete: string[];
+  violations: {
+    id: string;
+    impact: AxeViolation["impact"] | null;
+    help: string;
+    helpUrl: string;
+    tags: string[];
+    nodes: { target: string[]; html: string; failureSummary?: string }[];
+  }[];
 };
 
 export async function openBrowser(app: E2eApp): Promise<E2eBrowser> {
@@ -136,10 +177,59 @@ export async function openBrowser(app: E2eApp): Promise<E2eBrowser> {
     if (r.status() >= 500) problems.push(`http ${r.status()} ${r.url()}`);
   });
 
+  const a11y: AxeViolation[] = [];
+  const audits: E2eBrowser["audits"] = [];
+  const axeSource = readFileSync(AXE_PATH, "utf8");
+
   return {
     browser,
     page,
     problems,
+    a11y,
+    audits,
+    async audit(state) {
+      const loaded = await page.evaluate(() => typeof (window as unknown as { axe?: unknown }).axe !== "undefined");
+      if (!loaded) await page.addScriptTag({ content: axeSource });
+      const raw = (await page.evaluate(async (tags) => {
+        type Run = { passes: unknown[]; incomplete: { id: string }[]; violations: RawAxeResult["violations"] };
+        const axe = (window as unknown as { axe: { run: (ctx: Document, opts: unknown) => Promise<Run> } }).axe;
+        const res = await axe.run(document, { runOnly: { type: "tag", values: tags }, resultTypes: ["violations", "incomplete", "passes"] });
+        return {
+          passes: res.passes.length,
+          incomplete: res.incomplete.map((i) => i.id),
+          violations: res.violations.map((v) => ({
+            id: v.id,
+            impact: v.impact,
+            help: v.help,
+            helpUrl: v.helpUrl,
+            tags: v.tags,
+            nodes: v.nodes.slice(0, 3).map((n) => ({ target: n.target, html: n.html.slice(0, 200), failureSummary: n.failureSummary?.slice(0, 300) })),
+          })),
+        };
+      }, AXE_TAGS)) as RawAxeResult;
+      audits.push({ state, passes: raw.passes, violations: raw.violations.length, incomplete: raw.incomplete.length });
+      const found: AxeViolation[] = [];
+      for (const v of raw.violations) {
+        const first = v.nodes[0]?.target.join(" ") ?? "";
+        let row = a11y.find((r) => r.id === v.id && r.nodes[0]?.target === first);
+        if (!row) {
+          row = {
+            id: v.id,
+            impact: v.impact ?? "minor",
+            help: v.help,
+            helpUrl: v.helpUrl,
+            tags: v.tags.filter((t) => /^wcag|best-practice/.test(t)),
+            nodes: v.nodes.map((n) => ({ target: n.target.join(" "), html: n.html, summary: n.failureSummary ?? "" })),
+            count: v.nodes.length,
+            states: [],
+          };
+          a11y.push(row);
+        }
+        if (!row.states.includes(state)) row.states.push(state);
+        found.push(row);
+      }
+      return found.filter((v) => v.impact === "critical" || v.impact === "serious");
+    },
     async signIn(username, callbackPath) {
       await page.context().clearCookies();
       await page.goto(`${app.base}/signin?callbackUrl=${encodeURIComponent(callbackPath)}`, { waitUntil: "networkidle" });
@@ -155,9 +245,34 @@ export async function openBrowser(app: E2eApp): Promise<E2eBrowser> {
   };
 }
 
-/** Throws with the server log attached when the browser saw problems. */
+function describeViolation(v: AxeViolation): string {
+  const node = v.nodes[0];
+  return `[${v.impact}] ${v.id}: ${v.help} (${v.tags.join(", ")}) · ${v.count} node${v.count === 1 ? "" : "s"} · seen in ${v.states.join("; ")}\n    ${node?.target ?? ""}\n    ${node?.html ?? ""}\n    ${node?.summary.replace(/\n/g, " ") ?? ""}\n    ${v.helpUrl}`;
+}
+
+/**
+ * Throws with the server log attached when the browser saw problems, and
+ * when axe found a critical or serious violation in any audited state.
+ * Moderate and minor violations are printed so the record stays visible.
+ */
 export function assertNoProblems(b: E2eBrowser, app: E2eApp): void {
   if (b.problems.length) {
     throw new Error(`Browser problems:\n${b.problems.join("\n")}\n\nServer log tail:\n${app.serverLog().slice(-4000)}`);
+  }
+  const order = { critical: 0, serious: 1, moderate: 2, minor: 3 };
+  const sorted = [...b.a11y].sort((x, y) => order[x.impact] - order[y.impact]);
+  const blocking = sorted.filter((v) => v.impact === "critical" || v.impact === "serious");
+  const advisory = sorted.filter((v) => v.impact === "moderate" || v.impact === "minor");
+  const passes = b.audits.reduce((n, a) => n + a.passes, 0);
+  const incomplete = b.audits.reduce((n, a) => n + a.incomplete, 0);
+  if (b.audits.length === 0 || passes === 0) {
+    throw new Error(`axe audited ${b.audits.length} state(s) with ${passes} passing rules: the audit did not run.`);
+  }
+  console.log(
+    `axe-core 4.13.0: ${b.audits.length} states audited, ${passes} rule passes, ${incomplete} needing review, ${b.a11y.length} distinct violation${b.a11y.length === 1 ? "" : "s"} (${blocking.length} critical or serious, ${advisory.length} moderate or minor)` +
+      (advisory.length ? `:\n  ${advisory.map(describeViolation).join("\n  ")}` : "")
+  );
+  if (blocking.length) {
+    throw new Error(`Accessibility violations (critical or serious):\n  ${blocking.map(describeViolation).join("\n  ")}`);
   }
 }

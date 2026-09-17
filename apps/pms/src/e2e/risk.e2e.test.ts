@@ -38,6 +38,7 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     expect(await page().getByText(/^Bank matching:/).innerText()).toMatch(/no rate yet[\s\S]*nothing to measure/);
     expect(await page().getByText(/outside the rulebook/).innerText()).toMatch(/2 grant row/);
     expect(app.serverLog()).toMatch(/\[boot\] database role .*not superuser, not BYPASSRLS, owns no tables/);
+    await b.audit("practice risk (owner)");
   }, 90_000);
 
   it("refuses the owner cash custody, then refuses the owner licensing their own conflict", async () => {
@@ -50,12 +51,14 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     expect(text).toMatch(/Needs a control decision before this grant/);
     expect(text).toMatch(/Cash custody \+ bank reconciliation · Riley Owner · Critical/);
     expect(text).toMatch(/Record a control decision/);
+    await b.audit("practice risk, refused grant with the decision form");
 
     await alert().locator("input[placeholder*='compensates']").fill("Owner counts the drawer with the front desk each close.");
     await alert().locator("input[type=date]").fill("2026-12-31");
     await alert().getByRole("button", { name: "Record decision and grant" }).click();
     await page().locator("main [role=alert]", { hasText: "Needs a different administrator" }).waitFor({ timeout: 30_000 });
     expect(await alert().getByRole("button", { name: "Record decision and grant" }).count()).toBe(0);
+    await b.audit("practice risk, self-licence refusal");
   }, 90_000);
 
   it("licenses a grant for someone else only with a decision, and shows the governing decision on the row", async () => {
@@ -83,6 +86,8 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     const open = page().locator("section[aria-labelledby=conflicts] tbody tr", { hasText: "No decision yet" }).first();
     await open.getByRole("button", { name: "Record decision" }).click();
     const form = page().locator("section[aria-labelledby=conflicts] form");
+    await form.waitFor({ timeout: 30_000 });
+    await b.audit("practice risk, inline decision form");
     await form.getByRole("combobox").selectOption("monitor");
     await form.locator("input[placeholder*='compensates']").fill("Daily drawer report goes to the owner; watching until the bookkeeper starts.");
     await form.locator("input[type=date]").fill("2026-11-30");
@@ -93,6 +98,7 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await flash(/Snapshot frozen/).waitFor({ timeout: 30_000 });
     expect(await provenance().innerText()).toMatch(/^Frozen /);
     expect(await page().getByText(/^Independent bank reconciliation:/).innerText()).toMatch(/stale import/);
+    await b.audit("practice risk, frozen snapshot with decisions");
 
     await page().getByRole("button", { name: "Revoke Reconcile bank to PMS from Finn Front" }).click();
     await flash(/^Revoked Reconcile bank to PMS/).waitFor({ timeout: 30_000 });
@@ -109,5 +115,6 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await page().locator("main [role=alert]").waitFor({ timeout: 30_000 });
     expect(await page().locator("main [role=alert]").innerText()).toMatch(/Practice Risk did not load[\s\S]*manager rank or above/);
     expect(await page().getByRole("heading", { name: "Headline" }).count()).toBe(0);
+    await b.audit("practice risk, user-rank refusal");
   }, 90_000);
 });
