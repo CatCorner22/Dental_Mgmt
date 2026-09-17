@@ -8,11 +8,14 @@ import type { OwnerBoard as Board, TileShape } from "@/lib/home/board";
 
 type Me = { ok: boolean; role?: string };
 
+type HardEventItem = { kind: string; label: string; at: string; sentence: string; href: string | null };
+type Alerts = { since: string; days: number; items: HardEventItem[]; assumptions: string[] };
+
 type LoadState =
   | { status: "loading" }
   | { status: "not_for_seat" }
   | { status: "error"; message: string }
-  | { status: "ready"; board: Board; isAdmin: boolean };
+  | { status: "ready"; board: Board; isAdmin: boolean; alerts: Alerts | null };
 
 type ReviewAction = "keep" | "tighten" | "retire";
 
@@ -59,6 +62,15 @@ async function loadBoard(): Promise<Board> {
   return body;
 }
 
+/** The six hard events are the owner's alone; the manager seat sees no card. */
+async function loadAlerts(isAdmin: boolean): Promise<Alerts | null> {
+  if (!isAdmin) return null;
+  const res = await fetch("/api/alerts");
+  const body = (await res.json().catch(() => ({}))) as Alerts & { error?: string };
+  if (!res.ok) throw new Error(body.error ?? "Could not load the hard events.");
+  return body;
+}
+
 export function OwnerBoard() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [message, setMessage] = useState<string | null>(null);
@@ -76,8 +88,9 @@ export function OwnerBoard() {
         if (!cancelled) setState({ status: "not_for_seat" });
         return;
       }
-      const board = await loadBoard();
-      if (!cancelled) setState({ status: "ready", board, isAdmin: meetsRole(role, "admin") });
+      const isAdmin = meetsRole(role, "admin");
+      const [board, alerts] = await Promise.all([loadBoard(), loadAlerts(isAdmin)]);
+      if (!cancelled) setState({ status: "ready", board, isAdmin, alerts });
     })().catch((err: unknown) => {
       if (!cancelled) setState({ status: "error", message: err instanceof Error ? err.message : "Could not load the board." });
     });
@@ -155,6 +168,41 @@ export function OwnerBoard() {
           {b.matching.windowDays} days from the bank lines the practice holds.
         </p>
       </section>
+
+      {state.alerts && (
+        <Card id="hard-events" title={`Hard events · last ${state.alerts.days} days`}>
+          <p className="mt-1 text-2xl font-semibold tabular-nums">{state.alerts.items.length}</p>
+          {state.alerts.items.length === 0 ? (
+            <p className="mt-1 text-sm text-[var(--ink-2)]">
+              None. The six that page you one at a time: an after-hours refund, a retroactive-dated entry, a waived dual control, a
+              deposit variance over threshold, a failed chain check, a new device on a financial role. Everything else waits for
+              the weekly digest.
+            </p>
+          ) : (
+            <ul className="mt-1 space-y-2 text-sm text-[var(--ink-2)]">
+              {state.alerts.items.map((e) => (
+                <li key={`${e.kind}:${e.at}:${e.sentence}`}>
+                  <p className="font-semibold text-[var(--ink)]">
+                    {e.label} · {new Date(e.at).toLocaleString()}
+                  </p>
+                  <p>
+                    {e.sentence}
+                    {e.href && (
+                      <>
+                        {" "}
+                        <Link className="font-semibold text-[var(--link)] underline-offset-2 hover:underline" href={e.href}>
+                          Open
+                        </Link>
+                      </>
+                    )}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-2 text-xs text-[var(--ink-3)]">{state.alerts.assumptions.join(" ")}</p>
+        </Card>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card id="approvals-card" title="Approvals only you can give">

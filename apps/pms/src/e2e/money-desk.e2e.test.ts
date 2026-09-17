@@ -276,6 +276,18 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     const approvals = page().locator("div", { has: page().getByText("Approvals only you can give") }).last();
     expect(await approvals.innerText()).toMatch(/0[\s\S]*Nothing is waiting on you/);
     expect(await page().getByRole("link", { name: "See who can clear independently" }).getAttribute("href")).toBe("/risk");
+
+    // The hard events the day produced, for the owner only: the fee left the run $150 over the variance threshold,
+    // and each holder of a critical duty signed in from a browser this database had never seen.
+    const hard = page().locator("section[aria-labelledby=hard-events]");
+    await hard.waitFor({ timeout: 30_000 });
+    const hardText = await hard.innerText();
+    expect(hardText).toMatch(/Deposit variance over threshold/);
+    expect(hardText).toMatch(/carries a \$150\.00 variance against the practice's deposits, over the \$100\.00 threshold/);
+    expect(hardText).toMatch(/New device on a financial role/);
+    expect(hardText).not.toMatch(/After-hours refund|Retroactive-dated entry|Dual control waived|Audit-chain check failed/);
+    expect(hardText).not.toMatch(/Riley|Finn/);
+    expect(await hard.getByRole("link", { name: "Open" }).first().getAttribute("href")).toMatch(/^\/reconciliation\//);
     await b.audit("home (owner, tied with a second look)");
   }, 120_000);
 
