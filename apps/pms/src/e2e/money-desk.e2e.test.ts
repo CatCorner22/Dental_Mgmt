@@ -80,7 +80,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await approvals.innerText()).toMatch(/1[\s\S]*\$75\.00 held until a second person decides/);
     expect(await page().getByText(/No control decision comes up for review/).count()).toBe(1);
     expect(await page().getByText(/Segregation health\. COSO overall \d+/).count()).toBe(1);
-    for (const name of ["Open ledger", "Post payment", "Bank reconciliation", "Day close", "Statements", "Approvals inbox", "Practice Risk"]) {
+    for (const name of ["Open ledger", "Post payment", "Bank reconciliation", "Day close", "Statements", "Approvals inbox", "Practice Risk", "Weekly digest"]) {
       expect(await page().locator("main").getByRole("link", { name, exact: true }).count()).toBe(1);
     }
     await b.audit("home (owner, no bank record)");
@@ -278,4 +278,49 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await page().getByRole("link", { name: "See who can clear independently" }).getAttribute("href")).toBe("/risk");
     await b.audit("home (owner, tied with a second look)");
   }, 120_000);
+
+  it("counts the week for the owner in the digest, stamps it once, and refuses the front desk", async () => {
+    await page().goto(`${app.base}/digest`);
+    await page().getByRole("heading", { name: "The week, counted" }).waitFor({ timeout: 60_000 });
+    await page().locator("section[aria-labelledby=digest-chain]").waitFor({ timeout: 60_000 });
+    const section = (id: string) => page().locator(`section[aria-labelledby=${id}]`);
+    const row = (id: string, label: string) => section(id).locator("tr", { has: page().locator(`th:text-is("${label}")`) });
+
+    // The week this suite just lived: one statement imported and cleared by the owner alone, a day close frozen,
+    // the held write-off approved and the seeded one declined, a statement issued, the front desk's payment posted.
+    expect(await row("digest-bank", "Statements imported").innerText()).toMatch(/\b1$/);
+    expect(await row("digest-bank", "Bank runs cleared").innerText()).toMatch(/\b1$/);
+    expect(await row("digest-bank", "Of those, owner-only clearance").innerText()).toMatch(/\b1$/);
+    expect(await row("digest-bank", "Day closes frozen").innerText()).toMatch(/\b1$/);
+    expect(await row("digest-bank", "Patient statements issued").innerText()).toMatch(/\b1$/);
+    expect(await row("digest-approvals", "Given by a second person").innerText()).toMatch(/\b1$/);
+    expect(await row("digest-approvals", "Declined").innerText()).toMatch(/\b1$/);
+    expect(await row("digest-money", "Patient payment").innerText()).toMatch(/\$/);
+    expect(await section("digest-findings").innerText()).toMatch(/Opened · Unmatched bank line older than 48 hours\s+1/);
+    expect(await section("digest-decisions").innerText()).toMatch(/Snapshots frozen\s+[1-9]/);
+    expect(await section("digest-access").innerText()).toMatch(/Sign-ins\s+[1-9]/);
+    const whole = await page().locator("main").innerText();
+    expect(whole).toMatch(/Chain · \d+ events, sequence \d+ to \d+/);
+    expect(whole).toMatch(/no row here names anyone/);
+    expect(whole).not.toMatch(/Riley|Finn|John Smith/);
+    await b.audit("digest (owner, unacknowledged)");
+
+    // The owner stamps the week; the stamp shows who and when, and the button is gone for good.
+    await page().getByRole("button", { name: "Acknowledge this week" }).click();
+    await flash(/^Acknowledged\. The stamp binds the digest/).waitFor({ timeout: 30_000 });
+    expect(await section("digest-ack").innerText()).toMatch(/Acknowledged by Riley Owner on .* when the chain held \d+ events for this week/);
+    expect(await page().getByRole("button", { name: "Acknowledge this week" }).count()).toBe(0);
+    await page().reload();
+    await section("digest-ack").waitFor({ timeout: 60_000 });
+    expect(await section("digest-ack").innerText()).toMatch(/Acknowledged by Riley Owner/);
+    // The acknowledgment is itself a chain event inside the week, so the page says the rows moved after the stamp.
+    expect(await section("digest-ack").innerText()).toMatch(/The rows have changed since/);
+    expect(await row("digest-chain", "Digest acknowledgments").innerText()).toMatch(/\b1$/);
+    await b.audit("digest (owner, acknowledged)");
+
+    await b.signIn("ridgeview-front", "/digest");
+    await page().getByText(/The digest is for the manager and owner seats/).waitFor({ timeout: 60_000 });
+    expect(await page().getByRole("button", { name: "Acknowledge this week" }).count()).toBe(0);
+    await b.audit("digest (front desk refusal)");
+  }, 150_000);
 });

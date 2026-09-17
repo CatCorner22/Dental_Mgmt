@@ -137,6 +137,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [21, "control_findings_coverage", "app_migrate"],
         [22, "control_decisions_detector_finding", "app_migrate"],
         [23, "control_decisions_retire", "app_migrate"],
+        [24, "digest_acks", "app_migrate"],
       ]);
       const owners = await db.admin.query(
         "SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'"
@@ -147,7 +148,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
     it("is a no-op the second time", async () => {
       const result = await applyMigrations(db.admin);
       expect(result.applied).toEqual([]);
-      expect(result.alreadyApplied).toBe(23);
+      expect(result.alreadyApplied).toBe(24);
     });
 
     it("left domain_event with RLS forced after the seq backfill", async () => {
@@ -804,6 +805,41 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
       const remove = await attempt("app_rw", ridgeview, "DELETE FROM control_findings WHERE id = $1", [findingId]);
       expect(remove).toMatchObject({ code: "42501" });
       const otherTenant = await attempt("app_rw", oakridge, "SELECT id FROM control_findings");
+      expect(otherTenant).toEqual({ rows: [] });
+    });
+
+    it("stamps one digest acknowledgment per period, tenant-isolated, never updated or deleted", async () => {
+      const ackId = uuidv7(5_020);
+      const hash = "a".repeat(64);
+      const insert = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO digest_acks (id, tenant_id, period_start, period_end, summary_hash, event_count, acknowledged_by_id, acknowledged_by_name)
+         VALUES ($1, $2, '2026-09-11', '2026-09-17', $3, 12, $4, 'Ridgeview Admin')`,
+        [ackId, ridgeview.id, hash, ridgeview.user]
+      );
+      expect(insert).toEqual({ rows: [] });
+      const duplicate = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO digest_acks (id, tenant_id, period_start, period_end, summary_hash, event_count, acknowledged_by_id, acknowledged_by_name)
+         VALUES ($1, $2, '2026-09-11', '2026-09-17', $3, 13, $4, 'Ridgeview Admin')`,
+        [uuidv7(5_021), ridgeview.id, hash, ridgeview.user]
+      );
+      expect(duplicate).toMatchObject({ code: "23505" });
+      const shortHash = await attempt(
+        "app_rw",
+        ridgeview,
+        `INSERT INTO digest_acks (id, tenant_id, period_start, period_end, summary_hash, event_count, acknowledged_by_id, acknowledged_by_name)
+         VALUES ($1, $2, '2026-09-04', '2026-09-10', 'abc', 1, $3, 'Ridgeview Admin')`,
+        [uuidv7(5_022), ridgeview.id, ridgeview.user]
+      );
+      expect(shortHash).toMatchObject({ code: "23514" });
+      const update = await attempt("app_rw", ridgeview, "UPDATE digest_acks SET event_count = 0 WHERE id = $1", [ackId]);
+      expect(update).toMatchObject({ code: "42501" });
+      const remove = await attempt("app_rw", ridgeview, "DELETE FROM digest_acks WHERE id = $1", [ackId]);
+      expect(remove).toMatchObject({ code: "42501" });
+      const otherTenant = await attempt("app_rw", oakridge, "SELECT id FROM digest_acks");
       expect(otherTenant).toEqual({ rows: [] });
     });
 
