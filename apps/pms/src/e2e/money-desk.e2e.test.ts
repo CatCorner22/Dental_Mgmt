@@ -447,5 +447,21 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await mappings.getByRole("button", { name: /^Approve mapping/ }).count()).toBe(0);
     expect(await mappings.innerText()).toMatch(/0 approved mappings; 1 waiting for a second person/);
     await b.audit("month-end package, mapping proposed");
+
+    // The current month cannot be closed: it is still taking rows, so no control appears for it.
+    expect(await section("package-stamp").innerText()).toMatch(/month in progress/);
+    expect(await page().getByRole("button", { name: "Close month" }).count()).toBe(0);
+
+    // A month that has ended offers the close, behind one confirmation, and refuses while lines are unmapped.
+    const lastMonth = new Date();
+    lastMonth.setUTCDate(1);
+    lastMonth.setUTCMonth(lastMonth.getUTCMonth() - 1);
+    await page().locator("input[type=month]").fill(lastMonth.toISOString().slice(0, 7));
+    await page().getByRole("button", { name: "Close month" }).waitFor({ timeout: 30_000 });
+    await page().getByRole("button", { name: "Close month" }).click();
+    expect(await section("package-stamp").innerText()).toMatch(/cannot be undone\. A correction afterwards posts today with reason prior_period\./);
+    await b.audit("month-end package, close confirmation");
+    await page().getByRole("button", { name: "Cancel" }).click();
+    expect(await page().getByRole("button", { name: "Close it for good" }).count()).toBe(0);
   }, 150_000);
 });

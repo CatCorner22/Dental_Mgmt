@@ -760,6 +760,28 @@ export const glMappings = pgTable(
   (t) => [index("gl_mappings_tenant_key_idx").on(t.tenantId, t.glBucket, t.kind, t.reasonCode)]
 );
 
+/**
+ * A frozen month (Increment 1.36): what the practice told its accountant,
+ * with the package hash at the moment of closing. One per month; append-only.
+ */
+export const monthCloses = pgTable(
+  "month_closes",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    month: text("month").notNull(),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    packageHash: text("package_hash").notNull(),
+    entryCount: integer("entry_count").notNull(),
+    totalCents: bigint("total_cents", { mode: "number" }).notNull(),
+    closedById: uuid("closed_by_id").notNull(),
+    closedByName: text("closed_by_name").notNull(),
+    closedAt: timestamp("closed_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [uniqueIndex("month_closes_tenant_month_uidx").on(t.tenantId, t.month)]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "users",
@@ -795,4 +817,5 @@ export const TENANT_SCOPED_TABLES = [
   "digest_acks",
   "hard_event_acks",
   "gl_mappings",
+  "month_closes",
 ] as const;

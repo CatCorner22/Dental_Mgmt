@@ -79,7 +79,7 @@ export type MonthPackage = {
 };
 
 export const PACKAGE_SCOPE =
-  "Every figure is the practice's for the calendar month, from the rows the product holds; journal lines carry the ledger bucket, the kind, and the reason code, never a patient or a poster. Each line shows the account the practice mapped it to, or reads unmapped; a mapping is proposed by one person and approved by another. The package hash changes when any figure changes, so an accountant can tell whether a month moved after they took it.";
+  "Every figure is the practice's for the calendar month, from the rows the product holds; journal lines carry the ledger bucket, the kind, and the reason code, never a patient or a poster. Each line shows the account the practice mapped it to, or reads unmapped; a mapping is proposed by one person and approved by another. The package hash covers every figure the package states about the month, and none of the figures that state the practice's position right now, so an accountant can tell whether the month itself moved after they took it.";
 
 export async function computeMonthPackage(db: AppDb, tenantId: string, month: string): Promise<MonthPackage> {
   const period = monthPeriod(month);
@@ -229,9 +229,47 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
   };
 }
 
-/** sha256 of the canonical package; the same rows always give the same hash. */
+/**
+ * What the hash covers: every figure the package states about the month.
+ *
+ * A package mixes two kinds of figure. Most state something about the month
+ * — the journal and the accounts its lines map to, the reasons, the deposit
+ * register, the counts, how many lines the month left unmapped, the controls
+ * as they stood at month end, how many chain events the month carried, which
+ * tie-outs held. The rest state the practice's position right now and say so
+ * on their face: the chain head, the last nightly check, how many findings
+ * are open, how many reviews are overdue, and how much of the chart of
+ * accounts is approved or waiting. The hash covers the first kind alone.
+ *
+ * The reason is the close. A hash that moved whenever the practice appended
+ * any chain event would differ from the frozen one the moment the close's
+ * own event landed, and every closed month would report a change it never
+ * had. A tie-out's prose is left out for the same reason — it quotes those
+ * practice-wide counts; its key and its verdict carry the fact.
+ */
+export function hashedView(pkg: MonthPackage) {
+  const { findings, decisions, ...counts } = pkg.counts;
+  return {
+    month: pkg.month,
+    period: pkg.period,
+    journal: pkg.journal,
+    reasons: pkg.reasons,
+    depositRegister: pkg.depositRegister,
+    counts: {
+      ...counts,
+      findings: { opened: findings.opened, closed: findings.closed },
+      decisions: { recorded: decisions.recorded, reviews: decisions.reviews, snapshotsFrozen: decisions.snapshotsFrozen },
+    },
+    unmappedLines: pkg.mappings.unmappedLines,
+    controls: pkg.controls,
+    eventsInMonth: pkg.chain.eventsInMonth,
+    tieOut: pkg.tieOut.filter((t) => t.key !== "chain_verified").map((t) => ({ key: t.key, holds: t.holds })),
+  };
+}
+
+/** sha256 of that view; the same month always gives the same hash. */
 export function packageHash(pkg: MonthPackage): string {
-  return createHash("sha256").update(canonicalJson(pkg)).digest("hex");
+  return createHash("sha256").update(canonicalJson(hashedView(pkg))).digest("hex");
 }
 
 export type CsvRow = { section: string; key: string; label: string; count: number | ""; cents: number | "" };
