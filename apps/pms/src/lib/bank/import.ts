@@ -21,6 +21,7 @@ import {
 } from "@pms/import";
 import type { AppDb } from "../db/client";
 import { TENANT_CHAIN_LOCK_SQL } from "../auth/postgresStore";
+import { requireTenantBankAccount } from "./accounts";
 
 export type CreateBankStatementImportInput = {
   tenantId: string;
@@ -78,6 +79,7 @@ async function appendEvent(
   const hash = hashDomainEvent({
     prevHash,
     tenantId,
+    actorUserId,
     kind,
     payload,
     occurredAt: occurredAt.toISOString(),
@@ -251,6 +253,7 @@ export async function createBankStatementImport(
   input: CreateBankStatementImportInput
 ): Promise<BankStatementImportResult> {
   const now = input.now ?? new Date();
+  await requireTenantBankAccount(db, input.tenantId, input.bankAccountId);
   const rows = parseBankStatementCsv(input.content);
   const staged = stageBankRows(rows);
   const summary = summarizeBankRows(staged);
