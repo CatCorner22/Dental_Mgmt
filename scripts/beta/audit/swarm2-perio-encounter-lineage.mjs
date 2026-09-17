@@ -4,6 +4,12 @@
 // chart, "Use chart tooth" measured after File (where the killers now render), and the rail's recall beside the card's.
 // Default position is NOT reproduced: every check drives the UI, measures the breach and carries the values.
 // Each check closes its browser context in `finally`.
+// Verified (swarm2/verified-perio-encounter-lineage): all five reproduced independently (fresh contexts, direct
+// window.__proto.state() / DOM reads) and all five flipped to "no" under a local patch of the named lines (doSave
+// routing only "Start an addendum" refusals to openAmendGate; pendingZero reset on save/amend; savePerio refusing a
+// screening addendum over a full chart; rail.js recallLine reading mode/codes; fixKiller rewriting only #noteTooth).
+// Not duplicates: A-storm2-controls-7 drives the tag gate's "Open the note", not Save; S-perio-3 carries pendingZero
+// across lanes, not Save; S-clinical-store-7 is screening-then-full (now "no"); S-encounter-5 reads killers before File.
 
 export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => {
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
