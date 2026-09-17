@@ -59,7 +59,7 @@ export async function loadStaff(db: AppDb, tenantId: string, now: Date = new Dat
   const people = staffToPeople(rows, now);
   const byId = new Map(rows.map((r) => [r.id, r]));
   const grants: GrantRow[] = grantRows
-    .filter((g) => byId.has(g.userId))
+    .filter((g) => byId.has(g.userId) && isLive(g, now))
     .map((g) => {
       const row = byId.get(g.userId)!;
       return {
