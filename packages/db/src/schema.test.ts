@@ -30,6 +30,7 @@ const controlFindingsSql = readFileSync(join(here, "../migrations/0019_control_f
 const ledgerFindingsSql = readFileSync(join(here, "../migrations/0020_control_findings_ledger.sql"), "utf8");
 const coverageFindingsSql = readFileSync(join(here, "../migrations/0021_control_findings_coverage.sql"), "utf8");
 const decisionSubjectsSql = readFileSync(join(here, "../migrations/0022_control_decisions_detector_finding.sql"), "utf8");
+const decisionRetireSql = readFileSync(join(here, "../migrations/0023_control_decisions_retire.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -187,6 +188,12 @@ describe("Increment 1.22 detector findings", () => {
     expect(decisionSubjectsSql).toMatch(/DROP CONSTRAINT control_decisions_subject_kind_check/);
     expect(decisionSubjectsSql).toMatch(/'scenario', 'knowledge', 'detector_finding'\)/);
     expect(decisionSubjectsSql).not.toMatch(/GRANT|DROP TABLE|DELETE|UPDATE/);
+  });
+
+  it("lets a decision be retired by a superseding row of kind retire", () => {
+    expect(decisionRetireSql).toMatch(/DROP CONSTRAINT control_decisions_kind_check/);
+    expect(decisionRetireSql).toMatch(/'monitor', 'insure', 'retire'\)/);
+    expect(decisionRetireSql).not.toMatch(/GRANT|DROP TABLE|DELETE|UPDATE/);
   });
 });
 

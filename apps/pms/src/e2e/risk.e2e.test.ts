@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { addDays } from "@pms/controls-engine";
 import { assertNoProblems, e2eEnabled, openBrowser, startProductionApp, type E2eApp, type E2eBrowser } from "./harness";
 
 /**
@@ -149,6 +150,60 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
       expect.arrayContaining([expect.stringMatching(/OPEN CONFLICTS 0/), expect.stringMatching(/WITHOUT A DECISION 0/)])
     );
   }, 120_000);
+
+  it("brings decisions due to the home board with what happened since, and lets the owner keep one and retire one", async () => {
+    // Bring the two finding decisions inside the 30-day horizon by superseding them on Practice Risk.
+    const detectors = page().locator("section[aria-labelledby=detectors]");
+    const form = detectors.locator("form");
+    for (const [label, date] of [
+      ["Approve write-offs / adjustments", "2026-10-01"],
+      ["Collect patient payments / cash drawer", "2026-10-02"],
+    ] as const) {
+      const row = detectors.locator("tbody tr", { hasText: label });
+      await row.getByRole("button", { name: /^Supersede the decision on/ }).click();
+      await form.waitFor({ timeout: 30_000 });
+      await form.getByRole("combobox").selectOption("monitor");
+      await form.locator("input[placeholder*='compensates']").fill("Watching this duty until the second hire is live.");
+      await form.locator("input[type=date]").fill(date);
+      await form.getByRole("button", { name: "Record decision" }).click();
+      await detectors.locator("tbody tr", { hasText: `Monitor · review ${date}` }).first().waitFor({ timeout: 30_000 });
+    }
+
+    await page().goto(`${app.base}/home`);
+    const card = page().locator("section[aria-labelledby=decisions-due]");
+    await card.getByRole("button", { name: "Keep Monitor 90 more days" }).first().waitFor({ timeout: 60_000 });
+    const text = await card.innerText();
+    expect(text).toMatch(/Monitor on detector finding · review by 2026-10-01/);
+    expect(text).toMatch(/Monitor on detector finding · review by 2026-10-02/);
+    expect(text).toMatch(/Since this decision on \d{4}-\d{2}-\d{2}: \d+ postings?; \d+ guarded releases? with a second approver and \d+ without; \d+ bank runs? cleared, \d+ owner-only; \d+ detector findings? opened, \d+ closed\. Directional and practice-wide; no one is named\./);
+    expect(text).not.toMatch(/Riley|Finn/);
+    await b.audit("home board, decisions due with keep, tighten, and retire");
+
+    // Keep the first (due 10-01): the same decision, 90 days out, and it leaves the 30-day card.
+    await card.getByRole("button", { name: "Keep Monitor 90 more days" }).first().click();
+    await flash(/^Kept: Monitor stands and comes up for review again on /).waitFor({ timeout: 30_000 });
+    expect(await card.innerText()).not.toMatch(/review by 2026-10-01/);
+
+    // Retire the other: a note is required, and the second press is the irreversible one.
+    await card.getByRole("button", { name: "Retire Monitor" }).click();
+    const retireForm = card.locator("form");
+    await retireForm.waitFor({ timeout: 30_000 });
+    expect(await retireForm.getByRole("button", { name: "Retire for good" }).isDisabled()).toBe(true);
+    await b.audit("home board, retire form");
+    await retireForm.locator("input").fill("A second person now collects; nothing is left to watch.");
+    await retireForm.getByRole("button", { name: "Retire for good" }).click();
+    await flash(/^Retired: the decision no longer stands/).waitFor({ timeout: 30_000 });
+    expect(await page().getByText(/No control decision comes up for review/).count()).toBe(1);
+
+    // Practice Risk reads the outcome: the kept row reviewed 90 days out, the retired row undecided, the register carrying the retirement.
+    await page().goto(`${app.base}/risk`);
+    await page().getByRole("heading", { name: "Headline" }).waitFor({ timeout: 60_000 });
+    const keepDate = addDays(new Date().toISOString().slice(0, 10), 90);
+    expect(await detectors.locator("tbody tr", { hasText: "Approve write-offs / adjustments" }).innerText()).toMatch(new RegExp(`Monitor · review ${keepDate}`));
+    expect(await detectors.locator("tbody tr", { hasText: "Collect patient payments / cash drawer" }).innerText()).toMatch(/No decision yet/);
+    expect(await page().locator("section[aria-labelledby=register] tbody tr", { hasText: "Retired" }).count()).toBe(1);
+    await b.audit("practice risk, after the board review");
+  }, 150_000);
 
   it("shows a user-rank account the Refusal, not the page", async () => {
     await b.signIn("ridgeview-front", "/risk");

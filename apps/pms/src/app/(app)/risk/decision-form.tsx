@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { DECISION_KINDS, DECISION_KIND_LABEL, type DecisionKind } from "@pms/controls-engine";
+import { DECISION_KIND_LABEL, FIRST_DECISION_KINDS, type DecisionKind } from "@pms/controls-engine";
 
 export type DecisionDraft = { kind: DecisionKind; note: string; reviewBy: string };
 
@@ -11,7 +11,7 @@ export type DecisionDraft = { kind: DecisionKind; note: string; reviewBy: string
  * judge of both; this form only keeps the obvious mistakes from a round trip.
  */
 export function DecisionForm({
-  kinds = DECISION_KINDS,
+  kinds = FIRST_DECISION_KINDS,
   submitLabel,
   busy,
   onSubmit,

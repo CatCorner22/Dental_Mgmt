@@ -4,7 +4,8 @@ import { uuidv7 } from "@pms/db";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { createBankStatementImport } from "../bank/import";
 import { clearReconciliationRun } from "../reconciliation/clear";
-import { listDecisions, recordDecision } from "./decisions";
+import { listDecisions, recordDecision, reviewDecision } from "./decisions";
+import { measuredEffectSentence, measuredEffectSince } from "../home/measuredEffect";
 import {
   countOpenControlFindings,
   DECISION_UNREVIEWED_KIND,
@@ -341,5 +342,59 @@ describe.skipIf(!adminUrl)("Unmatched bank line detector (live)", () => {
     expect(after).toMatchObject({ closed: 1, refreshed: 1, open: 1 });
     const closed = (await tx((d) => listControlFindings(d, tenant.id))).find((r) => r.kind === SOLE_HOLDER_KIND && r.subjectId === "prepare_deposit");
     expect(closed).toMatchObject({ status: "closed", closedReason: "a second holder is live, or none is" });
+  });
+
+  it("reviews a decision by keeping, tightening, and retiring it, one superseding row each, and measures what happened since", async () => {
+    const actor = { id: owner.id, name: owner.name };
+    const ownDuty = (await tx((d) => listControlFindings(d, tenant.id))).find((r) => r.kind === SOLE_HOLDER_KIND && r.subjectId === "bank_reconcile")!;
+    const before = await tx((d) => listDecisions(d, tenant.id));
+    const monitor = governingFindingDecision(ownDuty.id, before)!;
+    expect(monitor.kind).toBe("monitor");
+
+    // What happened since the decision, over the practice's rows: this fixture posted nothing to the ledger,
+    // cleared one run (not owner-only), and the detectors opened and closed rows after the decision was made.
+    const effect = await tx((d) => measuredEffectSince(d, tenant.id, new Date(monitor.decidedAt)));
+    expect(effect).toMatchObject({ since: "2026-09-17", postings: 0, guardedWithSecond: 0, guardedWithoutSecond: 0 });
+    expect(measuredEffectSentence(effect)).toMatch(/^Since this decision on 2026-09-17: 0 postings; .* Directional and practice-wide; no one is named\.$/);
+
+    const unknown = await tx((d) => reviewDecision(d, { tenantId: tenant.id, actor, decisionId: uuidv7(33_800), action: "keep", now }));
+    expect(unknown).toMatchObject({ ok: false, status: 404 });
+
+    // Keep: same kind and note, reviewed again 90 days out.
+    const kept = await tx((d) => reviewDecision(d, { tenantId: tenant.id, actor, decisionId: monitor.id, action: "keep", now }));
+    expect(kept.ok).toBe(true);
+    const keptRow = (kept as { decision: { id: string; kind: string; note: string; reviewBy?: string; supersedesDecisionId?: string } }).decision;
+    expect(keptRow).toMatchObject({ kind: "monitor", note: monitor.note, reviewBy: "2026-12-16", supersedesDecisionId: monitor.id });
+
+    // The register moves forward only: the superseded row cannot be reviewed again.
+    const stale = await tx((d) => reviewDecision(d, { tenantId: tenant.id, actor, decisionId: monitor.id, action: "keep", now }));
+    expect(stale).toMatchObject({ ok: false, status: 409 });
+
+    // Tighten needs a note and lands on remediate, 30 days out.
+    const bare = await tx((d) => reviewDecision(d, { tenantId: tenant.id, actor, decisionId: keptRow.id, action: "tighten", now }));
+    expect(bare).toMatchObject({ ok: false });
+    const tightened = await tx((d) =>
+      reviewDecision(d, { tenantId: tenant.id, actor, decisionId: keptRow.id, action: "tighten", note: "A second reconciler is being hired; until then, remediate.", now })
+    );
+    expect(tightened.ok).toBe(true);
+    const tightRow = (tightened as { decision: { id: string; kind: string; reviewBy?: string } }).decision;
+    expect(tightRow).toMatchObject({ kind: "remediate", reviewBy: "2026-10-17" });
+    expect(governingFindingDecision(ownDuty.id, await tx((d) => listDecisions(d, tenant.id)))?.id).toBe(tightRow.id);
+
+    // Retire ends it: the finding reads as undecided again, and the retirement itself is never due for review.
+    const retired = await tx((d) =>
+      reviewDecision(d, { tenantId: tenant.id, actor, decisionId: tightRow.id, action: "retire", note: "The bookkeeper now reconciles; nothing left to decide.", now })
+    );
+    expect(retired.ok).toBe(true);
+    expect((retired as { decision: { kind: string; reviewBy?: string } }).decision).toMatchObject({ kind: "retire", reviewBy: undefined });
+    const after = await tx((d) => listDecisions(d, tenant.id));
+    expect(governingFindingDecision(ownDuty.id, after)).toBeUndefined();
+    expect(summarizeFindings(await tx((d) => listControlFindings(d, tenant.id)), after)).toMatchObject({ open: 1, decided: 0, undecided: 1 });
+    // A retirement is only ever the end of a decision; it cannot be recorded on its own.
+    const bareRetire = await tx((d) =>
+      recordDecision(d, { tenantId: tenant.id, actor, subjectKind: "detector_finding", subjectId: ownDuty.id, kind: "retire", note: "Recorded on its own, wrongly.", now })
+    );
+    expect(bareRetire.ok).toBe(false);
+    expect((bareRetire as { errors: string[] }).errors[0]).toMatch(/supersedes an existing decision/);
   });
 });
