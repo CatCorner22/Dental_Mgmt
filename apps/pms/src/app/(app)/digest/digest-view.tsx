@@ -263,6 +263,15 @@ export function DigestView() {
               ])}
               empty="No access events."
             />
+            <Rows
+              id="digest-alerts"
+              title="Hard events"
+              rows={pairs([
+                ["After-hours holds", state.data.digest.alerts.afterHoursHolds],
+                ["Hard events acknowledged", state.data.digest.alerts.hardEventsAcknowledged],
+              ])}
+              empty="No hard events."
+            />
           </div>
 
           <Rows

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { and, eq, gte, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { DECISION_KIND_LABEL, isIsoDate, overdueReviews, type ControlDecision } from "@pms/controls-engine";
-import { bankStatementImports, controlFindings, deposits, digestAcks, domainEvent, ledgerEntries, reconciliationRuns, uuidv7 } from "@pms/db";
+import { approvalRequests, bankStatementImports, controlFindings, deposits, digestAcks, domainEvent, ledgerEntries, reconciliationRuns, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { listDecisions } from "../controls/decisions";
 import { FINDING_KIND_LABEL, LEDGER_RELEASE_CHANNEL } from "../controls/detectors";
@@ -80,6 +80,8 @@ export type WeeklyDigest = {
     snapshotsFrozen: number;
   };
   access: { signIns: number; mfaEnrolled: number; sessionsRevoked: number; granted: number; revoked: number; policyChanges: number };
+  /** The week's hard events (Increment 1.33): postings the after-hours hold caught, and events the owner acknowledged. */
+  alerts: { afterHoursHolds: number; hardEventsAcknowledged: number };
   chain: { events: number; firstSeq: number | null; lastSeq: number | null; acknowledgments: number; otherKinds: CountRow[] };
   /** The sentence that says what these numbers are and are not. */
   scope: string;
@@ -109,6 +111,7 @@ const EVENT_FIELDS: Record<string, string> = {
   /** A location's business hours moved (Increment 1.32): the after-hours hold's window changed with them. */
   "location.hours_changed": "access.policyChanges",
   "digest.acknowledged": "chain.acknowledgments",
+  "hard_event.acknowledged": "alerts.hardEventsAcknowledged",
 };
 
 /** Kinds counted from their own tables or from the chain but shown elsewhere; not listed twice. */
@@ -156,6 +159,7 @@ export async function computeDigest(db: AppDb, tenantId: string, period: DigestP
     findings: { opened: [], closed: [], openNow: 0 },
     decisions: { recorded: [], reviews: { keep: 0, tighten: 0, retire: 0 }, overdueNow: 0, snapshotsFrozen: 0 },
     access: { signIns: 0, mfaEnrolled: 0, sessionsRevoked: 0, granted: 0, revoked: 0, policyChanges: 0 },
+    alerts: { afterHoursHolds: 0, hardEventsAcknowledged: 0 },
     chain: { events: 0, firstSeq: null, lastSeq: null, acknowledgments: 0, otherKinds: [] },
     scope: SCOPE_SENTENCE,
   };
@@ -179,6 +183,13 @@ export async function computeDigest(db: AppDb, tenantId: string, period: DigestP
     .from(ledgerEntries)
     .where(and(inWindow(ledgerEntries, ledgerEntries.postedAt), inArray(ledgerEntries.kind, guardedKinds), isNull(ledgerEntries.approvalRequestId)));
   digest.money.guardedWithSecond = Number(withSecond?.n ?? 0);
+
+  // Postings the after-hours hold caught this week, whatever became of them (Increment 1.33).
+  const [afterHours] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(approvalRequests)
+    .where(and(inWindow(approvalRequests, approvalRequests.requestedAt), sql`${approvalRequests.heldPayload} -> 'afterHours' IS NOT NULL`));
+  digest.alerts.afterHoursHolds = Number(afterHours?.n ?? 0);
   digest.money.guardedWithoutSecond = Number(withoutSecond?.n ?? 0);
 
   // Bank and close, from their tables.

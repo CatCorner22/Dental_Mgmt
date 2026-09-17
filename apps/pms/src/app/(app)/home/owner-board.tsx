@@ -8,8 +8,24 @@ import type { OwnerBoard as Board, TileShape } from "@/lib/home/board";
 
 type Me = { ok: boolean; role?: string };
 
-type HardEventItem = { kind: string; label: string; at: string; sentence: string; href: string | null };
-type Alerts = { since: string; days: number; items: HardEventItem[]; assumptions: string[] };
+type HardEventItem = {
+  kind: string;
+  label: string;
+  at: string;
+  subjectKind: string;
+  subjectId: string;
+  sentence: string;
+  href: string | null;
+  /** The owner's acknowledgment, if recorded (Increment 1.33). */
+  ack: { acknowledgedByName: string; acknowledgedAt: string; note: string } | null;
+};
+type Alerts = {
+  since: string;
+  days: number;
+  items: HardEventItem[];
+  acknowledgments: { total: number; acknowledged: number; waiting: number };
+  assumptions: string[];
+};
 
 type LoadState =
   | { status: "loading" }
@@ -77,6 +93,8 @@ export function OwnerBoard() {
   const [busy, setBusy] = useState<string | null>(null);
   // The review being composed: which decision, which action, and the note so far.
   const [review, setReview] = useState<{ id: string; action: ReviewAction; note: string } | null>(null);
+  // The hard event being acknowledged: its key and the note so far.
+  const [acking, setAcking] = useState<{ key: string; note: string } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -117,6 +135,30 @@ export function OwnerBoard() {
       setMessage(body.sentence ?? "Review recorded.");
     } catch (err: unknown) {
       setMessage(err instanceof Error ? err.message : "The review was not recorded.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** One append-only acknowledgment; the card is re-read from rows afterwards. */
+  async function acknowledge(item: HardEventItem, note: string) {
+    if (state.status !== "ready") return;
+    const key = `${item.kind}|${item.subjectKind}|${item.subjectId}`;
+    setBusy(key);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/alerts/ack", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: item.kind, subjectKind: item.subjectKind, subjectId: item.subjectId, note }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      setAcking(null);
+      setState({ ...state, alerts: await loadAlerts(state.isAdmin) });
+      setMessage(`Acknowledged: ${item.label}. The note is on the chain beside it.`);
+    } catch (err: unknown) {
+      setMessage(err instanceof Error ? err.message : "The hard event was not acknowledged.");
     } finally {
       setBusy(null);
     }
@@ -191,6 +233,11 @@ export function OwnerBoard() {
       {state.alerts && (
         <Card id="hard-events" title={`Hard events · last ${state.alerts.days} days`}>
           <p className="mt-1 text-2xl font-semibold tabular-nums">{state.alerts.items.length}</p>
+          {state.alerts.acknowledgments.waiting > 0 && (
+            <p className="text-sm text-[var(--ink-2)]">
+              {state.alerts.acknowledgments.waiting} not yet acknowledged. Each one takes a note of what was done.
+            </p>
+          )}
           {state.alerts.items.length === 0 ? (
             <p className="mt-1 text-sm text-[var(--ink-2)]">
               None. The six that page you one at a time: an after-hours refund, a retroactive-dated entry, a waived dual control, a
@@ -199,24 +246,75 @@ export function OwnerBoard() {
             </p>
           ) : (
             <ul className="mt-1 space-y-2 text-sm text-[var(--ink-2)]">
-              {state.alerts.items.map((e) => (
-                <li key={`${e.kind}:${e.at}:${e.sentence}`}>
-                  <p className="font-semibold text-[var(--ink)]">
-                    {e.label} · {new Date(e.at).toLocaleString()}
-                  </p>
-                  <p>
-                    {e.sentence}
-                    {e.href && (
-                      <>
-                        {" "}
-                        <Link className="font-semibold text-[var(--link)] underline-offset-2 hover:underline" href={e.href}>
-                          Open
-                        </Link>
-                      </>
+              {state.alerts.items.map((e) => {
+                const key = `${e.kind}|${e.subjectKind}|${e.subjectId}`;
+                const composing = acking?.key === key ? acking : null;
+                const noteOk = (composing?.note.trim().length ?? 0) >= 10;
+                return (
+                  <li key={key}>
+                    <p className="font-semibold text-[var(--ink)]">
+                      {e.label} · {new Date(e.at).toLocaleString()}
+                    </p>
+                    <p>
+                      {e.sentence}
+                      {e.href && (
+                        <>
+                          {" "}
+                          <Link className="font-semibold text-[var(--link)] underline-offset-2 hover:underline" href={e.href}>
+                            Open
+                          </Link>
+                        </>
+                      )}
+                    </p>
+                    {e.ack ? (
+                      <p className="text-xs text-[var(--ink-3)]">
+                        Seen by {e.ack.acknowledgedByName} on {e.ack.acknowledgedAt.slice(0, 10)}: {e.ack.note}
+                      </p>
+                    ) : composing ? (
+                      <form
+                        className="mt-1 flex flex-wrap items-end gap-2"
+                        onSubmit={(ev) => {
+                          ev.preventDefault();
+                          if (noteOk) void acknowledge(e, composing.note.trim());
+                        }}
+                      >
+                        <label className="flex min-w-[14rem] flex-1 flex-col text-sm">
+                          <span className="mb-1 font-semibold text-[var(--ink-2)]">What was done about it (at least ten characters)</span>
+                          <input
+                            className="rounded-md border border-[var(--line)] bg-[var(--bg)] px-3 py-2"
+                            value={composing.note}
+                            onChange={(ev) => setAcking({ key, note: ev.target.value })}
+                          />
+                        </label>
+                        <button
+                          type="submit"
+                          className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-3 py-1 text-sm font-semibold text-[var(--ink)] disabled:opacity-50"
+                          disabled={busy !== null || !noteOk}
+                        >
+                          {busy === key ? "Recording…" : "Mark as seen"}
+                        </button>
+                        <button
+                          type="button"
+                          className="min-h-[var(--target)] rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-sm font-semibold text-[var(--ink)]"
+                          onClick={() => setAcking(null)}
+                        >
+                          Cancel
+                        </button>
+                      </form>
+                    ) : (
+                      <button
+                        type="button"
+                        className="mt-1 min-h-[var(--target)] rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-semibold text-[var(--ink)] disabled:opacity-50"
+                        disabled={busy !== null}
+                        aria-label={`Acknowledge ${e.label}`}
+                        onClick={() => setAcking({ key, note: "" })}
+                      >
+                        Acknowledge
+                      </button>
                     )}
-                  </p>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           )}
           <p className="mt-2 text-xs text-[var(--ink-3)]">{state.alerts.assumptions.join(" ")}</p>

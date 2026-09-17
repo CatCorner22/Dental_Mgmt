@@ -712,6 +712,25 @@ export const digestAcks = pgTable(
   (t) => [uniqueIndex("digest_acks_tenant_period_uidx").on(t.tenantId, t.periodEnd)]
 );
 
+/** The owner's acknowledgment of one hard event (Increment 1.33); append-only, one per event. */
+export const hardEventAcks = pgTable(
+  "hard_event_acks",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    kind: text("kind").notNull(),
+    subjectKind: text("subject_kind").notNull(),
+    subjectId: text("subject_id").notNull(),
+    eventAt: timestamp("event_at", { withTimezone: true }).notNull(),
+    /** What was done about it; at least ten characters. */
+    note: text("note").notNull(),
+    acknowledgedById: uuid("acknowledged_by_id").notNull(),
+    acknowledgedByName: text("acknowledged_by_name").notNull(),
+    acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [uniqueIndex("hard_event_acks_event_uidx").on(t.tenantId, t.kind, t.subjectKind, t.subjectId)]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "users",
@@ -745,4 +764,5 @@ export const TENANT_SCOPED_TABLES = [
   "statements",
   "control_findings",
   "digest_acks",
+  "hard_event_acks",
 ] as const;
