@@ -13,6 +13,7 @@ const LINKS: { href: string; label: string }[] = [
   { href: "/risk", label: "Practice Risk" },
   { href: "/digest", label: "Weekly digest" },
   { href: "/locations", label: "Locations" },
+  { href: "/cpa", label: "Month-end package" },
 ];
 
 export default function HomePage() {
