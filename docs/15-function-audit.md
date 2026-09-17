@@ -195,7 +195,7 @@ What the storms did not prove is the same as before, with one addition. The rand
 
 | Measure | Count |
 |---|---|
-| Functions in `prototype/js` (`scripts/audit/inventory.mjs`) | 837 |
+| Functions in `prototype/js` (`scripts/audit/inventory.mjs`) | 842 |
 | Of those, from the registered audited universe of 497 | 486 |
 | Registered functions the fix round removed or renamed | 10 |
 | Registered functions the five storms removed | 1 |
@@ -980,6 +980,7 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `notice` | `screens/phone.js` | 137 | operational | A-storm-owner-2, A-storm2-owner-8 | Names the missing request, announces it and lands focus on the notice, where a pad over a decided or reset request used to close silently |
 | `onApprove` | `screens/phone.js` | 138 | operational | phone.request.<id>.approve (click and Enter). | S1 eventsOpenStepup (click → focus phone.stepup.1, no write); S2 seq 7-8 and 10-11 (two presses, two refusals… |
 | `onDecline` | `screens/phone.js` | 152 | broken → fixed | phone.request.<id>.decline; Enter inside the reason input. | S1 eventsDeclineEmpty (no write); eventsDecline seq 58-59 (key Enter field:true → write:approvalsLog:al-3); d… |
+| `landDecline` | `screens/phone.js` | 200 | operational | onDecline; the step-up pad's Send back. | The confirmation after a send-back the store recorded, whether it needed a PIN (shared desk) or the live session was enough |
 | `simulate` | `screens/phone.js` | 170 | operational | phone.simulate. | S1 events seq 3 and 6 (write:approvals:ar-1, ar-2); simNote; liveAfterSimulate; S4 with afterHours=1 → held w… |
 | `kv` | `screens/phone.js` | 183 | operational | requestCard grid. | S1 requestedAt: ["Patient \| LF · MRN-306 \| Show name","Requested by \| Sam Dawson","Requested at \| 8:40 am… |
 | `requestCard` | `screens/phone.js` | 185 | broken → fixed | render for each pending approval. | S7 cards/cardsRefusalDecline small=[] close=[] at all widths; S1 classes approve "btn irreversible", decline … |
@@ -1142,6 +1143,10 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `noPass` | `store.js` | 83 | operational | A-storm-store-6, A-storm2-store-13 | The pass-less temp is refused entitlement with "Open Roles" on every verb, clinical and money alike |
 | `needs` | `store.js` | 85 | operational | A-storm3-store-6, A-storm2-store-5, A-storm2-store-15 | One entitlement rule: the seat carries one of the grants or the verb refuses and names a seat that does |
 | `bills` | `store.js` | 89 | operational | A-storm3-store-6, A-storm2-store-5 | Money Desk, the Ledger and Checkout post money, so the seat carries a billing grant; a hygienist and a pass-less temp posted 37 ERA rows and a write-off |
+| `postsEra` | `store.js` | 92 | operational | S2-approvals-writeoff-era-8 | An 835 is posted, confirmed, held or disputed by a seat that carries post_era; a post_payment-only seat posted 37 insurance payments and opened an appeal |
+| `writesOff` | `store.js` | 93 | operational | S2-approvals-writeoff-era-8 | The contractual write-off an ERA line carries is a write-off, so Confirm needs write_off as the write-off control does; a seat the window refused for lacking write_off confirmed −$50 |
+| `validCents` | `store.js` | 96 | operational | S2-approvals-writeoff-era-4, S2-approvals-writeoff-era-10 | One amount rule for every verb that puts a number on the ledger: a positive, whole, safe count of cents; −5000, NaN, 100.5 and 1e-7 reached the ledger through the request path |
+| `badAmount` | `store.js` | 97 | operational | S2-approvals-writeoff-era-4, S2-approvals-writeoff-era-10 | The refusal validCents raises, verb-first with the amount field as its control |
 | `writeoffCap` | `store.js` | 93 | operational | A-storm-store-15, A-storm2-store-3 | A write-off retires what the patient owes and no more, at request and at Checkout; $1,000 on a $410 balance hid a −$590 net, and $410 cash plus a $100 courtesy posted a credit nobody paid |
 | `openDenial` | `store.js` | 384 | operational | A-regress-3-3, S-moneydesk-close-10 | The account's denied claim with no appeal packet sent; a $50 write-off on p-321 (c-88 denied, unappealed) returns needs_second with a pending request and no ledger row |
 | `afterHours` | `store.js` | 100 | operational | A-storm-store-12, A-storm2-store-4, A-storm3-money-2 | One after-hours rule for refunds and write-offs, with the control the screen acts on; eraConfirm's contractual write-off bypassed it |
