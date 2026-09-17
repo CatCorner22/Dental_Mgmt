@@ -1,10 +1,14 @@
 import { and, eq, gte, inArray, isNull } from "drizzle-orm";
 import { ENTITLEMENTS } from "@pms/controls-engine";
-import { auditChainChecks, domainEvent, ledgerEntries, locations, reconciliationRuns, sessions, userEntitlements } from "@pms/db";
+import type { AfterHoursFacts } from "@pms/ledger";
+import { approvalRequests, auditChainChecks, domainEvent, ledgerEntries, locations, reconciliationRuns, sessions, userEntitlements } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { BACKDATE_DAYS, CRITICAL_DUTIES } from "../controls/detectors";
 import { daysBetween } from "../controls/matchingMeasure";
 import { formatCents, formatLedgerKind } from "../ledger/format";
+import { hoursPhrase, isOutsideHours, localClock, WEEKDAY_LABEL, type Weekday, type WeekHours } from "../locations/hours";
+
+export { isOutsideHours, localClock, WEEKDAYS, type Weekday, type WeekHours } from "../locations/hours";
 
 /**
  * The six hard events (docs/01 item 14; docs/10 decision 6): the only
@@ -58,44 +62,12 @@ export type HardEvent = {
   href: string | null;
 };
 
-export const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
-export type Weekday = (typeof WEEKDAYS)[number];
-export type WeekHours = Partial<Record<Weekday, [string, string] | null>>;
-
-const WEEKDAY_LABEL: Record<Weekday, string> = {
-  sun: "Sunday",
-  mon: "Monday",
-  tue: "Tuesday",
-  wed: "Wednesday",
-  thu: "Thursday",
-  fri: "Friday",
-  sat: "Saturday",
-};
-
-/** The weekday and wall clock of an instant in a timezone, from the server, never the browser. */
-export function localClock(at: Date, timeZone: string): { weekday: Weekday; hhmm: string; date: string } {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    weekday: "short",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(at);
-  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  const weekday = get("weekday").toLowerCase().slice(0, 3) as Weekday;
-  const hour = get("hour") === "24" ? "00" : get("hour");
-  return { weekday, hhmm: `${hour}:${get("minute")}`, date: `${get("year")}-${get("month")}-${get("day")}` };
-}
-
-/** Whether a wall-clock moment falls outside the day's window; a null window is a closed day. */
-export function isOutsideHours(hours: WeekHours, weekday: Weekday, hhmm: string): { outside: boolean; window: [string, string] | null } {
-  const window = hours[weekday] ?? null;
-  if (!window) return { outside: true, window: null };
-  return { outside: hhmm < window[0] || hhmm >= window[1], window };
-}
+/**
+ * How the after-hours refund ended (Increment 1.30): the hold ran and a
+ * second person approved, the hold ran and still waits, or the row exists
+ * with no approval at all, which the database trigger should have refused.
+ */
+export type AfterHoursOutcome = "approved" | "waiting" | "unheld";
 
 export function afterHoursSentence(input: {
   amountCents: number;
@@ -104,10 +76,17 @@ export function afterHoursSentence(input: {
   date: string;
   hhmm: string;
   window: [string, string] | null;
+  outcome?: AfterHoursOutcome;
 }): string {
-  const when = `${WEEKDAY_LABEL[input.weekday]} ${input.date} at ${input.hhmm}`;
-  const hours = input.window ? `${input.locationName} is open ${input.window[0]} to ${input.window[1]} that day` : `${input.locationName} is closed that day`;
-  return `A ${formatCents(Math.abs(input.amountCents))} refund was posted on ${when} local time; ${hours}.`;
+  const when = `${WEEKDAY_LABEL[input.weekday as Weekday] ?? input.weekday} ${input.date} at ${input.hhmm}`;
+  const verb = input.outcome === "waiting" ? "is held, still waiting for a second person" : "was posted";
+  const tail =
+    input.outcome === "approved"
+      ? " Held for a second person, who approved it."
+      : input.outcome === "unheld"
+        ? " Posted with no second person: the after-hours hold did not run on this row."
+        : "";
+  return `A ${formatCents(Math.abs(input.amountCents))} refund ${verb} on ${when} local time; ${hoursPhrase(input.locationName, input.window)}.${tail}`;
 }
 
 export type SessionRow = { id: string; userId: string; userAgent: string | null; createdAt: Date };
@@ -151,6 +130,7 @@ export async function listHardEvents(db: AppDb, tenantId: string, opts: { since:
       effectiveDate: ledgerEntries.effectiveDate,
       postedAt: ledgerEntries.postedAt,
       locationId: ledgerEntries.locationId,
+      approvalRequestId: ledgerEntries.approvalRequestId,
     })
     .from(ledgerEntries)
     .where(and(eq(ledgerEntries.tenantId, tenantId), gte(ledgerEntries.postedAt, since)));
@@ -180,11 +160,44 @@ export async function listHardEvents(db: AppDb, tenantId: string, opts: { since:
           at: e.postedAt.toISOString(),
           subjectKind: "ledger_entry",
           subjectId: e.id,
-          sentence: afterHoursSentence({ amountCents: Number(e.amountCents), locationName: site.name, ...clock, window: check.window }),
+          sentence: afterHoursSentence({
+            amountCents: Number(e.amountCents),
+            locationName: site.name,
+            ...clock,
+            window: check.window,
+            outcome: e.approvalRequestId ? "approved" : "unheld",
+          }),
           href: "/ledger",
         });
       }
     }
+  }
+
+  // A refund the after-hours hold caught and that still waits for a second person.
+  const pending = await db
+    .select({ id: approvalRequests.id, amountCents: approvalRequests.amountCents, heldPayload: approvalRequests.heldPayload, requestedAt: approvalRequests.requestedAt })
+    .from(approvalRequests)
+    .where(and(eq(approvalRequests.tenantId, tenantId), eq(approvalRequests.status, "pending"), gte(approvalRequests.requestedAt, since)));
+  for (const p of pending) {
+    const held = p.heldPayload as { kind?: string; afterHours?: AfterHoursFacts | null };
+    if (held.kind !== "refund" || !held.afterHours) continue;
+    out.push({
+      kind: "after_hours_refund",
+      label: HARD_EVENT_LABEL.after_hours_refund,
+      at: p.requestedAt.toISOString(),
+      subjectKind: "approval_request",
+      subjectId: p.id,
+      sentence: afterHoursSentence({
+        amountCents: Number(p.amountCents),
+        locationName: held.afterHours.locationName,
+        weekday: held.afterHours.weekday as Weekday,
+        date: held.afterHours.date,
+        hhmm: held.afterHours.hhmm,
+        window: held.afterHours.window,
+        outcome: "waiting",
+      }),
+      href: "/approvals",
+    });
   }
 
   // A dual-control waiver, from the chain.

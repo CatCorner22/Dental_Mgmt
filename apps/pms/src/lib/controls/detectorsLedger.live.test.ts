@@ -3,9 +3,16 @@ import { createLiveDatabase, liveAdminUrl, type LiveDatabase } from "@pms/db/tes
 import { seedDatabase } from "@pms/db/seed";
 import { DEV_TENANTS, DEV_USERS, SEED_BANK, SEED_LEDGER } from "@pms/db/seed-data";
 import { uuidv7 } from "@pms/db";
+import { evaluateRelease } from "@pms/controls-engine";
+import type { PostEntryInput } from "@pms/ledger";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { HARD_EVENT_KINDS, listHardEvents } from "../alerts/hardEvents";
+import { afterHoursFactsFor, postLedgerEntry } from "../ledger/post";
+import { createApprovalRequest } from "./approvals";
+import { approveAndPost } from "./decideAndPost";
 import { appendControlEvent } from "./events";
+import { loadActivePolicy } from "./policy";
+import { loadStaff } from "./staff";
 import {
   BACKDATED_POSTING_KIND,
   DUPLICATE_PAYMENT_KIND,
@@ -155,7 +162,8 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
     expect((dup!.detail as { firstEntryId: string; count: number }).firstEntryId).toBe(ids.pay1);
 
     // A reversal of the second payment resolves it: the reversal mirrors the amount and reverses the entry.
-    await insertEntry({ id: ids.reversal, kind: "reversal", amountCents: 2_500, effectiveDate: "2026-09-16", postedAt: "2026-09-16T09:00:00Z", reversesEntryId: ids.pay2 });
+    // Posted at 10:00 Chicago: inside hours, so the after-hours hold (Increment 1.30) leaves it alone.
+    await insertEntry({ id: ids.reversal, kind: "reversal", amountCents: 2_500, effectiveDate: "2026-09-16", postedAt: "2026-09-16T15:00:00Z", reversesEntryId: ids.pay2 });
     summaries = await tx((d) => refreshLedgerFindings(d, tenantId, now));
     expect(summaries[2]).toMatchObject({ closed: 1, open: 0 });
     const closed = (await tx((d) => listControlFindings(d, tenantId))).find((r) => r.subjectId === ids.pay2);
@@ -170,7 +178,9 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
     // A refund needs a reason code; the seed carries none for refunds yet.
     await db.admin.query("INSERT INTO reason_codes (tenant_id, code, kind, label) VALUES ($1, 'overpayment', 'refund', 'Patient overpayment') ON CONFLICT DO NOTHING", [tenantId]);
     // After hours: 02:30 UTC on the 16th is 21:30 on Tuesday the 15th at Main (Chicago), which closes at 19:00.
-    await insertEntry({ id: uuidv7(34_010), kind: "refund", amountCents: 12_000, effectiveDate: "2026-09-15", postedAt: "2026-09-16T02:30:00Z" });
+    // With the trigger on, this row is impossible (the hold refuses it; see the next case), so it is planted with
+    // the trigger off and the hard event says the hold did not run on it.
+    await insertEntry({ id: uuidv7(34_010), kind: "refund", amountCents: 12_000, effectiveDate: "2026-09-15", postedAt: "2026-09-16T02:30:00Z", disableTrigger: true });
     // In hours: the same refund at 10:00 Chicago does not page.
     await insertEntry({ id: uuidv7(34_011), kind: "refund", amountCents: 3_000, effectiveDate: "2026-09-16", postedAt: "2026-09-16T15:00:00Z" });
     // A bank run whose variance is over the threshold, and one under it.
@@ -221,7 +231,7 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
     expect([...byKind.keys()].sort()).toEqual([...HARD_EVENT_KINDS].sort());
     expect(events.filter((e) => e.kind === "after_hours_refund")).toHaveLength(1);
     expect(byKind.get("after_hours_refund")!.sentence).toBe(
-      "A $120.00 refund was posted on Tuesday 2026-09-15 at 21:30 local time; Main is open 07:00 to 19:00 that day."
+      "A $120.00 refund was posted on Tuesday 2026-09-15 at 21:30 local time; Main is open 07:00 to 19:00 that day. Posted with no second person: the after-hours hold did not run on this row."
     );
     // The write-off posted 71 days after its effective date on the 10th is inside the window. The seed posts its
     // back-dated history at seed time, so those rows page too; that is the rule working, not noise.
@@ -240,5 +250,125 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
     // Newest first, and no person anywhere.
     expect(events.map((e) => e.at)).toEqual([...events.map((e) => e.at)].sort().reverse());
     expect(JSON.stringify(events)).not.toMatch(/Riley|Finn|Owner Riley/);
+  });
+
+  describe("the after-hours hold", () => {
+    const front = DEV_USERS[1]!;
+    let savedHours: unknown;
+    const AFTER_HOURS_WHY =
+      /^Exception "After-hours hold" forces dual release\. Posted at \d{2}:\d{2} local time on [A-Z][a-z]+ \d{4}-\d{2}-\d{2}; Main is closed that day\.$/;
+
+    beforeAll(async () => {
+      const { rows } = await db.admin.query("SELECT hours FROM locations WHERE id = $1", [SEED_LEDGER.locationId]);
+      savedHours = rows[0].hours as unknown;
+      // Close the location all week for these cases, so the real clock counts as after hours whenever the suite runs.
+      await db.admin.query("UPDATE locations SET hours = '{}'::jsonb WHERE id = $1", [SEED_LEDGER.locationId]);
+      // A refund is initiated by an Office Manager or the owner; the front desk becomes one for these cases.
+      await db.admin.query(
+        "INSERT INTO user_entitlements (id, tenant_id, user_id, entitlement, effective_from) VALUES ($1, $2, $3, 'approve_writeoffs', now())",
+        [uuidv7(34_040), tenantId, front.id]
+      );
+      await db.admin.query(
+        "INSERT INTO reason_codes (tenant_id, code, kind, label) VALUES ($1, 'overpayment', 'refund', 'Patient overpayment') ON CONFLICT DO NOTHING",
+        [tenantId]
+      );
+    });
+
+    afterAll(async () => {
+      await db.admin.query("UPDATE locations SET hours = $2::jsonb WHERE id = $1", [SEED_LEDGER.locationId, JSON.stringify(savedHours)]);
+    });
+
+    it("holds a small write-off posted after hours, at the service and at the database, until a second person decides", async () => {
+      // $12 is far under the $150 write-off threshold; the hours scope holds it anyway, and the refusal says when and where.
+      const held = await withTenantTransaction(
+        tenantId,
+        front.id,
+        (d) =>
+          postLedgerEntry(d, {
+            tenantId,
+            actorId: front.id,
+            actorName: front.displayName,
+            post: { accountId: SEED_LEDGER.accountDoeId, patientId: SEED_LEDGER.patientJaneId, kind: "write_off", amountCents: 1_200, effectiveDate: "2026-09-17", reasonCode: "courtesy" },
+          }),
+        env
+      );
+      expect(held).toMatchObject({ ok: false, status: "needs_second" });
+      const heldResult = held as { approvalRequestId: string; why: string };
+      expect(heldResult.why).toMatch(AFTER_HOURS_WHY);
+
+      // The database is the second lock: the same row posted alone is refused, threshold or no threshold.
+      await expect(
+        insertEntry({ id: uuidv7(34_041), kind: "write_off", amountCents: -1_200, effectiveDate: "2026-09-17", postedAt: new Date().toISOString() })
+      ).rejects.toThrow(/after-hours hold/);
+
+      // The owner decides; the posting runs citing the request and the trigger accepts it.
+      const approved = await approveAndPost(tenantId, { id: owner.id, name: owner.displayName }, heldResult.approvalRequestId, env);
+      expect(approved.ok).toBe(true);
+    });
+
+    it("reads a held after-hours refund as 'held, still waiting', then as approved once a second person decides", async () => {
+      // The posting screen posts no refunds yet, so this case builds the held request the way the service does:
+      // the evaluator sees the hours fact, the request carries it, and the approval re-evaluates on it.
+      const heldPayload = await tx(async (d) => {
+        const facts = await afterHoursFactsFor(d, tenantId, SEED_LEDGER.locationId, new Date());
+        expect(facts).toMatchObject({ locationName: "Main", window: null });
+        const active = await loadActivePolicy(d, tenantId);
+        const { people } = await loadStaff(d, tenantId);
+        const payload: PostEntryInput = {
+          tenantId,
+          accountId: SEED_LEDGER.accountDoeId,
+          patientId: SEED_LEDGER.patientJaneId,
+          locationId: SEED_LEDGER.locationId,
+          kind: "refund",
+          glBucket: "patient_ar",
+          amountCents: 1_200,
+          reasonCode: "overpayment",
+          effectiveDate: "2026-09-17",
+          postedAt: new Date().toISOString(),
+          createdById: front.id,
+          createdByName: front.displayName,
+          afterHours: facts,
+        };
+        const evaluation = evaluateRelease(
+          active!.policy,
+          { channel: "check", amountUsd: 12, initiatorPersonId: front.id, outsideBusinessHours: true },
+          people
+        );
+        expect(evaluation.status).toBe("needs_second");
+        const request = await createApprovalRequest(d, {
+          tenantId,
+          channel: "check",
+          amountCents: 1_200,
+          heldPayload: payload,
+          evaluation,
+          requesterId: front.id,
+          requesterName: front.displayName,
+        });
+        return { requestId: request.id };
+      });
+
+      // Until someone decides, the hard event reads "held, still waiting", never "posted".
+      const window = { since: new Date(Date.now() - 3_600_000), now: new Date() };
+      let events = await tx((d) => listHardEvents(d, tenantId, window));
+      const waiting = events.find((e) => e.subjectId === heldPayload.requestId);
+      expect(waiting?.kind).toBe("after_hours_refund");
+      expect(waiting?.sentence).toMatch(/^A \$12\.00 refund is held, still waiting for a second person on .* Main is closed that day\.$/);
+      expect(waiting?.href).toBe("/approvals");
+
+      // The database refuses the same refund posted alone, whatever the amount.
+      await expect(
+        insertEntry({ id: uuidv7(34_042), kind: "refund", amountCents: 1_200, effectiveDate: "2026-09-17", postedAt: new Date().toISOString() })
+      ).rejects.toThrow(/after-hours hold/);
+
+      // The owner decides; the posting cites the request, the trigger accepts it, and the event now reads approved.
+      const approved = await approveAndPost(tenantId, { id: owner.id, name: owner.displayName }, heldPayload.requestId, env);
+      expect(approved.ok).toBe(true);
+      const entryId = (approved as { entryId: string }).entryId;
+      events = await tx((d) => listHardEvents(d, tenantId, { since: window.since, now: new Date() }));
+      expect(events.find((e) => e.subjectId === heldPayload.requestId)).toBeUndefined();
+      expect(events.find((e) => e.subjectId === entryId)?.sentence).toMatch(
+        /^A \$12\.00 refund was posted on .* Main is closed that day\. Held for a second person, who approved it\.$/
+      );
+    });
   });
 });

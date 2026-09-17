@@ -395,7 +395,11 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
 
   it("versions the policy for every exception and keeps payroll external", async () => {
     const seeded = await tx((d) => listExceptions(d, tenant.id));
-    expect(seeded.exceptions).toEqual([]); // no demo exceptions in a real tenant
+    // No demo exceptions in a real tenant; the after-hours hold (Increment 1.30) is the one production default.
+    expect(seeded.exceptions.map((e) => [e.id, e.action, e.enabled])).toEqual([["ex-after-hours-hold", "force_dual", true]]);
+    expect(seeded.summary).toMatchObject({ total: 1, forceDual: 1, raises: 0, waives: 0 });
+    expect(seeded.coverage.find((c) => c.channel === "writeoff")?.activeExceptions).toBe(1);
+    expect(seeded.coverage.find((c) => c.channel === "ach")?.activeExceptions).toBe(0);
 
     const waiver = await tx((d) =>
       addException(d, {
@@ -504,7 +508,7 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
   it("freezes a snapshot with both versions and serves it back", async () => {
     const stored = await tx((d) => takeSnapshot(d, { tenantId: tenant.id, actor: asOwner, trigger: "manual" }));
     expect(stored.snapshot.scoringVersion).toBe("precog-residual-v1.1.0");
-    expect(stored.snapshot.rulebookVersion).toBe("0.1.0");
+    expect(stored.snapshot.rulebookVersion).toBe("0.2.0");
     expect(stored.snapshot.headline.unmitigatedCritical).toBeGreaterThanOrEqual(1);
     expect(stored.snapshot.assumptions.some((a) => /Payroll transmission/.test(a))).toBe(true);
 

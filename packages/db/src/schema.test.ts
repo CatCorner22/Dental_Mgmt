@@ -33,6 +33,7 @@ const decisionSubjectsSql = readFileSync(join(here, "../migrations/0022_control_
 const decisionRetireSql = readFileSync(join(here, "../migrations/0023_control_decisions_retire.sql"), "utf8");
 const digestAcksSql = readFileSync(join(here, "../migrations/0024_digest_acks.sql"), "utf8");
 const locationHoursSql = readFileSync(join(here, "../migrations/0025_locations_hours.sql"), "utf8");
+const afterHoursHoldSql = readFileSync(join(here, "../migrations/0026_after_hours_hold.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -222,6 +223,21 @@ describe("Increment 1.29 location hours", () => {
     expect(locationHoursSql).toMatch(/"fri":\["07:00","17:00"\]/);
     expect(locationHoursSql).toMatch(/"sat":null,"sun":null/);
     expect(locationHoursSql).not.toMatch(/GRANT|DROP|DELETE|UPDATE/);
+  });
+});
+
+describe("Increment 1.30 after-hours hold enforced by the database", () => {
+  it("re-defines the dual-release trigger to hold an after-hours release whatever the amount", () => {
+    expect(afterHoursHoldSql).toMatch(/CREATE OR REPLACE FUNCTION ledger_posted_outside_hours\(p_tenant uuid, p_location uuid, p_at timestamptz\)/);
+    expect(afterHoursHoldSql).toMatch(/p_at AT TIME ZONE loc\.timezone/);
+    expect(afterHoursHoldSql).toMatch(/loc\.hours -> dow/);
+    expect(afterHoursHoldSql).toMatch(/CREATE OR REPLACE FUNCTION ledger_entries_requires_approval\(\)/);
+    expect(afterHoursHoldSql).toMatch(/e->>'action' = 'force_dual'/);
+    expect(afterHoursHoldSql).toMatch(/COALESCE\(\(e->>'outsideBusinessHours'\)::boolean, false\)/);
+    expect(afterHoursHoldSql).toMatch(/IF amount_cents <= threshold_cents AND NOT after_hours_hold THEN/);
+    expect(afterHoursHoldSql).toMatch(/after-hours hold\) and cites no approved request/);
+    expect(afterHoursHoldSql).toMatch(/GRANT SELECT ON locations TO app_append/);
+    expect(afterHoursHoldSql).not.toMatch(/DROP TRIGGER|DROP TABLE|DELETE FROM/);
   });
 });
 

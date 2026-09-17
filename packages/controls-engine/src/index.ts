@@ -7,6 +7,7 @@ export { CONFLICT_RULES, ENTITLEMENTS } from "./sod/conflict-rules";
 export type { RoleAssignment, DetectedConflict, SodDetectionReport } from "./sod/detect";
 
 export {
+  AFTER_HOURS_HOLD_EXCEPTION,
   DEFAULT_DUAL_RELEASE_RULES,
   evaluateRelease,
   resolveEffectiveThreshold,

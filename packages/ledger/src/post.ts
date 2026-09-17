@@ -10,6 +10,25 @@ import type {
   PostSuccess,
 } from "./types";
 
+/**
+ * Why a posting counted as after hours (Increment 1.30): the location's
+ * wall clock at posting, from the server, and the window it fell outside.
+ * Carried on a held payload so the inbox can say "posted at 21:30; Main is
+ * open 07:00 to 19:00 that day", and so the approval re-evaluates with the
+ * same fact the hold was made on.
+ */
+export type AfterHoursFacts = {
+  locationName: string;
+  /** Three-letter weekday key, e.g. "tue". */
+  weekday: string;
+  /** Local calendar date YYYY-MM-DD. */
+  date: string;
+  /** Local wall clock HH:MM. */
+  hhmm: string;
+  /** The day's open window, or null when the location is closed that day. */
+  window: [string, string] | null;
+};
+
 export type PostEntryInput = {
   tenantId: string;
   accountId: string;
@@ -35,6 +54,8 @@ export type PostEntryInput = {
   idempotencyKey?: string;
   insuranceExpectedCents?: number | null;
   chargeIds?: string[];
+  /** Set by the posting service when the posting fell outside the location's hours; null or absent otherwise. */
+  afterHours?: AfterHoursFacts | null;
 };
 
 export type PostEntryFn = (input: PostEntryInput) => Promise<PostResult>;
