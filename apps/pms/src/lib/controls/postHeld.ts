@@ -1,7 +1,8 @@
 import type { DualReleasePolicy, Person } from "@pms/controls-engine";
 import { ledgerEntries, paymentAllocations } from "@pms/db";
 import { createPostEntry, makeInMemoryWriter, postGuarded } from "@pms/ledger";
-import type { PostEntryInput, PostResult } from "@pms/ledger";
+import type { PostResult } from "@pms/ledger";
+import { uuidv7 } from "@pms/db";
 import { withTenantAppendTransaction, withTenantTransaction } from "../db/client";
 import { loadActivePolicy } from "./policy";
 import { loadStaff } from "./staff";
@@ -15,6 +16,10 @@ import type { ApprovalRow } from "./approvals";
  * append role (app_append) then evaluates and inserts. The database trigger
  * re-reads the cited approval request on insert as the append role, which
  * holds SELECT on approval_requests and control_policies for exactly that.
+ *
+ * A held correction (Increment 1.38) carries its repost beside the reversal.
+ * Both halves insert here, in one transaction, under the one approval; the
+ * result names the reversal, and the repost is found through its link.
  */
 export async function executeHeldPosting(
   tenantId: string,
@@ -39,10 +44,7 @@ export async function executeHeldPosting(
     tenantId,
     userId,
     async (db) => {
-      const payload: PostEntryInput = {
-        ...request.heldPayload,
-        approvalRequestId: request.id,
-      };
+      const payload = { ...request.heldPayload, approvalRequestId: request.id };
 
       const store = { entries: [], allocations: [] };
       const post = createPostEntry(makeInMemoryWriter(store));
@@ -58,6 +60,7 @@ export async function executeHeldPosting(
       if (!result.ok) return result;
 
       const postedAt = new Date(result.entry.postedAt);
+      const correction = payload.correction;
       await db.insert(ledgerEntries).values({
         id: result.entry.id,
         tenantId: result.entry.tenantId,
@@ -77,6 +80,7 @@ export async function executeHeldPosting(
         claimId: result.entry.claimId ?? null,
         coverageId: result.entry.coverageId ?? null,
         reversesEntryId: result.entry.reversesEntryId ?? null,
+        correctsEntryId: correction?.correctsEntryId ?? null,
         approvalRequestId: result.entry.approvalRequestId ?? null,
         appliedExceptionId: result.entry.appliedExceptionId ?? null,
         tender: result.entry.tender ?? null,
@@ -85,6 +89,37 @@ export async function executeHeldPosting(
         insuranceExpectedCents: result.entry.insuranceExpectedCents ?? null,
         createdAt: postedAt,
       });
+
+      // The repost, written behind the reversal the database has just admitted.
+      if (correction) {
+        await db.insert(ledgerEntries).values({
+          id: uuidv7(postedAt.getTime() + 1),
+          tenantId: result.entry.tenantId,
+          accountId: result.entry.accountId,
+          patientId: result.entry.patientId,
+          locationId: result.entry.locationId,
+          kind: correction.repostKind,
+          glBucket: result.entry.glBucket,
+          amountCents: correction.repostAmountCents,
+          currency: result.entry.currency,
+          reasonCode: result.entry.reasonCode ?? null,
+          effectiveDate: result.entry.effectiveDate,
+          postedAt,
+          createdById: result.entry.createdById,
+          createdByName: result.entry.createdByName,
+          procedureId: result.entry.procedureId ?? null,
+          claimId: result.entry.claimId ?? null,
+          coverageId: result.entry.coverageId ?? null,
+          correctsEntryId: correction.correctsEntryId,
+          approvalRequestId: result.entry.approvalRequestId ?? null,
+          appliedExceptionId: result.entry.appliedExceptionId ?? null,
+          tender: correction.repostTender,
+          memo: result.entry.memo ?? null,
+          idempotencyKey: `correct-repost-${correction.correctsEntryId}`,
+          insuranceExpectedCents: null,
+          createdAt: postedAt,
+        });
+      }
 
       if (result.allocations.length) {
         await db.insert(paymentAllocations).values(

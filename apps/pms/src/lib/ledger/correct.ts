@@ -3,6 +3,7 @@ import { ledgerEntries, monthCloses, uuidv7 } from "@pms/db";
 import { evaluateRelease } from "@pms/controls-engine";
 import { CHANNEL_BY_KIND } from "@pms/ledger";
 import type { AppDb } from "../db/client";
+import { createApprovalRequest } from "../controls/approvals";
 import { appendControlEvent } from "../controls/events";
 import { loadActivePolicy } from "../controls/policy";
 import { loadStaff } from "../controls/staff";
@@ -34,7 +35,16 @@ export type CorrectionRefusal = {
     | "unchanged"
     | "missing_reason"
     | "no_policy"
-    | "needs_second";
+    | "not_allowed";
+  verb: string;
+  control: string;
+  why: string;
+};
+
+export type CorrectionHeld = {
+  ok: false;
+  code: "needs_second";
+  approvalRequestId: string;
   verb: string;
   control: string;
   why: string;
@@ -49,7 +59,7 @@ export type CorrectionSuccess = {
   closedMonth: string | null;
 };
 
-export type CorrectionResult = CorrectionSuccess | CorrectionRefusal;
+export type CorrectionResult = CorrectionSuccess | CorrectionHeld | CorrectionRefusal;
 
 export type CorrectEntryInput = {
   tenantId: string;
@@ -84,10 +94,10 @@ export async function closedMonthFor(db: AppDb, tenantId: string, effectiveDate:
  *
  * Refuses an entry this practice does not hold, a reversal (correct the row it
  * reverses instead), an entry already reversed (correct its repost instead),
- * and a correction that changes nothing. A correction whose amount needs a
- * second person under the dual-release policy is refused rather than held: the
- * pair has to land in one transaction, and a hold would split it. The database
- * refuses it too, on the same policy, whatever this service decides.
+ * and a correction that changes nothing. A correction whose figure needs a
+ * second person is held as one approval request naming the entry it corrects
+ * (Increment 1.38): the approval releases both halves together, and the
+ * database admits neither above the figure the second person approved.
  */
 export async function correctEntry(db: AppDb, input: CorrectEntryInput): Promise<CorrectionResult> {
   const now = input.now ?? new Date();
@@ -187,23 +197,75 @@ export async function correctEntry(db: AppDb, input: CorrectEntryInput): Promise
     },
     people
   );
-  if (!evaluation.ok || evaluation.dualRequired) {
+  // A refusal the practice cannot approve its way out of: the person may not
+  // initiate this release at all. Naming a second person does not cure it.
+  if (!evaluation.ok && evaluation.status !== "needs_second") {
     return {
       ok: false,
-      code: "needs_second",
-      verb: "Post the correction the ordinary way",
+      code: "not_allowed",
+      verb: "Choose a different person",
       control: evaluation.eligibleSeconds[0]?.name ?? "Controls",
-      why: `A correction of this size needs a second person, and a pair has to land in one transaction. ${
-        evaluation.reasons[0] ?? "Two people must release this amount."
-      }`,
+      why: evaluation.reasons[0] ?? "This release is refused by the dual-release policy.",
     };
   }
 
-  const appliedExceptionId = evaluation.appliedException ? evaluation.appliedException.id : null;
+  const appliedExceptionId =
+    !evaluation.dualRequired && evaluation.appliedException ? evaluation.appliedException.id : null;
   const why = closedMonth
     ? `Corrects entry ${original.id} (${input.reasonCode.trim()}); ${closedMonth} is closed to the accountant.`
     : `Corrects entry ${original.id} (${input.reasonCode.trim()}).`;
   const memo = input.memo?.trim() ? `${why} ${input.memo.trim()}` : why;
+
+  // Above the threshold, or under the after-hours hold: one request, naming the
+  // entry being corrected and the larger of its two figures. The second person
+  // approves the correction, not a row, and the release writes both halves.
+  if (evaluation.dualRequired || evaluation.status === "needs_second") {
+    const request = await createApprovalRequest(db, {
+      tenantId: input.tenantId,
+      channel: CHANNEL_BY_KIND.reversal!,
+      amountCents: releaseCents,
+      heldPayload: {
+        tenantId: input.tenantId,
+        accountId: original.accountId,
+        patientId: original.patientId,
+        locationId: original.locationId,
+        kind: "reversal",
+        glBucket: glBucketForKind("adjustment"),
+        amountCents: -original.amountCents,
+        reasonCode,
+        effectiveDate,
+        postedAt: now.toISOString(),
+        createdById: input.actorId,
+        createdByName: input.actorName,
+        procedureId: original.procedureId ?? null,
+        reversesEntryId: original.id,
+        memo,
+        afterHours,
+        correction: {
+          correctsEntryId: original.id,
+          repostKind: original.kind,
+          repostAmountCents: input.amountCents,
+          repostTender: original.tender,
+        },
+      },
+      evaluation,
+      requesterId: input.actorId,
+      requesterName: input.actorName,
+      subjectId: original.patientId,
+      correctsEntryId: original.id,
+      now,
+    });
+    return {
+      ok: false,
+      code: "needs_second",
+      approvalRequestId: request.id,
+      verb: "Request approval",
+      control: evaluation.eligibleSeconds[0]?.name ?? "Controls",
+      why: `${
+        evaluation.reasons[0] ?? "Two people must release this amount."
+      } The correction waits as one request; approving it writes both the reversal and the repost.`,
+    };
+  }
 
   const reversalId = uuidv7(now.getTime());
   const repostId = uuidv7(now.getTime() + 1);

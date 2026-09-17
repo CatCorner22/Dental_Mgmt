@@ -6,13 +6,16 @@ import { uuidv7 } from "@pms/db";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { closeMonth, PRIOR_PERIOD_REASON } from "../cpa/close";
 import { correctEntry } from "./correct";
+import { approveAndPost } from "../controls/decideAndPost";
 
 /**
  * The reversal-and-repost correction pair on the seeded Ridgeview tenant, as
  * app_rw (Increment 1.37): the pair written in one transaction, the database
  * refusing a reversal of a reversal, a second reversal of one entry, an
  * unmirrored amount, and a repost with no reversal behind it; and the closed
- * month admitting the pair while still refusing a bare labelled row. Skipped
+ * month admitting the pair while still refusing a bare labelled row; and a
+ * correction above the threshold held as one request whose approval writes
+ * both halves (Increment 1.38). Skipped
  * without PMS_TEST_POSTGRES_URL; mandatory under PMS_TEST_POSTGRES_REQUIRED=1.
  */
 
@@ -324,5 +327,57 @@ describe.skipIf(!adminUrl)("Correction pair (live)", () => {
       // The caller's own reason survives in the memo, beside the month that is closed.
       expect(row.memo).toMatch(/\(courtesy\); 2026-08 is closed to the accountant\.$/);
     }
+  });
+
+  it("holds a correction above the threshold as one request, and the approval writes both halves", async () => {
+    // A $200 write-off is above the seeded $150 write-off threshold, so correcting it
+    // needs a second person. The correction waits as one request, not two.
+    const bigId = uuidv7(38_200);
+    await insertEntry({ id: bigId, effectiveDate: "2026-09-12", postedAt: "2026-09-12T15:00:00Z", amountCents: -20_000 });
+
+    const held = await tx((d) =>
+      correctEntry(d, {
+        tenantId,
+        actorId: front.id,
+        actorName: front.displayName,
+        entryId: bigId,
+        amountCents: -15_000,
+        reasonCode: "courtesy",
+        now,
+      })
+    );
+    expect(held).toMatchObject({ ok: false, code: "needs_second" });
+    if (held.ok || held.code !== "needs_second") return;
+    expect(held.why).toMatch(/approving it writes both the reversal and the repost/);
+
+    // Nothing posted yet: a hold is a hold.
+    const beforeRelease = await db.admin.query("SELECT count(*)::int AS n FROM ledger_entries WHERE corrects_entry_id = $1", [bigId]);
+    expect(beforeRelease.rows[0].n).toBe(0);
+
+    // The request names the entry, and the larger of the two figures.
+    const request = await db.admin.query("SELECT amount_cents, corrects_entry_id, channel, status FROM approval_requests WHERE id = $1", [
+      held.approvalRequestId,
+    ]);
+    expect(request.rows[0]).toMatchObject({ corrects_entry_id: bigId, channel: "writeoff", status: "pending" });
+    expect(Number(request.rows[0].amount_cents)).toBe(20_000);
+
+    // The owner approves. One decision, both halves.
+    const released = await approveAndPost(tenantId, { id: owner.id, name: owner.displayName }, held.approvalRequestId, env);
+    expect(released).toMatchObject({ ok: true });
+
+    const rows = await db.admin.query(
+      "SELECT kind, amount_cents, approval_request_id, corrects_entry_id, reverses_entry_id FROM ledger_entries WHERE corrects_entry_id = $1 ORDER BY kind",
+      [bigId]
+    );
+    expect(rows.rows).toHaveLength(2);
+    const [repost, reversal] = rows.rows.at(0)!.kind === "reversal" ? [rows.rows[1], rows.rows[0]] : rows.rows;
+    expect(reversal.kind).toBe("reversal");
+    expect(Number(reversal.amount_cents)).toBe(20_000);
+    expect(reversal.reverses_entry_id).toBe(bigId);
+    expect(repost.kind).toBe("write_off");
+    expect(Number(repost.amount_cents)).toBe(-15_000);
+    // Both cite the one approval: the second person released the correction, not a row.
+    expect(reversal.approval_request_id).toBe(held.approvalRequestId);
+    expect(repost.approval_request_id).toBe(held.approvalRequestId);
   });
 });
