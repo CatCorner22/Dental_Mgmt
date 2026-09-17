@@ -108,6 +108,10 @@
   const noPass = (verb) => (currentUser().noPass ? refuse('entitlement', verb, 'Open Roles', NO_PASS_WHY) : null);
   /* One entitlement rule: the seat carries one of the grants or the verb refuses and names a seat that does. */
   const needs = (u, ents, verb, control, why) => (ents.some((e) => (u.entitlements || []).includes(e)) ? null : refuse('entitlement', verb, control, why));
+  /* One amount rule for every verb that puts a number on the ledger: a positive, whole, safe count of cents. The
+     window, the request and the approval all read it, so what one refuses none of the others posts. */
+  const validCents = (n) => Number.isSafeInteger(n) && n > 0;
+  const badAmount = (verb) => refuse('amount_required', verb, 'Go to amount', 'The amount has to be a positive whole number of cents. A value the ledger cannot store would post NaN, a fraction or a credit against the account.');
   /* Money Desk and the Ledger post money, so the seat that runs them carries a billing grant: a pass-less temp and a hygienist
      used to post 37 ERA rows and a write-off under their names while Checkout beside them refused. */
   const BILLING = ['post_payment', 'post_era', 'write_off', 'submit_claims'];
@@ -311,7 +315,7 @@
     if (form.decision === 'collect' && form.tender && !['card', 'cash', 'check'].includes(form.tender)) return refuse('invalid_input', 'Choose a tender', 'Choose card', 'Card, cash or check are the tenders the day sheet can reconcile. A value outside that list cannot post.');
     if (form.decision === 'collect' && form.amountCents != null && form.amountCents !== '') {
       const typed = Number(form.amountCents);
-      if (!Number.isFinite(typed) || typed <= 0 || !Number.isInteger(typed)) return refuse('amount_required', 'Type a dollar amount to collect', 'Go to amount', 'The amount has to be a positive number of cents. A value the ledger cannot store would post NaN against the account.');
+      if (!validCents(typed)) return badAmount('Type a dollar amount to collect');
     }
     if (S.collectionDecisions.some((d) => d.encounterId === a.encounterId)) return refuse('already_decided', 'Correct this visit from the ledger', 'Open the ledger', 'One typed decision per visit. To change what was collected, post a correction from the ledger: a reversal and a repost, both linked to the original.');
     const encId = a.encounterId; const enc = encounter(encId);
@@ -356,11 +360,19 @@
     retireChip('checkout', u); if (form.decision === 'collect') retireChip('payment', u);
     return { ok: true, taps: 0 };
   }
-  /* Written when the biller presses Request approval, so the control does the thing its label promises. */
+  /* Written when the biller presses Request approval, so the control does the thing its label promises. The request
+     is checked as the posting it defers would be: a kind the ledger knows, a requester who posts money, a whole
+     positive amount, and no more than the balance it retires — the approval trusts the row it decides. */
+  const REQUEST_KINDS = ['write_off'];
   function requestApproval(pending, who) {
     if (!pending) return notFound('request');
     const off = offline('Wait for the server — approvals are paused'); if (off) return off;
+    if (!REQUEST_KINDS.includes(pending.kind)) return refuse('invalid_input', 'Choose a posting the ledger knows', 'Dismiss', 'A request defers one kind of posting, and the ledger knows write-offs here. Nothing was written.');
+    if (!patient(pending.patientId)) return notFound('patient');
     const u = who || (pending.posterId && user(pending.posterId)) || currentUser();
+    const ent = bills(u); if (ent) return ent;
+    if (!validCents(pending.amountCents)) return badAmount('Type an amount above zero');
+    const cap = writeoffCap(pending.amountCents, balances(pending.patientId).patientDue); if (cap) return cap;
     const open = S.approvals.find((x) => x.status === 'pending' && x.kind === pending.kind && x.patientId === pending.patientId && x.amountCents === pending.amountCents);
     if (open) return { ok: true, requestId: open.id, already: true };
     poster(u);
@@ -403,24 +415,35 @@
   }
   /* An approver who sends a request back says why: the biller reads the reason on the write-off card, and
      without it the card could name who sent it back but not their line. The reason rides on the request and
-     on the log row, so the decision and its reason are one record. */
+     on the log row, so the decision and its reason are one record.
+     The decider is a person the store verified — the PIN's owner, else the seat with the live session — never the
+     id the caller passes; both decisions need approve_second, a person other than the requester, and on a shared
+     desk a PIN. `approverId` only says whose PIN the step-up must be. */
+  const DECISIONS = ['approved', 'declined'];
   function decideApproval(reqId, approverId, decision, stepup, reason) {
     const r = S.approvals.find((x) => x.id === reqId); if (!r) return notFound('request');
     const off = offline('Wait for the server — approvals are paused'); if (off) return off;
-    const approver = user(approverId) || currentUser();
-    if (r.requestedById === approver.id) return refuse('blocked_same_person', 'Ask someone else to approve this', 'Send back', 'You requested it, so you cannot be its second approver. The rule is enforced on the posting itself, not just on this screen.');
+    if (!DECISIONS.includes(decision)) return refuse('invalid_input', 'Choose Approve or Send back', 'Dismiss', 'A request is approved or sent back; no other decision exists, so the request and its log were not touched.');
     // A step-up is a challenge, not a refusal: it carries no gate identity and never reached the shared component.
-    // An approval's step-up is the approver's own PIN under the one PIN rule; a bare `true` or a colleague's PIN is
-    // no step-up, so Bree's 1111 can no longer approve as Dr. Reagan. A send-back needs none.
-    const needStepup = { ok: false, needsStepup: true, verb: 'Enter your PIN to approve', why: 'Approvals above the high-value band re-verify within two minutes.' };
+    // The step-up is the decider's own PIN under the one PIN rule; a bare `true` or a colleague's PIN is no step-up,
+    // so Bree's 1111 can no longer approve as Dr. Reagan, and nobody sends back in a third party's name.
+    const needStepup = { ok: false, needsStepup: true, verb: 'Enter your PIN to ' + (decision === 'declined' ? 'send back' : 'approve'), why: 'Approvals above the high-value band re-verify within two minutes.' };
+    const seat = currentUser();
+    let approver = seat;
+    if (stepup && stepup.pin) { const v = verifyPin(stepup.pin, approverId || undefined); if (!v.ok) return v; approver = v.user; }
+    else if (approverId && approverId !== seat.id) return needStepup;
+    if (r.requestedById === approver.id) return refuse('blocked_same_person', 'Ask someone else to approve this', 'Send back', 'You requested it, so you cannot be its second approver. The rule is enforced on the posting itself, not just on this screen.');
+    // A second approver is a seat that carries the grant: the phone shows the request to approve_second and the store decides for approve_second alone.
+    const ent = approver.noPass ? refuse('entitlement', 'Ask a second approver to decide this', 'Open Roles', NO_PASS_WHY)
+      : needs(approver, ['approve_second'], 'Ask a second approver to decide this', 'Switch author', approver.short + ' carries no approve_second grant, and a dual release is decided by a distinct seat that does: ' + (r.eligible || []).join(' or ') + '. Nothing was written; the author switch names who decides.'); if (ent) return ent;
     if (!stepup) return needStepup;
-    if (decision === 'approved') { if (!stepup.pin) return needStepup; const v = verifyPin(stepup.pin, approver.id); if (!v.ok) return v; }
+    if (!stepup.pin && (decision === 'approved' || shared())) return needStepup;
     if (r.status && r.status !== 'pending') return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'This request was already ' + r.status + ' by ' + (r.decidedBy || 'someone') + '. Deciding it twice would post the write-off twice; a correction is a reversal and a repost.');
     // The hold is checked when the money would post, not only when it was asked for.
     const ah = decision === 'approved' ? afterHours(r.kind, 'Send back') : null; if (ah) return ah;
     // The cap is re-read against the live balance when the money posts, not only when it was asked for: a $410 approved after
     // the window collected the $410 posted a credit nobody paid. Nothing left refuses; less left settles what is left.
-    const due = decision === 'approved' && r.kind === 'write_off' ? balances(r.patientId).patientDue : null;
+    const due = decision === 'approved' && REQUEST_KINDS.includes(r.kind) ? balances(r.patientId).patientDue : null;
     if (due !== null && due <= 0) return refuse('amount_required', 'Send back — nothing left to write off', 'Send back', 'The balance this request was raised against has since been paid or written off. Approving it now would post a credit nobody paid; send it back so the biller sees why.');
     const postCents = due === null ? r.amountCents : Math.min(r.amountCents, due);
     // The reason rides on the request and on the log row, so the decision and its reason are one record. It is
@@ -440,7 +463,7 @@
     const off = offline('Wait for the server — postings are paused'); if (off) return off;
     const pin = requirePin(extras); if (!pin.ok) return pin; const u = pin.user;
     const ent = bills(u) || needs(u, ['write_off'], 'Ask a seat that can write off balances', 'Switch author', u.short + ' posts payments but carries no write_off grant, and a write-off retires what the patient owes. The biller, Dana or Dr. Reagan write off here; the author switch names who.'); if (ent) return ent;
-    if (!Number.isFinite(amountCents) || amountCents <= 0) return refuse('amount_required', 'Type an amount above zero', 'Go to amount', 'A write-off posts the number you type against the balance, so it cannot be blank, negative, or zero.');
+    if (!validCents(amountCents)) return badAmount('Type an amount above zero');
     const cap = writeoffCap(amountCents, balances(accountPid).patientDue); if (cap) return cap;
     const gate = evaluateRelease('write_off', amountCents, u, { pid: accountPid });
     // The hold takes the write-off off the card; nothing is requested after hours.

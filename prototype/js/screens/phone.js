@@ -75,8 +75,12 @@
     focusOn(focus);
   }
 
-  /* ---- step-up: 'Confirm your PIN' (the store matches the digits against the approver's own PIN) ---- */
-  function openStepup(r, a) {
+  /* ---- step-up: 'Confirm your PIN' (the store matches the digits against the approver's own PIN) ----
+     One pad for both decisions: a send-back the store challenges (a shared desk, or a seat other than the live
+     session) confirms the same way an approval does, and the digits go to the same verb with the same reason. */
+  function openStepup(r, a, decision, reason) {
+    const declining = decision === 'declined';
+    const action = declining ? 'Send back' : 'Approve';
     // The display is where the keyboard lands and where Enter is Approve, as pin.display is Go on the author pad.
     // It carries .input because it is the box a person types into: with no border on a transparent ground there
     // was nothing on screen to type into, and an aria-label was its only name (WCAG 3.3.2, 1.4.11).
@@ -84,7 +88,7 @@
     const dots = h('div', { class: 'pindots input', testid: 'phone.stepup.display', tabindex: '0', role: 'textbox', 'aria-readonly': 'true', 'aria-live': 'polite', text: '' });
     // One pad, one grammar: the visible label above the box, the same length rule the author pad states, and a
     // refused press answered between the label and the box (ui.js field/setFieldError, WCAG 3.2.4, 3.3.1).
-    const field = Proto.ui.field('PIN', dots, { hint: Proto.screens.shell.PIN_RULE + ' Enter here is Approve.', required: true });
+    const field = Proto.ui.field('PIN', dots, { hint: Proto.screens.shell.PIN_RULE + ' Enter here is ' + action + '.', required: true });
     const lab = field.querySelector('label'); lab.id = 'stepup-label';
     dots.setAttribute('aria-labelledby', 'stepup-label');
     const state = { reqId: a.id, digits: '', dots, close: null, store: S() };
@@ -98,17 +102,18 @@
     state.add = (d) => { if (state.digits.length < 6) { state.digits += d; paint(); } };
     state.back = () => { state.digits = state.digits.slice(0, -1); paint(); };
     state.submit = () => {
-      if (state.digits.length < 4) { field._setError('Enter at least four digits, then press Approve.'); dots.focus(); return; }
+      if (state.digits.length < 4) { field._setError('Enter at least four digits, then press ' + action + '.'); dots.focus(); return; }
       field._setError(null);
       state.done = true;
       // The store may have been rebuilt under the pad: then there is no request to decide, and the person is told so.
       if (state.store !== S() || !S().approvals.some((x) => x.id === a.id)) { state.close(); notice(r, a.id); return; }
       const s = st();
       // The digits go to the store, which owns the PIN rule; until verifyPin lands the older store takes the bare step-up.
-      const res = Proto.store.decideApproval(a.id, me().id, 'approved', Proto.store.verifyPin ? { pin: state.digits } : true);
+      const res = Proto.store.decideApproval(a.id, me().id, declining ? 'declined' : 'approved', Proto.store.verifyPin ? { pin: state.digits } : true, reason);
       state.close();
       if (!res.ok) { s.refusal[a.id] = gate(r, a, res); if (res.code === 'pin_no_match') s.refusal[a.id].fresh = true; rerender(r, 'refusal.control'); return; }
       s.refusal[a.id] = null;
+      if (declining) { landDecline(r, a, reason); return; }
       // What posted, not what was asked: the store settles min(amount, due), so a partial approval says its own figure.
       const posted = money(res.postedCents != null ? res.postedCents : a.amountCents);
       s.done[a.id] = { kind: 'approved', text: 'Approved ' + posted + ' · posted with your name as second approver · the biller’s write-off is on the ledger' };
@@ -127,7 +132,7 @@
     // to span the keypad alone on its own row (CLT-neutral-irreversible, WCAG 3.2.4).
     const decide = h('div', { class: 'btnrow' },
       btn('Cancel', { testid: 'phone.stepup.cancel', kind: 'quiet', onClick: () => state.close() }),
-      btn('Approve', { testid: 'phone.stepup.submit', kind: 'irreversible', ariaLabel: 'Approve ' + money(a.amountCents) + ' with this PIN', onClick: state.submit }));
+      btn(action, { testid: 'phone.stepup.submit', kind: 'irreversible', ariaLabel: action + ' ' + money(a.amountCents) + ' with this PIN', onClick: state.submit }));
     const body = h('div', { class: 'stack ph-stepup' },
       h('h2', { text: 'Confirm your PIN' }),
       // The warning before the money moves: a mark the eye reads at 28 px, and the consequence in the bold
@@ -186,7 +191,12 @@
     // The line the approver typed rides with the decision: the store carries it onto the request and the
     // log row, so "Send back with one line" leaves a line behind and not just a name.
     const res = Proto.store.decideApproval(a.id, me().id, 'declined', true, reason);
+    if (!res.ok && res.needsStepup) { openStepup(r, a, 'declined', reason); return; }
     if (!res.ok) { s.refusal[a.id] = gate(r, a, res); rerender(r, 'refusal.control'); return; }
+    landDecline(r, a, reason);
+  }
+  function landDecline(r, a, reason) {
+    const s = st();
     // The confirmation names the object, the completion and what happens next, in that order.
     s.done[a.id] = { kind: 'declined', text: 'Sent back to ' + a.requestedBy + ': ' + reason + ' · they pick it up on the Money Desk; nothing posted', reason };
     s.declineOpen[a.id] = false;
