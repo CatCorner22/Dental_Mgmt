@@ -32,6 +32,7 @@ const coverageFindingsSql = readFileSync(join(here, "../migrations/0021_control_
 const decisionSubjectsSql = readFileSync(join(here, "../migrations/0022_control_decisions_detector_finding.sql"), "utf8");
 const decisionRetireSql = readFileSync(join(here, "../migrations/0023_control_decisions_retire.sql"), "utf8");
 const digestAcksSql = readFileSync(join(here, "../migrations/0024_digest_acks.sql"), "utf8");
+const locationHoursSql = readFileSync(join(here, "../migrations/0025_locations_hours.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -211,6 +212,16 @@ describe("Increment 1.28 weekly digest acknowledgments", () => {
     expect(digestAcksSql).toMatch(/GRANT SELECT, INSERT ON digest_acks TO app_rw/);
     expect(digestAcksSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*digest_acks/);
     expect(TENANT_SCOPED_TABLES).toContain("digest_acks");
+  });
+});
+
+describe("Increment 1.29 location hours", () => {
+  it("gives every location a week of business hours with a plain default and closed weekend", () => {
+    expect(locationHoursSql).toMatch(/ALTER TABLE locations\s+ADD COLUMN hours jsonb NOT NULL DEFAULT/);
+    expect(locationHoursSql).toMatch(/"mon":\["07:00","19:00"\]/);
+    expect(locationHoursSql).toMatch(/"fri":\["07:00","17:00"\]/);
+    expect(locationHoursSql).toMatch(/"sat":null,"sun":null/);
+    expect(locationHoursSql).not.toMatch(/GRANT|DROP|DELETE|UPDATE/);
   });
 });
 

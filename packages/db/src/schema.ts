@@ -33,6 +33,18 @@ export const locations = pgTable(
     timezone: text("timezone").notNull(),
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    /** Business hours per weekday, ["HH:MM", "HH:MM"] in the location's timezone, or null when closed (Increment 1.29). */
+    hours: jsonb("hours")
+      .notNull()
+      .default({
+        mon: ["07:00", "19:00"],
+        tue: ["07:00", "19:00"],
+        wed: ["07:00", "19:00"],
+        thu: ["07:00", "19:00"],
+        fri: ["07:00", "17:00"],
+        sat: null,
+        sun: null,
+      }),
   },
   (t) => [
     index("locations_tenant_idx").on(t.tenantId),

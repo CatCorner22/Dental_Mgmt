@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createLiveDatabase, liveAdminUrl, type LiveDatabase } from "@pms/db/testing";
 import { seedDatabase } from "@pms/db/seed";
-import { DEV_TENANTS, DEV_USERS, SEED_LEDGER } from "@pms/db/seed-data";
+import { DEV_TENANTS, DEV_USERS, SEED_BANK, SEED_LEDGER } from "@pms/db/seed-data";
 import { uuidv7 } from "@pms/db";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
+import { HARD_EVENT_KINDS, listHardEvents } from "../alerts/hardEvents";
+import { appendControlEvent } from "./events";
 import {
   BACKDATED_POSTING_KIND,
   DUPLICATE_PAYMENT_KIND,
@@ -73,7 +75,7 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
           owner.id,
           input.approvalRequestId ?? null,
           input.reversesEntryId ?? null,
-          input.kind === "write_off" ? "courtesy" : input.kind === "reversal" ? "correction" : null,
+          input.kind === "write_off" ? "courtesy" : input.kind === "reversal" ? "correction" : input.kind === "refund" ? "overpayment" : null,
           `dt-${input.id}`,
         ]
       );
@@ -161,5 +163,82 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
     // The alarm and the backdated finding still stand: the rows they describe cannot change.
     const open = (await tx((d) => listControlFindings(d, tenantId))).filter((r) => r.status === "open");
     expect(open.map((r) => r.kind).sort()).toEqual([BACKDATED_POSTING_KIND, RELEASE_WITHOUT_APPROVAL_KIND]);
+  });
+
+  it("reads all six hard events from rows for the owner, immediately and without a name", async () => {
+    const since = new Date("2026-09-10T15:00:00Z");
+    // A refund needs a reason code; the seed carries none for refunds yet.
+    await db.admin.query("INSERT INTO reason_codes (tenant_id, code, kind, label) VALUES ($1, 'overpayment', 'refund', 'Patient overpayment') ON CONFLICT DO NOTHING", [tenantId]);
+    // After hours: 02:30 UTC on the 16th is 21:30 on Tuesday the 15th at Main (Chicago), which closes at 19:00.
+    await insertEntry({ id: uuidv7(34_010), kind: "refund", amountCents: 12_000, effectiveDate: "2026-09-15", postedAt: "2026-09-16T02:30:00Z" });
+    // In hours: the same refund at 10:00 Chicago does not page.
+    await insertEntry({ id: uuidv7(34_011), kind: "refund", amountCents: 3_000, effectiveDate: "2026-09-16", postedAt: "2026-09-16T15:00:00Z" });
+    // A bank run whose variance is over the threshold, and one under it.
+    for (const [id, variance] of [
+      [uuidv7(34_020), 25_000],
+      [uuidv7(34_021), 4_000],
+    ] as const) {
+      await db.admin.query(
+        `INSERT INTO reconciliation_runs (id, tenant_id, bank_account_id, source, period_start, period_end, status, summary,
+                                          bank_net_cents, matched_cents, variance_cents, created_at, created_by_id, created_by_name)
+         VALUES ($1, $2, $3, 'statement_import', '2026-09-14', '2026-09-15', 'variance', '{}', 100000, $4, $5, '2026-09-16T12:00:00Z', $6, 'Riley Owner')`,
+        [id, tenantId, SEED_BANK.accountId, 100000 - variance, variance, owner.id]
+      );
+    }
+    // The nightly verifier said no once.
+    await db.admin.query(
+      `INSERT INTO audit_chain_checks (tenant_id, day, ok, head_hash, event_count, checked_at) VALUES ($1, '2026-09-16', false, 'deadbeef', 41, '2026-09-16T04:00:00Z')`,
+      [tenantId]
+    );
+    // The owner holds approve_writeoffs (weight 5): a signature seen in August is known; a new one in the window pages.
+    // uuidv7 takes a millisecond stamp and adds randomness, so the ids are captured once and reused.
+    const sessionIds = { known: uuidv7(34_030), repeat: uuidv7(34_031), phone: uuidv7(34_032) };
+    for (const [id, ua, at] of [
+      [sessionIds.known, "Mozilla/5.0 (desk)", "2026-08-01T10:00:00Z"],
+      [sessionIds.repeat, "Mozilla/5.0 (desk)", "2026-09-16T10:00:00Z"],
+      [sessionIds.phone, "Mozilla/5.0 (phone)", "2026-09-16T13:00:00Z"],
+    ] as const) {
+      await db.admin.query(
+        `INSERT INTO sessions (id, tenant_id, user_id, created_at, last_seen_at, absolute_expires_at, idle_expires_at, device_profile, user_agent)
+         VALUES ($1, $2, $3, $4, $4, $4::timestamptz + interval '12 hours', $4::timestamptz + interval '30 minutes', 'desk', $5)`,
+        [id, tenantId, owner.id, at, ua]
+      );
+    }
+    // A dual-control waiver on the chain.
+    await tx((d) =>
+      appendControlEvent(
+        d,
+        tenantId,
+        owner.id,
+        "control.policy_changed",
+        { version: 2, change: "exception_added", exceptionId: "ex-vacation-cover", action: "waive_dual", channels: ["writeoff"], effectiveTo: "2026-09-30" },
+        new Date("2026-09-16T15:30:00Z")
+      )
+    );
+
+    const events = await tx((d) => listHardEvents(d, tenantId, { since, now }));
+    const byKind = new Map(events.map((e) => [e.kind, e]));
+    expect([...byKind.keys()].sort()).toEqual([...HARD_EVENT_KINDS].sort());
+    expect(events.filter((e) => e.kind === "after_hours_refund")).toHaveLength(1);
+    expect(byKind.get("after_hours_refund")!.sentence).toBe(
+      "A $120.00 refund was posted on Tuesday 2026-09-15 at 21:30 local time; Main is open 07:00 to 19:00 that day."
+    );
+    // The write-off posted 71 days after its effective date on the 10th is inside the window. The seed posts its
+    // back-dated history at seed time, so those rows page too; that is the rule working, not noise.
+    const retro = events.filter((e) => e.kind === "retroactive_entry");
+    expect(retro.map((e) => e.subjectId), "retroactive entries").toContain(ids.backdated);
+    expect(retro.find((e) => e.subjectId === ids.backdated)!.sentence).toBe(
+      "A $10.00 write-off effective 2026-07-01 was posted on 2026-09-10, 71 days after its effective date."
+    );
+    expect(events.filter((e) => e.kind === "new_device_financial_role").map((e) => e.subjectId), "new devices").toEqual([sessionIds.phone]);
+    expect(events.filter((e) => e.kind === "deposit_variance")).toHaveLength(1);
+    expect(byKind.get("deposit_variance")!.sentence).toMatch(/carries a \$250\.00 variance against the practice's deposits, over the \$100\.00 threshold/);
+    expect(byKind.get("deposit_variance")!.href).toMatch(/^\/reconciliation\//);
+    expect(byKind.get("chain_failure")!.sentence).toMatch(/^The chain check for 2026-09-16 failed: 41 events did not verify/);
+    expect(byKind.get("new_device_financial_role")!.sentence).toMatch(/^A holder of Approve write-offs \/ adjustments and Reconcile bank to PMS signed in from a browser not seen before/);
+    expect(byKind.get("waived_dual_control")!.sentence).toBe("Dual control was waived on the writeoff channel until 2026-09-30. A waiver never outlives 90 days.");
+    // Newest first, and no person anywhere.
+    expect(events.map((e) => e.at)).toEqual([...events.map((e) => e.at)].sort().reverse());
+    expect(JSON.stringify(events)).not.toMatch(/Riley|Finn|Owner Riley/);
   });
 });
