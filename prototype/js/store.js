@@ -321,11 +321,16 @@
     const encId = a.encounterId; const enc = encounter(encId);
     const procs = S.procedures.filter((p) => p.encounterId === encId);
     const amt = form.decision === 'collect' ? form.amountCents || est.patientCents : 0;
+    const noteFiled = enc && enc.noteFiled;
     // Write-off gate (dual release inside the posting transaction). The request row is written when the
     // biller presses Request approval, not here: writing it at Post created an approval nobody asked for
     // and left the control itself a no-op. After hours nothing is requested either: the hold lifts at 7:30.
     if (form.writeoffCents && form.writeoffCents > 0) {
-      const cap = writeoffCap(form.writeoffCents, Math.max(0, Math.min(est.patientCents - amt, balances(a.patientId).patientDue))); if (cap) return cap;
+      if (!validCents(form.writeoffCents)) return badAmount('Type a write-off in whole cents');
+      // The cap is the balance as it stands after this Post: the charges a filed note releases here count, so a first
+      // visit is measured against what the patient will owe, not against the $0 the ledger shows before Post.
+      const dueAfterPost = balances(a.patientId).patientDue + (noteFiled ? procs.filter((p) => !charged(p)).reduce((s, p) => s + p.feeCents, 0) : 0) - amt;
+      const cap = writeoffCap(form.writeoffCents, Math.max(0, Math.min(est.patientCents - amt, dueAfterPost))); if (cap) return cap;
       const gate = evaluateRelease('write_off', form.writeoffCents, u, { pid: a.patientId });
       if (gate.code === 'after_hours') return refuse(gate.code, gate.verb, 'Remove the write-off', gate.why);
       // The request names the PIN's owner, not the persona at the desk: Dr. Reagan's PIN used to raise a request in Priya's name and then approve it as his own.
@@ -334,7 +339,6 @@
     // A statement, a plan and the decision carry what is left after the write-off posted beside them: a $410 statement used to queue on a $310 balance.
     const portion = est.patientCents - (form.writeoffCents || 0);
     // Post: charges (if note filed), payment, allocations, decision, self-pay flags in one transaction
-    const noteFiled = enc && enc.noteFiled;
     poster(u);
     const rows = [];
     // charged() is the ledger, not a flag: the seed marks a crown "completed" without setting charged, so the

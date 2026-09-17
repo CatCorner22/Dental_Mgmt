@@ -139,7 +139,9 @@
     return [...st.selfPay].filter((pid) => { const p = S.procedures.find((x) => x.id === pid && x.encounterId === a.encounterId); return p && !p.selfPayRestricted && payCents >= p.feeCents; });
   }
   // A statement or plan bills what the write-off typed beside it leaves: the row the store writes carries the same number.
-  const afterWriteoff = (st, est) => { const wo = st.writeoffOpen ? cents(st.writeoffStr) : 0; return Math.max(0, est.patientCents - (wo > 0 ? wo : 0)); };
+  // Once the write-off is approved it is on the ledger and the estimate already carries it: the typed figure is spent, so the
+  // promise, the read-back and the Post all read the estimate alone.
+  const afterWriteoff = (st, est) => { const approved = st.heldReq && st.heldReq.status === 'approved'; const wo = !approved && st.writeoffOpen ? cents(st.writeoffStr) : 0; return Math.max(0, est.patientCents - (wo > 0 ? wo : 0)); };
   const AMOUNT_WHY = 'A payment posts the number in the field against the balance, so it cannot be blank, negative, or a value that is not a number. To take nothing at the window, choose Nothing due today.';
   const WRITEOFF_WHY = 'A write-off posts the number in the field against the balance, so it cannot be blank, negative, or a value that is not a number. Remove the write-off to post without one.';
 
