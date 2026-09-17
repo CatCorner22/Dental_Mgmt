@@ -34,6 +34,7 @@ const decisionRetireSql = readFileSync(join(here, "../migrations/0023_control_de
 const digestAcksSql = readFileSync(join(here, "../migrations/0024_digest_acks.sql"), "utf8");
 const locationHoursSql = readFileSync(join(here, "../migrations/0025_locations_hours.sql"), "utf8");
 const afterHoursHoldSql = readFileSync(join(here, "../migrations/0026_after_hours_hold.sql"), "utf8");
+const hardEventAcksSql = readFileSync(join(here, "../migrations/0027_hard_event_acks.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -213,6 +214,25 @@ describe("Increment 1.28 weekly digest acknowledgments", () => {
     expect(digestAcksSql).toMatch(/GRANT SELECT, INSERT ON digest_acks TO app_rw/);
     expect(digestAcksSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*digest_acks/);
     expect(TENANT_SCOPED_TABLES).toContain("digest_acks");
+  });
+});
+
+describe("Increment 1.33 hard-event acknowledgments", () => {
+  it("stores one append-only, tenant-isolated acknowledgment per hard event, with a note that says something", () => {
+    expect(hardEventAcksSql).toMatch(/CREATE TABLE hard_event_acks\b/);
+    expect(hardEventAcksSql).toMatch(/kind text NOT NULL CHECK \(kind IN \(/);
+    for (const kind of ["after_hours_refund", "retroactive_entry", "waived_dual_control", "deposit_variance", "chain_failure", "new_device_financial_role"]) {
+      expect(hardEventAcksSql).toContain(`'${kind}'`);
+    }
+    expect(hardEventAcksSql).toMatch(/note text NOT NULL CHECK \(length\(btrim\(note\)\) >= 10\)/);
+    expect(hardEventAcksSql).toMatch(/UNIQUE \(tenant_id, kind, subject_kind, subject_id\)/);
+    expect(hardEventAcksSql).toMatch(/hard_event_acks_no_update/);
+    expect(hardEventAcksSql).toMatch(/hard_event_acks_no_delete/);
+    expect(hardEventAcksSql).toMatch(/ALTER TABLE hard_event_acks FORCE ROW LEVEL SECURITY/);
+    expect(hardEventAcksSql).toMatch(/CREATE POLICY hard_event_acks_isolation ON hard_event_acks/);
+    expect(hardEventAcksSql).toMatch(/GRANT SELECT, INSERT ON hard_event_acks TO app_rw/);
+    expect(hardEventAcksSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*hard_event_acks/);
+    expect(TENANT_SCOPED_TABLES).toContain("hard_event_acks");
   });
 });
 

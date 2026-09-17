@@ -290,7 +290,25 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(hardText).not.toMatch(/After-hours refund|Retroactive-dated entry|Dual control waived|Audit-chain check failed/);
     expect(hardText).not.toMatch(/Riley|Finn/);
     expect(await hard.getByRole("link", { name: "Open" }).first().getAttribute("href")).toMatch(/^\/reconciliation\//);
+    const waiting = Number(hardText.match(/(\d+) not yet acknowledged/)?.[1]);
+    expect(waiting).toBeGreaterThanOrEqual(2);
+    expect(await hard.getByRole("button", { name: /^Acknowledge / }).count()).toBe(waiting);
     await b.audit("home (owner, tied with a second look)");
+
+    // The owner acknowledges the variance with what was done; the note is required, the card re-reads from rows,
+    // and the other events still wait.
+    const variance = hard.locator("li", { hasText: "Deposit variance over threshold" });
+    await variance.getByRole("button", { name: "Acknowledge Deposit variance over threshold" }).click();
+    const ackForm = hard.locator("form");
+    await ackForm.waitFor({ timeout: 30_000 });
+    expect(await ackForm.getByRole("button", { name: "Mark as seen" }).isDisabled()).toBe(true);
+    await b.audit("home (owner, acknowledging a hard event)");
+    await ackForm.locator("input").fill("Fee line; cleared in the variance queue with the bank's reason.");
+    await ackForm.getByRole("button", { name: "Mark as seen" }).click();
+    await flash(/^Acknowledged: Deposit variance over threshold\./).waitFor({ timeout: 30_000 });
+    expect(await variance.innerText()).toMatch(/Seen by Riley Owner on \d{4}-\d{2}-\d{2}: Fee line; cleared in the variance queue with the bank's reason\./);
+    expect(await hard.innerText()).toMatch(new RegExp(`${waiting - 1} not yet acknowledged`));
+    expect(await hard.getByRole("button", { name: /^Acknowledge / }).count()).toBe(waiting - 1);
   }, 120_000);
 
   it("counts the week for the owner in the digest, stamps it once, and refuses the front desk", async () => {
@@ -313,6 +331,9 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await section("digest-findings").innerText()).toMatch(/Opened · Unmatched bank line older than 48 hours\s+1/);
     expect(await section("digest-decisions").innerText()).toMatch(/Snapshots frozen\s+[1-9]/);
     expect(await section("digest-access").innerText()).toMatch(/Sign-ins\s+[1-9]/);
+    // The variance acknowledged on the board above; the held write-off counts as an after-hours hold only when CI runs at night.
+    expect(await row("digest-alerts", "Hard events acknowledged").innerText()).toMatch(/\b1$/);
+    expect(await row("digest-alerts", "After-hours holds").innerText()).toMatch(/\b[01]$/);
     const whole = await page().locator("main").innerText();
     expect(whole).toMatch(/Chain · \d+ events, sequence \d+ to \d+/);
     expect(whole).toMatch(/no row here names anyone/);

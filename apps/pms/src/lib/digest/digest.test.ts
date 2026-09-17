@@ -20,6 +20,7 @@ function digest(over: Partial<WeeklyDigest> = {}): WeeklyDigest {
     findings: { opened: [{ key: "unmatched_bank_line_48h", label: "Unmatched bank line older than 48 hours", count: 1 }], closed: [], openNow: 1 },
     decisions: { recorded: [], reviews: { keep: 0, tighten: 0, retire: 0 }, overdueNow: 0, snapshotsFrozen: 1 },
     access: { signIns: 4, mfaEnrolled: 0, sessionsRevoked: 0, granted: 2, revoked: 1, policyChanges: 0 },
+    alerts: { afterHoursHolds: 0, hardEventsAcknowledged: 0 },
     chain: { events: 14, firstSeq: 3, lastSeq: 16, acknowledgments: 0, otherKinds: [] },
     scope: SCOPE_SENTENCE,
     ...over,
@@ -40,7 +41,7 @@ describe("periodEnding", () => {
 describe("digestHash", () => {
   it("is stable across key order and changes when any count changes", () => {
     const a = digest();
-    const reordered = JSON.parse(JSON.stringify({ scope: a.scope, chain: a.chain, access: a.access, decisions: a.decisions, findings: a.findings, bank: a.bank, approvals: a.approvals, money: a.money, period: a.period })) as WeeklyDigest;
+    const reordered = JSON.parse(JSON.stringify({ scope: a.scope, chain: a.chain, alerts: a.alerts, access: a.access, decisions: a.decisions, findings: a.findings, bank: a.bank, approvals: a.approvals, money: a.money, period: a.period })) as WeeklyDigest;
     expect(digestHash(reordered)).toBe(digestHash(a));
     expect(digestHash(a)).toMatch(/^[0-9a-f]{64}$/);
     expect(digestHash(digest({ chain: { ...a.chain, events: 15 } }))).not.toBe(digestHash(a));
