@@ -64,6 +64,59 @@ describe("takeControlSnapshot", () => {
     expect(s.assumptions.find((a) => /patient-ledger kinds only/.test(a))).toMatch(/ACH \/ vendor electronic pay, Paper checks/);
   });
 
+  it("carries a measurement only when one was taken, and words the assumption from it", () => {
+    const unmeasured = snap();
+    expect("measurements" in unmeasured).toBe(false);
+
+    const b = buildPracticeState({
+      people: livePeople,
+      grants: liveGrants,
+      policy: livePolicy(),
+      decisions: liveDecisions,
+      enforcement: ENFORCEMENT_INCREMENT_1_12,
+      asOf: AS_OF,
+      independentBankRec: false,
+    });
+    const measured = takeControlSnapshot({
+      state: b.state,
+      sod: b.sod,
+      coverage: b.coverage,
+      decisions: liveDecisions,
+      takenAt: TAKEN_AT,
+      measurements: {
+        reconciliation: {
+          grade: "same_hands",
+          windowDays: 45,
+          clearedInWindow: 2,
+          sameHandsInWindow: 1,
+          latestClearedAt: "2026-09-08T18:00:00Z",
+          why: "1 of 2 runs cleared in the last 45 days was cleared by someone who prepared deposits or posted payments in the period.",
+        },
+        matching: {
+          windowDays: 45,
+          dueDays: 2,
+          linesInWindow: 3,
+          creditsInWindow: 2,
+          creditsMatched: 2,
+          creditsMatchedWithinDue: 2,
+          matchRate48hPct: 100,
+          medianLagDays: 2,
+          maxLagDays: 3,
+          openLines: 0,
+          why: "2 of 2 bank credits matched a practice deposit within 48 hours (100%); median detection lag 2 days across 3 bank lines.",
+        },
+      },
+    });
+    expect(measured.measurements?.reconciliation?.grade).toBe("same_hands");
+    expect(measured.assumptions.some((a) => /bank reconciliation is not measured/.test(a))).toBe(false);
+    expect(measured.assumptions.find((a) => /bank reconciliation is measured/.test(a))).toMatch(
+      /absent \(same hands\): 1 of 2 runs/
+    );
+    // Matching is recorded, not scored, and the assumptions list says so; unmeasured, it is not an assumption the scores make.
+    expect(measured.assumptions.find((a) => /48-hour match rate/.test(a))).toMatch(/recorded, not scored: 2 of 2 bank credits/);
+    expect(unmeasured.assumptions.some((a) => /48-hour match rate/.test(a))).toBe(false);
+  });
+
   it("is deterministic and finite", () => {
     const a = JSON.stringify(snap());
     const b = JSON.stringify(snap());

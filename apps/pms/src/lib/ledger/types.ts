@@ -1,3 +1,11 @@
+/**
+ * Kinds the posting screen may post. Lives here, not in post.ts, because the
+ * posting page is a client component: importing post.ts would pull the
+ * Postgres driver into the browser bundle and break `next build`.
+ */
+export const POSTABLE_KINDS = ["charge", "patient_payment", "adjustment", "write_off"] as const;
+export type PostableKind = (typeof POSTABLE_KINDS)[number];
+
 export type LedgerAccountSummary = {
   accountId: string;
   displayName: string;

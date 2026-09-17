@@ -15,6 +15,7 @@
     "typecheck": "pnpm -r --filter \"./packages/*\" --filter \"./apps/pms\" typecheck",
     "check:routes": "pnpm --filter @pms/app check:routes",
     "test:live": "pnpm --filter @pms/db --filter @pms/app test:live",
+    "e2e": "pnpm --filter @pms/app e2e",
     "db:roles": "pnpm --filter @pms/db db:roles",
     "db:migrate": "pnpm --filter @pms/db db:migrate",
     "db:status": "pnpm --filter @pms/db db:status",

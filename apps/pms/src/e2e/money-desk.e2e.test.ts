@@ -1,0 +1,226 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { SEED_BANK } from "@pms/db/seed-data";
+import { uuidv7 } from "@pms/db";
+import { assertNoProblems, e2eEnabled, openBrowser, startProductionApp, type E2eApp, type E2eBrowser } from "./harness";
+
+/**
+ * The Money Desk in a real browser against the production server, on the
+ * seeded Ridgeview tenant: the ledger and an account's explanation; a
+ * payment posted by the front desk and a write-off held for a second
+ * approver; the owner approving one request and declining another; a bank
+ * statement imported, its credits matched to the deposits the front desk
+ * prepared, and its run cleared; the day close frozen by a second counter;
+ * the measured grade, lag, and match rate on the reconciliation screen and
+ * on Practice Risk; a statement drafted and issued. See harness.ts for what
+ * the run needs.
+ */
+
+/** YYYY-MM-DD, `days` days before today (UTC), which is the clock the server measures with. */
+function daysAgo(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * The bank's side of two days ago, when the front desk banked the drawer and
+ * a check (the deposits the suite prepares below), plus a fee dated the
+ * seeded business day so the run's period covers the owner's own postings.
+ * Imported today, the two credits match within 48 hours; the fee stays open.
+ */
+const DEPOSIT_DAY = daysAgo(2);
+const BANK_CSV = [
+  "Date,Description,Amount,Reference",
+  `${DEPOSIT_DAY},DEPOSIT CASH MAIN,250.00,`,
+  `${DEPOSIT_DAY},DEPOSIT CHECK 1042,100.00,1042`,
+  "2026-09-14,ACH MERCHANT FEE,-150.00,",
+].join("\n");
+
+describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
+  let app: E2eApp;
+  let b: E2eBrowser;
+  const page = () => b.page;
+  const flash = (re: RegExp) => page().getByText(re);
+
+  beforeAll(async () => {
+    app = await startProductionApp();
+    // The front desk prepared two deposits two days ago; the statement below is the bank's record of them.
+    const { rows } = await app.db.admin.query("SELECT id, display_name FROM users WHERE username = 'ridgeview-front'");
+    for (const [method, amount, reference] of [
+      ["cash", 25_000, null],
+      ["check", 10_000, "1042"],
+    ] as const) {
+      await app.db.admin.query(
+        `INSERT INTO deposits (id, tenant_id, location_id, bank_account_id, business_date, method, amount_cents,
+                               reference, status, prepared_by_id, prepared_by_name, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'open', $9, $10, now())`,
+        [uuidv7(), SEED_BANK.tenantId, SEED_BANK.locationId, SEED_BANK.accountId, DEPOSIT_DAY, method, amount, reference, rows[0].id, rows[0].display_name]
+      );
+    }
+    b = await openBrowser(app);
+  }, 180_000);
+
+  afterAll(async () => {
+    await b?.close();
+    await app?.stop();
+    if (b && app) assertNoProblems(b, app);
+  }, 60_000);
+
+  it("shows the owner the home links, the ledger, and an account's explanation", async () => {
+    await page().goto(`${app.base}/signin`, { waitUntil: "networkidle" });
+    await page().locator('input[name="username"]').waitFor({ timeout: 60_000 });
+    await b.audit("sign-in");
+
+    await b.signIn("ridgeview-owner", "/home");
+    await page().getByRole("heading", { name: "Nothing on the Board yet" }).waitFor({ timeout: 60_000 });
+    for (const name of ["Open ledger", "Post payment", "Bank reconciliation", "Day close", "Statements", "Approvals inbox", "Practice Risk"]) {
+      expect(await page().locator("main").getByRole("link", { name }).count()).toBe(1);
+    }
+    await b.audit("home (owner)");
+
+    await page().goto(`${app.base}/ledger`);
+    await page().getByRole("heading", { name: "Ledger" }).waitFor();
+    const rows = page().locator("tbody tr");
+    await rows.first().waitFor({ timeout: 30_000 });
+    const names = await rows.allInnerTexts();
+    expect(names.join("\n")).toMatch(/Jane Doe/);
+    expect(names.join("\n")).toMatch(/John Smith/);
+    await b.audit("ledger");
+
+    await page().getByRole("link", { name: "Jane Doe" }).click();
+    await page().getByText("Explain this balance").waitFor({ timeout: 30_000 });
+    expect(await page().getByRole("heading", { name: "Jane Doe" }).count()).toBe(1);
+    expect(await page().locator("section:has(h2:text('Running ledger')) tbody tr").count()).toBeGreaterThanOrEqual(2);
+    await b.audit("account explanation");
+  }, 90_000);
+
+  it("lets the front desk post a payment, and holds a write-off above the threshold for a second approver", async () => {
+    await b.signIn("ridgeview-front", "/ledger/post");
+    await page().getByRole("heading", { name: "Post to ledger" }).waitFor({ timeout: 60_000 });
+    const account = page().getByLabel("Guarantor account");
+    await account.locator("option", { hasText: "Jane Doe" }).waitFor({ state: "attached", timeout: 30_000 });
+    await account.selectOption((await account.locator("option", { hasText: "Jane Doe" }).getAttribute("value"))!);
+    await page().getByLabel("Kind").selectOption("patient_payment");
+    await page().getByLabel("Amount (USD)").fill("20");
+    await page().getByRole("button", { name: "Post", exact: true }).click();
+    await flash(/^Posted successfully\./).waitFor({ timeout: 30_000 });
+    await b.audit("post to ledger (posted)");
+
+    await page().getByLabel("Kind").selectOption("write_off");
+    await page().getByLabel("Amount (USD)").fill("200");
+    await page().getByLabel("Reason code").selectOption("courtesy");
+    await page().getByRole("button", { name: "Post", exact: true }).click();
+    await flash(/^Needs second approver:/).waitFor({ timeout: 30_000 });
+    expect(await flash(/^Needs second approver:/).innerText()).toMatch(/\(request [0-9a-f-]{36}\)/);
+    await b.audit("post to ledger (held for a second approver)");
+  }, 90_000);
+
+  it("shows the owner both held requests, approves the new one, and declines the seeded one with a reason", async () => {
+    await b.signIn("ridgeview-owner", "/approvals");
+    await page().getByRole("heading", { name: "Approvals inbox" }).waitFor({ timeout: 60_000 });
+    const items = page().locator("article");
+    await items.first().waitFor({ timeout: 30_000 });
+    expect(await items.count()).toBe(2);
+    await b.audit("approvals inbox with two requests");
+
+    const held = items.filter({ hasText: "$200.00" });
+    await held.getByRole("button", { name: "Approve" }).click();
+    await flash(/^Request approved\./).waitFor({ timeout: 30_000 });
+    expect(await items.count()).toBe(1);
+
+    const seeded = items.filter({ hasText: "$75.00" });
+    await seeded.getByLabel("Decline reason").fill("Not a courtesy case; bill the patient.");
+    await seeded.getByRole("button", { name: "Decline" }).click();
+    await flash(/^Request declined\./).waitFor({ timeout: 30_000 });
+    await page().getByText("No pending approvals.").waitFor({ timeout: 30_000 });
+    await b.audit("approvals inbox empty");
+
+    // The approved write-off is now on the account.
+    await page().goto(`${app.base}/ledger`);
+    await page().getByRole("link", { name: "Jane Doe" }).click();
+    await page().getByText("Explain this balance").waitFor({ timeout: 30_000 });
+    expect(await page().locator("section:has(h2:text('Running ledger')) tbody").innerText()).toMatch(/\$200\.00|-\$200\.00/);
+  }, 120_000);
+
+  it("imports a bank statement, matches its credits to the front desk's deposits, and clears the fee as the owner", async () => {
+    await page().goto(`${app.base}/reconciliation`);
+    await page().getByRole("heading", { name: "Bank reconciliation" }).waitFor({ timeout: 60_000 });
+    // Nothing measured yet: no run, no bank line.
+    await page().getByText(/^Stale import$/).waitFor({ timeout: 30_000 });
+    expect(await page().getByText(/^No rate yet/).count()).toBe(1);
+    await b.audit("reconciliation, no runs");
+
+    await page().getByLabel("CSV content").fill(BANK_CSV);
+    await page().getByRole("button", { name: "Import statement" }).click();
+    await page().waitForURL(/\/reconciliation\/[0-9a-f-]{36}$/, { timeout: 60_000 });
+    await page().getByText(/Independence source: statement import/).waitFor({ timeout: 30_000 });
+    expect(await page().locator("tbody tr").count()).toBe(3);
+    expect(await page().locator("tbody tr", { hasText: "Matched deposit" }).count()).toBe(2);
+    expect(await page().locator("tbody tr", { hasText: "Unmatched bank line" }).count()).toBe(1);
+    expect(await page().locator("div", { has: page().getByText(/^Matched$/) }).getByText("$350.00").count()).toBe(1);
+
+    // The owner posted the seeded payments, so only owner-only clearance is open to them; it is recorded, not hidden.
+    const clear = page().getByRole("button", { name: /^Clear/ });
+    await clear.waitFor({ timeout: 30_000 });
+    await b.audit("reconciliation run, open variance");
+    await clear.click();
+    await flash(/Cleared\.|Variances cleared\./).waitFor({ timeout: 30_000 });
+    await page().getByText(/^Cleared$/).waitFor({ timeout: 30_000 });
+    await b.audit("reconciliation run, cleared");
+  }, 120_000);
+
+  it("shows the measured grade, match rate, and detection lag over the runs", async () => {
+    await page().goto(`${app.base}/reconciliation`);
+    await page().getByRole("heading", { name: "Bank reconciliation" }).waitFor({ timeout: 60_000 });
+    await page().getByText(/^Same hands$/).waitFor({ timeout: 30_000 });
+    // Both credits matched on import, two days after the bank posted them; the fee cleared today. Median 2 whatever today is.
+    expect(await page().getByText(/^100% within 48 hours/).innerText()).toMatch(/median lag 2 days/);
+    expect(await page().getByText(/2 of 2 bank credits matched a practice deposit within 48 hours/).innerText()).toMatch(
+      /Debits are not matched yet/
+    );
+    await b.audit("reconciliation with measurements");
+  }, 90_000);
+
+  it("freezes the day close as a second counter, since the front desk prepared the deposits", async () => {
+    await page().goto(`${app.base}/day-close`);
+    await page().getByRole("heading", { name: "Day close" }).waitFor({ timeout: 60_000 });
+    await page().getByText(/Status:/).waitFor({ timeout: 30_000 });
+    expect(await page().locator("tbody tr").count()).toBe(2);
+    await b.audit("day close open");
+    await page().getByRole("button", { name: "Freeze day close" }).click();
+    await flash(/Freeze day close succeeded\./).waitFor({ timeout: 30_000 });
+    expect(await page().getByText(/Status:/).innerText()).toMatch(/Frozen[\s\S]*frozen by Riley Owner[\s\S]*second count by a different person/);
+    expect(await page().getByRole("button", { name: "Freeze day close" }).isDisabled()).toBe(true);
+    await b.audit("day close frozen");
+  }, 90_000);
+
+  it("reflects the owner-only clearance on Practice Risk as measured, not assumed", async () => {
+    await page().goto(`${app.base}/risk`);
+    await page().getByRole("heading", { name: "Headline" }).waitFor({ timeout: 60_000 });
+    await page().getByRole("button", { name: "Recompute from live rows" }).click();
+    await flash(/Recomputed from live rows/).waitFor({ timeout: 30_000 });
+    expect(await page().getByText(/^Independent bank reconciliation:/).innerText()).toMatch(/same hands[\s\S]*owner-only clearance recorded as a finding/);
+    expect(await page().getByText(/^Bank matching:/).innerText()).toMatch(/100% within 48 hours, median lag 2 days[\s\S]*recorded, not scored/);
+    await b.audit("practice risk (owner, measured)");
+  }, 90_000);
+
+  it("lets the front desk draft and issue a statement from the same balances", async () => {
+    await b.signIn("ridgeview-front", "/statements");
+    await page().getByRole("heading", { name: "Statements" }).waitFor({ timeout: 60_000 });
+    await page().locator("tbody tr").first().waitFor({ timeout: 30_000 });
+    expect(await page().locator("tbody").innerText()).toMatch(/Jane Doe[\s\S]*Issued/);
+    await b.audit("statements");
+
+    const account = page().getByLabel("Account");
+    await account.selectOption({ label: "John Smith" });
+    await page().getByRole("button", { name: "Create draft" }).click();
+    await page().waitForURL(/\/statements\/[0-9a-f-]{36}$/, { timeout: 60_000 });
+    await page().getByRole("heading", { name: "John Smith" }).waitFor({ timeout: 30_000 });
+    expect(await page().getByText(/As of .* · Draft/).count()).toBe(1);
+    await b.audit("statement draft");
+    await page().getByRole("button", { name: "Issue statement" }).click();
+    await flash(/^Statement issued\./).waitFor({ timeout: 30_000 });
+    expect(await page().getByText(/As of .* · Issued/).count()).toBe(1);
+    await b.audit("statement issued");
+  }, 90_000);
+});

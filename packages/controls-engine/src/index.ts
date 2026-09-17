@@ -111,3 +111,5 @@ export {
   applyVariablesToStaff,
 } from "./scoring/dynamic-variables";
 export type { RiskVariableState } from "./scoring/dynamic-variables";
+
+export type { MatchingMeasurementSummary, ReconciliationMeasurementSummary, SnapshotMeasurements } from "./snapshot";

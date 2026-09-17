@@ -5,6 +5,8 @@ import type { AppDb } from "../db/client";
 import { appendControlEvent } from "./events";
 import { refreshSodFindings } from "./findings";
 import { loadControlsContext, type ControlsContext } from "./practiceState";
+import { matchingSummary } from "./matchingMeasure";
+import { measurementSummary } from "./reconciliationMeasure";
 
 export type SnapshotTrigger = "manual" | "grant" | "revoke" | "policy" | "nightly" | "seed";
 
@@ -27,6 +29,10 @@ export async function computeSnapshot(db: AppDb, tenantId: string, now: Date = n
     coverage: ctx.built.coverage,
     decisions: ctx.decisions,
     takenAt: now.toISOString(),
+    measurements: {
+      reconciliation: measurementSummary(ctx.reconciliation),
+      matching: matchingSummary(ctx.matching),
+    },
   });
   return { ctx, snapshot };
 }

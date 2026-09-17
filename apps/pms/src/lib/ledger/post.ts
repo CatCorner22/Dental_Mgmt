@@ -15,8 +15,9 @@ import { staffToPeople } from "../controls/people";
 import { loadActivePolicy } from "../controls/policy";
 import type { AppDb } from "../db/client";
 
-export const POSTABLE_KINDS = ["charge", "patient_payment", "adjustment", "write_off"] as const;
-export type PostableKind = (typeof POSTABLE_KINDS)[number];
+import { POSTABLE_KINDS, type PostableKind } from "./types";
+
+export { POSTABLE_KINDS, type PostableKind };
 
 export type PostLedgerInput = {
   accountId: string;

@@ -19,7 +19,7 @@ function varianceLabel(kind: string): string {
     case "unmatched_bank":
       return "Unmatched bank line";
     case "matched_deposit":
-      return "Matched deposit slip";
+      return "Matched deposit";
     case "unmatched_ledger":
       return "Unmatched ledger";
     case "amount_mismatch":
@@ -67,7 +67,12 @@ export default function ReconciliationRunPage() {
     setBusy(true);
     setMessage(null);
     try {
-      const res = await fetch(`/api/reconciliation/runs/${runId}/clear`, { method: "POST" });
+      // Every guarded write needs a JSON content type; a bare POST is refused with 415.
+      const res = await fetch(`/api/reconciliation/runs/${runId}/clear`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
       const body = (await res.json()) as {
         run?: ReconciliationRunDetail;
         error?: string;
