@@ -1,5 +1,12 @@
 import { and, eq, gte, inArray, lte, sql } from "drizzle-orm";
-import { activeDecisions, DECISION_KIND_LABEL, ENTITLEMENTS, type ControlDecision, type DualReleasePolicy } from "@pms/controls-engine";
+import {
+  activeDecisions,
+  DECISION_KIND_LABEL,
+  ENTITLEMENTS,
+  latestDecisionFor,
+  type ControlDecision,
+  type DualReleasePolicy,
+} from "@pms/controls-engine";
 import { bankTransactions, controlFindings, deposits, ledgerEntries, reconciliationRuns, reconciliationVariances, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { listDecisions } from "./decisions";
@@ -837,4 +844,47 @@ export async function countOpenControlFindings(db: AppDb, tenantId: string): Pro
     .from(controlFindings)
     .where(and(eq(controlFindings.tenantId, tenantId), eq(controlFindings.status, "open")));
   return Number(rows[0]?.n ?? 0);
+}
+
+// ---------------------------------------------------------------------------
+// Decisions on findings (Increment 1.26)
+// ---------------------------------------------------------------------------
+
+/**
+ * The active decision that governs a finding: the latest one whose subject
+ * is this row and that no later decision has superseded. The detectors keep
+ * owning the row's status; the decision records what the owner made of it.
+ */
+export function governingFindingDecision(findingId: string, decisions: ControlDecision[]): ControlDecision | undefined {
+  return latestDecisionFor(decisions, "detector_finding", findingId);
+}
+
+export type FindingsSummary = {
+  open: number;
+  closed: number;
+  high: number;
+  medium: number;
+  low: number;
+  /** Open findings that carry an active decision. */
+  decided: number;
+  /** Open findings that carry none: the rows still waiting for the owner. */
+  undecided: number;
+};
+
+/** Counts over the rows as stored, with the open ones split by whether a decision governs them. */
+export function summarizeFindings(
+  rows: Pick<ControlFindingRow, "id" | "status" | "severity">[],
+  decisions: ControlDecision[]
+): FindingsSummary {
+  const open = rows.filter((r) => r.status === "open");
+  const decided = open.filter((r) => governingFindingDecision(r.id, decisions) !== undefined).length;
+  return {
+    open: open.length,
+    closed: rows.length - open.length,
+    high: open.filter((r) => r.severity === "high").length,
+    medium: open.filter((r) => r.severity === "medium").length,
+    low: open.filter((r) => r.severity === "low").length,
+    decided,
+    undecided: open.length - decided,
+  };
 }

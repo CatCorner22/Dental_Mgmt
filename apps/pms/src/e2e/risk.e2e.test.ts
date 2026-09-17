@@ -109,6 +109,37 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     expect(detectors).not.toMatch(/Riley|Finn/);
     await b.audit("practice risk, frozen snapshot with decisions");
 
+    // A decision on a finding. The owner is the one holder of approve_writeoffs, so accepting that residual is
+    // refused as self-licensing; watching it is allowed. Finn's collect_cash row is someone else's work.
+    const section = page().locator("section[aria-labelledby=detectors]");
+    const ownRow = section.locator("tbody tr", { hasText: "Approve write-offs / adjustments" });
+    await ownRow.getByRole("button", { name: /^Decide on Critical duty/ }).click();
+    const findingForm = section.locator("form");
+    await findingForm.waitFor({ timeout: 30_000 });
+    await b.audit("practice risk, decision form on a finding");
+    await findingForm.getByRole("combobox").selectOption("accept_residual");
+    await findingForm.locator("input[placeholder*='compensates']").fill("Only the owner approves write-offs; the practice accepts this.");
+    await findingForm.locator("input[type=date]").fill("2026-12-31");
+    await findingForm.getByRole("button", { name: "Record decision" }).click();
+    await flash(/cannot accept or compensate a finding about your own work/).waitFor({ timeout: 30_000 });
+    await findingForm.getByRole("combobox").selectOption("monitor");
+    await findingForm.getByRole("button", { name: "Record decision" }).click();
+    await flash(/^Monitor recorded for the finding "Critical duty held by one person"/).waitFor({ timeout: 30_000 });
+    expect(await ownRow.innerText()).toMatch(/Open[\s\S]*Monitor · review 2026-12-31/);
+
+    const finnRow = section.locator("tbody tr", { hasText: "Collect patient payments / cash drawer" });
+    await finnRow.getByRole("button", { name: /^Decide on Critical duty/ }).click();
+    await findingForm.waitFor({ timeout: 30_000 });
+    await findingForm.getByRole("combobox").selectOption("accept_residual");
+    await findingForm.locator("input[placeholder*='compensates']").fill("The front desk alone collects while the second hire is onboarded.");
+    await findingForm.locator("input[type=date]").fill("2026-11-30");
+    await findingForm.getByRole("button", { name: "Record decision" }).click();
+    await flash(/^Accept residual recorded for the finding/).waitFor({ timeout: 30_000 });
+    expect(await finnRow.innerText()).toMatch(/Accept residual · review 2026-11-30/);
+    expect(await section.innerText()).toMatch(/2 carry a decision and \d+ wait/);
+    expect(await page().locator("section[aria-labelledby=register] tbody tr", { hasText: "detector finding" }).count()).toBe(2);
+    await b.audit("practice risk, findings with decisions");
+
     await page().getByRole("button", { name: "Revoke Reconcile bank to PMS from Finn Front" }).click();
     await flash(/^Revoked Reconcile bank to PMS/).waitFor({ timeout: 30_000 });
     await page().getByRole("button", { name: "Revoke Collect patient payments / cash drawer from Finn Front" }).click();

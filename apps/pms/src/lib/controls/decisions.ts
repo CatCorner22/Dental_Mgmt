@@ -11,6 +11,7 @@ import {
 import { controlDecisions, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { appendControlEvent } from "./events";
+import { implicatedUserIds, loadFindingSubject } from "./findingSubjects";
 
 export type DecisionRow = typeof controlDecisions.$inferSelect;
 
@@ -56,7 +57,8 @@ export type RecordDecisionInput = {
 
 export type RecordDecisionResult =
   | { ok: true; decision: ControlDecision }
-  | { ok: false; errors: string[] };
+  /** `status` 403 marks a refusal of the actor (self-licensing); malformed input carries none and answers 400. */
+  | { ok: false; errors: string[]; status?: 403 };
 
 /**
  * Writes one append-only decision row stamped with both versions and
@@ -86,12 +88,32 @@ export async function recordDecision(db: AppDb, input: RecordDecisionInput): Pro
     input.subjectKind === "sod_finding" || input.subjectKind === "grant"
       ? input.subjectId.split(":")[0]
       : undefined;
-  if (licenses && subjectPerson && subjectPerson === input.actor.id) {
-    errors.push(
-      "You cannot accept or compensate a conflict on your own duties; a different administrator must record this decision."
-    );
-  }
   if (errors.length) return { ok: false, errors };
+  if (licenses && subjectPerson && subjectPerson === input.actor.id) {
+    return {
+      ok: false,
+      status: 403,
+      errors: ["You cannot accept or compensate a conflict on your own duties; a different administrator must record this decision."],
+    };
+  }
+
+  // A decision on a detector finding governs an open row the detectors
+  // wrote, and the same rule holds: the hands the row is about may not
+  // license it. Monitor, remediate, and insure stay open to everyone.
+  if (input.subjectKind === "detector_finding") {
+    const finding = await loadFindingSubject(db, input.tenantId, input.subjectId);
+    if (!finding) return { ok: false, errors: ["The finding was not found."] };
+    if (finding.status !== "open") {
+      return { ok: false, errors: ["The finding is closed. A decision governs an open finding; if it reopens, decide on it then."] };
+    }
+    if (licenses && (await implicatedUserIds(db, input.tenantId, finding)).includes(input.actor.id)) {
+      return {
+        ok: false,
+        status: 403,
+        errors: ["You cannot accept or compensate a finding about your own work; a different administrator must record this decision."],
+      };
+    }
+  }
 
   if (input.supersedesDecisionId) {
     const prior = await db

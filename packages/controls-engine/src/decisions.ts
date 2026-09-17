@@ -24,6 +24,8 @@ export const DECISION_SUBJECT_KINDS = [
   "exception",
   "scenario",
   "knowledge",
+  /** A detector's control_findings row (Increment 1.26); the subject id is the finding id. */
+  "detector_finding",
 ] as const;
 export type DecisionSubjectKind = (typeof DECISION_SUBJECT_KINDS)[number];
 

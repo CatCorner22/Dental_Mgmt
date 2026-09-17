@@ -68,11 +68,23 @@ type FindingItem = {
   closedAt: string | null;
   closedReason: string | null;
   reopenedCount: number;
+  /** The active decision that governs this finding, if the owner has recorded one. */
+  decision: {
+    id: string;
+    kind: string;
+    kindLabel: string;
+    note: string;
+    reviewBy: string | null;
+    overdue: boolean;
+    decidedAt: string;
+    decidedByName: string;
+  } | null;
 };
 
 type FindingsResponse = {
+  asOf: string;
   items: FindingItem[];
-  summary: { open: number; closed: number; high: number; medium: number; low: number };
+  summary: { open: number; closed: number; high: number; medium: number; low: number; decided: number; undecided: number };
 };
 
 type Loaded = {
@@ -216,6 +228,27 @@ export default function PracticeRiskPage() {
     });
   }
 
+  async function recordFindingDecision(finding: FindingItem, draft: DecisionDraft) {
+    await run("Record decision", async () => {
+      const res = await fetch("/api/controls/decisions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          subjectKind: "detector_finding",
+          subjectId: finding.id,
+          kind: draft.kind,
+          note: draft.note,
+          reviewBy: draft.reviewBy || undefined,
+          supersedesDecisionId: finding.decision?.id,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      setDecidingId(null);
+      return `${DECISION_KIND_LABEL[draft.kind]} recorded for the finding "${finding.kindLabel}". The row stays open until the detector sees the condition clear.`;
+    });
+  }
+
   async function grant(decision?: DecisionDraft) {
     if (!grantPerson || !grantEntitlement) return;
     setBusy("Grant");
@@ -296,6 +329,7 @@ export default function PracticeRiskPage() {
           onRecompute={() => void run("Recompute", async () => "Recomputed from live rows; nothing was frozen.")}
           onFreeze={() => void freezeSnapshot()}
           onDecide={(c, d) => void recordDecision(c, d)}
+          onDecideFinding={(f, d) => void recordFindingDecision(f, d)}
           grantForm={{
             person: grantPerson,
             setPerson: setGrantPerson,
@@ -337,6 +371,7 @@ function RiskBody({
   onRecompute,
   onFreeze,
   onDecide,
+  onDecideFinding,
   grantForm,
   onRevoke,
 }: {
@@ -350,6 +385,7 @@ function RiskBody({
   onRecompute: () => void;
   onFreeze: () => void;
   onDecide: (conflict: DetectedConflict, draft: DecisionDraft) => void;
+  onDecideFinding: (finding: FindingItem, draft: DecisionDraft) => void;
   grantForm: GrantFormState;
   onRevoke: (person: RoleAssignment, entitlement: string) => void;
 }) {
@@ -746,8 +782,10 @@ function RiskBody({
           Recorded, never enforced. The detectors run on every frozen snapshot, nightly and on demand, and
           keep one row per condition: open while it holds, closed with the reason when it clears, reopened
           if it returns. {findings.summary.open} open ({findings.summary.high} high, {findings.summary.medium}{" "}
-          medium, {findings.summary.low} low), {findings.summary.closed} closed. A finding describes a line or
-          a process, never a person.
+          medium, {findings.summary.low} low), {findings.summary.closed} closed. Of the open, {findings.summary.decided}{" "}
+          {findings.summary.decided === 1 ? "carries" : "carry"} a decision and {findings.summary.undecided}{" "}
+          {findings.summary.undecided === 1 ? "waits" : "wait"} for one. A finding describes a line or a process, never a
+          person; a decision on it says what the owner made of it and is reviewed like any other.
         </p>
         {findings.items.length === 0 ? (
           <p className="text-sm text-[var(--ink-2)]">No detector findings yet. Freeze a snapshot to run the detectors now.</p>
@@ -760,34 +798,22 @@ function RiskBody({
                   <th className="px-4 py-3 font-semibold">Severity</th>
                   <th className="px-4 py-3 font-semibold">What the rows say</th>
                   <th className="px-4 py-3 font-semibold">Status</th>
+                  <th className="px-4 py-3 font-semibold">Decision</th>
+                  {isAdmin && <th className="px-4 py-3 font-semibold">Action</th>}
                 </tr>
               </thead>
               <tbody>
                 {findings.items.map((f) => (
-                  <tr key={f.id} className="border-b border-[var(--line)] last:border-0 align-top">
-                    <td className="px-4 py-3">
-                      <p>{f.kindLabel}</p>
-                      <p className="text-xs text-[var(--ink-3)]" title={f.subjectId}>
-                        {f.subjectKind.replace(/_/g, " ")} {shortId(f.subjectId)} · first seen{" "}
-                        {new Date(f.firstSeenAt).toLocaleDateString()}
-                        {f.reopenedCount > 0 ? ` · reopened ${f.reopenedCount}×` : ""}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3 capitalize">{f.severity}</td>
-                    <td className="max-w-prose px-4 py-3">{typeof f.detail.sentence === "string" ? f.detail.sentence : "—"}</td>
-                    <td className="px-4 py-3">
-                      {f.status === "open" ? (
-                        <span className="rounded-md bg-[var(--review-soft)] px-2 py-0.5 text-xs font-semibold text-[var(--review-ink)]">
-                          Open
-                        </span>
-                      ) : (
-                        <span className="text-[var(--ink-2)]">
-                          Closed{f.closedAt ? ` ${new Date(f.closedAt).toLocaleDateString()}` : ""}
-                          {f.closedReason ? ` · ${f.closedReason}` : ""}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
+                  <FindingRow
+                    key={f.id}
+                    finding={f}
+                    isAdmin={isAdmin}
+                    deciding={decidingId === f.id}
+                    busy={busy !== null}
+                    onStart={() => setDecidingId(f.id)}
+                    onCancel={() => setDecidingId(null)}
+                    onDecide={(d) => onDecideFinding(f, d)}
+                  />
                 ))}
               </tbody>
             </table>
@@ -942,6 +968,100 @@ function ConflictRow({
           <td className="px-4 py-3" colSpan={isAdmin ? 7 : 6}>
             <p className="mb-2 text-sm text-[var(--ink-2)]">
               Compensating defaults from the rulebook: {c.compensatingControls.join("; ") || "none listed"}.
+            </p>
+            <DecisionForm submitLabel="Record decision" busy={busy} onSubmit={onDecide} onCancel={onCancel} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/**
+ * One detector finding. The detectors own the Status column; the Decision
+ * column shows the active decision that governs the row, and an
+ * administrator may record one on an open row, or supersede the one it has.
+ */
+function FindingRow({
+  finding: f,
+  isAdmin,
+  deciding,
+  busy,
+  onStart,
+  onCancel,
+  onDecide,
+}: {
+  finding: FindingItem;
+  isAdmin: boolean;
+  deciding: boolean;
+  busy: boolean;
+  onStart: () => void;
+  onCancel: () => void;
+  onDecide: (draft: DecisionDraft) => void;
+}) {
+  const d = f.decision;
+  return (
+    <>
+      <tr className="border-b border-[var(--line)] last:border-0 align-top">
+        <td className="px-4 py-3">
+          <p>{f.kindLabel}</p>
+          <p className="text-xs text-[var(--ink-3)]" title={f.subjectId}>
+            {f.subjectKind.replace(/_/g, " ")} {shortId(f.subjectId)} · first seen {new Date(f.firstSeenAt).toLocaleDateString()}
+            {f.reopenedCount > 0 ? ` · reopened ${f.reopenedCount}×` : ""}
+          </p>
+        </td>
+        <td className="px-4 py-3 capitalize">{f.severity}</td>
+        <td className="max-w-prose px-4 py-3">{typeof f.detail.sentence === "string" ? f.detail.sentence : "—"}</td>
+        <td className="px-4 py-3">
+          {f.status === "open" ? (
+            <span className="rounded-md bg-[var(--review-soft)] px-2 py-0.5 text-xs font-semibold text-[var(--review-ink)]">Open</span>
+          ) : (
+            <span className="text-[var(--ink-2)]">
+              Closed{f.closedAt ? ` ${new Date(f.closedAt).toLocaleDateString()}` : ""}
+              {f.closedReason ? ` · ${f.closedReason}` : ""}
+            </span>
+          )}
+        </td>
+        <td className="px-4 py-3">
+          {d ? (
+            <>
+              <p className={d.overdue ? "font-semibold text-[var(--review-ink)]" : "font-semibold"}>
+                {d.kindLabel}
+                {d.reviewBy ? ` · review ${d.reviewBy}` : ""}
+                {d.overdue ? " · overdue" : ""}
+              </p>
+              <p className="max-w-prose text-xs text-[var(--ink-3)]">{d.note}</p>
+            </>
+          ) : f.status === "open" ? (
+            <span className="font-semibold">No decision yet</span>
+          ) : (
+            <span className="text-[var(--ink-3)]">—</span>
+          )}
+        </td>
+        {isAdmin && (
+          <td className="px-4 py-3">
+            {f.status === "open" && !deciding && (
+              <button
+                type="button"
+                className="text-sm font-semibold text-[var(--link)] underline-offset-2 hover:underline disabled:opacity-50"
+                disabled={busy}
+                onClick={onStart}
+                aria-label={`${d ? "Supersede the decision on" : "Decide on"} ${f.kindLabel}: ${
+                  typeof f.detail.sentence === "string" ? f.detail.sentence : f.subjectId
+                }`}
+              >
+                {d ? "Supersede" : "Decide"}
+              </button>
+            )}
+          </td>
+        )}
+      </tr>
+      {deciding && (
+        <tr className="border-b border-[var(--line)] bg-[var(--surface-2)] last:border-0">
+          <td className="px-4 py-3" colSpan={isAdmin ? 6 : 5}>
+            <p className="mb-2 text-sm text-[var(--ink-2)]">
+              The row stays with the detector: it closes when the condition clears, not when a decision is recorded.
+              Whoever the row is about cannot accept its residual or name a compensating control for it.
             </p>
             <DecisionForm submitLabel="Record decision" busy={busy} onSubmit={onDecide} onCancel={onCancel} />
           </td>

@@ -49,7 +49,8 @@ export const POST = withGuard(
       })
     );
     if (!result.ok) {
-      return Response.json({ error: "The decision was not recorded.", errors: result.errors }, { status: 400 });
+      // A refusal of the actor (self-licensing) is 403; malformed input is 400.
+      return Response.json({ error: "The decision was not recorded.", errors: result.errors }, { status: result.status ?? 400 });
     }
     return Response.json(result.decision, { status: 201 });
   },
