@@ -80,7 +80,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await approvals.innerText()).toMatch(/1[\s\S]*\$75\.00 held until a second person decides/);
     expect(await page().getByText(/No control decision comes up for review/).count()).toBe(1);
     expect(await page().getByText(/Segregation health\. COSO overall \d+/).count()).toBe(1);
-    for (const name of ["Open ledger", "Post payment", "Bank reconciliation", "Day close", "Statements", "Approvals inbox", "Practice Risk", "Weekly digest", "Locations"]) {
+    for (const name of ["Open ledger", "Post payment", "Bank reconciliation", "Day close", "Statements", "Approvals inbox", "Practice Risk", "Weekly digest", "Locations", "Month-end package"]) {
       expect(await page().locator("main").getByRole("link", { name, exact: true }).count()).toBe(1);
     }
     await b.audit("home (owner, no bank record)");
@@ -390,5 +390,36 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().getByText(/Location hours are for the manager and owner seats/).waitFor({ timeout: 60_000 });
     expect(await page().getByRole("button", { name: /^Save / }).count()).toBe(0);
     await b.audit("locations (front desk refusal)");
+  }, 150_000);
+
+  it("renders the month-end package for the owner, exports it as CSV onto the chain, and shows the front desk the seat message", async () => {
+    await b.signIn("ridgeview-owner", "/cpa");
+    await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
+    const section = (id: string) => page().locator(`section[aria-labelledby=${id}]`);
+    await section("package-chain").waitFor({ timeout: 60_000 });
+    const stamp = await section("package-stamp").innerText();
+    expect(stamp).toMatch(/month in progress/);
+    expect(stamp).toMatch(/Package hash [0-9a-f]{16}…\. Not exported yet\./);
+    expect(await section("package-tieout").innerText()).toMatch(/Journal totals equal the month's ledger postings: yes\.[\s\S]*The deposit register equals the deposits prepared: yes\.[\s\S]*The audit chain verified at its last check: no\. No chain check recorded yet/);
+    expect(await section("package-journal").innerText()).toMatch(/patient ar · Patient payment/);
+    expect(await section("package-reasons").innerText()).toMatch(/Write-off · courtesy · 1 with approval/);
+    expect(await section("package-deposits").innerText()).toMatch(/cash · /);
+    expect(await section("package-controls").innerText()).toMatch(/Exception · After-hours hold · force dual[\s\S]*open/);
+    const whole = await page().locator("main").innerText();
+    expect(whole).not.toMatch(/Riley|Finn|Jane Doe|John Smith/);
+    await b.audit("month-end package (owner)");
+
+    const downloading = page().waitForEvent("download", { timeout: 30_000 });
+    await page().getByRole("button", { name: "Download CSV" }).click();
+    const download = await downloading;
+    expect(download.suggestedFilename()).toMatch(/^month-end-\d{4}-\d{2}\.csv$/);
+    await flash(/^Exported as CSV: \d+ rows, package hash [0-9a-f]{12}…, recorded on the chain\./).waitFor({ timeout: 30_000 });
+    expect(await section("package-stamp").innerText()).toMatch(/Exported 1 time; last on \d{4}-\d{2}-\d{2} as CSV with \d+ rows\. The rows have changed since that export\./);
+    await b.audit("month-end package (owner, exported)");
+
+    await b.signIn("ridgeview-front", "/cpa");
+    await page().getByText(/The month-end package is for the manager and owner seats/).waitFor({ timeout: 60_000 });
+    expect(await page().getByRole("button", { name: /^Download / }).count()).toBe(0);
+    await b.audit("month-end package (front desk refusal)");
   }, 150_000);
 });
