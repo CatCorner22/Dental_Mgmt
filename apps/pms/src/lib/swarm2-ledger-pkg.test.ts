@@ -11,6 +11,8 @@ import { addException } from "./controls/exceptions";
  * Swarm 2, lens ledger-pkg: the app callers of @pms/ledger against the live
  * database. Live cases run when PMS_TEST_POSTGRES_URL is set and are
  * mandatory under PMS_TEST_POSTGRES_REQUIRED=1 (liveAdminUrl throws).
+ * Verified set (swarm2/verified-ledger-pkg): S2-ledger-pkg-7, -8, -9, -10 and
+ * the verifier's adjacent S2-ledger-pkg-v1 (overpayment allocation crash).
  */
 
 const adminUrl = liveAdminUrl();
@@ -24,6 +26,7 @@ describe.skipIf(!adminUrl)("S2-ledger-pkg (live)", () => {
   let env: Record<string, string | undefined>;
 
   const jane = { accountId: SEED_LEDGER.accountDoeId, patientId: SEED_LEDGER.patientJaneId };
+  const john = { accountId: SEED_LEDGER.accountSmithId, patientId: SEED_LEDGER.patientJohnId };
   function postAs(user: typeof front, post: PostLedgerInput) {
     return withTenantTransaction(tenantId, user.id, (d) =>
       postLedgerEntry(d, { tenantId, actorId: user.id, actorName: user.displayName, post }), env);
@@ -53,11 +56,38 @@ describe.skipIf(!adminUrl)("S2-ledger-pkg (live)", () => {
   });
 
   // Negative control: the same payment with amountCents 5000 posts (ok: true, status: "posted").
-  it("S2-ledger-pkg-7: postLedgerEntry refuses fractional and out-of-range cents instead of throwing a database error", async () => {
+  // The posting page sends Math.round(dollars * 100), so "1e298" reaches here as 1e300 and "0.001" as 0;
+  // the route guard only checks typeof number && isFinite, so 50.5 reaches here from the API.
+  it("S2-ledger-pkg-7: postLedgerEntry refuses fractional, out-of-range and zero cents instead of throwing (22P02 / 'Amount must be non-zero.')", async () => {
     const fractional = await postAs(front, { ...jane, kind: "patient_payment", amountCents: 50.5, effectiveDate: "2026-09-17", tender: "cash" });
     expect(fractional).toMatchObject({ ok: false, status: "refused", code: "invalid_amount" });
     const huge = await postAs(front, { ...jane, kind: "patient_payment", amountCents: 1e300, effectiveDate: "2026-09-17", tender: "cash" });
     expect(huge).toMatchObject({ ok: false, status: "refused", code: "invalid_amount" });
+    const zero = await postAs(front, { ...jane, kind: "patient_payment", amountCents: 0, effectiveDate: "2026-09-17", tender: "cash" });
+    expect(zero).toMatchObject({ ok: false, status: "refused", code: "invalid_amount" });
+    const fine = await postAs(front, { ...jane, kind: "patient_payment", amountCents: 5_000, effectiveDate: "2026-09-17", tender: "cash" });
+    expect(fine).toMatchObject({ ok: true, status: "posted" });
+  });
+
+  // Negative control: a payment equal to the open balance posts. John Smith: seed charge 8900, nothing applied.
+  it("S2-ledger-pkg-v1: a patient payment larger than the open charges (or on a paid-up account) posts as credit instead of dying on allocation_exceeds_charge", async () => {
+    const over = await postAs(front, { ...john, kind: "patient_payment", amountCents: 10_000, effectiveDate: "2026-09-13", tender: "cash" });
+    expect(over).toMatchObject({ ok: true, status: "posted" });
+    const exact = await postAs(front, { ...john, kind: "patient_payment", amountCents: 8_900, effectiveDate: "2026-09-14", tender: "cash" });
+    expect(exact).toMatchObject({ ok: true, status: "posted" });
+    // The account is now paid up (or in credit); a prepayment must still post.
+    const prepay = await postAs(front, { ...john, kind: "patient_payment", amountCents: 500, effectiveDate: "2026-09-15", tender: "card" });
+    expect(prepay).toMatchObject({ ok: true, status: "posted" });
+    const { rows } = await db.admin.query(
+      "SELECT coalesce(sum(amount_cents), 0)::int AS paid FROM ledger_entries WHERE tenant_id = $1 AND patient_id = $2 AND kind = 'patient_payment'",
+      [tenantId, john.patientId]
+    );
+    expect(rows[0]).toEqual({ paid: -19_400 });
+    const bounds = await db.admin.query(
+      "SELECT pa.charge_entry_id, sum(pa.amount_cents)::int AS allocated, max(c.amount_cents)::int AS charge FROM payment_allocations pa JOIN ledger_entries c ON c.id = pa.charge_entry_id WHERE pa.tenant_id = $1 AND c.patient_id = $2 GROUP BY 1",
+      [tenantId, john.patientId]
+    );
+    for (const b of bounds.rows) expect(b.allocated).toBeLessThanOrEqual(b.charge);
   });
 
   // Negative control: the same $300 write-off with no exception in the policy is held (needs_second), not posted.
@@ -79,6 +109,13 @@ describe.skipIf(!adminUrl)("S2-ledger-pkg (live)", () => {
         },
       }), env);
     expect(raised).toMatchObject({ ok: true });
+    // Give Jane enough open balance ($500) for a $300 write-off to allocate within payment_allocations bounds.
+    await db.admin.query(
+      `INSERT INTO ledger_entries (id, tenant_id, account_id, patient_id, location_id, kind, gl_bucket, amount_cents, effective_date, posted_at,
+                                   created_by_id, created_by_name, procedure_id, idempotency_key, created_at)
+       VALUES ($1, $2, $3, $4, $5, 'charge', 'patient_ar', 50000, '2026-09-16', now(), $6, 'Finn Front', $7, 's2-charge-jane-writeoff', now())`,
+      [uuidv7(52_008), tenantId, jane.accountId, jane.patientId, SEED_LEDGER.locationId, front.id, SEED_LEDGER.procedureJaneId]
+    );
 
     // $300 is over the $150 rule threshold and under the $400 exception: the service releases it singly.
     const posted = await withTenantTransaction(tenantId, front.id, (d) =>

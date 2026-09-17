@@ -3,7 +3,14 @@ import { allocatePatientLedger } from "./balances";
 import { createPostEntry, makeInMemoryWriter } from "./post";
 import type { LedgerEntry, LedgerKind, PaymentAllocation } from "./types";
 
-/** Swarm 2, lens ledger-pkg: the posting kernel and the allocator, in memory. */
+/**
+ * Swarm 2, lens ledger-pkg: the posting kernel and the allocator, in memory.
+ * Verified set (swarm2/verified-ledger-pkg): S2-ledger-pkg-1, -4, -5, -6.
+ * S2-ledger-pkg-2 (kernel reversal invariants) and -3 (idempotency payload
+ * conflict) were rejected by the verifier: no reachable writer produces those
+ * rows (reversals are not postable and the database trigger is the documented
+ * enforcement point; no caller reuses an explicit key with a new payload).
+ */
 
 const base = (o: Partial<LedgerEntry> & { id: string }): LedgerEntry => ({
   tenantId: "t1",
@@ -57,8 +64,10 @@ describe("S2-ledger-pkg: posting kernel", () => {
       ["refund", 0],
       ["reversal", 0],
       ["transfer_in", 0],
-      ["refund", -5],
     ];
+    // No sign rule is asserted for refund/transfer kinds: docs do not fix one and the
+    // repo's own tests store refunds with either sign. Only the cents-only, non-zero,
+    // safe-integer model (docs/03; ledger_entries.amount_cents bigint CHECK <> 0) is measured.
     const accepted: string[] = [];
     for (const [kind, amountCents] of bad) {
       const result = await post(input(kind, amountCents, { idempotencyKey: `bad-${kind}-${amountCents}` }));
@@ -66,40 +75,6 @@ describe("S2-ledger-pkg: posting kernel", () => {
     }
     expect(accepted).toEqual([]);
     expect(store.entries.filter((e) => !Number.isSafeInteger(e.amountCents) || e.amountCents === 0)).toEqual([]);
-  });
-
-  // Negative control: one reversal that mirrors an unreversed original (amount -10000 against charge 10000) is accepted.
-  it("S2-ledger-pkg-2: createPostEntry enforces 'a reversal mirrors an unreversed original' (ADR-0003) — no second reversal, no mismatched amount, no missing target", async () => {
-    const { store, post } = freshPost();
-    const charge = await post(input("charge", 10_000));
-    expect(charge.ok).toBe(true);
-    if (!charge.ok) return;
-    const first = await post(input("reversal", -10_000, { reversesEntryId: charge.entry.id }));
-    expect(first.ok).toBe(true);
-
-    const second = await post(input("reversal", -10_000, { reversesEntryId: charge.entry.id, idempotencyKey: "rev-2" }));
-    const mismatch = await post(input("reversal", -4_000, { reversesEntryId: charge.entry.id, idempotencyKey: "rev-3" }));
-    const missing = await post(input("reversal", -1_000, { reversesEntryId: "no-such-entry", idempotencyKey: "rev-4" }));
-    expect([second.ok, mismatch.ok, missing.ok]).toEqual([false, false, false]);
-    expect(store.entries.filter((e) => e.kind === "reversal")).toHaveLength(1);
-
-    // The allocator reads the double reversal as $100 of patient credit on an account that was never paid.
-    const { balances } = allocatePatientLedger("p1", store.entries);
-    expect(balances).toEqual({ patientDueCents: 0, insurancePendingCents: 0, creditCents: 0 });
-  });
-
-  // Negative control: the same key with the same payload returns the original entry with duplicate: true.
-  it("S2-ledger-pkg-3: the same idempotency key with a different payload is refused, not reported as a duplicate of the first posting", async () => {
-    const { store, post } = freshPost();
-    const first = await post(input("patient_payment", -5_000, { idempotencyKey: "req-1" }));
-    expect(first.ok).toBe(true);
-    const replay = await post(input("patient_payment", -5_000, { idempotencyKey: "req-1" }));
-    expect(replay).toMatchObject({ ok: true, duplicate: true });
-
-    const different = await post(input("patient_payment", -9_000, { idempotencyKey: "req-1" }));
-    expect(different.ok).toBe(false);
-    if (!different.ok) return;
-    expect(store.entries).toHaveLength(1);
   });
 });
 
