@@ -31,7 +31,10 @@ button:focus-visible, [role="button"]:focus-visible, input:focus-visible, select
 .andon .grow { flex: 1 1 12rem; min-width: 0; }  /* the sentence takes its own row on a narrow phone instead of a zero-width column (WCAG 1.4.10) */
 .shell { display: flex; flex: 1; min-height: 0; }
 .rail { width: 320px; flex: 0 0 320px; border-right: 1px solid var(--line); background: var(--surface); padding: var(--space-3); overflow: auto; display: flex; flex-direction: column; gap: var(--space-3); }
-.canvas { flex: 1; min-width: 0; padding: var(--space-4); overflow: auto; }
+/* The canvas is the containing block for its own absolutely positioned descendants (the visually hidden "Error:"
+   prefixes on field messages): with none, one parked below a sticky gate stretched the document itself, and
+   scrollIntoView then scrolled the page under the shell as well as the canvas. */
+.canvas { flex: 1; min-width: 0; padding: var(--space-4); overflow: auto; position: relative; }
 .canvas:focus { outline: none; }
 /* When the browser scrolls a newly focused control into view, keep it clear of the
    sticky gate column and of the sticky top bar above it (WCAG 2.4.11). Screens that

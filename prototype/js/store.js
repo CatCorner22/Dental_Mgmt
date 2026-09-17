@@ -318,7 +318,7 @@
     // and left the control itself a no-op. After hours nothing is requested either: the hold lifts at 7:30.
     if (form.writeoffCents && form.writeoffCents > 0) {
       const cap = writeoffCap(form.writeoffCents, Math.max(0, Math.min(est.patientCents - amt, balances(a.patientId).patientDue))); if (cap) return cap;
-      const gate = evaluateRelease('write_off', form.writeoffCents, u);
+      const gate = evaluateRelease('write_off', form.writeoffCents, u, { pid: a.patientId });
       if (gate.code === 'after_hours') return refuse(gate.code, gate.verb, 'Remove the write-off', gate.why);
       // The request names the PIN's owner, not the persona at the desk: Dr. Reagan's PIN used to raise a request in Priya's name and then approve it as his own.
       if (!gate.ok) return Object.assign(refuse(gate.code, gate.verb, 'Request approval', gate.why), { held: true, pendingRequest: { kind: 'write_off', amountCents: form.writeoffCents, reason: form.writeoffReason || 'courtesy', patientId: a.patientId, eligible: gate.eligible, appointmentId: aid, posterId: u.id } });
@@ -381,6 +381,7 @@
   /* opts.contractual: the amount is computed from the fee schedule (an ERA delta), so the threshold does not
      apply; the after-hours hold still does. `eligible` is the two seats the biller is told to ask, ranked
      office manager first: one list feeds the verb, the Held chip and the phone card, so they cannot disagree. */
+  const openDenial = (pid) => S.claims.find((c) => c.patientId === pid && c.status === 'denied' && !S.appealPackets.some((p) => p.claimId === c.id && p.sent));
   function evaluateRelease(channel, amountCents, actor, opts) {
     const threshold = S.tenant.dualReleaseThresholdCents;
     const RANK = { office_manager: 0, owner: 1, dentist: 2, surgeon: 3 };
@@ -390,6 +391,10 @@
     const ah = afterHours(channel); if (ah) return Object.assign(ah, { eligible });
     // Two short names at most, so the verb never runs past eight words.
     if (amountCents >= threshold && !(opts && opts.contractual)) return { ok: false, code: 'needs_second', verb: 'Ask ' + eligible.join(' or ') + ' to approve', why: 'Write-offs at or above ' + Proto.ui.money(threshold) + ' need a distinct second approver (control policy v3, set by Dr. Reagan on 8/4, review due 9/1). Approvals here usually take about 4 minutes.', eligible };
+    // An account with an open denial routes every write-off through dual release: writing the balance off
+    // is how a denial disappears without an appeal, whatever the amount.
+    const denial = channel === 'write_off' && opts && opts.pid && !opts.contractual ? openDenial(opts.pid) : null;
+    if (denial) return { ok: false, code: 'needs_second', verb: 'Ask ' + eligible.join(' or ') + ' to approve', why: 'Claim ' + denial.id + ' on this account is denied and not yet appealed. A write-off here at any amount needs a distinct second approver, so the denial is decided on the record and not written away.', eligible };
     return { ok: true, code: 'below_threshold', eligible };
   }
   /* An approver who sends a request back says why: the biller reads the reason on the write-off card, and
@@ -430,10 +435,10 @@
     if (!patient(accountPid)) return notFound('patient');
     const off = offline('Wait for the server — postings are paused'); if (off) return off;
     const pin = requirePin(extras); if (!pin.ok) return pin; const u = pin.user;
-    const ent = bills(u); if (ent) return ent;
+    const ent = bills(u) || needs(u, ['write_off'], 'Ask a seat that can write off balances', 'Switch author', u.short + ' posts payments but carries no write_off grant, and a write-off retires what the patient owes. The biller, Dana or Dr. Reagan write off here; the author switch names who.'); if (ent) return ent;
     if (!Number.isFinite(amountCents) || amountCents <= 0) return refuse('amount_required', 'Type an amount above zero', 'Go to amount', 'A write-off posts the number you type against the balance, so it cannot be blank, negative, or zero.');
     const cap = writeoffCap(amountCents, balances(accountPid).patientDue); if (cap) return cap;
-    const gate = evaluateRelease('write_off', amountCents, u);
+    const gate = evaluateRelease('write_off', amountCents, u, { pid: accountPid });
     // The hold takes the write-off off the card; nothing is requested after hours.
     if (gate.code === 'after_hours') return refuse(gate.code, gate.verb, 'Remove the write-off', gate.why);
     if (!gate.ok) {
@@ -483,7 +488,7 @@
       const nums = codes.map((x) => Number(x)).filter((n) => Number.isFinite(n));
       const worst = nums.length ? Math.max.apply(null, nums) : null;
       const MEAN = { 0: 'healthy', 1: 'bleeding on probing', 2: 'calculus or defective margin', 3: 'pocket 4 to 5 mm', 4: 'pocket 6 mm or deeper' };
-      S.notes[encId].perioSummary = 'Perio screening: ' + codes.length + ' sextants scored (' + codes.join(', ') + ')' + (worst != null ? ', highest ' + worst + ' — ' + (MEAN[worst] || 'see chart') : '') + '.';
+      S.notes[encId].perioSummary = (amends ? 'Perio screening addendum to the ' + Proto.ui.longDate(prior.date) + ' exam (' + currentUser().name + ', ' + Proto.ui.longDate(S.tenant.today) + '): ' : 'Perio screening: ') + codes.length + ' sextants scored (' + codes.join(', ') + ')' + (worst != null ? ', highest ' + worst + ' — ' + (MEAN[worst] || 'see chart') : '') + '.';
       S.notes[encId].srpEvidence = (worst != null && worst >= 3) ? 'Screening code ' + worst + ' indicates a full six-point chart before periodontal therapy.' : null;
     } else {
       // The prior exam is named by its date and author, never by its row id: the note is a clinical record.
@@ -532,6 +537,7 @@
     const enc = encounter(encId); if (!enc) return notFound('encounter');
     const off = offline('Wait for the server — charting is paused'); if (off) return off;
     const who = clinician('Ask the clinician to chart this'); if (who) return who;
+    if (enc.noteFiled) return refuse('exam_sealed', 'Add an addendum to the filed note', 'Open the note', 'This visit\'s note is filed, so its chart is sealed. A finding after filing goes on the record as an addendum to that note; a paint here would bill a procedure the filed note never carried.');
     if (!S.cdt[cdtCode]) return refuse('licence_scope', 'Choose a procedure from the list', 'Open the procedure list', 'Only codes on the practice fee schedule can be charted; an unknown code would write a procedure with no fee and no claim line.');
     const fee = (S.cdt[cdtCode] || [null, 0])[1];
     if (wholePatient(cdtCode)) { tooth = null; surfaces = []; }
@@ -655,13 +661,14 @@
     // or a gerund, which reads as a description of the problem rather than the thing to do next.
     for (const t of S.tags) if (t.encounterId === encId && !t.disposition) killers.push({ code: 'tag_undispositioned', verb: 'Chart or dismiss tag #' + t.tooth, control: 'Chart it or dismiss', fix: 'tag' });
     const text = ((note && note.assessment) || '') + ' ' + ((note && note.plan) || '');
-    if (/\$\s?\d/.test(text) || /\b(fee|cost|price|estimate|copay)\b/i.test(text)) killers.push({ code: 'money_in_note', verb: 'Move the fee to the plan card', control: 'Move to plan card', fix: 'money' });
-    // Standing paints only: a reversed paint is not a tooth the chart names.
+    if (/\$\s?\d/.test(text) || /\b(fees?|costs?|prices?|pricing|estimates?|copay(ment)?s?|co-pay(ment)?s?|dollars?|cents)\b/i.test(text)) killers.push({ code: 'money_in_note', verb: 'Move the fee to the plan card', control: 'Move to plan card', fix: 'money' });
+    // Every tooth the note names, as #NN or "tooth NN", is compared with the paints that still stand.
     const toothed = liveEvents(encId).filter((c) => c.tooth != null);
-    const m = text.match(/#(\d{1,2})/);
-    if (m && toothed.length && !toothed.some((c) => c.tooth === Number(m[1]))) {
+    const named = [...text.matchAll(/(?:#|\btooth\s+#?)(\d{1,2})\b/gi)].map((m) => Number(m[1]));
+    const wrong = named.find((t) => !toothed.some((c) => c.tooth === t));
+    if (wrong != null && toothed.length) {
       const c = toothed[0];
-      killers.push({ code: 'contradiction', verb: 'Use the chart tooth #' + c.tooth, control: 'Use chart tooth', fix: 'contradiction', why: 'The note says #' + m[1] + ' and the chart says #' + c.tooth + '. A wrong-tooth claim is denied or paid wrongly, so the two must agree before filing.', noteTooth: Number(m[1]), chartTooth: c.tooth });
+      killers.push({ code: 'contradiction', verb: 'Use the chart tooth #' + c.tooth, control: 'Use chart tooth', fix: 'contradiction', why: 'The note says #' + wrong + ' and the chart says #' + c.tooth + '. A wrong-tooth claim is denied or paid wrongly, so the two must agree before filing.', noteTooth: wrong, chartTooth: c.tooth });
     }
     // The assessment is the dentist's to write, so a hygienist is not handed a control that lands on a readonly field: her
     // row is Send, and once sent it says so instead of offering the send again.
