@@ -422,4 +422,30 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await page().getByRole("button", { name: /^Download / }).count()).toBe(0);
     await b.audit("month-end package (front desk refusal)");
   }, 150_000);
+
+  it("maps a journal line to an account under maker-checker: the owner proposes, cannot approve their own, and the approval reaches the journal", async () => {
+    await b.signIn("ridgeview-owner", "/cpa");
+    const section = (id: string) => page().locator(`section[aria-labelledby=${id}]`);
+    await section("package-mappings").waitFor({ timeout: 60_000 });
+    const mappings = section("package-mappings");
+    expect(await mappings.innerText()).toMatch(/0 approved mappings; 0 waiting for a second person; \d+ journal lines? unmapped/);
+    expect(await section("package-tieout").innerText()).toMatch(/Every journal line is mapped to an account: no\./);
+    expect(await section("package-journal").innerText()).toMatch(/→ unmapped/);
+
+    const form = mappings.locator("form");
+    await form.getByLabel("Bucket").selectOption("patient_ar");
+    await form.getByLabel("Kind").selectOption("patient_payment");
+    await form.getByLabel("Account code").fill("1200");
+    await form.getByLabel("Account name").fill("Patient receivables");
+    await form.getByLabel("Side").selectOption("credit");
+    await form.getByRole("button", { name: "Propose mapping" }).click();
+    await flash(/^Proposed\. A different person approves it before the journal reads it\./).waitFor({ timeout: 30_000 });
+
+    // The owner proposed it, so the owner cannot decide it: the row says so and offers no button.
+    const row = mappings.locator("tbody tr", { hasText: "1200 Patient receivables" });
+    expect(await row.innerText()).toMatch(/Proposed by Riley Owner[\s\S]*Yours; a different person decides it\./);
+    expect(await mappings.getByRole("button", { name: /^Approve mapping/ }).count()).toBe(0);
+    expect(await mappings.innerText()).toMatch(/0 approved mappings; 1 waiting for a second person/);
+    await b.audit("month-end package, mapping proposed");
+  }, 150_000);
 });

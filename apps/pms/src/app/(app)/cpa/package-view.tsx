@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
+import { ANY_REASON, GL_BUCKETS, GL_KINDS, GL_SIDES, type GlMapping } from "@/lib/cpa/types";
 import type { MonthPackage, PackageExport } from "@/lib/cpa/package";
 import { formatCents } from "@/lib/ledger/format";
 
@@ -21,7 +22,21 @@ type LoadState =
   | { status: "loading" }
   | { status: "not_for_seat" }
   | { status: "error"; message: string }
-  | { status: "ready"; data: PackageResponse; isAdmin: boolean };
+  | { status: "ready"; data: PackageResponse; mappings: MappingRow[]; isAdmin: boolean };
+
+/** A mapping as the route serves it: the row plus whether the viewer proposed it. */
+type MappingRow = GlMapping & { mine: boolean };
+
+type Draft = { glBucket: string; kind: string; reasonCode: string; accountCode: string; accountName: string; side: string };
+
+const EMPTY_DRAFT: Draft = { glBucket: GL_BUCKETS[0], kind: GL_KINDS[0], reasonCode: "", accountCode: "", accountName: "", side: GL_SIDES[0] };
+
+async function loadMappings(): Promise<MappingRow[]> {
+  const res = await fetch("/api/cpa/mappings");
+  const body = (await res.json().catch(() => ({}))) as { items?: MappingRow[]; error?: string };
+  if (!res.ok) throw new Error(body.error ?? "Could not load the mappings.");
+  return body.items ?? [];
+}
 
 function thisMonth(): string {
   return new Date().toISOString().slice(0, 7);
@@ -68,6 +83,7 @@ export function PackageView() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
 
   const load = useCallback(async (m: string) => {
     const meRes = await fetch("/api/me");
@@ -77,8 +93,8 @@ export function PackageView() {
       setState({ status: "not_for_seat" });
       return;
     }
-    const data = await loadPackage(m);
-    setState({ status: "ready", data, isAdmin: meetsRole(role, "admin") });
+    const [data, mappings] = await Promise.all([loadPackage(m), loadMappings()]);
+    setState({ status: "ready", data, mappings, isAdmin: meetsRole(role, "admin") });
   }, []);
 
   useEffect(() => {
@@ -123,6 +139,52 @@ export function PackageView() {
       setMessage(`Exported as ${format.toUpperCase()}: ${rows} rows, package hash ${hash.slice(0, 12)}…, recorded on the chain.`);
     } catch (err: unknown) {
       setMessage(err instanceof Error ? err.message : "The package was not exported.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** One proposal; a different person decides it. */
+  async function propose() {
+    if (state.status !== "ready") return;
+    setBusy("propose");
+    setMessage(null);
+    try {
+      const res = await fetch("/api/cpa/mappings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...draft, reasonCode: draft.reasonCode.trim() || undefined }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      setDraft(EMPTY_DRAFT);
+      const [data, mappings] = await Promise.all([loadPackage(month), loadMappings()]);
+      setState({ ...state, data, mappings });
+      setMessage("Proposed. A different person approves it before the journal reads it.");
+    } catch (err: unknown) {
+      setMessage(err instanceof Error ? err.message : "The mapping was not proposed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function decide(mapping: MappingRow, decision: "approved" | "rejected") {
+    if (state.status !== "ready") return;
+    setBusy(mapping.id);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/cpa/mappings/decide", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mappingId: mapping.id, decision }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      const [data, mappings] = await Promise.all([loadPackage(month), loadMappings()]);
+      setState({ ...state, data, mappings });
+      setMessage(`${decision === "approved" ? "Approved" : "Rejected"}: ${mapping.glBucket} · ${mapping.kind} → ${mapping.accountCode}.`);
+    } catch (err: unknown) {
+      setMessage(err instanceof Error ? err.message : "The mapping was not decided.");
     } finally {
       setBusy(null);
     }
@@ -208,7 +270,12 @@ export function PackageView() {
             <Rows
               id="package-journal"
               title={`Journal · ${state.data.package.journal.entryCount} entr${state.data.package.journal.entryCount === 1 ? "y" : "ies"} · ${formatCents(state.data.package.journal.totalCents)}`}
-              rows={state.data.package.journal.rows.map((r) => ({ key: `${r.bucket}|${r.kind}`, label: r.label, count: r.count, cents: r.cents }))}
+              rows={state.data.package.journal.rows.map((r) => ({
+                key: `${r.bucket}|${r.kind}`,
+                label: r.account ? `${r.label} → ${r.account.code} ${r.account.name} (${r.account.side})` : `${r.label} → unmapped`,
+                count: r.count,
+                cents: r.cents,
+              }))}
               empty="Nothing posted this month."
             />
             <Rows
@@ -269,6 +336,143 @@ export function PackageView() {
               empty=""
             />
           </div>
+          <section aria-labelledby="package-mappings" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+            <h2 id="package-mappings" className="mb-1 text-base font-semibold">
+              Chart of accounts
+            </h2>
+            <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
+              {state.data.package.mappings.approved} approved mapping{state.data.package.mappings.approved === 1 ? "" : "s"};{" "}
+              {state.data.package.mappings.pending} waiting for a second person;{" "}
+              {state.data.package.mappings.unmappedLines} journal line{state.data.package.mappings.unmappedLines === 1 ? "" : "s"} unmapped this month. One
+              person proposes a mapping and a different person approves it, so no one maps the practice&apos;s books alone.
+            </p>
+            {state.mappings.length > 0 && (
+              <div className="overflow-x-auto rounded-lg border border-[var(--line)]">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="border-b border-[var(--line)] bg-[var(--cream)] text-[var(--ink-2)]">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold">Line</th>
+                      <th className="px-3 py-2 font-semibold">Account</th>
+                      <th className="px-3 py-2 font-semibold">State</th>
+                      {state.isAdmin && <th className="px-3 py-2 font-semibold">Decide</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {state.mappings.map((m) => (
+                      <tr key={m.id} className="border-b border-[var(--line)] last:border-0 align-top">
+                        <td className="px-3 py-2">
+                          {m.glBucket.replace(/_/g, " ")} · {m.kind.replace(/_/g, " ")}
+                          {m.reasonCode === ANY_REASON ? "" : ` · ${m.reasonCode}`}
+                        </td>
+                        <td className="px-3 py-2">
+                          {m.accountCode} {m.accountName} ({m.side})
+                        </td>
+                        <td className="px-3 py-2">
+                          {m.status === "proposed"
+                            ? `Proposed by ${m.proposedByName}`
+                            : `${m.status === "approved" ? "Approved" : "Rejected"} by ${m.decidedByName ?? "someone"} on ${(m.decidedAt ?? "").slice(0, 10)}`}
+                        </td>
+                        {state.isAdmin && (
+                          <td className="px-3 py-2">
+                            {m.status === "proposed" && !m.mine ? (
+                              <span className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-3 py-1 text-xs font-semibold disabled:opacity-50"
+                                  disabled={busy !== null}
+                                  aria-label={`Approve mapping ${m.accountCode}`}
+                                  onClick={() => void decide(m, "approved")}
+                                >
+                                  {busy === m.id ? "Deciding…" : "Approve"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="min-h-[var(--target)] rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-semibold disabled:opacity-50"
+                                  disabled={busy !== null}
+                                  aria-label={`Reject mapping ${m.accountCode}`}
+                                  onClick={() => void decide(m, "rejected")}
+                                >
+                                  Reject
+                                </button>
+                              </span>
+                            ) : m.status === "proposed" ? (
+                              <span className="text-xs text-[var(--ink-3)]">Yours; a different person decides it.</span>
+                            ) : (
+                              <span className="text-xs text-[var(--ink-3)]">Decided</span>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <form
+              className="mt-3 flex flex-wrap items-end gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (draft.accountCode.trim() && draft.accountName.trim()) void propose();
+              }}
+            >
+              <label className="flex flex-col text-sm">
+                <span className="mb-1 font-semibold text-[var(--ink-2)]">Bucket</span>
+                <select className="rounded-md border border-[var(--line)] bg-[var(--bg)] px-3 py-2" value={draft.glBucket} onChange={(e) => setDraft({ ...draft, glBucket: e.target.value })}>
+                  {GL_BUCKETS.map((b) => (
+                    <option key={b} value={b}>
+                      {b.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col text-sm">
+                <span className="mb-1 font-semibold text-[var(--ink-2)]">Kind</span>
+                <select className="rounded-md border border-[var(--line)] bg-[var(--bg)] px-3 py-2" value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
+                  {GL_KINDS.map((k) => (
+                    <option key={k} value={k}>
+                      {k.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col text-sm">
+                <span className="mb-1 font-semibold text-[var(--ink-2)]">Account code</span>
+                <input
+                  className="rounded-md border border-[var(--line)] bg-[var(--bg)] px-3 py-2"
+                  value={draft.accountCode}
+                  placeholder="1200"
+                  onChange={(e) => setDraft({ ...draft, accountCode: e.target.value })}
+                />
+              </label>
+              <label className="flex min-w-[12rem] flex-1 flex-col text-sm">
+                <span className="mb-1 font-semibold text-[var(--ink-2)]">Account name</span>
+                <input
+                  className="rounded-md border border-[var(--line)] bg-[var(--bg)] px-3 py-2"
+                  value={draft.accountName}
+                  placeholder="Patient receivables"
+                  onChange={(e) => setDraft({ ...draft, accountName: e.target.value })}
+                />
+              </label>
+              <label className="flex flex-col text-sm">
+                <span className="mb-1 font-semibold text-[var(--ink-2)]">Side</span>
+                <select className="rounded-md border border-[var(--line)] bg-[var(--bg)] px-3 py-2" value={draft.side} onChange={(e) => setDraft({ ...draft, side: e.target.value })}>
+                  {GL_SIDES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="submit"
+                className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                disabled={busy !== null || !draft.accountCode.trim() || !draft.accountName.trim()}
+              >
+                {busy === "propose" ? "Proposing…" : "Propose mapping"}
+              </button>
+            </form>
+          </section>
+
           <p className="max-w-prose text-xs text-[var(--ink-3)]">{state.data.package.scope}</p>
         </>
       )}

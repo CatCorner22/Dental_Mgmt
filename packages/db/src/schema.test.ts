@@ -35,6 +35,7 @@ const digestAcksSql = readFileSync(join(here, "../migrations/0024_digest_acks.sq
 const locationHoursSql = readFileSync(join(here, "../migrations/0025_locations_hours.sql"), "utf8");
 const afterHoursHoldSql = readFileSync(join(here, "../migrations/0026_after_hours_hold.sql"), "utf8");
 const hardEventAcksSql = readFileSync(join(here, "../migrations/0027_hard_event_acks.sql"), "utf8");
+const glMappingsSql = readFileSync(join(here, "../migrations/0028_gl_mappings.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -233,6 +234,25 @@ describe("Increment 1.33 hard-event acknowledgments", () => {
     expect(hardEventAcksSql).toMatch(/GRANT SELECT, INSERT ON hard_event_acks TO app_rw/);
     expect(hardEventAcksSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*hard_event_acks/);
     expect(TENANT_SCOPED_TABLES).toContain("hard_event_acks");
+  });
+});
+
+describe("Increment 1.35 GL mappings under maker-checker", () => {
+  it("keys a mapping by bucket, kind, and reason code, and lets only a different person decide it", () => {
+    expect(glMappingsSql).toMatch(/CREATE TABLE gl_mappings\b/);
+    expect(glMappingsSql).toMatch(/reason_code text NOT NULL DEFAULT '\*'/);
+    expect(glMappingsSql).toMatch(/side text NOT NULL CHECK \(side IN \('debit', 'credit'\)\)/);
+    expect(glMappingsSql).toMatch(/status text NOT NULL DEFAULT 'proposed' CHECK \(status IN \('proposed', 'approved', 'rejected'\)\)/);
+    expect(glMappingsSql).toMatch(/CONSTRAINT gl_mappings_maker_ne_checker CHECK \(decided_by_id IS NULL OR decided_by_id <> proposed_by_id\)/);
+    expect(glMappingsSql).toMatch(/CONSTRAINT gl_mappings_decision_complete/);
+    expect(glMappingsSql).toMatch(/CREATE UNIQUE INDEX gl_mappings_pending_uidx[\s\S]*WHERE status = 'proposed'/);
+    expect(glMappingsSql).toMatch(/gl_mappings_no_delete/);
+    expect(glMappingsSql).toMatch(/gl_mappings_decide_only/);
+    expect(glMappingsSql).toMatch(/ALTER TABLE gl_mappings FORCE ROW LEVEL SECURITY/);
+    expect(glMappingsSql).toMatch(/CREATE POLICY gl_mappings_isolation ON gl_mappings/);
+    expect(glMappingsSql).toMatch(/GRANT SELECT, INSERT, UPDATE ON gl_mappings TO app_rw/);
+    expect(glMappingsSql).not.toMatch(/GRANT[^\n]*DELETE[^\n]*gl_mappings/);
+    expect(TENANT_SCOPED_TABLES).toContain("gl_mappings");
   });
 });
 

@@ -9,6 +9,7 @@ import { ENFORCEMENT } from "../controls/enforcement";
 import { appendControlEvent } from "../controls/events";
 import { loadActivePolicy } from "../controls/policy";
 import { canonicalJson, computeDigest, type DigestPeriod, type WeeklyDigest } from "../digest/digest";
+import { activeMappings, pendingMappings, resolveMapping } from "./mappings";
 import { formatCents, formatLedgerKind } from "../ledger/format";
 
 /**
@@ -38,7 +39,15 @@ export function monthPeriod(month: string): DigestPeriod {
   return { start: startAt.toISOString().slice(0, 10), end: lastDay.toISOString().slice(0, 10), days, startAt, endAt };
 }
 
-export type JournalRow = { bucket: string; kind: string; label: string; count: number; cents: number };
+export type JournalRow = {
+  bucket: string;
+  kind: string;
+  label: string;
+  count: number;
+  cents: number;
+  /** The approved mapping for this line, or null when the practice has not mapped it (Increment 1.35). */
+  account: { code: string; name: string; side: string } | null;
+};
 export type ReasonRow = { code: string; kind: string; label: string; count: number; cents: number; withApproval: number };
 export type DepositRow = { method: string; status: string; count: number; cents: number };
 export type TieOut = { key: string; label: string; holds: boolean; detail: string };
@@ -51,6 +60,8 @@ export type MonthPackage = {
   depositRegister: { rows: DepositRow[]; count: number; totalCents: number };
   /** The same counts the weekly digest computes, over the month. */
   counts: WeeklyDigest;
+  /** The chart-of-accounts mapping in force, and what is still unmapped or waiting (Increment 1.35). */
+  mappings: { approved: number; pending: number; unmappedLines: number };
   controls: {
     coverage: { channel: string; label: string; enforcement: string; status: string; thresholdUsd: number; activeExceptions: number }[];
     activeExceptions: { id: string; label: string; action: string; channels: string[]; effectiveTo: string | null }[];
@@ -68,7 +79,7 @@ export type MonthPackage = {
 };
 
 export const PACKAGE_SCOPE =
-  "Every figure is the practice's for the calendar month, from the rows the product holds; journal lines carry the ledger bucket, the kind, and the reason code, never a patient or a poster. The package hash changes when any figure changes, so an accountant can tell whether a month moved after they took it.";
+  "Every figure is the practice's for the calendar month, from the rows the product holds; journal lines carry the ledger bucket, the kind, and the reason code, never a patient or a poster. Each line shows the account the practice mapped it to, or reads unmapped; a mapping is proposed by one person and approved by another. The package hash changes when any figure changes, so an accountant can tell whether a month moved after they took it.";
 
 export async function computeMonthPackage(db: AppDb, tenantId: string, month: string): Promise<MonthPackage> {
   const period = monthPeriod(month);
@@ -77,14 +88,28 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
 
   const counts = await computeDigest(db, tenantId, period);
 
-  // The journal: every posting of the month by ledger bucket and kind.
+  // The journal: every posting of the month by ledger bucket and kind, each line
+  // resolved to the account the practice mapped it to, or left plainly unmapped.
+  const active = await activeMappings(db, tenantId);
+  const pending = await pendingMappings(db, tenantId);
   const journalRows = await db
     .select({ bucket: ledgerEntries.glBucket, kind: ledgerEntries.kind, n: sql<number>`count(*)::int`, cents: sql<number>`coalesce(sum(${ledgerEntries.amountCents}), 0)::bigint` })
     .from(ledgerEntries)
     .where(inWindow(ledgerEntries, ledgerEntries.postedAt))
     .groupBy(ledgerEntries.glBucket, ledgerEntries.kind)
     .orderBy(ledgerEntries.glBucket, ledgerEntries.kind);
-  const journal = journalRows.map<JournalRow>((r) => ({ bucket: r.bucket, kind: r.kind, label: `${r.bucket.replace(/_/g, " ")} · ${formatLedgerKind(r.kind)}`, count: Number(r.n), cents: Number(r.cents) }));
+  const journal = journalRows.map<JournalRow>((r) => {
+    const mapping = resolveMapping(active, r.bucket, r.kind, null);
+    return {
+      bucket: r.bucket,
+      kind: r.kind,
+      label: `${r.bucket.replace(/_/g, " ")} · ${formatLedgerKind(r.kind)}`,
+      count: Number(r.n),
+      cents: Number(r.cents),
+      account: mapping ? { code: mapping.accountCode, name: mapping.accountName, side: mapping.side } : null,
+    };
+  });
+  const unmappedLines = journal.filter((r) => !r.account).length;
 
   // Adjustments, write-offs, refunds, and reversals by reason code, with how many cited an approval.
   const reasonRows = await db
@@ -111,9 +136,9 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
   const register = depositRows.map<DepositRow>((r) => ({ method: r.method, status: r.status, count: Number(r.n), cents: Number(r.cents) }));
 
   // Controls at month end: coverage, standing exceptions, the register, and attestations on external channels.
-  const active = await loadActivePolicy(db, tenantId);
-  const coverage = active ? channelCoverage(active.policy, ENFORCEMENT, period.end) : [];
-  const exceptions = (active?.policy.exceptions ?? []).filter((e: ThresholdException) => e.enabled && (!e.effectiveTo || e.effectiveTo >= period.end));
+  const policy = await loadActivePolicy(db, tenantId);
+  const coverage = policy ? channelCoverage(policy.policy, ENFORCEMENT, period.end) : [];
+  const exceptions = (policy?.policy.exceptions ?? []).filter((e: ThresholdException) => e.enabled && (!e.effectiveTo || e.effectiveTo >= period.end));
   const decisions = await listDecisions(db, tenantId);
   const asOfEnd = decisions.filter((d) => d.decidedAt < period.endAt.toISOString());
   const attestRows = await db
@@ -157,6 +182,15 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
       detail: `${registerCount} deposits totalling ${formatCents(registerTotal)} in the register; ${counts.bank.depositsPrepared} prepared.`,
     },
     {
+      key: "journal_mapped",
+      label: "Every journal line is mapped to an account",
+      holds: unmappedLines === 0,
+      detail:
+        unmappedLines === 0
+          ? `${journal.length} line${journal.length === 1 ? "" : "s"} mapped from ${active.size} approved mapping${active.size === 1 ? "" : "s"}.`
+          : `${unmappedLines} of ${journal.length} lines have no approved mapping${pending.length ? `; ${pending.length} proposal${pending.length === 1 ? "" : "s"} waiting for a second person` : ""}.`,
+    },
+    {
       key: "chain_verified",
       label: "The audit chain verified at its last check",
       holds: check?.ok === true,
@@ -173,6 +207,7 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
     reasons: { rows: reasons },
     depositRegister: { rows: register, count: registerCount, totalCents: registerTotal },
     counts,
+    mappings: { approved: active.size, pending: pending.length, unmappedLines },
     controls: {
       coverage: coverage.map((c) => ({ channel: c.channel, label: c.label, enforcement: c.enforcement, status: c.status, thresholdUsd: c.thresholdUsd, activeExceptions: c.activeExceptions })),
       activeExceptions: exceptions.map((e) => ({ id: e.id, label: e.label, action: e.action, channels: e.channels, effectiveTo: e.effectiveTo ?? null })),
@@ -209,7 +244,9 @@ function csvField(v: string | number): string {
 /** The package as flat rows: section, key, label, count, cents; the hash last. */
 export function packageRows(pkg: MonthPackage, hash: string): CsvRow[] {
   const rows: CsvRow[] = [];
-  for (const r of pkg.journal.rows) rows.push({ section: "journal", key: `${r.bucket}|${r.kind}`, label: r.label, count: r.count, cents: r.cents });
+  for (const r of pkg.journal.rows) {
+    rows.push({ section: "journal", key: `${r.bucket}|${r.kind}`, label: r.account ? `${r.label} → ${r.account.code} ${r.account.name} (${r.account.side})` : `${r.label} → unmapped`, count: r.count, cents: r.cents });
+  }
   rows.push({ section: "journal", key: "total", label: "Journal total", count: pkg.journal.entryCount, cents: pkg.journal.totalCents });
   for (const r of pkg.reasons.rows) rows.push({ section: "reasons", key: `${r.kind}|${r.code}`, label: `${r.label} (with approval: ${r.withApproval})`, count: r.count, cents: r.cents });
   for (const r of pkg.depositRegister.rows) rows.push({ section: "deposits", key: `${r.method}|${r.status}`, label: `${r.method} · ${r.status}`, count: r.count, cents: r.cents });
@@ -234,6 +271,9 @@ export function packageRows(pkg: MonthPackage, hash: string): CsvRow[] {
     ["alerts", "after_hours_holds", c.alerts.afterHoursHolds],
     ["alerts", "hard_events_acknowledged", c.alerts.hardEventsAcknowledged],
     ["chain", "events_in_month", pkg.chain.eventsInMonth],
+    ["mappings", "approved", pkg.mappings.approved],
+    ["mappings", "pending", pkg.mappings.pending],
+    ["mappings", "unmapped_journal_lines", pkg.mappings.unmappedLines],
   ];
   for (const [section, key, count] of flat) rows.push({ section, key, label: key.replace(/_/g, " "), count, cents: "" });
   for (const r of pkg.controls.coverage) rows.push({ section: "coverage", key: r.channel, label: `${r.label} · ${r.enforcement} · ${r.status}`, count: r.activeExceptions, cents: "" });

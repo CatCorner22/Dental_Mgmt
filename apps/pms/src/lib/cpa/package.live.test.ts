@@ -52,9 +52,12 @@ describe.skipIf(!adminUrl)("CPA month-end package (live)", () => {
     expect(pkg.tieOut.map((t) => [t.key, t.holds])).toEqual([
       ["journal_equals_postings", true],
       ["register_equals_deposits", true],
+      // Nothing is mapped on a fresh practice (Increment 1.35), and the chain has no check yet.
+      ["journal_mapped", false],
       ["chain_verified", false],
     ]);
-    expect(pkg.tieOut[2]!.detail).toMatch(/^No chain check recorded yet/);
+    expect(pkg.mappings).toEqual({ approved: 0, pending: 0, unmappedLines: pkg.journal.rows.length });
+    expect(pkg.tieOut[3]!.detail).toMatch(/^No chain check recorded yet/);
     expect(pkg.controls.coverage.map((c) => c.channel)).toEqual(["ach", "check", "writeoff", "vendor_new", "deposit", "payroll"]);
     // The development seed carries the engine's demo exceptions beside the after-hours hold; a real tenant
     // (defaultTenantPolicy) starts with the hold alone. Only the enabled, in-window ones are listed.

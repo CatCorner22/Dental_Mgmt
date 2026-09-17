@@ -731,6 +731,35 @@ export const hardEventAcks = pgTable(
   (t) => [uniqueIndex("hard_event_acks_event_uidx").on(t.tenantId, t.kind, t.subjectKind, t.subjectId)]
 );
 
+/**
+ * The tenant's chart-of-accounts mapping under maker-checker (Increment 1.35):
+ * one row per proposal, decided by someone other than the proposer.
+ */
+export const glMappings = pgTable(
+  "gl_mappings",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    glBucket: text("gl_bucket").notNull(),
+    kind: text("kind").notNull(),
+    /** The reason code, or "*" for every reason code on that bucket and kind. */
+    reasonCode: text("reason_code").notNull().default("*"),
+    accountCode: text("account_code").notNull(),
+    accountName: text("account_name").notNull(),
+    side: text("side").notNull(),
+    note: text("note").notNull().default(""),
+    status: text("status").notNull().default("proposed"),
+    proposedById: uuid("proposed_by_id").notNull(),
+    proposedByName: text("proposed_by_name").notNull(),
+    proposedAt: timestamp("proposed_at", { withTimezone: true }).notNull(),
+    decidedById: uuid("decided_by_id"),
+    decidedByName: text("decided_by_name"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    supersedesId: uuid("supersedes_id"),
+  },
+  (t) => [index("gl_mappings_tenant_key_idx").on(t.tenantId, t.glBucket, t.kind, t.reasonCode)]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "users",
@@ -765,4 +794,5 @@ export const TENANT_SCOPED_TABLES = [
   "control_findings",
   "digest_acks",
   "hard_event_acks",
+  "gl_mappings",
 ] as const;

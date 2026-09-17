@@ -335,11 +335,15 @@ describe.skipIf(!adminUrl)("Unmatched bank line detector (live)", () => {
     for (const r of rows) expect(JSON.stringify(r.detail)).not.toMatch(/Riley|Jordan|Owner|Blake/);
 
     // A second live holder of prepare_deposit closes that finding; bank_reconcile stays with one.
+    // The grant is dated before the as-of instant below, not from the wall clock: a grant the staff
+    // loader reads as live must precede the moment the detector runs, whatever time of day CI runs.
+    const secondHolderAt = new Date("2026-09-17T19:00:00Z");
+    const soleHolderAsOf = new Date("2026-09-17T20:00:00Z");
     await db.admin.query(
-      `INSERT INTO user_entitlements (id, tenant_id, user_id, entitlement, effective_from) VALUES ($1, $2, $3, 'prepare_deposit', now() - interval '1 hour')`,
-      [uuidv7(33_600), tenant.id, owner.id]
+      `INSERT INTO user_entitlements (id, tenant_id, user_id, entitlement, effective_from) VALUES ($1, $2, $3, 'prepare_deposit', $4)`,
+      [uuidv7(33_600), tenant.id, owner.id, secondHolderAt.toISOString()]
     );
-    const after = await tx((d) => refreshSoleHolderFindings(d, tenant.id, new Date("2026-09-17T20:00:00Z")));
+    const after = await tx((d) => refreshSoleHolderFindings(d, tenant.id, soleHolderAsOf));
     expect(after).toMatchObject({ closed: 1, refreshed: 1, open: 1 });
     const closed = (await tx((d) => listControlFindings(d, tenant.id))).find((r) => r.kind === SOLE_HOLDER_KIND && r.subjectId === "prepare_deposit");
     expect(closed).toMatchObject({ status: "closed", closedReason: "a second holder is live, or none is" });
