@@ -36,6 +36,10 @@ export type LedgerExplanationRow = {
   reasonLabel: string | null;
   posterName: string;
   memo: string | null;
+  /** The entry this row corrects, on both halves of a correction pair (Increment 1.37). */
+  correctsEntryId: string | null;
+  /** Set on the reversal half alone; the repost carries correctsEntryId only. */
+  reversesEntryId: string | null;
 };
 
 export type LedgerAccountDetail = {
