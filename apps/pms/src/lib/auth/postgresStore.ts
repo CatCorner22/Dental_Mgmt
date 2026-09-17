@@ -442,6 +442,18 @@ export function createPostgresStore(
           .where(eq(users.id, userId));
       }, env);
     },
+    async consumeMfaStep(userId, step) {
+      const user = await this.getUserById(userId);
+      if (!user) return false;
+      return withTenantTransaction(user.tenantId, userId, async (db) => {
+        const updated = await db
+          .update(users)
+          .set({ mfaLastStep: step })
+          .where(and(eq(users.id, userId), or(isNull(users.mfaLastStep), lt(users.mfaLastStep, step))))
+          .returning({ id: users.id });
+        return updated.length > 0;
+      }, env);
+    },
     async setTenantContext() {
       // Tenant binding is applied inside withTenantTransaction on each write.
     },

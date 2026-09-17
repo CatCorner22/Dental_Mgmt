@@ -1,4 +1,4 @@
--- Increment 1.36: three closures the roles-and-RLS layer left open.
+-- Increment 1.36: four closures the roles-and-RLS layer left open.
 --
 -- 1. A bank account belongs to one tenant. Rows keyed by (tenant_id,
 --    bank_account_id) must name an account of that same tenant, so the pair
@@ -12,6 +12,10 @@
 -- 3. auth_lookup_recovery_ceremony runs as app_auth_lookup before a tenant is
 --    bound; that role reads recovery_ceremonies the way it reads users and
 --    sessions (0003), and nothing else.
+-- 4. A TOTP code is single-use (RFC 6238 §5.2): the step that last opened a
+--    session is kept on the user so an equal or earlier step is refused.
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS mfa_last_step bigint;
 
 ALTER TABLE bank_accounts ADD CONSTRAINT bank_accounts_tenant_id_key UNIQUE (tenant_id, id);
 

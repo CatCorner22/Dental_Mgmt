@@ -43,14 +43,15 @@ export async function recordFailure(
     };
   } else if (existing.lockedUntil && existing.lockedUntil.getTime() > now.getTime()) {
     next = existing;
-  } else if (existing.lockedUntil && existing.lockedUntil.getTime() <= now.getTime()) {
-    next = { key, tenantId: existing.tenantId, failCount: 1, firstFailAt: now, lockedUntil: null };
   } else if (existing.firstFailAt.getTime() < windowStart.getTime()) {
     next = { key, tenantId: existing.tenantId, failCount: 1, firstFailAt: now, lockedUntil: null };
   } else {
+    // A lapsed lock inside the window keeps counting, so each lock is longer
+    // than the one before it until the window itself expires.
     next = {
       ...existing,
       failCount: existing.failCount + 1,
+      lockedUntil: null,
     };
   }
 

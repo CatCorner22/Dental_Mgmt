@@ -120,12 +120,14 @@ describe.skipIf(!adminUrl)("Postgres auth store (live)", () => {
 
   it("re-reads the session row on every guarded call and honours revocation", async () => {
     const store = createPostgresStore(env);
-    const code = currentCodeForTest(owner.username, DEV_MFA_SECRET, now.getTime());
+    // A TOTP step is single-use, so this second sign-in happens one step later.
+    const later = new Date(now.getTime() + 30_000);
+    const code = currentCodeForTest(owner.username, DEV_MFA_SECRET, later.getTime());
     const result = await authorizeCredentials(
       store,
       { username: owner.username, password: DEV_PASSWORD, totp: code },
       loginReq(),
-      now,
+      later,
       env
     );
     expect(result.ok).toBe(true);

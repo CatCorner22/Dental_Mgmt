@@ -3,7 +3,9 @@ import { generateMfaSecret, mfaEnrollmentUri, verifyMfaCode } from "./totp";
 import { generateRecoveryCodes, hashRecoveryCodes } from "./recovery";
 import type { AuthStore } from "./store";
 
-export type EnrollStart = { ok: true; otpauthUri: string };
+export type EnrollStart =
+  | { ok: true; otpauthUri: string }
+  | { ok: false; reason: "already_enrolled" | "missing_user" };
 export type EnrollComplete =
   | { ok: true; recoveryCodes: string[] }
   | { ok: false; reason: "already_enrolled" | "invalid_code" | "missing_user" };
@@ -19,8 +21,8 @@ export async function beginMfaEnrollment(
   env: Record<string, string | undefined> = process.env
 ): Promise<EnrollStart> {
   const user = await store.getUserById(userId);
-  if (!user) throw new Error("User not found.");
-  if (user.mfaEnrolledAt) throw new Error("MFA is already enrolled.");
+  if (!user) return { ok: false, reason: "missing_user" };
+  if (user.mfaEnrolledAt) return { ok: false, reason: "already_enrolled" };
   const secret = generateMfaSecret();
   const secretEnc = encryptSecret(secret, cryptoEnv(env));
   await store.setMfaPendingSecret(userId, secretEnc);

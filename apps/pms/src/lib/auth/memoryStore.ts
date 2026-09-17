@@ -80,6 +80,7 @@ export async function createMemoryStore(
 
   const sessions = new Map<string, SessionRow>();
   const throttle = new Map<string, ThrottleRow>();
+  const mfaLastStep = new Map<string, number>();
   const lastEventHash = new Map<string, string>();
   const ceremonies = new Map<string, CeremonyRow>();
 
@@ -243,6 +244,12 @@ export async function createMemoryStore(
       const user = users.get(userId);
       if (!user) return;
       users.set(userId, { ...user, passwordHash, passwordChangedAt });
+    },
+    async consumeMfaStep(userId, step) {
+      const last = mfaLastStep.get(userId);
+      if (last !== undefined && last >= step) return false;
+      mfaLastStep.set(userId, step);
+      return true;
     },
     async getThrottle(key) {
       const row = throttle.get(key);
