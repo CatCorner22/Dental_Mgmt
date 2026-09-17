@@ -12,6 +12,7 @@ const LINKS: { href: string; label: string }[] = [
   { href: "/approvals", label: "Approvals inbox" },
   { href: "/risk", label: "Practice Risk" },
   { href: "/digest", label: "Weekly digest" },
+  { href: "/locations", label: "Locations" },
 ];
 
 export default function HomePage() {

@@ -80,7 +80,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await approvals.innerText()).toMatch(/1[\s\S]*\$75\.00 held until a second person decides/);
     expect(await page().getByText(/No control decision comes up for review/).count()).toBe(1);
     expect(await page().getByText(/Segregation health\. COSO overall \d+/).count()).toBe(1);
-    for (const name of ["Open ledger", "Post payment", "Bank reconciliation", "Day close", "Statements", "Approvals inbox", "Practice Risk", "Weekly digest"]) {
+    for (const name of ["Open ledger", "Post payment", "Bank reconciliation", "Day close", "Statements", "Approvals inbox", "Practice Risk", "Weekly digest", "Locations"]) {
       expect(await page().locator("main").getByRole("link", { name, exact: true }).count()).toBe(1);
     }
     await b.audit("home (owner, no bank record)");
@@ -336,5 +336,38 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().getByText(/The digest is for the manager and owner seats/).waitFor({ timeout: 60_000 });
     expect(await page().getByRole("button", { name: "Acknowledge this week" }).count()).toBe(0);
     await b.audit("digest (front desk refusal)");
+  }, 150_000);
+
+  it("lets the owner set a location's hours, the week the after-hours hold reads, and gives the front desk nothing to edit", async () => {
+    await b.signIn("ridgeview-owner", "/locations");
+    const main = page().locator("section", { has: page().getByRole("heading", { name: "Main", exact: true }) });
+    await main.waitFor({ timeout: 60_000 });
+    expect(await main.innerText()).toMatch(/Timezone America\/Chicago/);
+    expect(await main.getByLabel("Main Friday opens").inputValue()).toBe("07:00");
+    expect(await main.getByLabel("Main Friday closes").inputValue()).toBe("17:00");
+    expect(await main.getByLabel("Main Saturday closed").isChecked()).toBe(true);
+    expect(await main.getByLabel("Main Saturday opens").isDisabled()).toBe(true);
+    await b.audit("locations (owner)");
+
+    // Friday evening clinic: the close moves to 18:00, and the page says what moved.
+    await main.getByLabel("Main Friday closes").fill("18:00");
+    await main.getByRole("button", { name: "Save Main" }).click();
+    await flash(/^Saved Main: Friday 07:00 to 17:00 → 07:00 to 18:00\. The after-hours hold reads these hours from the next posting\./).waitFor({ timeout: 30_000 });
+    await page().reload();
+    await main.waitFor({ timeout: 60_000 });
+    expect(await main.getByLabel("Main Friday closes").inputValue()).toBe("18:00");
+
+    // Saving the same week writes nothing; a window that closes before it opens is refused with the day named.
+    await main.getByRole("button", { name: "Save Main" }).click();
+    await flash(/^No change to Main: the week is as it was\./).waitFor({ timeout: 30_000 });
+    await main.getByLabel("Main Monday opens").fill("20:00");
+    await main.getByRole("button", { name: "Save Main" }).click();
+    await flash(/Monday must open before it closes \(20:00 to 19:00\)\./).waitFor({ timeout: 30_000 });
+    await b.audit("locations (owner, refused window)");
+
+    await b.signIn("ridgeview-front", "/locations");
+    await page().getByText(/Location hours are for the manager and owner seats/).waitFor({ timeout: 60_000 });
+    expect(await page().getByRole("button", { name: /^Save / }).count()).toBe(0);
+    await b.audit("locations (front desk refusal)");
   }, 150_000);
 });

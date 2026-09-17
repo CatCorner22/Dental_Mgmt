@@ -259,7 +259,7 @@ export function DigestView() {
                 ["All-sessions revocations", state.data.digest.access.sessionsRevoked],
                 ["Duties granted", state.data.digest.access.granted],
                 ["Duties revoked", state.data.digest.access.revoked],
-                ["Control policy changes", state.data.digest.access.policyChanges],
+                ["Control policy and location-hours changes", state.data.digest.access.policyChanges],
               ])}
               empty="No access events."
             />

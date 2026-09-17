@@ -47,3 +47,62 @@ export function isOutsideHours(hours: WeekHours, weekday: Weekday, hhmm: string)
 export function hoursPhrase(locationName: string, window: [string, string] | null): string {
   return window ? `${locationName} is open ${window[0]} to ${window[1]} that day` : `${locationName} is closed that day`;
 }
+
+/** A complete week: every weekday present, each a window or null (closed). */
+export type WeekHoursComplete = Record<Weekday, [string, string] | null>;
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** "HH:MM" on a 24-hour clock. */
+export function isHHMM(value: unknown): value is string {
+  return typeof value === "string" && HHMM.test(value);
+}
+
+/**
+ * Validates a week as the owner submits it (Increment 1.32). Every weekday
+ * must be present, as a ["HH:MM", "HH:MM"] window that opens before it
+ * closes or null for a closed day; nothing else is stored. The after-hours
+ * hold reads exactly this shape, so nothing malformed may reach the row.
+ */
+export function validateWeekHours(input: unknown): { ok: true; hours: WeekHoursComplete } | { ok: false; errors: string[] } {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { ok: false, errors: ["Hours must be an object with one entry per weekday."] };
+  }
+  const obj = input as Record<string, unknown>;
+  const errors: string[] = [];
+  for (const key of Object.keys(obj)) {
+    if (!(WEEKDAYS as readonly string[]).includes(key)) errors.push(`Unknown weekday "${key}".`);
+  }
+  const out = {} as WeekHoursComplete;
+  for (const day of WEEKDAYS) {
+    if (!(day in obj)) {
+      errors.push(`${WEEKDAY_LABEL[day]} is missing; give a window or mark it closed.`);
+      continue;
+    }
+    const v = obj[day];
+    if (v === null) {
+      out[day] = null;
+      continue;
+    }
+    if (!Array.isArray(v) || v.length !== 2 || !isHHMM(v[0]) || !isHHMM(v[1])) {
+      errors.push(`${WEEKDAY_LABEL[day]} must be an opening and a closing time as HH:MM on a 24-hour clock, or closed.`);
+      continue;
+    }
+    if (v[0] >= v[1]) {
+      errors.push(`${WEEKDAY_LABEL[day]} must open before it closes (${v[0]} to ${v[1]}).`);
+      continue;
+    }
+    out[day] = [v[0], v[1]];
+  }
+  return errors.length ? { ok: false, errors } : { ok: true, hours: out };
+}
+
+/** "07:00 to 17:00" or "closed". */
+export function windowPhrase(window: [string, string] | null | undefined): string {
+  return window ? `${window[0]} to ${window[1]}` : "closed";
+}
+
+/** The weekdays whose window differs between two weeks, in week order. */
+export function changedDays(before: WeekHours, after: WeekHours): Weekday[] {
+  return WEEKDAYS.filter((d) => JSON.stringify(before[d] ?? null) !== JSON.stringify(after[d] ?? null));
+}
