@@ -6,9 +6,17 @@ function pkg(over: Partial<MonthPackage> = {}): MonthPackage {
   return {
     month: "2026-09",
     period: { start: "2026-09-01", end: "2026-09-30", days: 30 },
-    journal: { rows: [{ bucket: "patient_ar", kind: "patient_payment", label: "patient ar · Patient payment", count: 2, cents: -7_500 }], entryCount: 2, totalCents: -7_500 },
+    journal: {
+      rows: [
+        { bucket: "patient_ar", kind: "patient_payment", label: "patient ar · Patient payment", count: 2, cents: -7_500, account: { code: "1200", name: "Patient receivables", side: "credit" } },
+        { bucket: "patient_ar", kind: "write_off", label: "patient ar · Write-off", count: 1, cents: -20_000, account: null },
+      ],
+      entryCount: 3,
+      totalCents: -27_500,
+    },
     reasons: { rows: [{ code: "courtesy", kind: "write_off", label: "Write-off · courtesy", count: 1, cents: -20_000, withApproval: 1 }] },
     depositRegister: { rows: [{ method: "cash", status: "open", count: 1, cents: 25_000 }], count: 1, totalCents: 25_000 },
+    mappings: { approved: 1, pending: 1, unmappedLines: 1 },
     counts: {
       period: { start: "2026-09-01", end: "2026-09-30", days: 30 },
       money: { postings: [{ key: "patient_payment", label: "Patient payment", count: 2, cents: -7_500 }], postingCount: 2, guardedWithSecond: 1, guardedWithoutSecond: 0 },
@@ -48,7 +56,7 @@ describe("monthPeriod (Increment 1.34)", () => {
 describe("packageHash and the flat rows", () => {
   it("is stable across key order and moves when a figure moves", () => {
     const a = pkg();
-    const reordered = JSON.parse(JSON.stringify({ scope: a.scope, tieOut: a.tieOut, chain: a.chain, controls: a.controls, counts: a.counts, depositRegister: a.depositRegister, reasons: a.reasons, journal: a.journal, period: a.period, month: a.month })) as MonthPackage;
+    const reordered = JSON.parse(JSON.stringify({ scope: a.scope, tieOut: a.tieOut, chain: a.chain, controls: a.controls, mappings: a.mappings, counts: a.counts, depositRegister: a.depositRegister, reasons: a.reasons, journal: a.journal, period: a.period, month: a.month })) as MonthPackage;
     expect(packageHash(reordered)).toBe(packageHash(a));
     expect(packageHash(pkg({ journal: { ...a.journal, totalCents: -7_600 } }))).not.toBe(packageHash(a));
   });
@@ -57,7 +65,9 @@ describe("packageHash and the flat rows", () => {
     const a = pkg();
     const hash = packageHash(a);
     const rows = packageRows(a, hash);
-    expect(rows[0]).toEqual({ section: "journal", key: "patient_ar|patient_payment", label: "patient ar · Patient payment", count: 2, cents: -7_500 });
+    expect(rows[0]).toEqual({ section: "journal", key: "patient_ar|patient_payment", label: "patient ar · Patient payment → 1200 Patient receivables (credit)", count: 2, cents: -7_500 });
+    expect(rows[1]).toMatchObject({ section: "journal", key: "patient_ar|write_off", label: "patient ar · Write-off → unmapped" });
+    expect(rows.find((r) => r.key === "unmapped_journal_lines")).toMatchObject({ section: "mappings", count: 1 });
     expect(rows.find((r) => r.section === "reasons")?.label).toBe("Write-off · courtesy (with approval: 1)");
     expect(rows.find((r) => r.key === "after_hours_holds")).toMatchObject({ section: "alerts", count: 0 });
     expect(rows.find((r) => r.section === "tie_out")?.label).toMatch(/^Journal totals equal the month's ledger postings: yes\./);
