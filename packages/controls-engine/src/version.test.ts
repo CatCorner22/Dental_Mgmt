@@ -8,6 +8,6 @@ describe("version stamps", () => {
     expect(typeof SCORING_VERSION).toBe("string");
     expect(SCORING_VERSION.length).toBeGreaterThan(0);
     expect(SCORING_VERSION).toBe("precog-residual-v1.1.0");
-    expect(CONTROL_RULEBOOK_VERSION).toBe("0.2.0");
+    expect(CONTROL_RULEBOOK_VERSION).toBe("0.2.1");
   });
 });

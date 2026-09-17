@@ -42,9 +42,21 @@ export interface AssignmentsFromGrants {
   unknownEntitlements: { personId: string; entitlement: string }[];
 }
 
+const DAY_MS = 86_400_000;
+
+/** A bare date spans its whole UTC day; an ISO timestamp is one instant. */
+function instant(value: string, edge: "start" | "end"): number {
+  if (value.includes("T")) return Date.parse(value);
+  const start = Date.parse(`${value}T00:00:00.000Z`);
+  return edge === "start" ? start : start + DAY_MS - 1;
+}
+
+/** Live at some instant of the asOf day (or at the asOf instant itself). */
 function isActive(row: GrantRow, asOf: string): boolean {
-  if (row.effectiveFrom && row.effectiveFrom.slice(0, 10) > asOf) return false;
-  if (row.effectiveTo && row.effectiveTo.slice(0, 10) <= asOf) return false;
+  const asOfStart = instant(asOf, "start");
+  const asOfEnd = instant(asOf, "end");
+  if (row.effectiveFrom && instant(row.effectiveFrom, "start") > asOfEnd) return false;
+  if (row.effectiveTo && instant(row.effectiveTo, "end") <= asOfStart) return false;
   return true;
 }
 

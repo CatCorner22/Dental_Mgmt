@@ -594,7 +594,9 @@ export function evaluateRelease(
   }
 
   const matches = matchExceptions(policy, request, people);
-  const topEx = matches[0];
+  // A hold outranks any loosening: a matching force_dual applies whatever its
+  // specificity, so a raise or waiver can never talk the practice out of it.
+  const topEx = matches.find((ex) => ex.action === "force_dual") ?? matches[0];
   const resolved = resolveEffectiveThreshold(rule.thresholdUsd, topEx);
   const reportedThreshold = resolved.thresholdUsd;
   const dualRequired = resolved.forceDual
