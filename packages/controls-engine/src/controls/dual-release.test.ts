@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { ridgeviewPractice } from "../fixtures/ridgeview";
+import { validateThresholdException } from "../exceptions";
 import {
+  AFTER_HOURS_HOLD_EXCEPTION,
   defaultDualReleasePolicy,
   evaluateRelease,
   mergeDualReleasePolicy,
@@ -168,5 +170,35 @@ describe("evaluateRelease", () => {
     );
     expect(evaluation.status).toBe("blocked_policy_off");
     expectFiniteMoney(evaluation);
+  });
+});
+
+describe("the after-hours hold (hours scope)", () => {
+  const people = ridgeviewPractice().people;
+  const om = "p2";
+
+  it("forces a second person on a small write-off only when the caller marks the release outside hours", () => {
+    const policy = enabledPolicy([AFTER_HOURS_HOLD_EXCEPTION]);
+    const inHours = evaluateRelease(policy, { channel: "writeoff", amountUsd: 40, initiatorPersonId: om }, people);
+    expect(inHours.status).toBe("below_threshold");
+    expect(inHours.dualRequired).toBe(false);
+
+    const afterHours = evaluateRelease(policy, { channel: "writeoff", amountUsd: 40, initiatorPersonId: om, outsideBusinessHours: true }, people);
+    expect(afterHours.dualRequired).toBe(true);
+    expect(afterHours.status).toBe("blocked_missing_second");
+    expect(afterHours.reasons[0]).toBe('Exception "After-hours hold" forces dual release.');
+    expect(afterHours.appliedException?.id).toBe("ex-after-hours-hold");
+    expectFiniteMoney(afterHours);
+
+    // The hold covers the ledger's refund channel too, and no other.
+    expect(evaluateRelease(policy, { channel: "check", amountUsd: 40, initiatorPersonId: om, outsideBusinessHours: true }, people).dualRequired).toBe(true);
+    expect(evaluateRelease(policy, { channel: "ach", amountUsd: 40, initiatorPersonId: om, outsideBusinessHours: true }, people).dualRequired).toBe(false);
+  });
+
+  it("is a boolean scope in validation", () => {
+    expect(validateThresholdException(AFTER_HOURS_HOLD_EXCEPTION, "2026-09-17").ok).toBe(true);
+    expect(
+      validateThresholdException({ ...AFTER_HOURS_HOLD_EXCEPTION, outsideBusinessHours: "yes" as unknown as boolean }, "2026-09-17").errors[0]
+    ).toMatch(/outsideBusinessHours must be true or false/);
   });
 });

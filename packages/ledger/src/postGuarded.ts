@@ -31,6 +31,12 @@ export type GuardedPostInput = PostEntryInput & {
   secondPersonId?: string;
   policy: DualReleasePolicy;
   people: Person[];
+  /**
+   * True when the caller found the posting outside the location's business
+   * hours (Increment 1.30). The evaluator hands it to the hours-scoped
+   * exceptions; the caller, never this package, reads the clock.
+   */
+  outsideBusinessHours?: boolean;
 };
 
 function refusalFromEvaluation(evaluation: ReleaseEvaluation): PostRefusal {
@@ -87,6 +93,7 @@ export async function postGuarded(
       initiatorPersonId: input.createdById,
       secondPersonId: input.secondPersonId,
       memo: input.memo ?? undefined,
+      outsideBusinessHours: input.outsideBusinessHours ?? input.afterHours != null,
     },
     input.people
   );

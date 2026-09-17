@@ -1,10 +1,11 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { ReleaseEvaluation } from "@pms/controls-engine";
-import { ledgerEntries, paymentAllocations, patients, users, userEntitlements } from "@pms/db";
+import { ledgerEntries, locations, paymentAllocations, patients, users, userEntitlements } from "@pms/db";
 import {
   CHANNEL_BY_KIND,
   createPostEntry,
   postGuarded,
+  type AfterHoursFacts,
   type LedgerEntry,
   type LedgerWriter,
   type PostEntryInput,
@@ -14,6 +15,7 @@ import { createApprovalRequest } from "../controls/approvals";
 import { staffToPeople } from "../controls/people";
 import { loadActivePolicy } from "../controls/policy";
 import type { AppDb } from "../db/client";
+import { hoursPhrase, isOutsideHours, localClock, WEEKDAY_LABEL, type WeekHours } from "../locations/hours";
 
 import { POSTABLE_KINDS, type PostableKind } from "./types";
 
@@ -221,6 +223,31 @@ async function assertAccountPatient(
   return { locationId: patient.locationId };
 }
 
+/**
+ * Whether a posting at `at` falls outside the location's business hours,
+ * read from the location's stored week and the server clock (Increment
+ * 1.30). Null when the location is open at that moment or is unknown.
+ */
+export async function afterHoursFactsFor(db: AppDb, tenantId: string, locationId: string, at: Date): Promise<AfterHoursFacts | null> {
+  const rows = await db
+    .select({ name: locations.name, timezone: locations.timezone, hours: locations.hours })
+    .from(locations)
+    .where(and(eq(locations.tenantId, tenantId), eq(locations.id, locationId)))
+    .limit(1);
+  const site = rows[0];
+  if (!site) return null;
+  const clock = localClock(at, site.timezone);
+  const check = isOutsideHours((site.hours ?? {}) as WeekHours, clock.weekday, clock.hhmm);
+  if (!check.outside) return null;
+  return { locationName: site.name, weekday: clock.weekday, date: clock.date, hhmm: clock.hhmm, window: check.window };
+}
+
+/** "Posted at 21:30 local time on Tuesday 2026-09-15; Main is open 07:00 to 19:00 that day." */
+export function afterHoursLine(facts: AfterHoursFacts): string {
+  const day = WEEKDAY_LABEL[facts.weekday as keyof typeof WEEKDAY_LABEL] ?? facts.weekday;
+  return `Posted at ${facts.hhmm} local time on ${day} ${facts.date}; ${hoursPhrase(facts.locationName, facts.window)}.`;
+}
+
 export async function postLedgerEntry(
   db: AppDb,
   input: {
@@ -228,9 +255,12 @@ export async function postLedgerEntry(
     actorId: string;
     actorName: string;
     post: PostLedgerInput;
+    /** The server's clock; injectable for tests. */
+    now?: Date;
   }
 ): Promise<PostLedgerResult> {
   const { tenantId, actorId, actorName, post } = input;
+  const now = input.now ?? new Date();
   const amountCents = normalizeAmountCents(post.kind, post.amountCents);
 
   if (post.kind === "charge" && !post.procedureId) {
@@ -283,6 +313,8 @@ export async function postLedgerEntry(
   }
 
   const people = await loadStaff(db, tenantId);
+  // The after-hours hold reads the location's stored week and the server clock, never the browser.
+  const afterHours = await afterHoursFactsFor(db, tenantId, context.locationId, now);
   const payload: PostEntryInput = {
     tenantId,
     accountId: post.accountId,
@@ -293,11 +325,13 @@ export async function postLedgerEntry(
     amountCents,
     reasonCode: post.reasonCode ?? null,
     effectiveDate: post.effectiveDate,
+    postedAt: now.toISOString(),
     createdById: actorId,
     createdByName: actorName,
     procedureId: post.procedureId ?? null,
     tender: post.tender ?? null,
     memo: post.memo ?? null,
+    afterHours,
   };
 
   const writer = makePostgresWriter(db, tenantId);
@@ -306,6 +340,7 @@ export async function postLedgerEntry(
     ...payload,
     policy: active.policy,
     people,
+    outsideBusinessHours: afterHours != null,
   });
 
   if (!result.ok && result.code === "needs_second" && result.held && result.evaluation) {
@@ -338,7 +373,8 @@ export async function postLedgerEntry(
       approvalRequestId: request.id,
       verb: result.verb,
       control: result.control,
-      why: result.why,
+      // The held card says when and where, so the poster learns the rule from the refusal itself.
+      why: afterHours ? `${result.why} ${afterHoursLine(afterHours)}` : result.why,
     };
   }
 

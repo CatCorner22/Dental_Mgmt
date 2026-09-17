@@ -34,7 +34,9 @@ export type ExceptionScope =
   | "person"
   | "role"
   | "channel"
-  | "amount_band";
+  | "amount_band"
+  /** Matches only a release made outside the location's business hours (Increment 1.30). */
+  | "hours";
 
 export interface ThresholdException {
   id: string;
@@ -51,6 +53,13 @@ export interface ThresholdException {
   /** Amount band: match when request amount is within [min, max] */
   amountMinUsd?: number;
   amountMaxUsd?: number;
+  /**
+   * Hours scope: when true, the exception matches only a request the caller
+   * marked as made outside the location's business hours. The caller reads
+   * the location's stored week and the server clock; the engine only
+   * trusts the flag it is handed.
+   */
+  outsideBusinessHours?: boolean;
   /** ISO date YYYY-MM-DD inclusive */
   effectiveFrom?: string;
   effectiveTo?: string;
@@ -61,6 +70,25 @@ export interface ThresholdException {
   /** Residual risk note when waive/raise is used */
   residualNote?: string;
 }
+
+/**
+ * The after-hours hold (docs/13; Increment 1.30): a refund, adjustment, or
+ * write-off posted outside the location's business hours needs a second
+ * person whatever the amount. A force_dual exception on the two ledger
+ * channels those kinds map to, matched by the hours scope. New tenants
+ * start with it; the database trigger enforces the same floor.
+ */
+export const AFTER_HOURS_HOLD_EXCEPTION: ThresholdException = {
+  id: "ex-after-hours-hold",
+  label: "After-hours hold",
+  channels: ["writeoff", "check"],
+  action: "force_dual",
+  outsideBusinessHours: true,
+  enabled: true,
+  reason:
+    "A refund, adjustment, or write-off posted outside the location's business hours needs a second person, whatever the amount. The evening posting is the classic cover move.",
+  createdAt: "2026-09-17",
+};
 
 export interface DualReleaseRule {
   channel: ReleaseChannel;
@@ -95,6 +123,8 @@ export interface ReleaseRequest {
   payee?: string;
   /** Evaluation as-of date (ISO date); defaults to today */
   asOfDate?: string;
+  /** True when the caller found the release outside the location's business hours. */
+  outsideBusinessHours?: boolean;
 }
 
 export type ReleaseStatus =
@@ -345,6 +375,7 @@ function exceptionSpecificity(ex: ThresholdException): number {
   if (ex.payeeContains) s += 40;
   if (ex.personId) s += 30;
   if (ex.role) s += 20;
+  if (ex.outsideBusinessHours) s += 25;
   if (ex.amountMinUsd != null || ex.amountMaxUsd != null) s += 15;
   if (ex.channels.length === 1) s += 10;
   if (ex.effectiveFrom || ex.effectiveTo) s += 5;
@@ -355,7 +386,7 @@ export function matchExceptions(
   policy: DualReleasePolicy,
   request: Pick<
     ReleaseRequest,
-    "channel" | "amountUsd" | "initiatorPersonId" | "payee" | "asOfDate"
+    "channel" | "amountUsd" | "initiatorPersonId" | "payee" | "asOfDate" | "outsideBusinessHours"
   >,
   people: Person[],
 ): ThresholdException[] {
@@ -369,6 +400,7 @@ export function matchExceptions(
     if (ex.channels.length > 0 && !ex.channels.includes(request.channel)) {
       return false;
     }
+    if (ex.outsideBusinessHours && request.outsideBusinessHours !== true) return false;
     if (ex.payeeContains) {
       if (!payee.includes(ex.payeeContains.toLowerCase())) return false;
     }

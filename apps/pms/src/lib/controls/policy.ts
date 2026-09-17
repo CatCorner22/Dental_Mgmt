@@ -1,5 +1,6 @@
 import { eq, desc } from "drizzle-orm";
 import {
+  AFTER_HOURS_HOLD_EXCEPTION,
   CONTROL_RULEBOOK_VERSION,
   type DualReleasePolicy,
   mergeDualReleasePolicy,
@@ -33,15 +34,17 @@ export async function loadActivePolicy(db: AppDb, tenantId: string): Promise<Act
 
 /**
  * A new tenant starts with every channel on, held postings instead of hard
- * blocks, and no exceptions. The engine's sample exceptions are demo data;
- * a real exception arrives only through addException with an owner's
- * reason, residual note, and window.
+ * blocks, and one exception: the after-hours hold (Increment 1.30), which
+ * forces a second person on a refund, adjustment, or write-off posted
+ * outside the location's business hours. The engine's sample exceptions
+ * are demo data; any other exception arrives only through addException
+ * with an owner's reason, residual note, and window.
  */
 export function defaultTenantPolicy(): DualReleasePolicy {
   return mergeDualReleasePolicy({
     enabled: true,
     hardBlockWithoutSecond: false,
-    exceptions: [],
+    exceptions: [AFTER_HOURS_HOLD_EXCEPTION],
   });
 }
 

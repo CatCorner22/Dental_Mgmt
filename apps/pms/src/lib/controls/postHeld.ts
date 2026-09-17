@@ -51,6 +51,8 @@ export async function executeHeldPosting(
         secondPersonId: approverId,
         policy: context.policy,
         people: context.people,
+        // The hold was made on the clock at request time; the approval re-evaluates on the same fact.
+        outsideBusinessHours: payload.afterHours != null,
       });
 
       if (!result.ok) return result;

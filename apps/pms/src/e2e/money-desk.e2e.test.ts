@@ -131,6 +131,8 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await b.audit("approvals inbox with two requests");
 
     const held = items.filter({ hasText: "$200.00" });
+    // The card says why it was held: above the threshold in hours, or the after-hours hold when CI runs at night.
+    expect(await held.innerText()).toMatch(/Why held: (Dual release required above \$150\.|Exception "After-hours hold" forces dual release\. Posted at \d{2}:\d{2} local time)/);
     await held.getByRole("button", { name: "Approve" }).click();
     await flash(/^Request approved\./).waitFor({ timeout: 30_000 });
     expect(await items.count()).toBe(1);

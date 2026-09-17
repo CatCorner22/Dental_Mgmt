@@ -1,5 +1,7 @@
 import {
+  AFTER_HOURS_HOLD_EXCEPTION,
   CONTROL_RULEBOOK_VERSION,
+  defaultDualReleasePolicy,
   mergeDualReleasePolicy,
 } from "@pms/controls-engine";
 import type { EncryptedBlob } from "./crypto";
@@ -117,9 +119,11 @@ export async function seedDatabase(
   for (const t of DEV_TENANTS) {
     const owner = DEV_USERS.find((u) => u.tenantId === t.id && u.role === "admin");
     if (!owner) continue;
+    // The engine's sample exceptions plus the after-hours hold every tenant starts with (Increment 1.30).
     const policy = mergeDualReleasePolicy({
       enabled: true,
       hardBlockWithoutSecond: false,
+      exceptions: [...defaultDualReleasePolicy().exceptions, AFTER_HOURS_HOLD_EXCEPTION],
     });
     await db.query(
       `INSERT INTO control_policies (

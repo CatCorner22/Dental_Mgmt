@@ -32,6 +32,9 @@ export function validateThresholdException(
     errors.push(`Exception action must be one of: ${EXCEPTION_ACTIONS.join(", ")}.`);
   }
   if (typeof ex.enabled !== "boolean") errors.push("Exception enabled must be true or false.");
+  if (ex.outsideBusinessHours != null && typeof ex.outsideBusinessHours !== "boolean") {
+    errors.push("outsideBusinessHours must be true or false when present.");
+  }
   for (const field of OPTIONAL_STRING_FIELDS) {
     const v = ex[field];
     if (v != null && (typeof v !== "string" || !v.trim())) {

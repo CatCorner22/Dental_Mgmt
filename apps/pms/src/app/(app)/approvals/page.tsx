@@ -6,11 +6,16 @@ import { formatCents } from "@/lib/ledger/format";
 type InboxItem = {
   id: string;
   channel: string;
+  kind?: string;
   amountCents: number;
   status: string;
   requesterName: string;
   requestedAt: string;
   subjectId: string | null;
+  /** Why the posting was held, in the evaluator's words. */
+  why?: string | null;
+  /** For an after-hours hold: the clock and the location's window at posting. */
+  afterHours?: string | null;
 };
 
 type LoadState =
@@ -102,9 +107,16 @@ export default function ApprovalsPage() {
                 <h2 className="text-lg font-semibold capitalize">{item.channel.replace(/_/g, " ")}</h2>
                 <p className="text-lg font-semibold tabular-nums">{formatCents(item.amountCents)}</p>
               </div>
-              <p className="mb-4 text-sm text-[var(--ink-2)]">
+              <p className="mb-1 text-sm text-[var(--ink-2)]">
                 Requested by {item.requesterName} · {new Date(item.requestedAt).toLocaleString()}
+                {item.kind ? ` · ${item.kind.replace(/_/g, " ")}` : ""}
               </p>
+              {(item.why || item.afterHours) && (
+                <p className="mb-4 max-w-prose text-sm text-[var(--ink-2)]">
+                  <span className="font-semibold">Why held:</span> {item.why}
+                  {item.afterHours ? ` ${item.afterHours}` : ""}
+                </p>
+              )}
               <div className="flex flex-wrap items-end gap-3">
                 <button
                   type="button"
