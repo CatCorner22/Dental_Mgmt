@@ -3,12 +3,13 @@ import { createLiveDatabase, liveAdminUrl, type LiveDatabase } from "@pms/db/tes
 import { seedDatabase } from "@pms/db/seed";
 import { DEV_TENANTS, DEV_USERS, SEED_BANK, SEED_LEDGER } from "@pms/db/seed-data";
 import { uuidv7 } from "@pms/db";
-import { evaluateRelease } from "@pms/controls-engine";
+import { AFTER_HOURS_HOLD_EXCEPTION, addDays, evaluateRelease } from "@pms/controls-engine";
 import type { PostEntryInput } from "@pms/ledger";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { HARD_EVENT_KINDS, listHardEvents } from "../alerts/hardEvents";
 import { afterHoursFactsFor, postLedgerEntry } from "../ledger/post";
 import { createApprovalRequest } from "./approvals";
+import { restoreException, retireException } from "./exceptions";
 import { approveAndPost } from "./decideAndPost";
 import { appendControlEvent } from "./events";
 import { loadActivePolicy } from "./policy";
@@ -369,6 +370,28 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
       expect(events.find((e) => e.subjectId === entryId)?.sentence).toMatch(
         /^A \$12\.00 refund was posted on .* Main is closed that day\. Held for a second person, who approved it\.$/
       );
+    });
+
+    it("lets a small after-hours write-off through once the owner switches the hold off with a decision, and holds again once it is back on", async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      const actor = { id: owner.id, name: owner.displayName };
+      const off = await tx((d) =>
+        retireException(d, {
+          tenantId,
+          actor,
+          exceptionId: AFTER_HOURS_HOLD_EXCEPTION.id,
+          decision: { kind: "accept_residual", note: "Two people staff the evening clinic through the year end.", reviewBy: addDays(today, 90) },
+        })
+      );
+      expect(off.ok).toBe(true);
+      // The trigger reads the active policy: with the hold off, $12 under the threshold posts alone.
+      await insertEntry({ id: uuidv7(34_043), kind: "write_off", amountCents: -1_200, effectiveDate: today, postedAt: new Date().toISOString() });
+
+      const on = await tx((d) => restoreException(d, { tenantId, actor, exceptionId: AFTER_HOURS_HOLD_EXCEPTION.id }));
+      expect(on.ok).toBe(true);
+      await expect(
+        insertEntry({ id: uuidv7(34_044), kind: "write_off", amountCents: -1_200, effectiveDate: today, postedAt: new Date().toISOString() })
+      ).rejects.toThrow(/after-hours hold/);
     });
   });
 });

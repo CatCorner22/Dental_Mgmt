@@ -14,12 +14,15 @@ export function DecisionForm({
   kinds = FIRST_DECISION_KINDS,
   submitLabel,
   busy,
+  reviewByRequired = false,
   onSubmit,
   onCancel,
 }: {
   kinds?: readonly DecisionKind[];
   submitLabel: string;
   busy: boolean;
+  /** Switching a tightening control off needs the day it is looked at again (Increment 1.31). */
+  reviewByRequired?: boolean;
   onSubmit: (draft: DecisionDraft) => void;
   onCancel?: () => void;
 }) {
@@ -27,13 +30,14 @@ export function DecisionForm({
   const [note, setNote] = useState("");
   const [reviewBy, setReviewBy] = useState("");
   const noteOk = note.trim().length >= 10;
+  const dateOk = !reviewByRequired || reviewBy.length > 0;
 
   return (
     <form
       className="flex flex-wrap items-end gap-3"
       onSubmit={(e) => {
         e.preventDefault();
-        if (!noteOk) return;
+        if (!noteOk || !dateOk) return;
         onSubmit({ kind, note: note.trim(), reviewBy });
       }}
     >
@@ -61,7 +65,7 @@ export function DecisionForm({
         />
       </label>
       <label className="flex flex-col text-sm">
-        <span className="mb-1 font-semibold text-[var(--ink-2)]">Review by</span>
+        <span className="mb-1 font-semibold text-[var(--ink-2)]">{reviewByRequired ? "Review by (required)" : "Review by"}</span>
         <input
           className="rounded-md border border-[var(--line)] bg-[var(--bg)] px-3 py-2"
           type="date"
@@ -72,7 +76,7 @@ export function DecisionForm({
       <button
         type="submit"
         className="rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
-        disabled={busy || !noteOk}
+        disabled={busy || !noteOk || !dateOk}
       >
         {busy ? "Recording…" : submitLabel}
       </button>

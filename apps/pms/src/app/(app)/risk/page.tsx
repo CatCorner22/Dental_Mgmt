@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   DECISION_KIND_LABEL,
   ENTITLEMENTS,
+  exceptionTightens,
   type ControlDecision,
   type ControlSnapshot,
   type DetectedConflict,
@@ -124,6 +125,8 @@ export default function PracticeRiskPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [showFamily, setShowFamily] = useState(false);
   const [decidingId, setDecidingId] = useState<string | null>(null);
+  // The tightening exception being switched off; the decision form is open for it.
+  const [switchingId, setSwitchingId] = useState<string | null>(null);
 
   // Grant form
   const [grantPerson, setGrantPerson] = useState("");
@@ -279,6 +282,55 @@ export default function PracticeRiskPage() {
     }
   }
 
+  /**
+   * Switching a tightening exception off is a decision, not a settings
+   * change (Increment 1.31): the server refuses without one, and the form
+   * asks for the review date up front so the refusal never has to.
+   */
+  async function switchOff(exception: ThresholdException, draft: DecisionDraft) {
+    await run("Switch off", async () => {
+      const res = await fetch("/api/controls/exceptions/retire", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          exceptionId: exception.id,
+          decision: { kind: draft.kind, note: draft.note, reviewBy: draft.reviewBy || undefined },
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      setSwitchingId(null);
+      return `Switched off: ${exception.label}. Review due ${draft.reviewBy}; the home board says so until it is back on.`;
+    });
+  }
+
+  async function switchOn(exception: ThresholdException) {
+    await run("Switch on", async () => {
+      const res = await fetch("/api/controls/exceptions/restore", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ exceptionId: exception.id }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      return `Switched on: ${exception.label}. The decision that switched it off is retired.`;
+    });
+  }
+
+  /** Retiring a raise or a waiver tightens a control; a reason is enough. */
+  async function retire(exception: ThresholdException) {
+    await run("Retire", async () => {
+      const res = await fetch("/api/controls/exceptions/retire", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ exceptionId: exception.id, reason: "Retired from Practice Risk." }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      return `Retired: ${exception.label}. The control it loosened stands again.`;
+    });
+  }
+
   async function revoke(person: RoleAssignment, entitlement: string) {
     await run("Revoke", async () => {
       const res = await fetch("/api/controls/grants/revoke", {
@@ -342,11 +394,26 @@ export default function PracticeRiskPage() {
             submit: (d?: DecisionDraft) => void grant(d),
           }}
           onRevoke={(p, e) => void revoke(p, e)}
+          exceptionControls={{
+            switchingId,
+            setSwitchingId,
+            onSwitchOff: (x, d) => void switchOff(x, d),
+            onSwitchOn: (x) => void switchOn(x),
+            onRetire: (x) => void retire(x),
+          }}
         />
       )}
     </main>
   );
 }
+
+type ExceptionControls = {
+  switchingId: string | null;
+  setSwitchingId: (v: string | null) => void;
+  onSwitchOff: (exception: ThresholdException, draft: DecisionDraft) => void;
+  onSwitchOn: (exception: ThresholdException) => void;
+  onRetire: (exception: ThresholdException) => void;
+};
 
 type GrantFormState = {
   person: string;
@@ -374,6 +441,7 @@ function RiskBody({
   onDecideFinding,
   grantForm,
   onRevoke,
+  exceptionControls,
 }: {
   data: Loaded;
   isAdmin: boolean;
@@ -388,6 +456,7 @@ function RiskBody({
   onDecideFinding: (finding: FindingItem, draft: DecisionDraft) => void;
   grantForm: GrantFormState;
   onRevoke: (person: RoleAssignment, entitlement: string) => void;
+  exceptionControls: ExceptionControls;
 }) {
   const { risk, sod, decisions, exceptions, findings } = data;
   const s = risk.snapshot;
@@ -840,6 +909,7 @@ function RiskBody({
                   <th className="px-4 py-3 font-semibold">Channels</th>
                   <th className="px-4 py-3 font-semibold">Window</th>
                   <th className="px-4 py-3 font-semibold">Enabled</th>
+                  {isAdmin && <th className="px-4 py-3 font-semibold">Switch</th>}
                 </tr>
               </thead>
               <tbody>
@@ -859,12 +929,74 @@ function RiskBody({
                       {e.effectiveFrom ?? "open"} → {e.effectiveTo ?? "open"}
                     </td>
                     <td className="px-4 py-3">{e.enabled ? "Yes" : "No"}</td>
+                    {isAdmin && (
+                      <td className="px-4 py-3">
+                        {exceptionTightens(e) ? (
+                          e.enabled ? (
+                            <button
+                              type="button"
+                              className="rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-semibold disabled:opacity-50"
+                              disabled={busy !== null}
+                              aria-label={`Switch off ${e.label}`}
+                              onClick={() => exceptionControls.setSwitchingId(e.id)}
+                            >
+                              Switch off
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-3 py-1 text-xs font-semibold disabled:opacity-50"
+                              disabled={busy !== null}
+                              aria-label={`Switch on ${e.label}`}
+                              onClick={() => exceptionControls.onSwitchOn(e)}
+                            >
+                              {busy === "Switch on" ? "Switching…" : "Switch on"}
+                            </button>
+                          )
+                        ) : e.enabled ? (
+                          <button
+                            type="button"
+                            className="rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-semibold disabled:opacity-50"
+                            disabled={busy !== null}
+                            aria-label={`Retire ${e.label}`}
+                            onClick={() => exceptionControls.onRetire(e)}
+                          >
+                            {busy === "Retire" ? "Retiring…" : "Retire"}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-[var(--ink-3)]">Ended</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
+        {isAdmin &&
+          exceptionControls.switchingId &&
+          (() => {
+            const target = exceptions.exceptions.find((e) => e.id === exceptionControls.switchingId);
+            if (!target) return null;
+            return (
+              <div className="mt-3 rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] p-4">
+                <p className="mb-2 max-w-prose text-sm text-[var(--ink-2)]">
+                  Switching off &ldquo;{target.label}&rdquo; loosens a control: {target.reason} Record the decision that licenses
+                  it: accept the residual or name what compensates, say why, and set the day the practice looks at this again.
+                  The home board says &ldquo;off since, review due&rdquo; until it is back on.
+                </p>
+                <DecisionForm
+                  kinds={["accept_residual", "compensate"]}
+                  submitLabel="Switch off with this decision"
+                  busy={busy === "Switch off"}
+                  reviewByRequired
+                  onSubmit={(draft) => exceptionControls.onSwitchOff(target, draft)}
+                  onCancel={() => exceptionControls.setSwitchingId(null)}
+                />
+              </div>
+            );
+          })()}
       </section>
 
       <section aria-labelledby="assumptions" className="mb-6">

@@ -1,13 +1,12 @@
 import { withGuard } from "@/lib/auth/withGuard";
 import { withTenantTransaction } from "@/lib/db/client";
-import { retireException } from "@/lib/controls/exceptions";
+import { restoreException } from "@/lib/controls/exceptions";
 
-type Body = { exceptionId?: string; reason?: string; decision?: { kind?: string; note?: string; reviewBy?: string } };
+type Body = { exceptionId?: string; reason?: string };
 
 /**
- * Retires an exception in a new policy version: disabled and ended today.
- * A tightening exception (the after-hours hold, a lowered threshold) needs
- * a decision with a review date in the body; the service refuses without one.
+ * Switches a retired tightening exception back on, in a new policy version,
+ * and retires the decision that licensed switching it off (Increment 1.31).
  */
 export const POST = withGuard(
   async (req, ctx) => {
@@ -15,18 +14,15 @@ export const POST = withGuard(
     if (!body.exceptionId) return Response.json({ error: "exceptionId is required." }, { status: 400 });
     const user = ctx.access.user;
     const result = await withTenantTransaction(user.tenantId, user.id, async (db) =>
-      retireException(db, {
+      restoreException(db, {
         tenantId: user.tenantId,
         actor: { id: user.id, name: user.displayName },
         exceptionId: body.exceptionId!,
         reason: body.reason,
-        decision: body.decision
-          ? { kind: String(body.decision.kind ?? ""), note: String(body.decision.note ?? ""), reviewBy: body.decision.reviewBy || undefined }
-          : undefined,
       })
     );
     if (!result.ok) {
-      return Response.json({ error: "The exception was not retired.", code: result.code, errors: result.errors }, {
+      return Response.json({ error: "The exception was not switched back on.", code: result.code, errors: result.errors }, {
         status: result.status,
       });
     }
