@@ -8,7 +8,7 @@ import { listHardEvents } from "../alerts/hardEvents";
 import { closeMonth, listMonthCloses, loadMonthClose, PRIOR_PERIOD_REASON } from "./close";
 import { correctEntry } from "../ledger/correct";
 import { decideMapping, proposeMapping } from "./mappings";
-import { computeMonthPackage, packageHash } from "./package";
+import { computeMonthPackage, packageHash, PACKAGE_SCHEMA_VERSION } from "./package";
 
 /**
  * Closing a month on the seeded Ridgeview tenant, as app_rw (Increment
@@ -111,11 +111,15 @@ describe.skipIf(!adminUrl)("Month close (live)", () => {
       periodStart: "2026-08-01",
       periodEnd: "2026-08-31",
       packageHash: expectedHash,
+      packageSchema: PACKAGE_SCHEMA_VERSION,
       entryCount: pkg.journal.entryCount,
       totalCents: pkg.journal.totalCents,
       closedByName: owner.displayName,
     });
-    expect(await tx((d) => loadMonthClose(d, tenantId, CLOSED_MONTH))).toMatchObject({ packageHash: expectedHash });
+    expect(await tx((d) => loadMonthClose(d, tenantId, CLOSED_MONTH))).toMatchObject({
+      packageHash: expectedHash,
+      packageSchema: PACKAGE_SCHEMA_VERSION,
+    });
 
     const chain = await db.admin.query("SELECT payload FROM domain_event WHERE tenant_id = $1 AND kind = 'month.closed'", [tenantId]);
     expect(chain.rows).toHaveLength(1);
@@ -123,6 +127,7 @@ describe.skipIf(!adminUrl)("Month close (live)", () => {
       closeId: closed.close.id,
       month: CLOSED_MONTH,
       packageHash: expectedHash,
+      packageSchema: PACKAGE_SCHEMA_VERSION,
       entryCount: pkg.journal.entryCount,
       totalCents: pkg.journal.totalCents,
     });
@@ -192,5 +197,39 @@ describe.skipIf(!adminUrl)("Month close (live)", () => {
     // The close row is untouched: it still says what the accountant received.
     expect((await tx((d) => loadMonthClose(d, tenantId, CLOSED_MONTH)))!.packageHash).toBe(frozen);
     expect(await tx((d) => listMonthCloses(d, tenantId))).toHaveLength(1);
+  });
+
+  it("keeps the figures the close froze answerable when the package changes shape (Increment 1.43)", async () => {
+    const close = (await tx((d) => loadMonthClose(d, tenantId, CLOSED_MONTH)))!;
+    // The close names the shape it froze, so a later release can tell a shape change
+    // from a figure moving rather than reporting the first as the second forever.
+    expect(close.packageSchema).toBe(PACKAGE_SCHEMA_VERSION);
+
+    // Pretend this month was closed under the first shape, as every month closed
+    // before this increment was. The hash is then not comparable at all.
+    await db.admin.query("SET session_replication_role = replica");
+    try {
+      await db.admin.query("UPDATE month_closes SET package_schema = 'package-v1' WHERE id = $1", [close.id]);
+    } finally {
+      await db.admin.query("SET session_replication_role = origin");
+    }
+    const stale = (await tx((d) => loadMonthClose(d, tenantId, CLOSED_MONTH)))!;
+    expect(stale.packageSchema).toBe("package-v1");
+    expect(stale.packageSchema).not.toBe(PACKAGE_SCHEMA_VERSION);
+
+    // The two columns the close froze in their own right still answer, because no
+    // change of shape touches them. Here they hold: the earlier case moved an
+    // account mapping, which changes what the month reports but not its arithmetic.
+    const pkg = await tx((d) => computeMonthPackage(d, tenantId, CLOSED_MONTH));
+    expect(pkg.journal.entryCount).toBe(stale.entryCount);
+    expect(pkg.journal.totalCents).toBe(stale.totalCents);
+
+    // Put it back, so the suite leaves the row as the close wrote it.
+    await db.admin.query("SET session_replication_role = replica");
+    try {
+      await db.admin.query("UPDATE month_closes SET package_schema = $2 WHERE id = $1", [close.id, PACKAGE_SCHEMA_VERSION]);
+    } finally {
+      await db.admin.query("SET session_replication_role = origin");
+    }
   });
 });

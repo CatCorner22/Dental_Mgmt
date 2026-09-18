@@ -13,6 +13,8 @@ function digest(over: Partial<WeeklyDigest> = {}): WeeklyDigest {
       variancesClearedWithReason: 1,
       depositsPrepared: 0,
       dayClosesFrozen: 1,
+      postingsIntoSealedDays: 0,
+      firstPostingsIntoSealedDays: 0,
       statementsIssued: 1,
       statementsHeld: 0,
       statementsVoided: 0,

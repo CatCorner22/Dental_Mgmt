@@ -41,6 +41,7 @@ const correctionPairsSql = readFileSync(join(here, "../migrations/0030_correctio
 const correctionHoldsSql = readFileSync(join(here, "../migrations/0031_correction_holds.sql"), "utf8");
 const latePostingsSql = readFileSync(join(here, "../migrations/0032_late_postings.sql"), "utf8");
 const sealedDayFindingSql = readFileSync(join(here, "../migrations/0033_finding_sealed_day_posting.sql"), "utf8");
+const packageSchemaSql = readFileSync(join(here, "../migrations/0034_package_schema_version.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -340,6 +341,16 @@ describe("Increment 1.38 one approval releases a correction pair", () => {
     expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_approval_request_uidx\s+ON ledger_entries \(approval_request_id\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NULL/);
     expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_correction_approval_uidx\s+ON ledger_entries \(approval_request_id, kind\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NOT NULL/);
     expect(correctionHoldsSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
+  });
+});
+
+describe("Increment 1.43 the package schema version", () => {
+  it("backfills the months already closed, then makes a close state its own schema", () => {
+    expect(packageSchemaSql).toMatch(/ALTER TABLE month_closes ADD COLUMN package_schema text NOT NULL DEFAULT 'package-v1'/);
+    // Dropping the default is the point: a close records the shape it used rather
+    // than inheriting whichever one the column was created with.
+    expect(packageSchemaSql).toMatch(/ALTER COLUMN package_schema DROP DEFAULT/);
+    expect(packageSchemaSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM|UPDATE month_closes/);
   });
 });
 

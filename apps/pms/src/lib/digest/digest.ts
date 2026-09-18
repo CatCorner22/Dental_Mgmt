@@ -68,6 +68,9 @@ export type WeeklyDigest = {
     variancesClearedWithReason: number;
     depositsPrepared: number;
     dayClosesFrozen: number;
+    /** Rows that landed behind a seal this week, and how many are first postings (Increment 1.43). */
+    postingsIntoSealedDays: number;
+    firstPostingsIntoSealedDays: number;
     statementsIssued: number;
     statementsHeld: number;
     statementsVoided: number;
@@ -156,6 +159,8 @@ export async function computeDigest(db: AppDb, tenantId: string, period: DigestP
       variancesClearedWithReason: 0,
       depositsPrepared: 0,
       dayClosesFrozen: 0,
+      postingsIntoSealedDays: 0,
+      firstPostingsIntoSealedDays: 0,
       statementsIssued: 0,
       statementsHeld: 0,
       statementsVoided: 0,
@@ -194,6 +199,20 @@ export async function computeDigest(db: AppDb, tenantId: string, period: DigestP
     .from(approvalRequests)
     .where(and(inWindow(approvalRequests, approvalRequests.requestedAt), sql`${approvalRequests.heldPayload} -> 'afterHours' IS NOT NULL`));
   digest.alerts.afterHoursHolds = Number(afterHours?.n ?? 0);
+
+  // Rows that landed behind a day the practice had already sealed, from the stamps
+  // the database wrote at insert time (Increment 1.43). The split is the point: a
+  // correction names the entry it replaces, and a first posting names nothing.
+  // Adding these moved the package hash, which is why PACKAGE_SCHEMA_VERSION is v2.
+  const [sealed] = await db
+    .select({
+      n: sql<number>`count(*)::int`,
+      first: sql<number>`count(*) FILTER (WHERE ${ledgerEntries.correctsEntryId} IS NULL)::int`,
+    })
+    .from(ledgerEntries)
+    .where(and(inWindow(ledgerEntries, ledgerEntries.postedAt), eq(ledgerEntries.postedAfterClose, true)));
+  digest.bank.postingsIntoSealedDays = Number(sealed?.n ?? 0);
+  digest.bank.firstPostingsIntoSealedDays = Number(sealed?.first ?? 0);
   digest.money.guardedWithoutSecond = Number(withoutSecond?.n ?? 0);
 
   // Bank and close, from their tables.

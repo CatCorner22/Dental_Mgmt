@@ -332,6 +332,9 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await row("digest-bank", "Bank runs cleared").innerText()).toMatch(/\b1$/);
     expect(await row("digest-bank", "Of those, owner-only clearance").innerText()).toMatch(/\b1$/);
     expect(await row("digest-bank", "Day closes frozen").innerText()).toMatch(/\b1$/);
+    // Nothing has posted behind a seal yet; the row reads zero rather than being absent (Increment 1.43).
+    expect(await row("digest-bank", "Postings into sealed days").innerText()).toMatch(/\b0$/);
+    expect(await row("digest-bank", "\u2026of those, first postings").innerText()).toMatch(/\b0$/);
     expect(await row("digest-bank", "Patient statements issued").innerText()).toMatch(/\b1$/);
     expect(await row("digest-approvals", "Given by a second person").innerText()).toMatch(/\b1$/);
     expect(await row("digest-approvals", "Declined").innerText()).toMatch(/\b1$/);
@@ -594,5 +597,14 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await sealedAlerts.first().innerText()).toMatch(/\$40\.00 patient payment[\s\S]*landed against 2026-09-14, a day the practice had already sealed/);
     expect(await sealedAlerts.first().innerText()).not.toMatch(/Riley|Finn/);
     await b.audit("home (owner, postings into closed days)");
+
+    // The week counts the same three rows, and splits them the same way (Increment 1.43).
+    await page().goto(`${app.base}/digest`);
+    await page().getByRole("heading", { name: "The week, counted" }).waitFor({ timeout: 60_000 });
+    const bank = page().locator("section[aria-labelledby=digest-bank]");
+    await bank.waitFor({ timeout: 30_000 });
+    const bankRow = (label: string) => bank.locator("tr", { has: page().locator(`th:text-is("${label}")`) });
+    expect(await bankRow("Postings into sealed days").innerText()).toMatch(/\b3$/);
+    expect(await bankRow("\u2026of those, first postings").innerText()).toMatch(/\b1$/);
   }, 120_000);
 });

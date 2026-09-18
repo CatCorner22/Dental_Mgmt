@@ -13,7 +13,10 @@ type PackageResponse = {
   month: string;
   inProgress: boolean;
   close: MonthClose | null;
+  packageSchema: string;
+  schemaChanged: boolean;
   changedSinceClose: boolean;
+  frozenFiguresHold: boolean;
   package: MonthPackage;
   packageHash: string;
   exports: PackageExport[];
@@ -264,9 +267,13 @@ export function PackageView() {
                 Closed by {state.data.close.closedByName} on {state.data.close.closedAt.slice(0, 10)}, with {state.data.close.entryCount} entr
                 {state.data.close.entryCount === 1 ? "y" : "ies"} totalling {formatCents(state.data.close.totalCents)}. Frozen hash{" "}
                 <code className="text-xs">{state.data.close.packageHash.slice(0, 16)}…</code>.{" "}
-                {state.data.changedSinceClose
-                  ? "This month no longer reads as the accountant received it: a figure it states has changed since, most often an account mapping or a control policy. The hash above is what it reads now."
-                  : "This month still reads as the accountant received it. A later correction into it posts today with reason prior_period, and is reported in the month it posts."}
+                {state.data.schemaChanged
+                  ? `The package has changed shape since this close (${state.data.close.packageSchema} then, ${state.data.packageSchema} now), so the two hashes do not compare and neither one says anything about the figures. What the close froze in its own columns does: the entry count and the journal total above ${
+                      state.data.frozenFiguresHold ? "still match what the month reads today." : "no longer match what the month reads today, so a figure has moved since."
+                    }`
+                  : state.data.changedSinceClose
+                    ? "This month no longer reads as the accountant received it: a figure it states has changed since, most often an account mapping or a control policy. The hash above is what it reads now."
+                    : "This month still reads as the accountant received it. A later correction into it posts today with reason prior_period, and is reported in the month it posts."}
               </p>
             )}
             {state.isAdmin ? (

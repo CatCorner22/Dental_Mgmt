@@ -2,7 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { monthCloses, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { appendControlEvent } from "../controls/events";
-import { computeMonthPackage, isMonth, monthPeriod, packageHash } from "./package";
+import { computeMonthPackage, isMonth, monthPeriod, packageHash, PACKAGE_SCHEMA_VERSION } from "./package";
 
 /**
  * Closing a month (docs/13 item 22, Increment 1.36). Closing freezes what
@@ -11,6 +11,12 @@ import { computeMonthPackage, isMonth, monthPeriod, packageHash } from "./packag
  * it. A month is never re-opened, because re-opening would make the frozen
  * hash a lie; a later correction posts today with reason `prior_period`,
  * which the database permits and the retroactive-entry hard event surfaces.
+ *
+ * The close also records the package schema it was computed under. The frozen
+ * hash is only comparable against a package of the same shape, and the shape
+ * grows; where they differ, the entry count and the journal total the close
+ * froze in their own columns answer in the hash's place, because no schema
+ * change touches them.
  */
 
 export type MonthClose = {
@@ -19,6 +25,8 @@ export type MonthClose = {
   periodStart: string;
   periodEnd: string;
   packageHash: string;
+  /** The package shape that hash was computed under (Increment 1.43). */
+  packageSchema: string;
   entryCount: number;
   totalCents: number;
   closedById: string;
@@ -37,6 +45,7 @@ function mapRow(row: typeof monthCloses.$inferSelect): MonthClose {
     periodStart: String(row.periodStart),
     periodEnd: String(row.periodEnd),
     packageHash: row.packageHash,
+    packageSchema: row.packageSchema,
     entryCount: row.entryCount,
     totalCents: Number(row.totalCents),
     closedById: row.closedById,
@@ -106,6 +115,7 @@ export async function closeMonth(
     periodStart: period.start,
     periodEnd: period.end,
     packageHash: hash,
+    packageSchema: PACKAGE_SCHEMA_VERSION,
     entryCount: pkg.journal.entryCount,
     totalCents: pkg.journal.totalCents,
     closedById: input.actor.id,
@@ -117,7 +127,14 @@ export async function closeMonth(
     input.tenantId,
     input.actor.id,
     "month.closed",
-    { closeId: id, month: input.month, packageHash: hash, entryCount: pkg.journal.entryCount, totalCents: pkg.journal.totalCents },
+    {
+      closeId: id,
+      month: input.month,
+      packageHash: hash,
+      packageSchema: PACKAGE_SCHEMA_VERSION,
+      entryCount: pkg.journal.entryCount,
+      totalCents: pkg.journal.totalCents,
+    },
     now
   );
   return { ok: true, close: (await loadMonthClose(db, input.tenantId, input.month))! };
