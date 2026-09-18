@@ -19,6 +19,7 @@ import { measurementSummary } from "../controls/reconciliationMeasure";
 import { computeSnapshot } from "../controls/snapshots";
 import { getDayCloseSnapshot } from "../day-close/service";
 import { listReconciliationRuns } from "../reconciliation/queries";
+import { afterCloseCard, countPostingsAfterClose, type AfterCloseCard } from "./afterClose";
 import { measuredEffectSentence, measuredEffectSince } from "./measuredEffect";
 
 /**
@@ -283,6 +284,8 @@ export type OwnerBoard = {
   detectorFindingsUndecided: number;
   reconciliation: ReconciliationMeasurementSummary;
   matching: MatchingMeasurementSummary;
+  /** What has posted into days the practice had already sealed (Increment 1.41). */
+  afterClose: AfterCloseCard;
 };
 
 /**
@@ -343,5 +346,6 @@ export async function buildOwnerBoard(db: AppDb, tenantId: string, viewerId: str
     detectorFindingsUndecided: findings.undecided,
     reconciliation: measurementSummary(ctx.reconciliation),
     matching: matchingSummary(ctx.matching),
+    afterClose: afterCloseCard(await countPostingsAfterClose(db, tenantId, asOf, yesterday)),
   };
 }
