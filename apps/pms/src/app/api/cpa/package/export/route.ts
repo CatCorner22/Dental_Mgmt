@@ -1,3 +1,4 @@
+import { CPA_SEAT_ENTITLEMENT } from "@/lib/auth/seats";
 import { withGuard } from "@/lib/auth/withGuard";
 import { withTenantTransaction } from "@/lib/db/client";
 import { computeMonthPackage, isMonth, packageHash, packageRows, recordPackageExport, toCsv } from "@/lib/cpa/package";
@@ -48,5 +49,7 @@ export const POST = withGuard(
       },
     });
   },
-  { minRank: "admin" }
+  // The seat exists to take the month away and reconcile it, so it exports
+  // as the administrator does; the chain event names who did (Increment 1.49).
+  { minRank: "admin", orEntitlement: CPA_SEAT_ENTITLEMENT }
 );

@@ -180,4 +180,39 @@ describe.skipIf(!adminUrl)("CPA month-end package (live)", () => {
     expect(dayRow.label).toBe(`${today} \u00b7 1 seal \u00b7 2 first postings`);
     expect(rows.find((r) => r.key === "closes_frozen")).toMatchObject({ section: "sealed_days", count: 1 });
   });
+
+  it("names no patient anywhere in the package or its CSV (Increment 1.49)", async () => {
+    // The page has claimed this since Increment 1.34, and the outside
+    // accountant's seat rests on it: an accountant who receives no protected
+    // health information needs no business-associate agreement to read this
+    // (docs/05, docs/07 question 25). A claim a seat depends on belongs in a
+    // test, so this reads the practice's own patient and guarantor rows and
+    // looks for any of them in what the package would hand over.
+    const people = await db.admin.query(
+      `SELECT id::text AS id, mrn, first_name, last_name FROM patients WHERE tenant_id = $1`,
+      [tenantId]
+    );
+    const accounts = await db.admin.query(
+      `SELECT id::text AS id, display_name FROM guarantor_accounts WHERE tenant_id = $1`,
+      [tenantId]
+    );
+    expect(people.rows.length).toBeGreaterThan(0);
+    expect(accounts.rows.length).toBeGreaterThan(0);
+
+    const pkg = await tx((d) => computeMonthPackage(d, tenantId, month));
+    const asJson = JSON.stringify(pkg);
+    const asCsv = toCsv(packageRows(pkg, packageHash(pkg)));
+
+    const identifiers = [
+      ...people.rows.flatMap((r) => [r.id as string, r.mrn as string, r.first_name as string, r.last_name as string]),
+      ...accounts.rows.flatMap((r) => [r.id as string, r.display_name as string]),
+    ].filter((v) => typeof v === "string" && v.length > 1);
+
+    // Both haystacks are real and searchable, so the empty result below is an
+    // absence rather than a search that could never have found anything.
+    expect([asJson.includes(month), asCsv.includes(month)]).toEqual([true, true]);
+
+    const leaked = identifiers.filter((v) => asJson.includes(v) || asCsv.includes(v));
+    expect(leaked).toEqual([]);
+  });
 });

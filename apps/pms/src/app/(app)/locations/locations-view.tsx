@@ -95,7 +95,7 @@ export function LocationsView() {
 
   if (state.status === "loading") return <p className="text-sm text-[var(--ink-2)]">Reading the locations…</p>;
   if (state.status === "not_for_seat") {
-    return <p className="max-w-prose text-[var(--ink-2)]">Location hours are for the manager and owner seats. Your seat works from the links on the home page.</p>;
+    return <p className="max-w-prose text-[var(--ink-2)]">Location hours are for the manager and owner seats. Your seat works from the links in the header.</p>;
   }
   if (state.status === "error") return <p className="text-sm text-[var(--ink-2)]">{state.message}</p>;
 

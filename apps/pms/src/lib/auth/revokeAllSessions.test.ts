@@ -16,7 +16,9 @@ describe("revokeAllSessionsForTenant", () => {
       userAgent: "test",
       now,
     });
-    const otherTenant = DEV_USERS[3];
+    // Named rather than indexed: the seed gains users, and what this case
+    // needs is a session in a different tenant, not the fourth row.
+    const otherTenant = DEV_USERS.find((u) => u.tenantId !== owner.tenantId)!;
     await store.createSession({
       tenantId: otherTenant.tenantId,
       userId: otherTenant.id,

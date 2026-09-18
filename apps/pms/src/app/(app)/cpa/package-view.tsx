@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
+import { isCpaSeat } from "@/lib/auth/seats";
 import { ANY_REASON, GL_BUCKETS, GL_KINDS, GL_SIDES, type GlMapping } from "@/lib/cpa/types";
 import type { MonthClose } from "@/lib/cpa/close";
 import type { MonthPackage, PackageExport } from "@/lib/cpa/package";
 import { formatCents } from "@/lib/ledger/format";
 
-type Me = { ok: boolean; role?: string };
+type Me = { ok: boolean; role?: string; entitlements?: string[] };
 
 type PackageResponse = {
   month: string;
@@ -28,7 +29,14 @@ type LoadState =
   | { status: "loading" }
   | { status: "not_for_seat" }
   | { status: "error"; message: string }
-  | { status: "ready"; data: PackageResponse; mappings: MappingRow[]; isAdmin: boolean };
+  | {
+      status: "ready";
+      data: PackageResponse;
+      mappings: MappingRow[];
+      isAdmin: boolean;
+      /** True for the outside accountant: it reads and exports, and the practice's own governance is not its to run. */
+      seat: boolean;
+    };
 
 /** A mapping as the route serves it: the row plus whether the viewer proposed it. */
 type MappingRow = GlMapping & { mine: boolean };
@@ -97,12 +105,17 @@ export function PackageView() {
     const meRes = await fetch("/api/me");
     const me = (await meRes.json().catch(() => ({ ok: false }))) as Me;
     const role = me.role && isRole(me.role) ? me.role : undefined;
-    if (!meRes.ok || !meetsRole(role, "manager")) {
+    // The outside accountant reaches this screen on its grant rather than its
+    // rank (Increment 1.49), and reads the package alone: the chart of accounts
+    // is the practice's own maker-checker, so the seat neither loads nor is
+    // offered it. Asking for it would answer 403, which is the right answer.
+    const seat = isCpaSeat(role ? { role, entitlements: me.entitlements ?? [] } : null);
+    if (!meRes.ok || (!meetsRole(role, "manager") && !seat)) {
       setState({ status: "not_for_seat" });
       return;
     }
-    const [data, mappings] = await Promise.all([loadPackage(m), loadMappings()]);
-    setState({ status: "ready", data, mappings, isAdmin: meetsRole(role, "admin") });
+    const [data, mappings] = await Promise.all([loadPackage(m), seat ? Promise.resolve([]) : loadMappings()]);
+    setState({ status: "ready", data, mappings, isAdmin: meetsRole(role, "admin"), seat });
   }, []);
 
   useEffect(() => {
@@ -244,7 +257,7 @@ export function PackageView() {
       )}
       {state.status === "loading" && <p className="text-sm text-[var(--ink-2)]">Reading the month&apos;s rows…</p>}
       {state.status === "not_for_seat" && (
-        <p className="max-w-prose text-[var(--ink-2)]">The month-end package is for the manager and owner seats. Your seat works from the links on the home page.</p>
+        <p className="max-w-prose text-[var(--ink-2)]">The month-end package is for the manager and owner seats and for the practice&apos;s accountant. Your seat works from the links in the header.</p>
       )}
       {state.status === "error" && <p className="text-sm text-[var(--ink-2)]">{state.message}</p>}
       {state.status === "ready" && (
@@ -276,7 +289,7 @@ export function PackageView() {
                     : "This month still reads as the accountant received it. A later correction into it posts today with reason prior_period, and is reported in the month it posts."}
               </p>
             )}
-            {state.isAdmin ? (
+            {state.isAdmin || state.seat ? (
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -294,7 +307,8 @@ export function PackageView() {
                 >
                   {busy === "json" ? "Exporting…" : "Download JSON"}
                 </button>
-                {!state.data.close &&
+                {state.isAdmin &&
+                  !state.data.close &&
                   !state.data.inProgress &&
                   (confirmClose === month ? (
                     <span className="flex flex-wrap items-center gap-2">
@@ -329,7 +343,7 @@ export function PackageView() {
                   ))}
               </div>
             ) : (
-              <p className="mt-2 text-sm text-[var(--ink-3)]">Only an administrator exports the package; each export is recorded on the chain.</p>
+              <p className="mt-2 text-sm text-[var(--ink-3)]">An administrator or the practice&apos;s accountant exports the package; each export is recorded on the chain.</p>
             )}
           </section>
 
@@ -450,6 +464,10 @@ export function PackageView() {
               empty=""
             />
           </div>
+          {/* The chart of accounts is the practice's own maker-checker, so the
+              outside accountant is not offered it; each journal line above
+              already carries the account it was mapped to. */}
+          {!state.seat && (
           <section aria-labelledby="package-mappings" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
             <h2 id="package-mappings" className="mb-1 text-base font-semibold">
               Chart of accounts
@@ -586,6 +604,7 @@ export function PackageView() {
               </button>
             </form>
           </section>
+          )}
 
           <p className="max-w-prose text-xs text-[var(--ink-3)]">{state.data.package.scope}</p>
         </>
