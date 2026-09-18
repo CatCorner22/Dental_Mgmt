@@ -21,6 +21,8 @@ import { getDayCloseSnapshot } from "../day-close/service";
 import { listReconciliationRuns } from "../reconciliation/queries";
 import { afterCloseCard, countPostingsAfterClose, type AfterCloseCard } from "./afterClose";
 import { threadsAwaitingPractice, type Thread } from "../cpa/questions";
+import { ATTESTABLE_CHANNELS, listMonthAttestations } from "../controls/attestations";
+import { attestationCoverage, lastCompleteMonth, type AttestationCoverage } from "../controls/attestationCoverage";
 import { measuredEffectSentence, measuredEffectSince } from "./measuredEffect";
 
 /**
@@ -294,6 +296,13 @@ export type OwnerBoard = {
    * carry the meaning and `/cpa` is where the line reads in full.
    */
   accountantAsked: Thread[];
+  /**
+   * Whether anybody has vouched for the channels this build cannot enforce, for
+   * the month that has ended (Increment 1.52). Read for the last complete month
+   * rather than the one running: "reviewed this month" means a month somebody
+   * could have reviewed.
+   */
+  attestations: AttestationCoverage;
 };
 
 /**
@@ -304,6 +313,8 @@ export type OwnerBoard = {
  */
 export async function buildOwnerBoard(db: AppDb, tenantId: string, viewerId: string, now: Date = new Date()): Promise<OwnerBoard> {
   const asOf = now.toISOString().slice(0, 10);
+  // The month that has ended, for the attestation card below.
+  const lastComplete = lastCompleteMonth(asOf);
   const { ctx, snapshot } = await computeSnapshot(db, tenantId, now);
 
   const runs = (await listReconciliationRuns(db, tenantId)).map<RunForBoard>((r) => ({
@@ -356,5 +367,12 @@ export async function buildOwnerBoard(db: AppDb, tenantId: string, viewerId: str
     matching: matchingSummary(ctx.matching),
     afterClose: afterCloseCard(await countPostingsAfterClose(db, tenantId, asOf, yesterday)),
     accountantAsked: await threadsAwaitingPractice(db, tenantId),
+    attestations: attestationCoverage({
+      month: lastComplete,
+      channels: ATTESTABLE_CHANNELS,
+      attested: (await listMonthAttestations(db, tenantId, lastComplete))
+        .filter((r) => r.attestation !== null)
+        .map((r) => ({ channel: r.channel, seat: r.attestation!.seat as string, byName: r.attestation!.byName })),
+    }),
   };
 }

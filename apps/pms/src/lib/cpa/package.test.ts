@@ -117,7 +117,7 @@ describe("packageHash and the flat rows", () => {
     // The hash is self-describing: the version is inside it, so a package computed
     // under a different shape cannot silently produce a comparable-looking digest.
     expect(hashedView(pkg()).schema).toBe(PACKAGE_SCHEMA_VERSION);
-    expect(PACKAGE_SCHEMA_VERSION).toBe("package-v4");
+    expect(PACKAGE_SCHEMA_VERSION).toBe("package-v5");
   });
 
   it("folds the whole digest into the hash, so a new digest field moves every frozen month", () => {

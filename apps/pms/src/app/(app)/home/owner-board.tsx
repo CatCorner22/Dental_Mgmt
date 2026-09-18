@@ -270,6 +270,30 @@ export function OwnerBoard() {
         )}
       </section>
 
+      {/* The channels this build cannot enforce, for the month that has ended
+          (Increment 1.52). Shown in every state, the quiet one included: an
+          owner who sees this card only when something is wrong cannot tell a
+          reviewed month from a month nobody looked at. */}
+      <section aria-labelledby="attested" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">
+          Channels the product cannot hold · {b.attestations.month}
+        </p>
+        <p id="attested" className="mt-1 font-semibold text-[var(--ink)]">
+          {b.attestations.complete
+            ? `Reviewed by somebody: ${b.attestations.attested.length} of ${b.attestations.channels.length}`
+            : `${b.attestations.unattested.length} of ${b.attestations.channels.length} reviewed by nobody`}
+        </p>
+        <p className="mt-1 max-w-prose text-sm text-[var(--ink-2)]">{b.attestations.sentence}</p>
+        {!b.attestations.complete && b.attestations.channels.length > 0 && (
+          <Link
+            className="mt-3 inline-flex min-h-[var(--target)] items-center rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold text-[var(--ink)]"
+            href="/cpa"
+          >
+            Attest them on the month-end package
+          </Link>
+        )}
+      </section>
+
       {/* What the outside accountant asked and the practice has not answered
           (Increment 1.50). Shown only when something waits: unlike the sealed-days
           card, silence here means nobody is owed anything, not that nothing was

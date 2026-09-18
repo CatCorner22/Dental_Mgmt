@@ -208,16 +208,11 @@ export function reasonTighteningSentence(t: ReasonTightening): string {
 }
 
 /**
- * The last month that has ended, as of a date (Increment 1.51).
- *
- * The coverage table names an attestation for this month rather than the one
- * running: "reviewed this month" means a month somebody could have reviewed,
- * and a month still filling is not one.
+ * The month the coverage table names an attestation for: the last one that has
+ * ended (Increment 1.51). Re-exported from the pure module the owner board also
+ * reads (Increment 1.52), so the two surfaces cannot disagree about January.
  */
-export function lastCompleteMonth(asOf: string): string {
-  const [year, month] = asOf.slice(0, 7).split("-").map(Number);
-  return month === 1 ? `${year! - 1}-12` : `${year}-${String(month! - 1).padStart(2, "0")}`;
-}
+export { lastCompleteMonth } from "./attestationCoverage";
 
 /**
  * What the coverage table says about a channel the product cannot enforce.
