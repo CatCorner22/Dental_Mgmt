@@ -58,6 +58,12 @@ export type ReasonCodeRow = {
   active: boolean;
   /** True where the product needs this code to exist; it may be relabelled, never retired. */
   reserved: boolean;
+  /**
+   * The figure above which a posting under this reason waits for a second
+   * person (Increment 1.46); null where the practice set no rule and the
+   * channel's threshold governs, 0 where every one of them waits.
+   */
+  requiresApprovalOverCents: number | null;
   /** How many ledger entries cite it: why a code in use is retired rather than removed. */
   entries: number;
 };

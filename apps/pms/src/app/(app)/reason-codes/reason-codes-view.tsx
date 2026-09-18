@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
+import { formatCents } from "@/lib/ledger/format";
 import { REASON_KIND_LABEL, REASON_KINDS, type ReasonCodeRow, type ReasonKind } from "@/lib/ledger/reasons";
 
 type Me = { ok: boolean; role?: string };
@@ -17,6 +18,8 @@ export function ReasonCodesView() {
   const [busy, setBusy] = useState<string | null>(null);
   const [relabelling, setRelabelling] = useState<string | null>(null);
   const [label, setLabel] = useState("");
+  const [threshold, setThreshold] = useState<string | null>(null);
+  const [dollars, setDollars] = useState("");
   const [draft, setDraft] = useState<{ code: string; kind: ReasonKind; label: string }>({
     code: "",
     kind: "write_off",
@@ -51,19 +54,26 @@ export function ReasonCodesView() {
     };
   }, [reload]);
 
-  async function act(action: string, code: string, extra: Record<string, string> = {}, label = action) {
+  async function act(
+    action: string,
+    code: string,
+    extra: Record<string, string> = {},
+    label = action,
+    extraBody: Record<string, unknown> = {}
+  ) {
     setBusy(`${action}:${code}`);
     setNotice(null);
     try {
       const res = await fetch("/api/reason-codes", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action, code, ...extra }),
+        body: JSON.stringify({ action, code, ...extra, ...extraBody }),
       });
       const body = (await res.json()) as { ok?: boolean; error?: string; verb?: string; why?: string };
       if (!res.ok) throw new Error(body.why ? `${body.verb}: ${body.why}` : (body.error ?? `${label} failed.`));
       setNotice(`${label} succeeded.`);
       setRelabelling(null);
+      setThreshold(null);
       setDraft({ code: "", kind: "write_off", label: "" });
       setReload((n) => n + 1);
     } catch (err: unknown) {
@@ -100,6 +110,7 @@ export function ReasonCodesView() {
                   <th className="px-4 py-3 font-semibold">Code</th>
                   <th className="px-4 py-3 font-semibold">Reads as</th>
                   <th className="px-4 py-3 font-semibold">On the forms</th>
+                  <th className="px-4 py-3 font-semibold">Second person over</th>
                   <th className="px-4 py-3 font-semibold tabular-nums">Entries</th>
                   {state.isAdmin && <th className="px-4 py-3 font-semibold">Change</th>}
                 </tr>
@@ -144,6 +155,66 @@ export function ReasonCodesView() {
                       )}
                     </td>
                     <td className="px-4 py-3">{row.active ? "Offered" : "Retired"}</td>
+                    <td className="px-4 py-3">
+                      {threshold === row.code ? (
+                        <span className="flex flex-wrap items-center gap-2">
+                          <label className="sr-only" htmlFor={`threshold-${row.code}`}>
+                            Second person over, in dollars, for {row.code}
+                          </label>
+                          <input
+                            id={`threshold-${row.code}`}
+                            className="w-24 rounded-md border border-[var(--line)] bg-[var(--bg)] px-2 py-1 tabular-nums"
+                            inputMode="decimal"
+                            placeholder="none"
+                            value={dollars}
+                            onChange={(e) => setDollars(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-3 py-1 text-sm font-semibold disabled:opacity-50"
+                            disabled={busy !== null}
+                            onClick={() => {
+                              const trimmed = dollars.trim();
+                              const cents = trimmed === "" ? null : Math.round(Number(trimmed) * 100);
+                              if (cents !== null && !Number.isFinite(cents)) return;
+                              void act("threshold", row.code, {}, "Set the threshold", { cents });
+                            }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            className="min-h-[var(--target)] rounded-md border border-[var(--line)] px-3 py-1 text-sm"
+                            onClick={() => setThreshold(null)}
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="tabular-nums">
+                            {row.requiresApprovalOverCents === null
+                              ? "the channel's figure"
+                              : row.requiresApprovalOverCents === 0
+                                ? "every one"
+                                : formatCents(row.requiresApprovalOverCents)}
+                          </span>
+                          {state.isAdmin && (
+                            <button
+                              type="button"
+                              className="min-h-[var(--target)] rounded-md border border-[var(--line)] px-3 py-1 text-sm"
+                              onClick={() => {
+                                setThreshold(row.code);
+                                setDollars(row.requiresApprovalOverCents === null ? "" : (row.requiresApprovalOverCents / 100).toFixed(2));
+                                setNotice(null);
+                              }}
+                            >
+                              Set threshold for {row.code}
+                            </button>
+                          )}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 tabular-nums">{row.entries}</td>
                     {state.isAdmin && (
                       <td className="px-4 py-3">

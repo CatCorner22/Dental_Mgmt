@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { allReasonOptions, reasonOptionsForPosting, REASON_KIND_FOR_POSTING, type ReasonCodeRow } from "./reasons";
 
 function row(over: Partial<ReasonCodeRow> & Pick<ReasonCodeRow, "code" | "kind" | "label">): ReasonCodeRow {
-  return { active: true, reserved: false, entries: 0, ...over };
+  return { active: true, reserved: false, requiresApprovalOverCents: null, entries: 0, ...over };
 }
 
 const rows: ReasonCodeRow[] = [

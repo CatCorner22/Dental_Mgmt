@@ -42,6 +42,7 @@ const correctionHoldsSql = readFileSync(join(here, "../migrations/0031_correctio
 const latePostingsSql = readFileSync(join(here, "../migrations/0032_late_postings.sql"), "utf8");
 const sealedDayFindingSql = readFileSync(join(here, "../migrations/0033_finding_sealed_day_posting.sql"), "utf8");
 const packageSchemaSql = readFileSync(join(here, "../migrations/0034_package_schema_version.sql"), "utf8");
+const reasonThresholdSql = readFileSync(join(here, "../migrations/0035_reason_thresholds.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -341,6 +342,37 @@ describe("Increment 1.38 one approval releases a correction pair", () => {
     expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_approval_request_uidx\s+ON ledger_entries \(approval_request_id\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NULL/);
     expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_correction_approval_uidx\s+ON ledger_entries \(approval_request_id, kind\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NOT NULL/);
     expect(correctionHoldsSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
+  });
+});
+
+describe("Increment 1.46 a reason may tighten the threshold", () => {
+  it("makes the three states distinguishable, and backfills the rows that never meant anything", () => {
+    expect(reasonThresholdSql).toMatch(/ALTER TABLE reason_codes ALTER COLUMN requires_approval_over_cents DROP NOT NULL/);
+    expect(reasonThresholdSql).toMatch(/ALTER TABLE reason_codes ALTER COLUMN requires_approval_over_cents DROP DEFAULT/);
+    // Every existing row carries 0 because nothing ever read the column, so NULL
+    // is the truth about them: no practice expressed a rule through it.
+    expect(reasonThresholdSql).toMatch(/UPDATE reason_codes SET requires_approval_over_cents = NULL WHERE requires_approval_over_cents = 0/);
+    expect(reasonThresholdSql).toMatch(/CHECK \(requires_approval_over_cents IS NULL OR requires_approval_over_cents >= 0\)/);
+  });
+
+  it("tightens and never loosens, and lets the append role read the reasons", () => {
+    expect(reasonThresholdSql).toMatch(/threshold_cents := least\(threshold_cents, reason_threshold_cents\)/);
+    expect(reasonThresholdSql).toMatch(/SELECT requires_approval_over_cents INTO reason_threshold_cents/);
+    expect(reasonThresholdSql).toMatch(/GRANT SELECT ON reason_codes TO app_append;/);
+    expect(reasonThresholdSql).not.toMatch(/GRANT (INSERT|UPDATE|DELETE)[^;]*TO app_append/);
+  });
+
+  it("carries the whole trigger forward, the after-hours hold and the correction branch included", () => {
+    // Rebuilding this function from an older migration's text would silently
+    // revert both, as it nearly did in Increment 1.38. These lines are that guarantee.
+    expect(reasonThresholdSql).toMatch(/CREATE OR REPLACE FUNCTION ledger_entries_requires_approval/);
+    expect(reasonThresholdSql).toMatch(/after_hours_hold boolean := false;/);
+    expect(reasonThresholdSql).toMatch(/ledger_posted_outside_hours\(NEW\.tenant_id, NEW\.location_id, NEW\.posted_at\)/);
+    expect(reasonThresholdSql).toMatch(/was posted outside the location''s business hours \(after-hours hold\)/);
+    expect(reasonThresholdSql).toMatch(/req\.corrects_entry_id IS NOT NULL/);
+    expect(reasonThresholdSql).toMatch(/amount_cents > abs\(req\.amount_cents\)/);
+    // And the exception path is untouched: a governed decision still licenses its figure.
+    expect(reasonThresholdSql).toMatch(/exception % raises the threshold only to % cents/);
   });
 });
 

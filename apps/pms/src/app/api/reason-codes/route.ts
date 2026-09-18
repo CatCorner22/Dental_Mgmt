@@ -1,6 +1,6 @@
 import { withGuard } from "@/lib/auth/withGuard";
 import { withTenantTransaction } from "@/lib/db/client";
-import { addReasonCode, listReasonCodes, renameReasonCode, setReasonCodeActive } from "@/lib/ledger/reasonCodes";
+import { addReasonCode, listReasonCodes, renameReasonCode, setReasonCodeActive, setReasonThreshold } from "@/lib/ledger/reasonCodes";
 
 /**
  * The practice's reason codes (Increment 1.45). Anyone who posts needs to read
@@ -20,7 +20,7 @@ export const POST = withGuard(
   async (req, ctx) => {
     const user = ctx.access.user;
     const body = (await req.json().catch(() => null)) as
-      | { action?: string; code?: string; kind?: string; label?: string }
+      | { action?: string; code?: string; kind?: string; label?: string; cents?: number | null }
       | null;
     if (!body?.action || !body.code) {
       return Response.json({ error: "An action and a code are required." }, { status: 400 });
@@ -38,12 +38,14 @@ export const POST = withGuard(
           return setReasonCodeActive(db, { tenantId: user.tenantId, actor, code, active: false });
         case "restore":
           return setReasonCodeActive(db, { tenantId: user.tenantId, actor, code, active: true });
+        case "threshold":
+          return setReasonThreshold(db, { tenantId: user.tenantId, actor, code, cents: body.cents ?? null });
         default:
           return null;
       }
     });
 
-    if (!result) return Response.json({ error: "The action must be add, relabel, retire, or restore." }, { status: 400 });
+    if (!result) return Response.json({ error: "The action must be add, relabel, retire, restore, or threshold." }, { status: 400 });
     if (!result.ok) return Response.json({ error: result.code, verb: result.verb, why: result.why }, { status: result.status });
     return Response.json({ ok: true, row: result.row });
   },
