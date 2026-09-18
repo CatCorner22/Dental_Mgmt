@@ -130,7 +130,8 @@
   const siteDepth = (st) => { const v = curKey(st) && st.sites[curKey(st)]; return v && v.depth != null ? v.depth : null; };
   /* One sealed-exam gate for every way of reaching it: a grammar key, the Amend control, a lane segment. */
   function openAmendGate(st, r) {
-    if (!st.amendGate) st.amendGate = gateNode({ code: 'exam_sealed', verb: 'Amend the saved exam with an addendum', control: 'Start an addendum', onControl: () => { st.saved = null; st.savedAt = null; st.amendGate = null; st.amending = true; rerender(Proto.router.current()); }, why: 'A saved exam is the record. Keys no longer change it; an amendment is a new dated entry by you that links to the original, and the original is never overwritten.', severity: 'info' });
+    // The addendum starts with an empty two-digit buffer: a "0" pending from before Save is not its first digit.
+    if (!st.amendGate) st.amendGate = gateNode({ code: 'exam_sealed', verb: 'Amend the saved exam with an addendum', control: 'Start an addendum', onControl: () => { st.saved = null; st.savedAt = null; st.amendGate = null; st.amending = true; st.pendingZero = false; rerender(Proto.router.current()); }, why: 'A saved exam is the record. Keys no longer change it; an amendment is a new dated entry by you that links to the original, and the original is never overwritten.', severity: 'info' });
     rerender(r || Proto.router.current());
     return 'Exam is saved; start an addendum to change it';
   }
@@ -250,6 +251,7 @@
   // A gate names the next thing to do, so the keyboard lands on it rather than on the Held primary behind it.
   function focusGateControl() { const c = document.querySelector('[data-testid="refusal.control"]'); if (c) c.focus(); }
   function doSave(st, r, licence) {
+    st.pendingZero = false;
     // A second dispatch in the same tick lands on a saved exam: it is the amend path, not a second Save.
     if (st.saved) { openAmendGate(st, r); return; }
     if (st.mode === 'screening' && st.sextants.some((c) => c === '')) { const n = st.sextants.filter((c) => c === '').length; mkGate(st, { code: 'screening_incomplete', verb: 'Code ' + n + ' more sextant' + (n > 1 ? 's' : '') + ' before Save', control: 'Go to the first empty sextant', why: 'Screening saves six codes (0 to 4, or * for furcation, mobility, or recession). An empty box would read as 0.' }, () => { st.gate = null; st.scur = st.sextants.indexOf(''); rerender(r); const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); }); rerender(r); focusGateControl(); return; }
@@ -257,8 +259,9 @@
     if (!res.ok) {
       // The reasons open with the gate: the chart is finished, so the remaining decision is the reason and one Save.
       if (res.code === 'omission_licence') { st.licenceOpen = true; mkGate(st, res, () => { const b = document.querySelector('[data-testid="perio.licence.' + LICENCES[0][0] + '"]'); if (b) b.focus(); }); }
-      // The store says the exam is already saved (a draft started after the save): the one gate for that is the amend gate.
-      else if (res.code === 'exam_sealed') { st.gate = null; openAmendGate(st, r); focusGateControl(); return; }
+      // Only the store's "saved exam" refusal is the amend gate; its filed-note refusal keeps the store's words and
+      // its control opens the note, where the addendum is written.
+      else if (res.code === 'exam_sealed' && res.control === 'Start an addendum') { st.gate = null; openAmendGate(st, r); focusGateControl(); return; }
       else mkGate(st, res);
       rerender(r); focusGateControl(); return;
     }
@@ -383,6 +386,8 @@
     }
     const region = Proto.ui.scrollRegion('Perio grid', 'perio.grid:perio-wrap', table);
     region.setAttribute('aria-keyshortcuts', '1 2 3 4 5 6 7 8 9 0 Space S Backspace ArrowRight ArrowLeft PageDown PageUp');
+    // The two-digit buffer belongs to the grid: leaving it drops a pending "0" rather than carrying it to the next key.
+    region.addEventListener('focusout', (ev) => { if (!rendering && st.pendingZero && !(ev.relatedTarget && region.contains(ev.relatedTarget))) st.pendingZero = false; });
     /* The legend lives in the box with the cells it explains, not 440 px below them (CLT-split-attention),
        and the keys are printed beside the instrument they drive (CLT-recognition-keys). */
     const legend = h('div', { class: 'stack pe-legend-in' },
@@ -583,8 +588,8 @@
     const sub = (a ? 'Chair ' + a.op + ' · ' : '') + (st.priorDate ? 'Prior exam ' + longDate(st.priorDate) + ' ghosted' : 'No prior exam on file') + ' · ' + (32 - st.missing.length) + ' teeth';
 
     // Selection carries its ✓ press mark, not fill alone: opts.pressed is the only way to get both.
-    const segFull = btn('Full chart', { kind: 'quiet', testid: 'perio.full', pressed: st.mode === 'full', onClick: () => { if (st.saved) { openAmendGate(st, r); return; } st.mode = 'full'; st.gate = null; rerender(r); } });
-    const segScr = btn('Screening', { kind: 'quiet', testid: 'perio.screening', pressed: st.mode === 'screening', ariaLabel: 'Screening lane: six sextant codes in at most 12 keystrokes', onClick: () => { if (st.saved) { openAmendGate(st, r); return; } st.mode = 'screening'; st.gate = null; st.padOpen = false; rerender(r); const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); } });
+    const segFull = btn('Full chart', { kind: 'quiet', testid: 'perio.full', pressed: st.mode === 'full', onClick: () => { if (st.saved) { openAmendGate(st, r); return; } st.mode = 'full'; st.gate = null; st.pendingZero = false; rerender(r); } });
+    const segScr = btn('Screening', { kind: 'quiet', testid: 'perio.screening', pressed: st.mode === 'screening', ariaLabel: 'Screening lane: six sextant codes in at most 12 keystrokes', onClick: () => { if (st.saved) { openAmendGate(st, r); return; } st.mode = 'screening'; st.gate = null; st.padOpen = false; st.pendingZero = false; rerender(r); const b = document.querySelector('[data-testid="perio.sextant.' + (st.scur + 1) + '"]'); if (b) b.focus(); } });
     // The pad carries the full-chart grammar, so it is offered in the lane that has one, and not on a sealed chart.
     const padT = st.mode === 'full' && !st.saved ? btn(st.padOpen ? 'Hide glove pad' : 'Glove pad', { kind: 'quiet', testid: 'perio.pad.toggle', pressed: st.padOpen, ariaLabel: 'Glove pad: 44 px keys for gloved fingers', onClick: () => { st.padOpen = !st.padOpen; rerender(r); } }) : null;
     const setT = btn('Settings', { kind: 'quiet', testid: 'perio.settings', pressed: st.settingsOpen, ariaLabel: 'Perio settings: last key pressed and probing path', onClick: () => { st.settingsOpen = !st.settingsOpen; rerender(r); if (st.settingsOpen) { const sec = document.getElementById('perio-settings'); if (sec) { sec.scrollIntoView({ block: 'nearest', behavior: 'auto' }); sec.focus(); } } } }); setT.setAttribute('aria-expanded', String(st.settingsOpen)); setT.setAttribute('aria-controls', 'perio-settings');
