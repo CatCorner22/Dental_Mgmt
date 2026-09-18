@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatCents, formatLedgerKind } from "@/lib/ledger/format";
+import { ALL_REASON_OPTIONS } from "@/lib/ledger/reasons";
 import type { LedgerAccountDetail, LedgerExplanationRow } from "@/lib/ledger/types";
 
 type LoadState =
@@ -91,7 +92,7 @@ export default function LedgerAccountPage() {
   function openCorrection(entry: LedgerExplanationRow) {
     setCorrecting(entry.entryId);
     setAmount((entry.amountCents / 100).toFixed(2));
-    setReason(entry.reasonCode ?? "");
+    setReason(ALL_REASON_OPTIONS.some((o) => o.value === entry.reasonCode) ? entry.reasonCode! : "");
     setNotice(null);
   }
 
@@ -240,18 +241,24 @@ export default function LedgerAccountPage() {
                               </label>
                               <label className="text-xs font-semibold text-[var(--ink-2)]">
                                 Reason
-                                <input
-                                  type="text"
-                                  className="mt-1 block w-36 rounded-md border border-[var(--line-strong)] bg-[var(--surface)] px-2 py-1 text-sm"
+                                <select
+                                  className="mt-1 block w-44 rounded-md border border-[var(--line-strong)] bg-[var(--surface)] px-2 py-1 text-sm"
                                   value={reason}
                                   onChange={(e) => setReason(e.target.value)}
-                                />
+                                >
+                                  <option value="">Select reason…</option>
+                                  {ALL_REASON_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>
+                                      {option.label}
+                                    </option>
+                                  ))}
+                                </select>
                               </label>
                               <span className="flex gap-2">
                                 <button
                                   type="button"
                                   className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-3 py-1 text-sm font-semibold disabled:opacity-50"
-                                  disabled={busy}
+                                  disabled={busy || !reason.trim()}
                                   onClick={() => void submitCorrection(entry.entryId)}
                                 >
                                   {busy ? "Correcting…" : "Reverse and repost"}

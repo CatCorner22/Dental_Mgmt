@@ -34,6 +34,7 @@ export type CorrectionRefusal = {
     | "already_reversed"
     | "unchanged"
     | "missing_reason"
+    | "unknown_reason"
     | "no_policy"
     | "not_allowed";
   verb: string;
@@ -170,6 +171,24 @@ export async function correctEntry(db: AppDb, input: CorrectEntryInput): Promise
   const effectiveDate = String(original.effectiveDate).slice(0, 10);
   const closedMonth = await closedMonthFor(db, input.tenantId, effectiveDate);
   const reasonCode = closedMonth ? PRIOR_PERIOD_REASON : input.reasonCode.trim();
+
+  // `ledger_entries.reason_code` is a foreign key into this practice's reason codes.
+  // Refuse an unregistered one here, in words, rather than letting the insert fail:
+  // a reason the practice has not adopted is a choice to make, not a crash to read.
+  const known = await db.execute(
+    sql`SELECT 1 FROM reason_codes WHERE tenant_id = ${input.tenantId} AND code = ${reasonCode} LIMIT 1`
+  );
+  if (known.rows.length === 0) {
+    return {
+      ok: false,
+      code: "unknown_reason",
+      verb: "Choose a reason",
+      control: "Reason code",
+      why: closedMonth
+        ? `This practice has no reason code "${reasonCode}", the one a correction into a closed month must carry. Add it to the practice's reason codes first.`
+        : `This practice has no reason code "${reasonCode}". Choose one the practice has adopted.`,
+    };
+  }
 
   // The reversal carries the larger exposure of the two rows in the general case,
   // but the practice is releasing both, so the policy reads the larger amount.

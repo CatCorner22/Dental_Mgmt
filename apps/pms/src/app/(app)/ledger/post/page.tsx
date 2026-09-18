@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { formatCents, formatLedgerKind } from "@/lib/ledger/format";
+import { REASON_OPTIONS } from "@/lib/ledger/reasons";
 import {
   POSTABLE_KINDS,
   type LedgerAccountSummary,
@@ -31,14 +32,6 @@ type Outcome =
   | { type: "posted"; entryId: string; duplicate: boolean }
   | { type: "needs_second"; approvalRequestId: string; why: string }
   | { type: "refused"; why: string; verb?: string };
-
-const REASON_OPTIONS: Record<string, { value: string; label: string }[]> = {
-  write_off: [
-    { value: "courtesy", label: "Courtesy adjustment" },
-    { value: "contractual_ppo", label: "Contractual PPO write-off" },
-  ],
-  adjustment: [{ value: "correction", label: "Correction" }],
-};
 
 const DEMO_DATE = "2026-09-14";
 

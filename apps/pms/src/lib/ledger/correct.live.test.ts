@@ -7,6 +7,7 @@ import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { closeMonth, PRIOR_PERIOD_REASON } from "../cpa/close";
 import { correctEntry } from "./correct";
 import { approveAndPost } from "../controls/decideAndPost";
+import { decideApprovalRequest, listInboxApprovals } from "../controls/approvals";
 
 /**
  * The reversal-and-repost correction pair on the seeded Ridgeview tenant, as
@@ -85,10 +86,13 @@ describe.skipIf(!adminUrl)("Correction pair (live)", () => {
     await resetDbPoolForTests();
     await seedDatabase(db.admin, { env: { ENCRYPTION_KEY: "b".repeat(64), BCRYPT_COST: "4" } });
     env = { POSTGRES_URL: await db.loginAs("app_rw"), APPEND_ROLE_DSN: await db.loginAs("app_append"), BCRYPT_COST: "4" };
-    await db.admin.query(
-      "INSERT INTO reason_codes (tenant_id, code, kind, label) VALUES ($1, $2, 'adjustment', 'Prior period correction') ON CONFLICT DO NOTHING",
-      [tenantId, PRIOR_PERIOD_REASON]
-    );
+    // The seed carries prior_period since Increment 1.39; assert it rather than inserting it,
+    // because a practice that cannot name the reason cannot correct a closed month at all.
+    const seeded = await db.admin.query("SELECT code FROM reason_codes WHERE tenant_id = $1 AND code = $2", [
+      tenantId,
+      PRIOR_PERIOD_REASON,
+    ]);
+    expect(seeded.rows).toHaveLength(1);
     closedEntryId = uuidv7(38_001);
     openEntryId = uuidv7(38_002);
     await insertEntry({ id: closedEntryId, effectiveDate: "2026-08-14", postedAt: "2026-08-14T15:00:00Z" });
@@ -379,5 +383,105 @@ describe.skipIf(!adminUrl)("Correction pair (live)", () => {
     // Both cite the one approval: the second person released the correction, not a row.
     expect(reversal.approval_request_id).toBe(held.approvalRequestId);
     expect(repost.approval_request_id).toBe(held.approvalRequestId);
+  });
+
+  it("shows the waiting correction to the second person as a correction, with both figures", async () => {
+    // A $300 write-off, above the threshold: held, and the owner's inbox has to say what it is.
+    const bigId = uuidv7(39_001);
+    await insertEntry({ id: bigId, effectiveDate: "2026-09-13", postedAt: "2026-09-13T15:00:00Z", amountCents: -30_000 });
+    const held = await tx((d) =>
+      correctEntry(d, {
+        tenantId,
+        actorId: front.id,
+        actorName: front.displayName,
+        entryId: bigId,
+        amountCents: -18_000,
+        reasonCode: "courtesy",
+        now,
+      })
+    );
+    expect(held).toMatchObject({ ok: false, code: "needs_second" });
+    if (held.ok || held.code !== "needs_second") return;
+
+    // The inbox carries the whole correction: the entry it replaces, the figure now, the figure proposed.
+    const inbox = await tx((d) => listInboxApprovals(d, tenantId, owner.id), owner);
+    const item = inbox.find((r) => r.id === held.approvalRequestId);
+    expect(item).toBeDefined();
+    expect(item!.correctsEntryId).toBe(bigId);
+    expect(item!.heldPayload.kind).toBe("reversal");
+    // The reversal mirrors the entry, so the entry's own figure is the reversal's opposite.
+    expect(-item!.heldPayload.amountCents).toBe(-30_000);
+    expect(item!.heldPayload.correction).toMatchObject({
+      correctsEntryId: bigId,
+      repostKind: "write_off",
+      repostAmountCents: -18_000,
+    });
+
+    // Declining writes neither half: a correction the second person refused leaves the ledger alone.
+    const declined = await tx(
+      (d) =>
+        decideApprovalRequest(d, {
+          tenantId,
+          requestId: held.approvalRequestId,
+          approverId: owner.id,
+          approverName: owner.displayName,
+          decision: "declined",
+          reason: "The original figure is right; bill the patient.",
+        }),
+      owner
+    );
+    expect(declined.ok).toBe(true);
+    const after = await db.admin.query("SELECT count(*)::int AS n FROM ledger_entries WHERE corrects_entry_id = $1", [bigId]);
+    expect(after.rows[0].n).toBe(0);
+    // And the entry is still correctable: a refused correction is not a spent one.
+    const second = await tx((d) =>
+      correctEntry(d, {
+        tenantId,
+        actorId: front.id,
+        actorName: front.displayName,
+        entryId: bigId,
+        amountCents: -20_000,
+        reasonCode: "courtesy",
+        now,
+      })
+    );
+    expect(second).toMatchObject({ ok: false, code: "needs_second" });
+  });
+
+  it("refuses a reason code this practice has not adopted, in words rather than as a failed insert", async () => {
+    const targetId = uuidv7(39_100);
+    await insertEntry({ id: targetId, effectiveDate: "2026-09-14", postedAt: "2026-09-14T15:00:00Z" });
+    const refused = await tx((d) =>
+      correctEntry(d, {
+        tenantId,
+        actorId: front.id,
+        actorName: front.displayName,
+        entryId: targetId,
+        amountCents: -2000,
+        reasonCode: "wrong figure keyed",
+        now,
+      })
+    );
+    // `ledger_entries.reason_code` is a foreign key; free text used to reach the database and fail
+    // the insert, which the browser saw as a 500. The service answers it now.
+    expect(refused).toMatchObject({ ok: false, code: "unknown_reason" });
+    if (refused.ok || refused.code !== "unknown_reason") return;
+    expect(refused.why).toMatch(/This practice has no reason code "wrong figure keyed"/);
+    const after = await db.admin.query("SELECT count(*)::int AS n FROM ledger_entries WHERE corrects_entry_id = $1", [targetId]);
+    expect(after.rows[0].n).toBe(0);
+
+    // The same correction with a reason the practice has adopted goes through.
+    const ok = await tx((d) =>
+      correctEntry(d, {
+        tenantId,
+        actorId: front.id,
+        actorName: front.displayName,
+        entryId: targetId,
+        amountCents: -2000,
+        reasonCode: "courtesy",
+        now,
+      })
+    );
+    expect(ok).toMatchObject({ ok: true });
   });
 });

@@ -68,7 +68,11 @@ export async function seedLedgerDemo(db: Queryable, now: Date = new Date()): Pro
     `INSERT INTO reason_codes (tenant_id, code, kind, label) VALUES
        ($1, 'courtesy', 'write_off', 'Courtesy adjustment'),
        ($1, 'correction', 'reversal', 'Correction'),
-       ($1, 'contractual_ppo', 'write_off', 'Contractual PPO write-off')
+       ($1, 'contractual_ppo', 'write_off', 'Contractual PPO write-off'),
+       -- The reason a correction into a closed month must carry (Increment 1.36's
+       -- refusal). Without it the database admits no correction into a closed month
+       -- at all, since reason_code is a foreign key into this table.
+       ($1, 'prior_period', 'adjustment', 'Prior period correction')
      ON CONFLICT (tenant_id, code) DO NOTHING`,
     [tenantId]
   );
