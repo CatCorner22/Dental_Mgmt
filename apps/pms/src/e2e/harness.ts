@@ -137,8 +137,13 @@ export type E2eBrowser = {
   problems: string[];
   /** Distinct axe violations seen so far, one per rule and first target. */
   a11y: AxeViolation[];
-  /** One row per audited state: how many rules passed, failed, or need review, so a silent no-op cannot pass. */
-  audits: { state: string; passes: number; violations: number; incomplete: number }[];
+  /**
+   * One row per audited state: the document title the audit saw, and how many rules
+   * passed, failed, or need review, so a silent no-op cannot pass. The title is
+   * recorded because a document sampled mid-update reads differently from the same
+   * screen at rest, and the next such failure should say so rather than be guessed at.
+   */
+  audits: { state: string; title: string; passes: number; violations: number; incomplete: number }[];
   signIn(username: string, callbackPath: string): Promise<void>;
   /** Runs axe on the page as it stands and records the violations under `state`. Returns the serious and critical ones. */
   audit(state: string): Promise<AxeViolation[]>;
@@ -188,6 +193,18 @@ export async function openBrowser(app: E2eApp): Promise<E2eBrowser> {
     a11y,
     audits,
     async audit(state) {
+      // Audit the screen at rest, never mid-update. Every route here declares
+      // metadata, so an empty document.title is always a document caught between
+      // renders -- the head swapped by a client navigation or a refresh -- and
+      // never a screen a person can be on. CI hit exactly that window on a state
+      // whose title reads "Account ledger" before and after it, and reported a
+      // WCAG 2.4.2 failure against a page that has a title.
+      //
+      // This settles the sample; it excuses nothing. A screen that genuinely
+      // carries no title never settles, so this wait times out and the suite
+      // fails, which is how the missing titles of Increment 1.49 were found.
+      await page.waitForFunction(() => document.title.length > 0, undefined, { timeout: 30_000 });
+      const title = await page.title();
       const loaded = await page.evaluate(() => typeof (window as unknown as { axe?: unknown }).axe !== "undefined");
       if (!loaded) await page.addScriptTag({ content: axeSource });
       const raw = (await page.evaluate(async (tags) => {
@@ -207,7 +224,7 @@ export async function openBrowser(app: E2eApp): Promise<E2eBrowser> {
           })),
         };
       }, AXE_TAGS)) as RawAxeResult;
-      audits.push({ state, passes: raw.passes, violations: raw.violations.length, incomplete: raw.incomplete.length });
+      audits.push({ state, title, passes: raw.passes, violations: raw.violations.length, incomplete: raw.incomplete.length });
       const found: AxeViolation[] = [];
       for (const v of raw.violations) {
         const first = v.nodes[0]?.target.join(" ") ?? "";

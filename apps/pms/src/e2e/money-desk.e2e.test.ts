@@ -642,6 +642,9 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await held.waitFor({ timeout: 30_000 });
     expect(await held.innerText()).toMatch(/\(request [0-9a-f-]{36}\)/);
     expect(await ledger.locator("tbody tr").count()).toBe(before);
+    // Pinned at the state CI caught: this screen carries its own title, and the
+    // violation reported against it was a document sampled between renders.
+    expect(await page().title()).toBe("Account ledger");
     await b.audit("account explanation (correction held for a second person)");
 
     // The owner's inbox reads it as a correction, not a bare reversal, and names both figures.
