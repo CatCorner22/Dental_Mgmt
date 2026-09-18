@@ -6,6 +6,7 @@ import { auditChainChecks, dayCloses, deposits, domainEvent, ledgerEntries } fro
 import type { AppDb } from "../db/client";
 import { listDecisions } from "../controls/decisions";
 import { ENFORCEMENT } from "../controls/enforcement";
+import { listMonthAttestations } from "../controls/attestations";
 import { appendControlEvent } from "../controls/events";
 import { loadActivePolicy } from "../controls/policy";
 import { canonicalJson, computeDigest, type DigestPeriod, type WeeklyDigest } from "../digest/digest";
@@ -88,6 +89,14 @@ export type MonthPackage = {
     activeExceptions: { id: string; label: string; action: string; channels: string[]; effectiveTo: string | null }[];
     decisions: { active: number; overdueAtMonthEnd: number; recordedInMonth: number };
     attestations: { channel: string; count: number }[];
+    /**
+     * Who said they reviewed each channel this build cannot enforce, for this
+     * month (Increment 1.51). Distinct from `attestations` above, which counts
+     * the per-release attestations the evaluator recorded as they happened:
+     * this is one dated assertion about the month as a whole, and the seat says
+     * whether an independent reader or the practice itself made it.
+     */
+    monthAttestations: { channel: string; seat: string; byName: string; at: string }[];
   };
   chain: {
     headSeq: number | null;
@@ -168,6 +177,15 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
     .where(and(inWindow(domainEvent, domainEvent.occurredAt), eq(domainEvent.kind, "control.release_attested")))
     .groupBy(sql`${domainEvent.payload}->>'channel'`)
     .orderBy(sql`${domainEvent.payload}->>'channel'`);
+
+  const monthAttestations = (await listMonthAttestations(db, tenantId, month))
+    .filter((r) => r.attestation !== null)
+    .map((r) => ({
+      channel: r.channel,
+      seat: r.attestation!.seat as string,
+      byName: r.attestation!.byName,
+      at: r.attestation!.at,
+    }));
 
   // The days this month that the practice sealed, and what landed behind them
   // (Increment 1.44). The window is the sealed day, not the posting: a row that
@@ -299,6 +317,7 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
         recordedInMonth: counts.decisions.recorded.reduce((n, r) => n + r.count, 0),
       },
       attestations: attestRows.map((r) => ({ channel: r.channel, count: Number(r.n) })),
+      monthAttestations,
     },
     chain: {
       headSeq: head ? Number(head.seq) : null,
@@ -323,8 +342,9 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
  *
  * v1: Increments 1.34 to 1.42. v2: the digest's sealed-day counts (1.43).
  * v3: the sealed-days section and its tie-out (1.44).
+ * v4: who attested each external channel for the month (1.51).
  */
-export const PACKAGE_SCHEMA_VERSION = "package-v3";
+export const PACKAGE_SCHEMA_VERSION = "package-v4";
 
 /**
  * What the hash covers: every figure the package states about the month.
@@ -433,6 +453,15 @@ export function packageRows(pkg: MonthPackage, hash: string): CsvRow[] {
   for (const r of pkg.controls.coverage) rows.push({ section: "coverage", key: r.channel, label: `${r.label} · ${r.enforcement} · ${r.status}`, count: r.activeExceptions, cents: "" });
   for (const e of pkg.controls.activeExceptions) rows.push({ section: "exceptions", key: e.id, label: `${e.label} · ${e.action} · ${e.channels.join("/") || "all"}${e.effectiveTo ? ` · until ${e.effectiveTo}` : ""}`, count: 1, cents: "" });
   for (const a of pkg.controls.attestations) rows.push({ section: "attestations", key: a.channel, label: `${a.channel} attested`, count: a.count, cents: "" });
+  for (const a of pkg.controls.monthAttestations) {
+    rows.push({
+      section: "attestations",
+      key: `month:${a.channel}`,
+      label: `${a.channel} reviewed for the month by ${a.byName} (${a.seat}) on ${a.at.slice(0, 10)}`,
+      count: 1,
+      cents: "",
+    });
+  }
   for (const t of pkg.tieOut) rows.push({ section: "tie_out", key: t.key, label: `${t.label}: ${t.holds ? "yes" : "no"}. ${t.detail}`, count: t.holds ? 1 : 0, cents: "" });
   rows.push({ section: "chain", key: "head", label: pkg.chain.headHash ?? "(empty chain)", count: pkg.chain.headSeq ?? "", cents: "" });
   rows.push({ section: "meta", key: "package_hash", label: hash, count: "", cents: "" });

@@ -45,6 +45,7 @@ const packageSchemaSql = readFileSync(join(here, "../migrations/0034_package_sch
 const reasonThresholdSql = readFileSync(join(here, "../migrations/0035_reason_thresholds.sql"), "utf8");
 const reasonDecisionSql = readFileSync(join(here, "../migrations/0036_decision_on_reason_code.sql"), "utf8");
 const cpaQuestionsSql = readFileSync(join(here, "../migrations/0037_cpa_questions.sql"), "utf8");
+const attestationsSql = readFileSync(join(here, "../migrations/0038_channel_attestations.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -344,6 +345,31 @@ describe("Increment 1.38 one approval releases a correction pair", () => {
     expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_approval_request_uidx\s+ON ledger_entries \(approval_request_id\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NULL/);
     expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_correction_approval_uidx\s+ON ledger_entries \(approval_request_id, kind\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NOT NULL/);
     expect(correctionHoldsSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
+  });
+});
+
+describe("Increment 1.51 attesting a channel the product cannot enforce", () => {
+  it("holds one dated assertion per practice, month and channel", () => {
+    expect(attestationsSql).toMatch(/CREATE TABLE channel_attestations/);
+    expect(attestationsSql).toMatch(/month text NOT NULL CHECK \(month ~ '\^\[0-9\]\{4\}-\[0-9\]\{2\}\$'\)/);
+    expect(attestationsSql).toMatch(/note text NOT NULL CHECK \(length\(btrim\(note\)\) >= 10\)/);
+    // Whether an independent reader or the practice itself said it.
+    expect(attestationsSql).toMatch(/attested_seat text NOT NULL CHECK \(attested_seat IN \('accountant', 'practice'\)\)/);
+    // Named, so the constraint the schema declares and the one the database holds agree.
+    expect(attestationsSql).toMatch(
+      /CREATE UNIQUE INDEX channel_attestations_month_channel_uidx[\s\S]*\(tenant_id, month, channel\)/
+    );
+  });
+
+  it("is append-only, tenant-isolated under FORCE RLS, and never granted an update or a delete", () => {
+    expect(attestationsSql).toMatch(/channel_attestations is append-only/);
+    expect(attestationsSql).toMatch(/TRIGGER channel_attestations_no_update[\s\S]*BEFORE UPDATE/);
+    expect(attestationsSql).toMatch(/TRIGGER channel_attestations_no_delete[\s\S]*BEFORE DELETE/);
+    expect(attestationsSql).toMatch(/ALTER TABLE channel_attestations FORCE ROW LEVEL SECURITY/);
+    expect(attestationsSql).toMatch(/CREATE POLICY channel_attestations_isolation/);
+    expect(attestationsSql).toMatch(/GRANT SELECT, INSERT ON channel_attestations TO app_rw;/);
+    expect(attestationsSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON channel_attestations/);
+    expect(attestationsSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON channel_attestations/);
   });
 });
 

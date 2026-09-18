@@ -851,4 +851,51 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
       .toMatch(/Practice · Riley Owner[\s\S]*Two deposits landed[\s\S]*Waiting on nobody/);
     await b.audit("month-end package (the question answered)");
   }, 150_000);
+
+  it("lets the accountant attest a channel the product cannot hold, refuses one it can, and names it on the coverage table", async () => {
+    // The coverage table has called vendor payments and payroll "attested,
+    // never enforced" since Increment 1.12 with nothing behind the word. This
+    // is what stands behind it (Increment 1.51).
+    await b.signIn("ridgeview-cpa", "/cpa");
+    await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
+    const attest = page().locator("section[aria-labelledby=package-attest]");
+    await attest.waitFor({ timeout: 30_000 });
+
+    // Only the two channels this build cannot enforce are offered at all.
+    const text = await attest.innerText();
+    expect(text).toMatch(/New vendors[\s\S]*Payroll/);
+    expect(text).not.toMatch(/Write-offs|Paper checks|Deposits/);
+    expect(await attest.getByRole("button", { name: /^Attest / }).count()).toBe(2);
+    await b.audit("month-end package (nothing attested yet)");
+
+    await attest.getByRole("button", { name: "Attest Payroll" }).click();
+    const note = attest.getByLabel("What you reviewed, and against what");
+    await note.waitFor({ timeout: 30_000 });
+    // It says what was reviewed, or it is not an attestation.
+    await note.fill("too short");
+    expect(await attest.getByRole("button", { name: "Reviewed this month" }).isDisabled()).toBe(true);
+    await note.fill("Tied the payroll register to the provider's report and to the bank debits for the month.");
+    await attest.getByRole("button", { name: "Reviewed this month" }).click();
+    await page().getByText(/^Attested: Payroll for \d{4}-\d{2}\./).waitFor({ timeout: 30_000 });
+    await expect
+      .poll(async () => attest.innerText(), { timeout: 30_000 })
+      .toMatch(/Reviewed for \d{4}-\d{2} by Casey Prentice \(the accountant\) on \d{4}-\d{2}-\d{2}/);
+    // It is said once and never rewritten, so the control is gone from that row.
+    expect(await attest.getByRole("button", { name: "Attest Payroll" }).count()).toBe(0);
+    await b.audit("month-end package (payroll attested)");
+
+    // The owner reads the same word on the coverage table, with who said it.
+    // The table names the month that has ended, so this month's attestation is
+    // not what it reports — which is the honest reading, and says so.
+    await b.signIn("ridgeview-owner", "/risk");
+    await page().getByRole("heading", { name: "Headline" }).waitFor({ timeout: 60_000 });
+    const payrollRow = page().locator("section[aria-labelledby=coverage] tbody tr", { hasText: "Payroll" });
+    await payrollRow.waitFor({ timeout: 30_000 });
+    expect(await payrollRow.innerText()).toMatch(/Attested \(external\)[\s\S]*(Nobody has reviewed|Reviewed for) \d{4}-\d{2}/);
+    // An enforced channel carries no such line: there is nothing to attest
+    // beside evidence the product already holds.
+    const writeoffRow = page().locator("section[aria-labelledby=coverage] tbody tr", { hasText: "Write-offs / adjustments" });
+    expect(await writeoffRow.innerText()).not.toMatch(/Nobody has reviewed|Reviewed for/);
+    await b.audit("practice risk, what stands behind the word attested");
+  }, 150_000);
 });

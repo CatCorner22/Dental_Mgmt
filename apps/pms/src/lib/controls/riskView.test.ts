@@ -6,6 +6,8 @@ import {
   decisionStateLabel,
   dutiesByPerson,
   grantRefusal,
+  attestationSentence,
+  lastCompleteMonth,
   provenanceSentence,
   reasonTighteningSentence,
   reasonTighteningsForChannel,
@@ -199,5 +201,26 @@ describe("reason thresholds beside the coverage they tighten", () => {
     expect(centsPhrase(0)).toBe("every one");
     expect(centsPhrase(15_000)).toBe("$150");
     expect(centsPhrase(125_050)).toBe("$1,250.50");
+  });
+});
+
+describe("what the coverage table says about a channel the product cannot enforce", () => {
+  it("names the last month that has ended, not the one still filling", () => {
+    expect(lastCompleteMonth("2026-09-18")).toBe("2026-08");
+    // Across a year boundary, which a naive subtraction gets wrong.
+    expect(lastCompleteMonth("2026-01-04")).toBe("2025-12");
+    expect(lastCompleteMonth("2026-11-30")).toBe("2026-10");
+  });
+
+  it("says nobody has spoken rather than letting the word stand alone", () => {
+    expect(attestationSentence(null, "2026-08")).toBe("Nobody has reviewed 2026-08.");
+    expect(
+      attestationSentence({ byName: "Casey Prentice", seat: "accountant", at: "2026-09-03T10:00:00.000Z" }, "2026-08")
+    ).toBe("Reviewed for 2026-08 by Casey Prentice (the accountant) on 2026-09-03.");
+    // An attestation the practice makes about its own external channel is
+    // worth less than an independent reader's, so the row says which it is.
+    expect(
+      attestationSentence({ byName: "Riley Owner", seat: "practice", at: "2026-09-03T10:00:00.000Z" }, "2026-08")
+    ).toBe("Reviewed for 2026-08 by Riley Owner (the practice itself) on 2026-09-03.");
   });
 });
