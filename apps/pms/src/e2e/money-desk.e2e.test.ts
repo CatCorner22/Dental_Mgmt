@@ -500,18 +500,32 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await page().getByRole("button", { name: /^Set threshold for / }).count()).toBe(0);
     await b.audit("reason codes (front desk)");
 
-    // Put the threshold back, so the cases after this read the seeded practice.
+    // Clearing the threshold hands those rows back to the channel's own figure,
+    // which lets through what used to wait — a control decision, not a settings
+    // change (Increment 1.47), exactly as switching the after-hours hold off is.
     await b.signIn("ridgeview-owner", "/reason-codes");
     await page().getByRole("heading", { name: "Why money moved" }).waitFor({ timeout: 60_000 });
     const ppoAgain = page().locator("tr", { hasText: "contractual_ppo" });
     await ppoAgain.waitFor({ timeout: 30_000 });
     await ppoAgain.getByRole("button", { name: "Set threshold for contractual_ppo" }).click();
     await page().getByLabel("Second person over, in dollars, for contractual_ppo").fill("");
+    // The form says what the change does and asks for the decision before it will save.
+    await page().getByText(/That lets through what used to wait for a second person/).waitFor({ timeout: 30_000 });
+    await b.audit("reason codes (loosening asks for a decision)");
+
+    // Save holds until the decision is complete: the form already knows it is
+    // incomplete, so it says so rather than spending a round trip to be refused.
+    expect(await ppoAgain.getByRole("button", { name: "Save" }).isDisabled()).toBe(true);
+    await page().getByLabel("Why").fill("The channel's own $150 governs these again.");
+    expect(await ppoAgain.getByRole("button", { name: "Save" }).isDisabled()).toBe(true);
+    await page().getByLabel("Review by").fill("2026-12-01");
+    expect(await ppoAgain.getByRole("button", { name: "Save" }).isDisabled()).toBe(false);
     await ppoAgain.getByRole("button", { name: "Save" }).click();
     await page().getByText(/^Set the threshold succeeded\.$/).waitFor({ timeout: 30_000 });
     await expect
       .poll(async () => page().locator("tr", { hasText: "contractual_ppo" }).innerText(), { timeout: 30_000 })
       .toMatch(/the channel's figure/);
+    await b.audit("reason codes (loosened under a decision)");
   }, 150_000);
 
   it("renders the month-end package for the owner, exports it as CSV onto the chain, and shows the front desk the seat message", async () => {

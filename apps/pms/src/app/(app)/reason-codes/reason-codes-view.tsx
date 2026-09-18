@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
 import { formatCents } from "@/lib/ledger/format";
 import { REASON_KIND_LABEL, REASON_KINDS, type ReasonCodeRow, type ReasonKind } from "@/lib/ledger/reasons";
+import { isLoosening } from "@/lib/ledger/reasonThreshold";
 
 type Me = { ok: boolean; role?: string };
 
@@ -20,6 +21,11 @@ export function ReasonCodesView() {
   const [label, setLabel] = useState("");
   const [threshold, setThreshold] = useState<string | null>(null);
   const [dollars, setDollars] = useState("");
+  // What the owner records when the figure they entered lets more through than
+  // it used to (Increment 1.47); the service refuses the change without it.
+  const [decisionKind, setDecisionKind] = useState("accept_residual");
+  const [decisionNote, setDecisionNote] = useState("");
+  const [reviewBy, setReviewBy] = useState("");
   const [draft, setDraft] = useState<{ code: string; kind: ReasonKind; label: string }>({
     code: "",
     kind: "write_off",
@@ -74,6 +80,8 @@ export function ReasonCodesView() {
       setNotice(`${label} succeeded.`);
       setRelabelling(null);
       setThreshold(null);
+      setDecisionNote("");
+      setReviewBy("");
       setDraft({ code: "", kind: "write_off", label: "" });
       setReload((n) => n + 1);
     } catch (err: unknown) {
@@ -81,6 +89,17 @@ export function ReasonCodesView() {
     } finally {
       setBusy(null);
     }
+  }
+
+  /** The figure the form currently holds, in cents, or null for "the channel's own". */
+  function enteredCents(): number | null {
+    const trimmed = dollars.trim();
+    return trimmed === "" ? null : Math.round(Number(trimmed) * 100);
+  }
+
+  /** Whether what is typed would let through what used to wait for a second person. */
+  function needsDecision(row: ReasonCodeRow): boolean {
+    return isLoosening(row.requiresApprovalOverCents, enteredCents());
   }
 
   if (state.status === "loading") return <p className="text-sm text-[var(--ink-2)]">Loading…</p>;
@@ -172,12 +191,17 @@ export function ReasonCodesView() {
                           <button
                             type="button"
                             className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-3 py-1 text-sm font-semibold disabled:opacity-50"
-                            disabled={busy !== null}
+                            // A loosening needs its decision complete before it is worth
+                            // sending: the server refuses an incomplete one anyway, and a
+                            // form that already knows should say so without the round trip.
+                            disabled={busy !== null || (needsDecision(row) && (!decisionNote.trim() || !reviewBy))}
                             onClick={() => {
-                              const trimmed = dollars.trim();
-                              const cents = trimmed === "" ? null : Math.round(Number(trimmed) * 100);
+                              const cents = enteredCents();
                               if (cents !== null && !Number.isFinite(cents)) return;
-                              void act("threshold", row.code, {}, "Set the threshold", { cents });
+                              const decision = needsDecision(row)
+                                ? { kind: decisionKind, note: decisionNote.trim(), reviewBy }
+                                : undefined;
+                              void act("threshold", row.code, {}, "Set the threshold", { cents, decision });
                             }}
                           >
                             Save
@@ -189,6 +213,42 @@ export function ReasonCodesView() {
                           >
                             Cancel
                           </button>
+                          {needsDecision(row) && (
+                            <span className="flex w-full flex-wrap items-end gap-2">
+                              <span className="w-full max-w-prose text-sm text-[var(--ink-2)]">
+                                That lets through what used to wait for a second person. Accept the residual or name
+                                what compensates, say why, and set the day the practice looks at this again.
+                              </span>
+                              <label className="flex flex-col text-sm">
+                                <span className="mb-1 font-semibold">Decision</span>
+                                <select
+                                  className="rounded-md border border-[var(--line)] bg-[var(--bg)] px-2 py-1"
+                                  value={decisionKind}
+                                  onChange={(e) => setDecisionKind(e.target.value)}
+                                >
+                                  <option value="accept_residual">Accept residual</option>
+                                  <option value="compensate">Compensate</option>
+                                </select>
+                              </label>
+                              <label className="flex flex-col text-sm">
+                                <span className="mb-1 font-semibold">Why</span>
+                                <input
+                                  className="w-64 rounded-md border border-[var(--line)] bg-[var(--bg)] px-2 py-1"
+                                  value={decisionNote}
+                                  onChange={(e) => setDecisionNote(e.target.value)}
+                                />
+                              </label>
+                              <label className="flex flex-col text-sm">
+                                <span className="mb-1 font-semibold">Review by</span>
+                                <input
+                                  className="rounded-md border border-[var(--line)] bg-[var(--bg)] px-2 py-1"
+                                  type="date"
+                                  value={reviewBy}
+                                  onChange={(e) => setReviewBy(e.target.value)}
+                                />
+                              </label>
+                            </span>
+                          )}
                         </span>
                       ) : (
                         <span className="flex flex-wrap items-center gap-2">

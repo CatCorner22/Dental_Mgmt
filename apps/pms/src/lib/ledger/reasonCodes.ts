@@ -2,6 +2,9 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { ledgerEntries, reasonCodes } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { appendControlEvent } from "../controls/events";
+import { listDecisions, recordDecision, reviewDecision } from "../controls/decisions";
+import { decisionPermitsRetirement, latestDecisionFor, type ControlDecision } from "@pms/controls-engine";
+import { isLoosening } from "./reasonThreshold";
 import { REASON_KINDS, RESERVED_REASON_CODES, type ReasonCodeRow } from "./reasons";
 
 /**
@@ -29,12 +32,13 @@ import { REASON_KINDS, RESERVED_REASON_CODES, type ReasonCodeRow } from "./reaso
 export type ReasonCodeRefusal = {
   ok: false;
   status: 400 | 404 | 409;
-  code: "invalid" | "duplicate" | "not_found" | "reserved" | "unchanged";
+  code: "invalid" | "duplicate" | "not_found" | "reserved" | "unchanged" | "needs_decision";
   verb: string;
   why: string;
 };
 
 export type { ReasonCodeRow };
+export { isLoosening } from "./reasonThreshold";
 
 export type ReasonCodeResult = { ok: true; row: ReasonCodeRow } | ReasonCodeRefusal;
 
@@ -91,12 +95,44 @@ export async function loadReasonThresholdCents(db: AppDb, tenantId: string, code
   return cents === null || cents === undefined ? null : Number(cents);
 }
 
-/** Sets or clears what one reason requires. Tightening is free; loosening is the risk. */
+/** What the owner records when a change lets more through than it used to. */
+export type ThresholdDecision = { kind: string; note: string; reviewBy?: string };
+
+/** The figure in words, for a refusal the reader can act on. */
+function figurePhrase(cents: number | null): string {
+  if (cents === null) return "the channel's own figure";
+  if (cents === 0) return "every one of them";
+  return `${(cents / 100).toFixed(2)}`;
+}
+
+/**
+ * Sets or clears what one reason requires (Increment 1.46), under the rule
+ * Increment 1.47 adds: tightening is a settings change, loosening is a control
+ * decision.
+ *
+ * Loosening means letting through what used to wait — raising the figure, or
+ * clearing it so the channel's own figure governs again. That is the same act
+ * as switching the after-hours hold off (Increment 1.31), so it takes the same
+ * thing: an accept-residual or compensate decision, with a note and the day
+ * the practice looks at it again. The decision and the change are written in
+ * the caller's one transaction, so neither lands without the other.
+ *
+ * Tightening back retires that decision, because the control stands again and
+ * nothing is left to accept.
+ */
 export async function setReasonThreshold(
   db: AppDb,
-  input: { tenantId: string; actor: { id: string; name: string }; code: string; cents: number | null; now?: Date }
+  input: {
+    tenantId: string;
+    actor: { id: string; name: string };
+    code: string;
+    cents: number | null;
+    decision?: ThresholdDecision;
+    now?: Date;
+  }
 ): Promise<ReasonCodeResult> {
   const now = input.now ?? new Date();
+  const asOf = now.toISOString().slice(0, 10);
   if (input.cents !== null && (!Number.isInteger(input.cents) || input.cents < 0)) {
     return { ok: false, status: 400, code: "invalid", verb: "Enter a figure", why: "A threshold is a whole number of cents, or none at all." };
   }
@@ -105,6 +141,62 @@ export async function setReasonThreshold(
   const before = await loadReasonThresholdCents(db, input.tenantId, input.code);
   if (before === input.cents) {
     return { ok: false, status: 400, code: "unchanged", verb: "Change the figure", why: "That is what it requires already." };
+  }
+
+  const loosened = isLoosening(before, input.cents);
+  if (loosened && !input.decision) {
+    // 409, not 400: the figure was well formed and the request was fine; the
+    // practice's current state is what refuses it until a decision stands beside
+    // it. (`retireException` still answers 400 for the same condition — worth
+    // unifying, but not by widening this increment.)
+    return {
+      ok: false,
+      status: 409,
+      code: "needs_decision",
+      verb: "Record a decision",
+      why: `Moving "${row.code}" from ${figurePhrase(before)} to ${figurePhrase(input.cents)} lets through what used to wait for a second person. Accept the residual or name what compensates, say why, and set the day the practice looks at this again.`,
+    };
+  }
+  if (loosened && input.decision) {
+    const permitted = decisionPermitsRetirement(input.decision, asOf);
+    if (!permitted.ok) {
+      return { ok: false, status: 400, code: "invalid", verb: "Record a decision", why: permitted.errors.join(" ") };
+    }
+  }
+
+  // The decision first: refused, nothing else is written.
+  let decision: ControlDecision | undefined;
+  if (loosened && input.decision) {
+    const recorded = await recordDecision(db, {
+      tenantId: input.tenantId,
+      actor: input.actor,
+      subjectKind: "reason_code",
+      subjectId: row.code,
+      kind: input.decision.kind,
+      note: input.decision.note,
+      reviewBy: input.decision.reviewBy,
+      now,
+    });
+    if (!recorded.ok) return { ok: false, status: 400, code: "invalid", verb: "Record a decision", why: recorded.errors.join(" ") };
+    decision = recorded.decision;
+  }
+
+  // Tightening back ends the decision that licensed the loosening: the control
+  // stands again, so there is nothing left to accept.
+  if (!loosened) {
+    const governing = latestDecisionFor(await listDecisions(db, input.tenantId), "reason_code", row.code);
+    if (governing) {
+      const ended = await reviewDecision(db, {
+        tenantId: input.tenantId,
+        actor: input.actor,
+        decisionId: governing.id,
+        action: "retire",
+        note: `"${row.code}" holds at ${figurePhrase(input.cents)} again; nothing is left to accept.`,
+        now,
+      });
+      if (!ended.ok) return { ok: false, status: 400, code: "invalid", verb: "Tighten it", why: ended.errors.join(" ") };
+      decision = ended.decision;
+    }
   }
 
   await db
@@ -116,18 +208,18 @@ export async function setReasonThreshold(
     input.tenantId,
     input.actor.id,
     "reason_code.threshold_changed",
-    { code: row.code, beforeCents: before ?? -1, afterCents: input.cents ?? -1, loosened: looser(before, input.cents) },
+    {
+      code: row.code,
+      beforeCents: before ?? -1,
+      afterCents: input.cents ?? -1,
+      loosened,
+      decisionId: decision?.id ?? "",
+    },
     now
   );
   return { ok: true, row: { ...row, requiresApprovalOverCents: input.cents } };
 }
 
-/** Whether the change lets more through than it used to; null is the loosest state of all. */
-function looser(before: number | null, after: number | null): boolean {
-  if (after === null) return before !== null;
-  if (before === null) return false;
-  return after > before;
-}
 
 async function loadOne(db: AppDb, tenantId: string, code: string): Promise<ReasonCodeRow | null> {
   const all = await listReasonCodes(db, tenantId);

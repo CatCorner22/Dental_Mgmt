@@ -35,6 +35,12 @@ export const DECISION_SUBJECT_KINDS = [
   "knowledge",
   /** A detector's control_findings row (Increment 1.26); the subject id is the finding id. */
   "detector_finding",
+  /**
+   * One of the practice's reason codes (Increment 1.47); the subject id is the
+   * code itself, which never changes, so the decision keeps pointing at the same
+   * reason for as long as the practice holds it.
+   */
+  "reason_code",
 ] as const;
 export type DecisionSubjectKind = (typeof DECISION_SUBJECT_KINDS)[number];
 

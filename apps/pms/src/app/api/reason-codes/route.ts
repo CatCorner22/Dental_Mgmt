@@ -20,7 +20,14 @@ export const POST = withGuard(
   async (req, ctx) => {
     const user = ctx.access.user;
     const body = (await req.json().catch(() => null)) as
-      | { action?: string; code?: string; kind?: string; label?: string; cents?: number | null }
+      | {
+          action?: string;
+          code?: string;
+          kind?: string;
+          label?: string;
+          cents?: number | null;
+          decision?: { kind: string; note: string; reviewBy?: string };
+        }
       | null;
     if (!body?.action || !body.code) {
       return Response.json({ error: "An action and a code are required." }, { status: 400 });
@@ -39,7 +46,7 @@ export const POST = withGuard(
         case "restore":
           return setReasonCodeActive(db, { tenantId: user.tenantId, actor, code, active: true });
         case "threshold":
-          return setReasonThreshold(db, { tenantId: user.tenantId, actor, code, cents: body.cents ?? null });
+          return setReasonThreshold(db, { tenantId: user.tenantId, actor, code, cents: body.cents ?? null, decision: body.decision });
         default:
           return null;
       }

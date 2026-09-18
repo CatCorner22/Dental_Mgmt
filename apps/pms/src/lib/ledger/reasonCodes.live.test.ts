@@ -4,6 +4,7 @@ import { seedDatabase } from "@pms/db/seed";
 import { DEV_TENANTS, DEV_USERS, SEED_LEDGER } from "@pms/db/seed-data";
 import { uuidv7 } from "@pms/db";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
+import { listDecisions } from "../controls/decisions";
 import { addReasonCode, listReasonCodes, loadReasonThresholdCents, renameReasonCode, setReasonCodeActive, setReasonThreshold } from "./reasonCodes";
 
 /**
@@ -164,7 +165,7 @@ describe.skipIf(!adminUrl)("Reason codes (live)", () => {
     });
   });
 
-  it("records a threshold change on the chain, and says which way it moved", async () => {
+  it("records a tightening on the chain as a settings change, needing nothing else", async () => {
     expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "courtesy", cents: 5_000 }))).toMatchObject({ ok: true });
     expect(await tx((d) => loadReasonThresholdCents(d, tenantId, "courtesy"))).toBe(5_000);
     expect((await events("reason_code.threshold_changed"))[0]).toMatchObject({
@@ -172,15 +173,85 @@ describe.skipIf(!adminUrl)("Reason codes (live)", () => {
       beforeCents: -1,
       afterCents: 5_000,
       loosened: false,
+      decisionId: "",
     });
 
-    // Tightening further is not a loosening; raising it is; clearing it is the loosest of all.
+    // Tightening further is a settings change too.
     expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "courtesy", cents: 2_500 }))).toMatchObject({ ok: true });
     expect((await events("reason_code.threshold_changed"))[1]).toMatchObject({ beforeCents: 5_000, afterCents: 2_500, loosened: false });
-    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "courtesy", cents: 9_000 }))).toMatchObject({ ok: true });
-    expect((await events("reason_code.threshold_changed"))[2]).toMatchObject({ beforeCents: 2_500, afterCents: 9_000, loosened: true });
-    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "courtesy", cents: null }))).toMatchObject({ ok: true });
-    expect((await events("reason_code.threshold_changed"))[3]).toMatchObject({ beforeCents: 9_000, afterCents: -1, loosened: true });
+  });
+
+  it("refuses a loosening with no decision behind it, and writes neither without the other (Increment 1.47)", async () => {
+    const refused = await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "courtesy", cents: 9_000 }));
+    // 409 rather than 400: the figure was fine; the state is what refuses it.
+    expect(refused).toMatchObject({ ok: false, status: 409, code: "needs_decision" });
+    expect(refused.ok === false && refused.why).toMatch(/lets through what used to wait for a second person/);
+    expect(refused.ok === false && refused.why).toMatch(/from 25\.00 to 90\.00/);
+    // Nothing moved, and no decision was recorded.
+    expect(await tx((d) => loadReasonThresholdCents(d, tenantId, "courtesy"))).toBe(2_500);
+    expect(await tx((d) => listDecisions(d, tenantId))).toEqual([]);
+
+    // A decision of the wrong kind, or one with no review date, is refused the same way.
+    for (const decision of [
+      { kind: "monitor", note: "Watching it.", reviewBy: "2026-12-01" },
+      { kind: "accept_residual", note: "The evening clinic runs with two people present." },
+    ]) {
+      const bad = await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "courtesy", cents: 9_000, decision }));
+      expect(bad, decision.kind).toMatchObject({ ok: false, status: 400, code: "invalid" });
+    }
+    expect(await tx((d) => loadReasonThresholdCents(d, tenantId, "courtesy"))).toBe(2_500);
+    expect(await tx((d) => listDecisions(d, tenantId))).toEqual([]);
+  });
+
+  it("writes the decision and the loosening together, and ends the decision when it is tightened back", async () => {
+    const loosened = await tx((d) =>
+      setReasonThreshold(d, {
+        tenantId,
+        actor,
+        code: "courtesy",
+        cents: 9_000,
+        decision: { kind: "accept_residual", note: "Courtesy write-offs run small; the weekly digest carries the count.", reviewBy: "2026-12-01" },
+      })
+    );
+    expect(loosened).toMatchObject({ ok: true });
+    expect(await tx((d) => loadReasonThresholdCents(d, tenantId, "courtesy"))).toBe(9_000);
+
+    const decisions = await tx((d) => listDecisions(d, tenantId));
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]).toMatchObject({ subjectKind: "reason_code", subjectId: "courtesy", kind: "accept_residual", reviewBy: "2026-12-01" });
+    // The chain event names the decision that licensed it, so the two are one story.
+    expect((await events("reason_code.threshold_changed")).at(-1)).toMatchObject({
+      beforeCents: 2_500,
+      afterCents: 9_000,
+      loosened: true,
+      decisionId: decisions[0]!.id,
+    });
+
+    // Tightening back retires it: the control stands again, so nothing is left to accept.
+    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "courtesy", cents: 1_000 }))).toMatchObject({ ok: true });
+    const after = await tx((d) => listDecisions(d, tenantId));
+    expect(after).toHaveLength(2);
+    const retirement = after.find((r) => r.supersedesDecisionId === decisions[0]!.id)!;
+    expect(retirement).toMatchObject({ subjectKind: "reason_code", subjectId: "courtesy", kind: "retire" });
+    expect(retirement.note).toMatch(/holds at 10\.00 again; nothing is left to accept/);
+
+    // And clearing it now needs a fresh decision, because it loosens again.
+    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "courtesy", cents: null }))).toMatchObject({
+      ok: false,
+      code: "needs_decision",
+    });
+    expect(
+      await tx((d) =>
+        setReasonThreshold(d, {
+          tenantId,
+          actor,
+          code: "courtesy",
+          cents: null,
+          decision: { kind: "compensate", note: "The channel's own $150 governs, and the digest counts the write-offs.", reviewBy: "2026-11-01" },
+        })
+      )
+    ).toMatchObject({ ok: true });
+    expect(await tx((d) => loadReasonThresholdCents(d, tenantId, "courtesy"))).toBeNull();
   });
 
   it("tightens the channel at the database, and never loosens it", async () => {
@@ -214,14 +285,38 @@ describe.skipIf(!adminUrl)("Reason codes (live)", () => {
     await expect(writeOff(4, -100, "contractual_ppo")).rejects.toThrow(/dual_release_required[\s\S]*exceeds 0 cents/);
 
     // A reason set ABOVE the channel never loosens it: least() is the whole rule,
-    // or a practice could undo dual release by inventing a reason.
-    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "contractual_ppo", cents: 90_000 }))).toMatchObject({ ok: true });
+    // or a practice could undo dual release by inventing a reason. Raising it is
+    // itself a loosening of what this reason required, so it takes a decision
+    // (Increment 1.47) — the two rules compose rather than replacing one another.
+    expect(
+      await tx((d) =>
+        setReasonThreshold(d, {
+          tenantId,
+          actor,
+          code: "contractual_ppo",
+          cents: 90_000,
+          decision: { kind: "accept_residual", note: "PPO write-offs are contractual; the channel's own figure is the control.", reviewBy: "2026-12-01" },
+        })
+      )
+    ).toMatchObject({ ok: true });
     await expect(writeOff(5, -20_000, "contractual_ppo")).rejects.toThrow(/dual_release_required[\s\S]*exceeds 15000 cents/);
     // $100 is under the channel's own figure, so it posts, exactly as it did before.
     await expect(writeOff(6, -10_000, "contractual_ppo")).resolves.toBeTruthy();
 
-    // Put it back, so what follows reads the seeded practice.
-    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "contractual_ppo", cents: null }))).toMatchObject({ ok: true });
+    // Put it back, so what follows reads the seeded practice. Clearing it hands
+    // the row to the channel, which loosens what this reason required, so it takes
+    // a decision too.
+    expect(
+      await tx((d) =>
+        setReasonThreshold(d, {
+          tenantId,
+          actor,
+          code: "contractual_ppo",
+          cents: null,
+          decision: { kind: "compensate", note: "The channel's own $150 governs these again.", reviewBy: "2026-12-01" },
+        })
+      )
+    ).toMatchObject({ ok: true });
   });
 
   it("lets an adopted code reach an entry, which is the whole point of adopting one", async () => {

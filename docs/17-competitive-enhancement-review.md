@@ -555,6 +555,20 @@ The CPA month-end package, `docs/13` item 22, has sat in every "not in" list sin
 
 **Not in Increment 1.35.** QuickBooks Online and Xero export shapes (the mapping is theirs to feed, but the formats are not written); a starter chart of accounts; reason-code-level mappings in the page's form (the service and the resolver take them; the form proposes the wildcard); the CPA seat; month close.
 
+## Increment 1.47
+
+Increment 1.46 made a reason code able to tighten the dual-release threshold, and recorded on the chain which way each change moved. That direction was the fact this increment hangs on: tightening a control is a settings change, loosening one is a decision.
+
+- **Loosening takes a decision.** Raising the figure, or clearing it so the channel's own governs again, lets through what used to wait for a second person. That is the same act as switching the after-hours hold off, so it takes the same thing (Increment 1.31): an accept-residual or compensate decision, with a note and the day the practice looks at it again. `decisionPermitsRetirement` from the engine is reused rather than reimplemented, so the two paths cannot drift.
+- **Neither lands without the other.** The decision is recorded first, in the caller's one transaction; refused, nothing else is written. The chain event then names the decision that licensed the change, so the two read as one story rather than two rows that happen to share a timestamp.
+- **Tightening back ends it.** The control stands again, so nothing is left to accept: the governing decision is retired through the review path, as restoring the after-hours hold does.
+- **The subject is the reason code itself** (migration 0036 widens `control_decisions.subject_kind`). The code never changes (Increment 1.45), so a decision keeps pointing at the same reason for as long as the practice holds it, and the owner board's decisions-due card carries it like any other decision without a line of new code.
+- **409, not 400.** The refusal says the figure was well formed and the practice's state is what refuses it until a decision stands beside it. The browser harness found this: it treats a 400 on an API route as a defect, because the product's own screens should not send malformed requests, and it was right — the request was fine. (`retireException` still answers 400 for the same condition; unifying them is a small follow-up, not a widening of this increment.)
+- **The form holds Save until the decision is complete.** It already knows the note or the review date is missing, so it says so rather than spending a round trip to be refused; the service refusal remains the backstop, proved by the live case rather than the browser one.
+- **Tests.** Unit: clearing the figure read as the loosest move of all, setting a first figure read as a tightening whatever the figure, and zero read as the strictest state. Live: a loosening refused with nothing written and no decision recorded; a wrong-kind decision and one with no review date refused the same way; the decision and the change written together with the event naming it; tightening back retiring it; and clearing it afterward needing a fresh one. The Increment 1.46 case that raised a threshold now supplies its own decisions, which shows the two rules composing rather than one replacing the other. Browser: the form naming what the change does, Save held until the note and the review date are both there, and the loosening saved under its decision.
+
+**Not in Increment 1.47.** Unifying `retireException`'s 400 with this 409 for the same condition; a per-reason threshold shown on the Practice Risk page beside the channel coverage it tightens; a migration that re-hashes historical closes under the current package schema; and the CPA seat, questions, and the attestation tab.
+
 ## Increment 1.46
 
 `reason_codes.requires_approval_over_cents` has existed since migration 0010 and nothing had ever read it. Increment 1.45 named it as the next thing to do and said why it had been left alone: a per-reason threshold is a control of its own, not a field beside a label.

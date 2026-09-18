@@ -49,3 +49,14 @@ export function tightenPolicyForReason(
     rules: policy.rules.map((r) => (r.channel === channel ? { ...r, thresholdUsd: effective / 100 } : r)),
   };
 }
+
+/**
+ * Whether the change lets through what used to wait. Null is the loosest state
+ * of all, because it hands the row back to the channel's own figure; 0 is the
+ * strictest, because every posting waits.
+ */
+export function isLoosening(before: number | null, after: number | null): boolean {
+  if (after === null) return before !== null;
+  if (before === null) return false;
+  return after > before;
+}
