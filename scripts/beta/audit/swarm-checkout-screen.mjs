@@ -15,21 +15,28 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
   const todayRows = (p, pid) => p.evaluate((pid) => { const S = window.__proto.state(); return S.ledger.filter((e) => e.patientId === pid && e.posted === S.tenant.today).map((e) => ({ id: e.id, kind: e.kind, amountCents: e.amountCents, tender: e.tender || null, actor: e.actor })); }, pid);
   const balances = (p, pid) => p.evaluate((pid) => Proto.store.balances(pid), pid);
   const active = (p) => p.evaluate(() => (document.activeElement && document.activeElement.getAttribute('data-testid')) || document.activeElement.tagName.toLowerCase());
-  // Drives the write-off add → amount → courtesy → card → Post (needs_second) → Request approval sequence on the open checkout.
-  const requestWriteoff = async (p, amount) => {
+  // Drives the write-off add → amount → courtesy → card → collect amount → Post (needs_second) → Request approval sequence on the
+  // open checkout. The collect amount must be the estimate less the write-off (the prefill keeps the full estimate and the store
+  // refuses amount_required otherwise); the setup throws when no request was raised, so the checks measure or crash, never "no".
+  const requestWriteoff = async (p, amount, collect) => {
     await click(p, 'checkout.writeoff.add'); await fill(p, 'checkout.writeoff.amount', amount);
-    await click(p, 'checkout.writeoff.reason.courtesy'); await click(p, 'checkout.tender.card');
+    await click(p, 'checkout.writeoff.reason.courtesy'); await click(p, 'checkout.tender.card'); await fill(p, 'checkout.amount', collect);
     await click(p, 'checkout.post'); await p.waitForTimeout(150);
     await click(p, 'refusal.control'); await p.waitForTimeout(150);
-    return p.evaluate(() => { const a = window.__proto.state().approvals.slice(-1)[0]; return a ? { id: a.id, status: a.status, amountCents: a.amountCents, requestedBy: a.requestedBy } : null; });
+    const req = await p.evaluate(() => { const a = window.__proto.state().approvals.slice(-1)[0]; return a ? { id: a.id, status: a.status, amountCents: a.amountCents, requestedBy: a.requestedBy } : null; });
+    if (!req || req.status !== 'pending') throw new Error('setup: write-off request was not raised: ' + JSON.stringify(req));
+    return req;
   };
-  // Approves one request from the owner's phone with the seeded step-up pad (four digits, then Submit).
+  // Approves one request from the owner's phone with the seeded step-up pad (Dr. Reagan's PIN 2468, then Submit) and throws
+  // unless the request reads approved.
   const approveOnPhone = async (p, reqId) => {
     await hop(p, '#/owner/phone'); await p.waitForTimeout(200);
     await click(p, 'phone.request.' + reqId + '.approve');
-    for (const d of ['1', '2', '3', '4']) await click(p, 'phone.stepup.' + d);
+    for (const d of ['2', '4', '6', '8']) await click(p, 'phone.stepup.' + d);
     await click(p, 'phone.stepup.submit'); await p.waitForTimeout(200);
-    return p.evaluate((id) => { const S = window.__proto.state(); const a = S.approvals.find((x) => x.id === id) || {}; return { status: a.status, decidedBy: a.decidedBy, writeoffRows: S.ledger.filter((e) => e.kind === 'write_off' && e.posted === S.tenant.today).map((e) => [e.id, e.amountCents]), balances: Proto.store.balances(a.patientId) }; }, reqId);
+    const out = await p.evaluate((id) => { const S = window.__proto.state(); const a = S.approvals.find((x) => x.id === id) || {}; return { status: a.status, decidedBy: a.decidedBy, writeoffRows: S.ledger.filter((e) => e.kind === 'write_off' && e.posted === S.tenant.today).map((e) => [e.id, e.amountCents]), balances: Proto.store.balances(a.patientId) }; }, reqId);
+    if (out.status !== 'approved') throw new Error('setup: ' + reqId + ' did not reach approved: ' + JSON.stringify(out));
+    return out;
   };
 
   return {
@@ -74,8 +81,8 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       const { c, p, errs } = await ctx(b);
       try {
         await go(p, '#/frontdesk/checkout/a-1047');
-        const req = await requestWriteoff(p, '200');
-        const approved = req ? await approveOnPhone(p, req.id) : null;
+        const req = await requestWriteoff(p, '200', '210');
+        const approved = await approveOnPhone(p, req.id);
         await hop(p, '#/frontdesk/checkout/a-1047'); await p.waitForTimeout(200);
         const screen = { threeNumbers: await threeNumbers(p), estFoot: await p.evaluate(() => ((document.querySelector('.co-lines tfoot .co-est') || {}).textContent || '').trim()), amountField: await val(p, 'checkout.amount'), amountHint: await p.evaluate(() => ((document.querySelector('[data-testid="checkout.amount"]').closest('.field') || {}).innerText || '').trim()), postLabel: await txt(p, 'checkout.post'), balances: await balances(p, 'p-306') };
         const seq0 = await lastSeq(p);
@@ -102,8 +109,8 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       const { c, p, errs } = await ctx(b);
       try {
         await go(p, '#/frontdesk/checkout/a-1047');
-        const req = await requestWriteoff(p, '200');
-        const approved = req ? await approveOnPhone(p, req.id) : null;
+        const req = await requestWriteoff(p, '200', '210');
+        const approved = await approveOnPhone(p, req.id);
         await hop(p, '#/frontdesk/checkout/a-1047'); await p.waitForTimeout(200);
         await click(p, 'checkout.collect.seg.send-statement'); await p.waitForTimeout(100);
         const promise = (await mainText(p)).match(/[^\n]*statement-due row[^\n]*/i)?.[0] || null;
