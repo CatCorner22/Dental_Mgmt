@@ -538,8 +538,11 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 /* The location is a fact the bar states, not a control. */
 .topbar .loc { color: var(--ink-2); font-weight: var(--weight-bold); white-space: nowrap; }
 /* One of the two ways to reach another screen shows at a time: the row of destinations on a
-   desk or tablet, the single Go to control on a phone. */
-.topbar .btn.navmenu { display: none; }
+   desk or tablet, the single Go to control on a phone. The desk rule lives in its own media
+   query so it cannot outrank the phone rule above it in the cascade. */
+@media (min-width: 641px) {
+  .topbar .btn.navmenu { display: none; }
+}
 .settings .setlabel { font-weight: var(--weight-bold); display: block; }
 .settings .seg { flex-wrap: wrap; }
 /* The charted mark on a tooth: a shape the eye reads, with the word beside it for a screen
