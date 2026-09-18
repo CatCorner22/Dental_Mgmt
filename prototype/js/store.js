@@ -514,6 +514,9 @@
     // Save is once only: a second Save on a saved chart is an addendum or nothing. The screen swapped the button
     // for Amend, but two dispatches of one Save wrote two exams.
     if (prior && !(extras && extras.amending)) return refuse('exam_sealed', 'Amend the saved exam with an addendum', 'Start an addendum', 'This visit already carries a saved exam. A saved exam is the record; a change is a dated addendum that links to it, never a second exam.');
+    // A screening scores sextants and cannot amend site depths: once a full chart stands on the visit, the note keeps
+    // that chart's line and an addendum is charted in the full lane.
+    if (mode === 'screening' && S.perioExams.some((e) => e.encounterId === encId && e.mode === 'full')) return refuse('invalid_input', 'Amend the full chart, not a screening', 'Use the full chart lane', 'This visit already carries a full six-point chart. A screening addendum would replace its line in the note with a sentence asking for the chart that already exists; the addendum is charted in the full lane.');
     const amends = prior ? prior.id : null;
     // A licence explains skipped sites; with none skipped there is nothing for it to explain.
     const licence = skipped > 0 ? extras.licence : null;

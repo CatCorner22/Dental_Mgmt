@@ -225,6 +225,7 @@
     'Switch author': (st) => Proto.screens.shell.openPinPad(Proto.router.current()),
     'Open Roles': () => { location.hash = '#/owner/roles'; },   // the seat that issues a pass
     'Open the note': (st) => { const r = Proto.router.current(); Proto.router.go(r.persona, 'encounter', st.encId); },
+    'Use the full chart lane': (st) => { st.mode = 'full'; st.gate = null; st.pendingZero = false; const r = Proto.router.current(); rerender(r); focusCursor(st); },
     'Support line': support,
   };
   /* The shared refusal ships its severity mark at text size. A warning has to survive grayscale and a
