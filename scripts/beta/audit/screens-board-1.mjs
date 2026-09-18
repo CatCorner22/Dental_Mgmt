@@ -3,7 +3,7 @@
 // Default position is NOT reproduced: every check measures the breach it claims and carries the values.
 // Each check closes its browser context in `finally` so one failure cannot hang the run.
 
-export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => {
+export default ({ ctx, go, hop, railOf, press, click, txt, box, state, events, rec }) => {
 
 // The readiness row ids carry seed id segments (`board.readiness.row.<seedId>.<control>`), and a fix round
 // can legitimately change which seed id a row names. A probe that hard-codes one stops pressing anything the
@@ -137,7 +137,7 @@ const readinessRow = (p, control) => p.evaluate((c) => {
         const status1043 = await p.evaluate(() => window.__proto.state().appointments.find((a) => a.id === 'a-1043').status);
         const boardChips = await chipWords(p, 'board.card.a-1043');
         const boardAria = await p.evaluate(() => (document.querySelector('[data-testid="board.card.a-1043"]') || {}).getAttribute('aria-label'));
-        await click(p, 'board.card.a-1043.rail'); await p.waitForTimeout(200);
+        await click(p, await railOf(p, 'a-1043')); await p.waitForTimeout(200);
         const rail = await p.evaluate(() => { const r = document.getElementById('rail'); if (!r || r.hidden) return null; const line = [...r.querySelectorAll('*')].map((e) => e.textContent.trim()).find((t) => /^Next: /.test(t)) || null; const chips = [...r.querySelectorAll('.chip')].map((c) => c.textContent.replace(/^[■▲◆★▬●]\s*/, '').trim()); return { nextLine: line, chips }; });
         // Seat a-1042 and read the announcement word against the chip word for the same new status.
         await click(p, 'board.card.a-1042.arrive'); await click(p, 'board.card.a-1042.seat'); await p.waitForTimeout(200);
