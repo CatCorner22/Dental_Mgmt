@@ -35,8 +35,12 @@ export type MonthClose = {
   closedAt: string;
 };
 
-/** The reason code a correction into a closed month must carry. */
-export const PRIOR_PERIOD_REASON = "prior_period";
+/**
+ * The reason code a correction into a closed month must carry. Defined beside
+ * the forms that offer reasons (Increment 1.45) so a client component can read
+ * it without pulling the database in; re-exported here, where it is enforced.
+ */
+export { PRIOR_PERIOD_REASON } from "../ledger/reasons";
 
 function mapRow(row: typeof monthCloses.$inferSelect): MonthClose {
   return {

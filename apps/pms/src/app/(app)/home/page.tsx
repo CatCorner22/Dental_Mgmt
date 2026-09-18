@@ -13,6 +13,7 @@ const LINKS: { href: string; label: string }[] = [
   { href: "/risk", label: "Practice Risk" },
   { href: "/digest", label: "Weekly digest" },
   { href: "/locations", label: "Locations" },
+  { href: "/reason-codes", label: "Reason codes" },
   { href: "/cpa", label: "Month-end package" },
 ];
 

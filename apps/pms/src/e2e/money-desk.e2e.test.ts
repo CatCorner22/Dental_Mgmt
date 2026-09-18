@@ -80,7 +80,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await approvals.innerText()).toMatch(/1[\s\S]*\$75\.00 held until a second person decides/);
     expect(await page().getByText(/No control decision comes up for review/).count()).toBe(1);
     expect(await page().getByText(/Segregation health\. COSO overall \d+/).count()).toBe(1);
-    for (const name of ["Open ledger", "Post payment", "Bank reconciliation", "Day close", "Statements", "Approvals inbox", "Practice Risk", "Weekly digest", "Locations", "Month-end package"]) {
+    for (const name of ["Open ledger", "Post payment", "Bank reconciliation", "Day close", "Statements", "Approvals inbox", "Practice Risk", "Weekly digest", "Locations", "Reason codes", "Month-end package"]) {
       expect(await page().locator("main").getByRole("link", { name, exact: true }).count()).toBe(1);
     }
     await b.audit("home (owner, no bank record)");
@@ -401,6 +401,70 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().getByText(/Location hours are for the manager and owner seats/).waitFor({ timeout: 60_000 });
     expect(await page().getByRole("button", { name: /^Save / }).count()).toBe(0);
     await b.audit("locations (front desk refusal)");
+  }, 150_000);
+
+  it("lets the owner adopt, relabel and retire a reason code, refuses the reserved one, and shows the front desk the list only", async () => {
+    await b.signIn("ridgeview-owner", "/reason-codes");
+    await page().getByRole("heading", { name: "Why money moved" }).waitFor({ timeout: 60_000 });
+    await page().getByRole("heading", { name: "Write-off" }).waitFor({ timeout: 30_000 });
+    // The seeded list, grouped by kind, with prior_period marked reserved.
+    const codes = page().locator("main");
+    expect(await codes.innerText()).toMatch(/courtesy[\s\S]*Courtesy adjustment/);
+    expect(await codes.innerText()).toMatch(/prior_period[\s\S]*reserved/);
+    await b.audit("reason codes (owner)");
+
+    // Adopting one: the code is a key, so it is lowercased and kept.
+    await page().getByLabel("Code").fill("Insurance_Adjustment");
+    await page().getByLabel("Kind").selectOption("adjustment");
+    await page().getByLabel("Reads as").fill("Insurance adjustment");
+    await page().getByRole("button", { name: "Adopt", exact: true }).click();
+    await page().getByText(/^Adopt succeeded\.$/).waitFor({ timeout: 30_000 });
+    const adopted = page().locator("tr", { hasText: "insurance_adjustment" });
+    await expect
+      .poll(async () => adopted.innerText(), { timeout: 30_000 })
+      .toMatch(/Insurance adjustment[\s\S]*Offered[\s\S]*0/);
+
+    // Relabelling changes what the form reads, never the key underneath it.
+    await adopted.getByRole("button", { name: "Relabel insurance_adjustment" }).click();
+    await page().getByLabel("New wording for insurance_adjustment").fill("Insurance contractual adjustment");
+    await adopted.getByRole("button", { name: "Save" }).click();
+    await page().getByText(/^Relabel succeeded\.$/).waitFor({ timeout: 30_000 });
+    // The notice lands before the list refetches, so poll the row rather than race it.
+    await expect
+      .poll(async () => page().locator("tr", { hasText: "insurance_adjustment" }).innerText(), { timeout: 30_000 })
+      .toMatch(/Insurance contractual adjustment/);
+
+    // Retiring takes it off the forms; the row stays.
+    await page().locator("tr", { hasText: "insurance_adjustment" }).getByRole("button", { name: "Retire insurance_adjustment" }).click();
+    await page().getByText(/^Retire succeeded\.$/).waitFor({ timeout: 30_000 });
+    await expect
+      .poll(async () => page().locator("tr", { hasText: "insurance_adjustment" }).innerText(), { timeout: 30_000 })
+      .toMatch(/Retired/);
+
+    // The reserved one cannot be retired at all: the closed-month refusal needs it.
+    const reserved = page().locator("tr", { hasText: "prior_period" });
+    expect(await reserved.getByRole("button", { name: "Retire prior_period" }).isDisabled()).toBe(true);
+    await b.audit("reason codes (owner, after adopting and retiring)");
+
+    // The posting form offers what the practice holds, and not what it retired.
+    await page().goto(`${app.base}/ledger/post`);
+    await page().getByRole("heading", { name: "Post to ledger" }).waitFor({ timeout: 60_000 });
+    await page().getByLabel("Kind").selectOption("write_off");
+    const reason = page().getByLabel("Reason code");
+    await reason.locator("option", { hasText: "Courtesy adjustment" }).waitFor({ state: "attached", timeout: 30_000 });
+    const offered = await reason.locator("option").allInnerTexts();
+    expect(offered).toContain("Courtesy adjustment");
+    expect(offered).toContain("Contractual PPO write-off");
+    // A retired code and the reserved one are both absent.
+    expect(offered.join("|")).not.toMatch(/Insurance contractual adjustment|Prior period/);
+
+    // The front desk reads the list and is offered nothing to change.
+    await b.signIn("ridgeview-front", "/reason-codes");
+    await page().getByRole("heading", { name: "Why money moved" }).waitFor({ timeout: 60_000 });
+    await page().getByText(/Adopting, relabelling, and retiring a reason code is the administrator/).waitFor({ timeout: 30_000 });
+    expect(await page().getByRole("button", { name: /^Retire / }).count()).toBe(0);
+    expect(await page().getByRole("button", { name: "Adopt", exact: true }).count()).toBe(0);
+    await b.audit("reason codes (front desk)");
   }, 150_000);
 
   it("renders the month-end package for the owner, exports it as CSV onto the chain, and shows the front desk the seat message", async () => {

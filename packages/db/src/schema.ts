@@ -1,16 +1,4 @@
-import {
-  bigint,
-  boolean,
-  date,
-  index,
-  integer,
-  jsonb,
-  pgTable,
-  text,
-  timestamp,
-  uniqueIndex,
-  uuid,
-} from "drizzle-orm/pg-core";
+import { bigint, boolean, date, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 /**
  * Increment 0.1 schema. No PHI patient rows.
@@ -256,6 +244,29 @@ export const guarantorAccounts = pgTable(
     createdByName: text("created_by_name").notNull(),
   },
   (t) => [index("guarantor_accounts_tenant_idx").on(t.tenantId)]
+);
+
+/**
+ * The reason codes one practice has adopted (migration 0010; governed from a
+ * screen since Increment 1.45). `ledger_entries.reason_code` is a foreign key
+ * into (tenant_id, code), so the code itself never changes and a code in use
+ * is never deleted: retiring one clears `active` and leaves history readable.
+ */
+export const reasonCodes = pgTable(
+  "reason_codes",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    code: text("code").notNull(),
+    kind: text("kind").notNull(),
+    label: text("label").notNull(),
+    requiresApprovalOverCents: bigint("requires_approval_over_cents", { mode: "number" }).notNull().default(0),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.code] }),
+    index("reason_codes_tenant_kind_idx").on(t.tenantId, t.kind),
+  ]
 );
 
 export const ledgerEntries = pgTable(
@@ -795,6 +806,7 @@ export const monthCloses = pgTable(
 
 export const TENANT_SCOPED_TABLES = [
   "locations",
+  "reason_codes",
   "users",
   "sessions",
   "user_entitlements",

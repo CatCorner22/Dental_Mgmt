@@ -344,6 +344,23 @@ describe("Increment 1.38 one approval releases a correction pair", () => {
   });
 });
 
+describe("Increment 1.45 the practice's reason codes", () => {
+  it("names reason_codes among the tenant-scoped tables it has always been", () => {
+    // The table has carried FORCE RLS and a tenant policy since migration 0010;
+    // the list that names the tenant-scoped tables had simply never said so.
+    expect(TENANT_SCOPED_TABLES).toContain("reason_codes");
+    expect(ledgerSql).toMatch(/ALTER TABLE reason_codes FORCE ROW LEVEL SECURITY/);
+    expect(ledgerSql).toMatch(/CREATE POLICY reason_codes_isolation ON reason_codes/);
+  });
+
+  it("keys entries to the code, which is why the code never changes and a used one is never deleted", () => {
+    expect(ledgerSql).toMatch(/PRIMARY KEY \(tenant_id, code\)/);
+    expect(ledgerSql).toMatch(/CONSTRAINT ledger_entries_reason_fk\s+FOREIGN KEY \(tenant_id, reason_code\) REFERENCES reason_codes \(tenant_id, code\)/);
+    // Retiring is a flag the table has always had, so Increment 1.45 needed no migration.
+    expect(ledgerSql).toMatch(/active boolean NOT NULL DEFAULT true/);
+  });
+});
+
 describe("Increment 1.43 the package schema version", () => {
   it("backfills the months already closed, then makes a close state its own schema", () => {
     expect(packageSchemaSql).toMatch(/ALTER TABLE month_closes ADD COLUMN package_schema text NOT NULL DEFAULT 'package-v1'/);

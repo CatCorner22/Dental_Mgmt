@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { formatCents, formatLedgerKind } from "@/lib/ledger/format";
-import { REASON_OPTIONS } from "@/lib/ledger/reasons";
+import { reasonOptionsForPosting, type ReasonCodeRow } from "@/lib/ledger/reasons";
+
 import {
   POSTABLE_KINDS,
   type LedgerAccountSummary,
@@ -133,7 +134,22 @@ export default function LedgerPostPage() {
     };
   }, [form.patientId, form.kind]);
 
-  const reasonOptions = useMemo(() => REASON_OPTIONS[form.kind] ?? [], [form.kind]);
+  // The practice's own codes, read once (Increment 1.45). A reason the practice
+  // never adopted cannot reach the database, so the form must not offer one.
+  const [reasonCodes, setReasonCodes] = useState<ReasonCodeRow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/reason-codes")
+      .then(async (res) => {
+        const body = (await res.json()) as { items?: ReasonCodeRow[] };
+        if (res.ok && !cancelled) setReasonCodes(body.items ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const reasonOptions = useMemo(() => reasonOptionsForPosting(reasonCodes, form.kind), [reasonCodes, form.kind]);
   const selectedAccount = accounts.find((a) => a.accountId === form.accountId);
 
   async function submit(event: React.FormEvent) {

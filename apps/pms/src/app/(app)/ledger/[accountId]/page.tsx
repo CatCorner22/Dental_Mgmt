@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatCents, formatLedgerKind } from "@/lib/ledger/format";
-import { ALL_REASON_OPTIONS } from "@/lib/ledger/reasons";
+import { allReasonOptions, type ReasonCodeRow } from "@/lib/ledger/reasons";
+
 import type { LedgerAccountDetail, LedgerExplanationRow } from "@/lib/ledger/types";
 
 type LoadState =
@@ -66,6 +67,22 @@ export default function LedgerAccountPage() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  // The practice's own codes, read once (Increment 1.45): a correction cites one
+  // the practice adopted, and the column is a foreign key into exactly those.
+  const [reasonCodes, setReasonCodes] = useState<ReasonCodeRow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/reason-codes")
+      .then(async (res) => {
+        const body = (await res.json()) as { items?: ReasonCodeRow[] };
+        if (res.ok && !cancelled) setReasonCodes(body.items ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const reasonOptions = allReasonOptions(reasonCodes);
 
   useEffect(() => {
     if (!accountId) return;
@@ -92,7 +109,7 @@ export default function LedgerAccountPage() {
   function openCorrection(entry: LedgerExplanationRow) {
     setCorrecting(entry.entryId);
     setAmount((entry.amountCents / 100).toFixed(2));
-    setReason(ALL_REASON_OPTIONS.some((o) => o.value === entry.reasonCode) ? entry.reasonCode! : "");
+    setReason(reasonOptions.some((o) => o.value === entry.reasonCode) ? entry.reasonCode! : "");
     setNotice(null);
   }
 
@@ -247,7 +264,7 @@ export default function LedgerAccountPage() {
                                   onChange={(e) => setReason(e.target.value)}
                                 >
                                   <option value="">Select reason…</option>
-                                  {ALL_REASON_OPTIONS.map((option) => (
+                                  {reasonOptions.map((option) => (
                                     <option key={option.value} value={option.value}>
                                       {option.label}
                                     </option>
