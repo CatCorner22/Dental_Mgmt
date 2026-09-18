@@ -21,6 +21,8 @@ const tenant = { id: uuidv7(32_000), name: "Ridgeview Family Dental", slug: "rid
 const owner = { id: uuidv7(32_001), username: "hb-owner", name: "Riley Owner", role: "admin" };
 const front = { id: uuidv7(32_002), username: "hb-front", name: "Jordan Blake", role: "user" };
 const location = { id: uuidv7(32_010) };
+const patient = { id: uuidv7(32_030) };
+const account = { id: uuidv7(32_031) };
 const bank = { id: uuidv7(32_020) };
 const now = new Date("2026-09-17T14:00:00Z");
 
@@ -96,6 +98,11 @@ describe.skipIf(!adminUrl)("Owner home board (live)", () => {
     expect(b.health.levers.length).toBeGreaterThan(0);
     expect(b.reconciliation.grade).toBe("stale_import");
     expect(b.matching.linesInWindow).toBe(0);
+    // No day is sealed yet, so nothing can have landed behind one. The card says so
+    // rather than hiding: an owner who never sees it cannot tell clean from broken.
+    expect(b.afterClose.headline).toBe("Nothing posted into a sealed day");
+    expect(b.afterClose.window).toEqual({ rows: 0, netCents: 0, daysTouched: 0, firstPostings: 0 });
+    expect(b.afterClose.action).toBeNull();
   });
 
   it("counts the open variances of an imported statement and points at the run", async () => {
@@ -149,5 +156,88 @@ describe.skipIf(!adminUrl)("Owner home board (live)", () => {
     expect(b.yesterday).toMatchObject({ shape: "filled", headline: "Tied · independent", action: null });
     expect(b.reconciliation.grade).toBe("independent");
     expect(b.matching).toMatchObject({ creditsInWindow: 1, creditsMatchedWithinDue: 1, matchRate48hPct: 100 });
+    // 2026-09-16 is sealed now, and nothing has posted behind it.
+    expect(b.afterClose.headline).toBe("Nothing posted into a sealed day");
+  });
+
+  describe("what has posted into a sealed day (Increment 1.41)", () => {
+    // 2026-09-16 is frozen by the case above; these seal 2026-09-12 and an old
+    // day as well, then post into each and read the counts back off the board.
+
+    /** One patient payment, effective-dated into whichever day this names. */
+    async function post(seq: number, effectiveDate: string) {
+      await tx(async (d) => {
+        const { sql } = await import("drizzle-orm");
+        await d.execute(
+          sql`INSERT INTO ledger_entries (id, tenant_id, account_id, patient_id, location_id, kind, gl_bucket,
+                                          amount_cents, effective_date, posted_at, created_by_id, created_by_name,
+                                          tender, idempotency_key, created_at)
+              VALUES (${uuidv7(32_300 + seq)}, ${tenant.id}, ${account.id}, ${patient.id}, ${location.id},
+                      'patient_payment', 'undeposited_funds', ${-1_000 * seq}, ${effectiveDate}, now(),
+                      ${front.id}, ${front.name}, 'cash', ${`after-close-${seq}`}, now())`
+        );
+      }, front);
+    }
+
+    async function freeze(seq: number, businessDate: string) {
+      await db.admin.query(
+        `INSERT INTO day_closes (id, tenant_id, location_id, business_date, status, deposit_total_cents,
+                                 day_sheet_total_cents, variance_cents, summary, created_at, frozen_at,
+                                 frozen_by_id, frozen_by_name)
+         VALUES ($1, $2, $3, $4, 'frozen', 0, 0, 0, '{}', now(), now(), $5, $6)`,
+        [uuidv7(32_400 + seq), tenant.id, location.id, businessDate, owner.id, owner.name]
+      );
+    }
+
+    beforeAll(async () => {
+      await db.admin.query(
+        `INSERT INTO patients (id, tenant_id, mrn, first_name, last_name, date_of_birth, primary_location_id, created_by_id, created_by_name)
+         VALUES ($1, $2, 'MRN-HB', 'Dana', 'Board', '1985-06-11', $3, $4, 'seed')`,
+        [patient.id, tenant.id, location.id, owner.id]
+      );
+      await db.admin.query(
+        `INSERT INTO guarantor_accounts (id, tenant_id, display_name, created_by_id, created_by_name, created_at)
+         VALUES ($1, $2, 'Dana Board', $3, 'seed', now())`,
+        [account.id, tenant.id, owner.id]
+      );
+    });
+
+    it("leads with the window where an older sealed day moved and yesterday held", async () => {
+      await freeze(1, "2026-09-12");
+      await post(1, "2026-09-12");
+      const b = await tx((d) => buildOwnerBoard(d, tenant.id, owner.id, now));
+      expect(b.afterClose.headline).toBe("Postings into closed days: 1 row");
+      expect(b.afterClose.why).toMatch(/^Yesterday's seals hold\./);
+      expect(b.afterClose.yesterday).toEqual({ rows: 0, netCents: 0, daysTouched: 0, firstPostings: 0 });
+      expect(b.afterClose.window).toEqual({ rows: 1, netCents: -1_000, daysTouched: 1, firstPostings: 1 });
+      expect(b.afterClose.action).toEqual({ label: "Open the day close", href: "/day-close" });
+    });
+
+    it("leads with yesterday once yesterday's own seal moved, and keeps the window behind it", async () => {
+      await post(2, "2026-09-16");
+      const b = await tx((d) => buildOwnerBoard(d, tenant.id, owner.id, now));
+      expect(b.afterClose.headline).toBe("Yesterday changed after close: 1 row");
+      expect(b.afterClose.yesterday).toEqual({ rows: 1, netCents: -2_000, daysTouched: 1, firstPostings: 1 });
+      expect(b.afterClose.window).toEqual({ rows: 2, netCents: -3_000, daysTouched: 2, firstPostings: 2 });
+      expect(b.afterClose.why).toMatch(/last 30 days, 2 rows across 2 sealed days/);
+      expect(b.afterClose.action).toEqual({ label: "Open the sealed day", href: "/day-close" });
+      // The seal itself is untouched: the board reports the drift, it does not hide it.
+      expect(b.yesterday.headline).toBe("Tied \u00b7 independent");
+    });
+
+    it("leaves a sealed day older than the window out of the count, while the row keeps its stamp", async () => {
+      await freeze(2, "2026-07-15");
+      await post(3, "2026-07-15");
+      const stamped = await db.admin.query(
+        "SELECT posted_after_close, closed_day_id FROM ledger_entries WHERE idempotency_key = $1 AND tenant_id = $2",
+        ["after-close-3", tenant.id]
+      );
+      expect(stamped.rows[0].posted_after_close).toBe(true);
+      expect(stamped.rows[0].closed_day_id).not.toBeNull();
+
+      const b = await tx((d) => buildOwnerBoard(d, tenant.id, owner.id, now));
+      // The stamp is permanent; the card is a window, and 2026-07-15 is outside it.
+      expect(b.afterClose.window).toEqual({ rows: 2, netCents: -3_000, daysTouched: 2, firstPostings: 2 });
+    });
   });
 });

@@ -21,9 +21,11 @@ import {
   planFindings,
   planUnmatchedFindings,
   releaseWithoutApprovalCandidates,
+  sealedDayPostingCandidates,
   severityForAge,
   severityForBackdate,
   severityForOverdue,
+  severityForSealedDayPostings,
   UNMATCHED_BANK_LINE_KIND,
   type ControlFindingRow,
   type LedgerEntryFacts,
@@ -170,6 +172,8 @@ function entry(over: Partial<LedgerEntryFacts>): LedgerEntryFacts {
     approvalRequestId: null,
     appliedExceptionId: null,
     reversesEntryId: null,
+    correctsEntryId: null,
+    closedDayId: null,
     ...over,
   };
 }
@@ -224,6 +228,51 @@ describe("backdated posting detector", () => {
     expect(out[0]!.detail.sentence).toBe("A $20.00 adjustment effective 2026-08-20 was posted on 2026-09-10, 21 days after its effective date.");
     expect(severityForBackdate(30)).toBe("medium");
     expect(severityForBackdate(31)).toBe("high");
+  });
+});
+
+describe("first posting into a sealed day detector", () => {
+  it("flags first postings the database stamped, and leaves both halves of a correction alone", () => {
+    const out = sealedDayPostingCandidates([
+      entry({ id: "open-day", kind: "patient_payment", amountCents: -4_000 }), // never stamped
+      entry({
+        id: "late",
+        kind: "patient_payment",
+        amountCents: -4_000,
+        effectiveDate: "2026-09-14",
+        postedOn: "2026-09-18",
+        closedDayId: "close-1",
+      }),
+      // Both halves of a correction into the same sealed day: a correction names the
+      // entry it replaces, so it announces itself and is not this detector's business.
+      entry({ id: "rev", kind: "reversal", amountCents: 20_000, effectiveDate: "2026-09-14", postedOn: "2026-09-18", closedDayId: "close-1", correctsEntryId: "x" }),
+      entry({ id: "repost", kind: "write_off", amountCents: -15_000, effectiveDate: "2026-09-14", postedOn: "2026-09-18", closedDayId: "close-1", correctsEntryId: "x" }),
+    ]);
+    expect(out.map((c) => [c.subjectId, c.severity])).toEqual([["late", "medium"]]);
+    expect(out[0]!.detail).toMatchObject({ sealedDay: "2026-09-14", postedOn: "2026-09-18", closedDayId: "close-1", postingsBehindThatSeal: 1 });
+    expect(out[0]!.detail.sentence).toBe(
+      "A $40.00 patient payment posted 2026-09-18 landed against 2026-09-14, a day the practice had already sealed. The sealed figures do not move, so that day's count and that day's ledger now differ."
+    );
+    expect(String(out[0]!.detail.sentence)).not.toMatch(/Riley|Finn|Jordan/);
+  });
+
+  it("reads a second first posting behind one seal as a pattern rather than a slip", () => {
+    const shared = { effectiveDate: "2026-09-14", postedOn: "2026-09-18", closedDayId: "close-1", kind: "patient_payment" };
+    const out = sealedDayPostingCandidates([
+      entry({ id: "a", amountCents: -4_000, ...shared }),
+      entry({ id: "b", amountCents: -6_000, ...shared }),
+      // A different seal, on its own, stays a slip.
+      entry({ id: "c", amountCents: -1_000, effectiveDate: "2026-09-11", postedOn: "2026-09-18", closedDayId: "close-2", kind: "patient_payment" }),
+    ]);
+    expect(out.map((c) => [c.subjectId, c.severity])).toEqual([
+      ["a", "high"],
+      ["b", "high"],
+      ["c", "medium"],
+    ]);
+    expect(out[0]!.detail.sentence).toMatch(/2 first postings have landed behind that seal\.$/);
+    expect(out[2]!.detail.sentence).not.toMatch(/have landed behind that seal/);
+    expect(severityForSealedDayPostings(1)).toBe("medium");
+    expect(severityForSealedDayPostings(2)).toBe("high");
   });
 });
 

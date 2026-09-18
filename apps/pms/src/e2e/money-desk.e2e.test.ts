@@ -280,6 +280,13 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await approvals.innerText()).toMatch(/0[\s\S]*Nothing is waiting on you/);
     expect(await page().getByRole("link", { name: "See who can clear independently" }).getAttribute("href")).toBe("/risk");
 
+    // 2026-09-14 is sealed by now and nothing has posted behind it, which the board says
+    // out loud rather than omitting (Increment 1.41).
+    const sealed = page().locator("section[aria-labelledby=after-close]");
+    await sealed.waitFor({ timeout: 30_000 });
+    expect(await sealed.innerText()).toMatch(/Nothing posted into a sealed day/);
+    expect(await sealed.getByRole("link").count()).toBe(0);
+
     // The hard events the day produced, for the owner only: the fee left the run $150 over the variance threshold,
     // and each holder of a critical duty signed in from a browser this database had never seen.
     const hard = page().locator("section[aria-labelledby=hard-events]");
@@ -563,5 +570,29 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(sinceText).toMatch(/together \$10\.00/);
     expect(sinceText).toMatch(/what the practice counted, and what the ledger holds/);
     await b.audit("day close with postings since the seal");
+
+    // And the owner's board counts the same three rows, from the same stamps (Increment 1.41).
+    await b.signIn("ridgeview-owner", "/home");
+    await page().getByRole("heading", { name: "Today's board" }).waitFor({ timeout: 60_000 });
+    const sealedDays = page().locator("section[aria-labelledby=after-close]");
+    await sealedDays.waitFor({ timeout: 30_000 });
+    const sealedText = await sealedDays.innerText();
+    expect(sealedText).toMatch(/Postings into closed days: 3 rows/);
+    expect(sealedText).toMatch(/Together they move the sealed days by \$10\.00/);
+    expect(sealedText).toMatch(/one a first posting, the rest corrections/);
+    // Nothing here names a person; the board reports the practice.
+    expect(sealedText).not.toMatch(/Riley|Finn/);
+    expect(await sealedDays.getByRole("link", { name: "Open the day close" }).getAttribute("href")).toBe("/day-close");
+
+    // And exactly one of those three rows pages the owner (Increment 1.42): the payment.
+    // Both halves of the correction landed against the same sealed day, and neither is a
+    // hard event, because a correction names the entry it replaces.
+    const hardCard = page().locator("section[aria-labelledby=hard-events]");
+    await hardCard.waitFor({ timeout: 30_000 });
+    const sealedAlerts = hardCard.locator("li", { hasText: "First posting into a day already sealed" });
+    expect(await sealedAlerts.count()).toBe(1);
+    expect(await sealedAlerts.first().innerText()).toMatch(/\$40\.00 patient payment[\s\S]*landed against 2026-09-14, a day the practice had already sealed/);
+    expect(await sealedAlerts.first().innerText()).not.toMatch(/Riley|Finn/);
+    await b.audit("home (owner, postings into closed days)");
   }, 120_000);
 });

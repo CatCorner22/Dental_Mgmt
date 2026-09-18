@@ -211,6 +211,36 @@ export function OwnerBoard() {
         </p>
       </section>
 
+      {/* What has posted into days the practice already sealed (Increment 1.41).
+          Shown in every state: an owner who never sees this card cannot tell a
+          clean practice from a broken count. */}
+      <section aria-labelledby="after-close" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">
+          Sealed days · last {b.afterClose.windowDays} days
+        </p>
+        <p id="after-close" className="mt-1 font-semibold text-[var(--ink)]">
+          {b.afterClose.headline}
+        </p>
+        {b.afterClose.window.rows > 0 && (
+          <p className="mt-1 text-sm text-[var(--ink-2)]">
+            Together they move the sealed days by{" "}
+            <span className="font-semibold tabular-nums text-[var(--ink)]">
+              {formatCents(b.afterClose.window.netCents)}
+            </span>
+            . The sealed figures themselves stay as the practice counted them.
+          </p>
+        )}
+        <p className="mt-1 max-w-prose text-sm text-[var(--ink-2)]">{b.afterClose.why}</p>
+        {b.afterClose.action && (
+          <Link
+            className="mt-3 inline-flex min-h-[var(--target)] items-center rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold text-[var(--ink)]"
+            href={b.afterClose.action.href}
+          >
+            {b.afterClose.action.label}
+          </Link>
+        )}
+      </section>
+
       {b.afterHoursHold && !b.afterHoursHold.on && (
         <section aria-labelledby="after-hours-hold" className="rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] p-4">
           <p id="after-hours-hold" className="font-semibold text-[var(--ink)]">

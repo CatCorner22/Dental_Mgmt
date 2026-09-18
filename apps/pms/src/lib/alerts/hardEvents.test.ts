@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { afterHoursSentence, countByKind, isOutsideHours, localClock, newDeviceCandidates, type HardEvent, type WeekHours } from "./hardEvents";
+import {
+  afterHoursSentence,
+  countByKind,
+  HARD_EVENT_KINDS,
+  HARD_EVENT_LABEL,
+  isOutsideHours,
+  localClock,
+  newDeviceCandidates,
+  type HardEvent,
+  type WeekHours,
+} from "./hardEvents";
 
 const hours: WeekHours = { mon: ["07:00", "19:00"], tue: ["07:00", "19:00"], fri: ["07:00", "17:00"], sat: null, sun: null };
 
@@ -59,6 +69,14 @@ describe("countByKind", () => {
       deposit_variance: 2,
       chain_failure: 1,
       new_device_financial_role: 0,
+      sealed_day_posting: 0,
     });
+  });
+
+  it("carries every kind the card can show, so a new one cannot go uncounted", () => {
+    // countByKind zeroes each declared kind; this pins the list itself.
+    expect(Object.keys(countByKind([]))).toEqual([...HARD_EVENT_KINDS]);
+    expect(HARD_EVENT_KINDS).toContain("sealed_day_posting");
+    expect(HARD_EVENT_LABEL.sealed_day_posting).toBe("First posting into a day already sealed");
   });
 });
