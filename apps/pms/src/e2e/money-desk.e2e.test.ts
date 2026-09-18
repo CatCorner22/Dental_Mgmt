@@ -521,4 +521,47 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await ledger.locator("tr", { hasText: "Reposts the" }).getByRole("button", { name: "Correct" }).count()).toBe(0);
     await b.audit("account explanation (corrected)");
   }, 120_000);
+
+  // Last, because it posts against a day an earlier case sealed and so changes
+  // what that day reads. Every case that counts rows has already run.
+  it("names on the sealed day everything that posted against it afterward, and leaves the sealed figures alone", async () => {
+    // The front desk records a payment that arrived for a day the practice already
+    // froze. The database admits it — the money arrived — and stamps it.
+    await b.signIn("ridgeview-front", "/ledger/post");
+    await page().getByRole("heading", { name: "Post to ledger" }).waitFor({ timeout: 60_000 });
+    const account = page().getByLabel("Guarantor account");
+    await account.locator("option", { hasText: "Jane Doe" }).waitFor({ state: "attached", timeout: 30_000 });
+    await account.selectOption((await account.locator("option", { hasText: "Jane Doe" }).getAttribute("value"))!);
+    await page().getByLabel("Kind").selectOption("patient_payment");
+    await page().getByLabel("Amount (USD)").fill("40");
+    // The form already offers 2026-09-14, the day an earlier case sealed.
+    expect(await page().getByLabel("Effective date").inputValue()).toBe("2026-09-14");
+    await page().getByRole("button", { name: "Post", exact: true }).click();
+    await flash(/^Posted successfully\./).waitFor({ timeout: 30_000 });
+
+    await page().goto(`${app.base}/day-close`);
+    await page().getByRole("heading", { name: "Day close" }).waitFor({ timeout: 60_000 });
+    await page().getByRole("heading", { name: "Since the seal" }).waitFor({ timeout: 30_000 });
+
+    // The seal still reads frozen, and the glyph accompanies the word rather than standing for it.
+    expect(await page().getByText(/Status:/).innerText()).toMatch(/Frozen/);
+    // And the figures the practice counted have not moved.
+    expect(await page().getByText(/^\$350\.00$/).count()).toBeGreaterThan(0);
+
+    const since = page().locator("section:has(h2:text('Since the seal'))");
+    const sinceText = await since.innerText();
+    // Three rows: the correction pair the previous case approved, both effective-dated
+    // into this day, and the payment just posted.
+    expect(await since.locator("tbody tr").count()).toBe(3);
+    expect(sinceText).toMatch(/3 rows posted against this day after it was frozen/);
+    // Each half of the correction says what it did, and the payment says it is a first posting.
+    expect(sinceText).toMatch(/Correction: clears the earlier entry/);
+    expect(sinceText).toMatch(/Correction: replaces it/);
+    expect(sinceText).toMatch(/First posting: patient payment/);
+    expect(sinceText).toMatch(/Finn Front/);
+    // The three together net $10.00 against a day sealed at $350.00.
+    expect(sinceText).toMatch(/together \$10\.00/);
+    expect(sinceText).toMatch(/what the practice counted, and what the ledger holds/);
+    await b.audit("day close with postings since the seal");
+  }, 120_000);
 });
