@@ -36,6 +36,14 @@ const BANK_CSV = [
   "2026-09-14,ACH MERCHANT FEE,-150.00,",
 ].join("\n");
 
+/** The month that has ended, which is the month every attestation reader reports. */
+function lastCompleteMonth(): string {
+  const d = new Date();
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  return d.toISOString().slice(0, 7);
+}
+
 describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
   let app: E2eApp;
   let b: E2eBrowser;
@@ -897,5 +905,55 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     const writeoffRow = page().locator("section[aria-labelledby=coverage] tbody tr", { hasText: "Write-offs / adjustments" });
     expect(await writeoffRow.innerText()).not.toMatch(/Nobody has reviewed|Reviewed for/);
     await b.audit("practice risk, what stands behind the word attested");
+  }, 150_000);
+
+  it("names on the owner board the channels nobody reviewed for the month that ended, and clears the card once somebody does", async () => {
+    // Increment 1.51 gave the word "attested" something behind it. This is the
+    // other half: the months nobody spoke for. Silence is the state that
+    // matters, so the card is on the board in every state rather than only
+    // when it is red — an owner who sees it only on a bad month cannot tell a
+    // reviewed month from one nobody looked at.
+    const ended = lastCompleteMonth();
+
+    await b.signIn("ridgeview-owner", "/home");
+    await page().getByRole("heading", { name: "Today's board" }).waitFor({ timeout: 60_000 });
+    const card = page().locator("section[aria-labelledby=attested]");
+    await card.waitFor({ timeout: 30_000 });
+    // The eyebrow is set in uppercase by the stylesheet, so read it that way.
+    expect(await card.innerText()).toContain(`CHANNELS THE PRODUCT CANNOT HOLD · ${ended}`);
+    expect(await card.innerText()).toContain("2 of 2 reviewed by nobody");
+    expect(await card.innerText()).toContain(
+      `Nobody has reviewed new vendors and payroll for ${ended}, so those channels are a month the product cannot speak for and no person has.`
+    );
+    // The attestation the accountant made above was for the month still
+    // running, and this card does not count it: a month nobody could have
+    // finished reviewing is not a month anybody reviewed.
+    await card.getByRole("link", { name: "Attest them on the month-end package" }).waitFor({ timeout: 30_000 });
+    await b.audit("home board, an external channel nobody vouched for");
+
+    // The accountant reads the ended month and vouches for both channels.
+    await b.signIn("ridgeview-cpa", "/cpa");
+    await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
+    await page().getByLabel("Month", { exact: true }).fill(ended);
+    const attest = page().locator("section[aria-labelledby=package-attest]");
+    await expect.poll(async () => attest.getByRole("button", { name: /^Attest / }).count(), { timeout: 30_000 }).toBe(2);
+    for (const [button, note] of [
+      ["Attest Payroll", "Tied the payroll register for the ended month to the provider's report and to the bank debits."],
+      ["Attest New vendors", "Checked every vendor opened in the ended month against the approval emails that opened it."],
+    ] as const) {
+      await attest.getByRole("button", { name: button }).click();
+      await attest.getByLabel("What you reviewed, and against what").fill(note);
+      await attest.getByRole("button", { name: "Reviewed this month" }).click();
+      await page().getByText(new RegExp(`^Attested: .* for ${ended}\\.`)).waitFor({ timeout: 30_000 });
+    }
+
+    // And the board now reads the way the month-end package's tie-out does.
+    await b.signIn("ridgeview-owner", "/home");
+    await page().getByRole("heading", { name: "Today's board" }).waitFor({ timeout: 60_000 });
+    await expect.poll(async () => card.innerText(), { timeout: 30_000 }).toContain("Reviewed by somebody: 2 of 2");
+    expect(await card.innerText()).toContain(`carries an attestation for ${ended}`);
+    expect(await card.innerText()).toContain("payroll by Casey Prentice");
+    expect(await card.getByRole("link", { name: "Attest them on the month-end package" }).count()).toBe(0);
+    await b.audit("home board, every external channel vouched for");
   }, 150_000);
 });

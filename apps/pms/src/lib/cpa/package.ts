@@ -6,7 +6,8 @@ import { auditChainChecks, dayCloses, deposits, domainEvent, ledgerEntries } fro
 import type { AppDb } from "../db/client";
 import { listDecisions } from "../controls/decisions";
 import { ENFORCEMENT } from "../controls/enforcement";
-import { listMonthAttestations } from "../controls/attestations";
+import { ATTESTABLE_CHANNELS, listMonthAttestations } from "../controls/attestations";
+import { attestationCoverage } from "../controls/attestationCoverage";
 import { appendControlEvent } from "../controls/events";
 import { loadActivePolicy } from "../controls/policy";
 import { canonicalJson, computeDigest, type DigestPeriod, type WeeklyDigest } from "../digest/digest";
@@ -258,6 +259,10 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
   const registerTotal = register.reduce((n, r) => n + r.cents, 0);
   const registerCount = register.reduce((n, r) => n + r.count, 0);
 
+  // What nobody vouched for is the state that matters, so the tie-out says it
+  // in the same words the owner board does (Increment 1.52).
+  const attestCoverage = attestationCoverage({ month, channels: ATTESTABLE_CHANNELS, attested: monthAttestations });
+
   const tieOut: TieOut[] = [
     {
       key: "journal_equals_postings",
@@ -288,6 +293,12 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
         sealedDays.postings === 0
           ? `${sealedDays.closesFrozen} day${sealedDays.closesFrozen === 1 ? "" : "s"} sealed this month, none disturbed afterward.`
           : `${sealedDays.postings} row${sealedDays.postings === 1 ? "" : "s"} totalling ${formatCents(sealedDays.totalCents)} landed against ${sealedDays.daysDisturbed.length} of ${sealedDays.closesFrozen} sealed day${sealedDays.closesFrozen === 1 ? "" : "s"}, ${sealedDays.firstPostings} of them first postings. The sealed figures did not move, so those days read two ways.`,
+    },
+    {
+      key: "external_channels_attested",
+      label: "Every channel the product cannot enforce was reviewed by somebody",
+      holds: attestCoverage.complete,
+      detail: attestCoverage.sentence,
     },
     {
       key: "chain_verified",
@@ -343,8 +354,9 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
  * v1: Increments 1.34 to 1.42. v2: the digest's sealed-day counts (1.43).
  * v3: the sealed-days section and its tie-out (1.44).
  * v4: who attested each external channel for the month (1.51).
+ * v5: the tie-out line for the channels nobody vouched for (1.52).
  */
-export const PACKAGE_SCHEMA_VERSION = "package-v4";
+export const PACKAGE_SCHEMA_VERSION = "package-v5";
 
 /**
  * What the hash covers: every figure the package states about the month.

@@ -56,6 +56,9 @@ describe.skipIf(!adminUrl)("CPA month-end package (live)", () => {
       ["journal_mapped", false],
       // No day is sealed on a fresh practice, so nothing can have landed behind one.
       ["sealed_days_undisturbed", true],
+      // And nobody has vouched for the channels the product cannot enforce
+      // (Increment 1.52), which is the state that matters rather than a blank.
+      ["external_channels_attested", false],
       ["chain_verified", false],
     ]);
     expect(pkg.mappings).toEqual({ approved: 0, pending: 0, unmappedLines: pkg.journal.rows.length });
