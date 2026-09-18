@@ -661,6 +661,11 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     // Neither half offers a Correct control: a correction is corrected through its repost, never in place.
     expect(await ledger.locator("tr", { hasText: "Reverses the" }).getByRole("button", { name: "Correct" }).count()).toBe(0);
     expect(await ledger.locator("tr", { hasText: "Reposts the" }).getByRole("button", { name: "Correct" }).count()).toBe(0);
+    // The screen carries a title of its own. It had none until now and inherited
+    // the root layout's "Practice home", which CI caught here as no title at all
+    // while a client navigation swapped it — a WCAG 2.4.2 failure on a page
+    // reached by a link rather than by a fresh load.
+    expect(await page().title()).toBe("Account ledger");
     await b.audit("account explanation (corrected)");
   }, 120_000);
 
