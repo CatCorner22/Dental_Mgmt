@@ -2,7 +2,7 @@
 // Default position is NOT reproduced: every check measures the breach it claims and carries the values.
 // Each check closes its browser context in `finally` so one failure cannot hang the run.
 
-export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => {
+export default ({ ctx, go, hop, open, press, click, txt, box, state, events, rec }) => {
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
   const after = async (p, seq) => (await events(p)).filter((e) => e.seq > seq);
   const writes = (ev) => ev.filter((e) => e.kind === 'write').map((e) => e.table + '/' + e.id);
@@ -161,7 +161,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
           return out;
         });
         await hop(p, '#/biller/close'); await p.waitForTimeout(150);
-        await click(p, 'close.tied.tile'); await p.waitForTimeout(150);
+        await open(p, 'close.tied.tile'); await p.waitForTimeout(150);
         const clearBeforeInject = await p.evaluate(() => !!document.querySelector('[data-testid="close.variance.v-1.clear"]'));
         /* Clearing a variance now needs the entitlement as well as independence, and the screen offers the
            control only to a seat that carries it. Injecting the closer alone left the button unrendered, so

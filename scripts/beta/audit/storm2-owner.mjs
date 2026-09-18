@@ -1,7 +1,7 @@
 // Round-2 storm checks for the owner chunk: Daily Close (dailyclose.js), Roles (roles.js) and the approver's phone
 // card (phone.js). Default position is NOT reproduced: every check measures the breach it claims, carries the
 // precondition values in its evidence, and closes its context in `finally`.
-export default ({ ctx, go, hop, click, txt, state, events, rec }) => {
+export default ({ ctx, go, hop, open, click, txt, state, events, rec }) => {
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
   const since = async (p, seq, kind) => (await events(p)).filter((e) => e.seq > seq && (!kind || e.kind === kind)).map((e) => ({ seq: e.seq, kind: e.kind, code: e.code, testid: e.testid, table: e.table, id: e.id }));
   const refusals = (p) => p.evaluate(() => [...document.querySelectorAll('.refusal')].map((r) => ({ code: r.dataset.code || null, verb: ((r.querySelector('[data-testid="refusal.verb"]') || {}).textContent || '').trim(), ids: [...r.querySelectorAll('[data-testid]')].map((e) => e.getAttribute('data-testid')) })));
@@ -34,7 +34,7 @@ export default ({ ctx, go, hop, click, txt, state, events, rec }) => {
       try {
         await go(p, '#/temp/close');
         const me = await p.evaluate(() => Proto.store.currentUser());
-        await click(p, 'close.tied.tile'); await click(p, 'close.variance.v-1.match'); await click(p, 'close.decision.d-1.retire'); await p.waitForTimeout(150);
+        await open(p, 'close.tied.tile'); await click(p, 'close.variance.v-1.match'); await click(p, 'close.decision.d-1.retire'); await p.waitForTimeout(150);
         const S = await state(p); const gates = await refusals(p);
         const gate = gates.find((g) => g.code === 'entitlement') || null;
         const hash0 = await p.evaluate(() => location.hash);
@@ -51,7 +51,7 @@ export default ({ ctx, go, hop, click, txt, state, events, rec }) => {
     async 'A-storm2-owner-3'(b) {
       const { c, p } = await ctx(b);
       try {
-        await go(p, '#/owner/close'); await set(p, { outage: true }); await click(p, 'close.tied.tile'); await click(p, 'close.variance.v-1.match'); await p.waitForTimeout(120);
+        await go(p, '#/owner/close'); await set(p, { outage: true }); await open(p, 'close.tied.tile'); await click(p, 'close.variance.v-1.match'); await p.waitForTimeout(120);
         const during = { label: await txt(p, 'close.variance.v-1.match'), gates: (await refusals(p)).map((g) => g.code) };
         await set(p, { outage: false }); await hop(p, '#/owner/money'); await hop(p, '#/owner/close'); await p.waitForTimeout(120);
         const after = { outage: (await state(p)).outage, label: await txt(p, 'close.variance.v-1.match'), gates: (await refusals(p)).map((g) => g.code), variance: (await state(p)).variances[0].status };

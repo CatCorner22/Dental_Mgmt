@@ -1,7 +1,7 @@
 // Round-3 storm checks for the owner chunk: Daily Close (dailyclose.js), Roles (roles.js) and the approver's phone
 // card (phone.js). Default position is NOT reproduced: every check measures the breach it claims, carries the
 // precondition values in its evidence, and closes its context in `finally`.
-export default ({ ctx, go, hop, click, txt, state, events, rec }) => {
+export default ({ ctx, go, hop, open, click, txt, state, events, rec }) => {
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
   const since = async (p, seq, kind) => (await events(p)).filter((e) => e.seq > seq && (!kind || e.kind === kind)).map((e) => ({ seq: e.seq, kind: e.kind, code: e.code, testid: e.testid, table: e.table, id: e.id }));
   const refusals = (p) => p.evaluate(() => [...document.querySelectorAll('.refusal')].map((r) => ({ code: r.dataset.code || null, verb: ((r.querySelector('[data-testid="refusal.verb"]') || {}).textContent || '').trim(), controls: [...r.querySelectorAll('[data-testid="refusal.control"]')].map((b) => b.textContent.trim()) })));
@@ -26,7 +26,7 @@ export default ({ ctx, go, hop, click, txt, state, events, rec }) => {
         const S0 = await state(p); const owner = S0.users.find((u) => u.id === 'u-dr-1');
         const hasPin = await has(p, 'close.pin');
         // The tile opens by itself when the day is not tied (CLT-disclosure-depth, UX review wave 3); press it only if it is closed.
-        if ((await p.getAttribute('[data-testid="close.tied.tile"]', 'aria-expanded')) !== 'true') await click(p, 'close.tied.tile');
+        await open(p, 'close.tied.tile');
         await click(p, 'close.variance.v-1.match'); await p.waitForTimeout(120);
         const noPin = { gates: (await refusals(p)).map((g) => g.code), variance: (await state(p)).variances[0].status, label: await txt(p, 'close.variance.v-1.match') };
         await fill(p, 'close.pin', owner.pin); await click(p, 'close.variance.v-1.match'); await p.waitForTimeout(150);

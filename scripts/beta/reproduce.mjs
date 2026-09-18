@@ -43,6 +43,12 @@ const click = async (p, tid) => { const ok = await clickOnce(p, tid); if (ok) aw
 // drives such a verb presses the read-back's confirm when one appears, so it still measures the write it was
 // written for; a verb that does not ask is pressed once as before.
 const commit = click;   // the drivers that were switched by hand keep their name; it is the same press model
+/* An opener is pressed for the state it leaves, not for the press: `open` leaves a disclosure that already reads
+   aria-expanded="true" alone, and `railOf` reveals a Board card's details (where its Rail button lives) before
+   returning that button's id. Both throw when the control is not on the page, so a check whose opener moved or
+   renamed reads CRASH instead of an unmeasured "no". */
+const open = async (p, tid) => { const s = `[data-testid="${tid}"]`; const el = await p.$(s); if (!el) throw new Error(`opener ${tid} is not on the page`); if ((await el.getAttribute('aria-expanded')) !== 'true') { await p.click(s); await p.waitForTimeout(120); } return true; };
+const railOf = async (p, aid) => { const tid = `board.card.${aid}.rail`; if (!(await p.$(`[data-testid="${tid}"]`))) await open(p, `board.card.${aid}.expand`); if (!(await p.$(`[data-testid="${tid}"]`))) throw new Error(`${tid} is not on the page after Show details`); return tid; };
 const txt = (p, tid) => p.$eval(`[data-testid="${tid}"]`, (e) => e.textContent.trim()).catch(() => null);
 const box = (p, tid) => p.$eval(`[data-testid="${tid}"]`, (e) => { const b = e.getBoundingClientRect(); return { x: Math.round(b.x), y: Math.round(b.y), w: Math.round(b.width), h: Math.round(b.height) }; }).catch(() => null);
 const state = (p) => p.evaluate(() => window.__proto.state());
@@ -514,7 +520,7 @@ const CHECKS = {
    `default (helpers) => ({ [checkId]: async (browser) => {...} })` and uses the same helpers. */
 const AUDIT_DIR = path.join(ROOT, 'scripts', 'beta', 'audit');
 if (fs.existsSync(AUDIT_DIR)) {
-  const helpers = { ctx, go, hop, press, click, pressOnce, clickOnce, txt, box, state, events, rec, FILE };
+  const helpers = { ctx, go, hop, press, click, pressOnce, clickOnce, open, railOf, txt, box, state, events, rec, FILE };
   for (const f of fs.readdirSync(AUDIT_DIR).filter((x) => x.endsWith('.mjs')).sort()) {
     const mod = await import(pathToFileURL(path.join(AUDIT_DIR, f)).href);
     const extra = mod.default(helpers);
