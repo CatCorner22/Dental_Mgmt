@@ -100,6 +100,19 @@ describe("packageHash and the flat rows", () => {
     expect(csv.trimEnd().split("\n")).toHaveLength(rows.length + 1);
   });
 
+  it("folds the whole digest into the hash, so a new digest field moves every frozen month", () => {
+    // Discovered while building Increment 1.42: hashedView spreads pkg.counts, and
+    // canonicalJson serializes every key, so adding one field to the weekly digest
+    // changes the hash of months already closed and makes them read "changed since
+    // close" forever. This pins the coupling: a digest field is a package schema
+    // change, and the package needs a schema version recorded at close before one
+    // can be added. See docs/17, "Not in Increment 1.42".
+    const before = packageHash(pkg());
+    const widened = pkg();
+    (widened.counts.bank as unknown as Record<string, number>).aNewlyAddedCount = 0;
+    expect(packageHash(widened)).not.toBe(before);
+  });
+
   it("quotes a field holding a comma or a quote", () => {
     const csv = toCsv([{ section: "s", key: "k", label: 'Say "hi", then', count: 1, cents: "" }]);
     expect(csv.split("\n")[1]).toBe('s,k,"Say ""hi"", then",1,');

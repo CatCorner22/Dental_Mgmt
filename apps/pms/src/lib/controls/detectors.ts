@@ -59,8 +59,14 @@ import { loadStaff, type LoadedStaff } from "./staff";
  * - sole_holder_critical_duty: a duty of the highest risk weight held live
  *   by exactly one active person (docs/05 "sole ownership of a critical
  *   process"). Closes when a second holder is live or none is.
+ * - posting_into_sealed_day: a first posting the database stamped against a
+ *   day the practice had already frozen (Increment 1.40), inside the 45-day
+ *   window on the posting date. Halves of a correction are excluded: a
+ *   correction names the entry it replaces and carries its own reason, while
+ *   a first posting into a sealed day names nothing. Closes when the row
+ *   leaves the window.
  */
-export const DETECTOR_VERSION = "detectors-v4";
+export const DETECTOR_VERSION = "detectors-v5";
 export const UNMATCHED_BANK_LINE_KIND = "unmatched_bank_line_48h";
 export const DEGRADED_CLEARANCE_KIND = "degraded_owner_clearance";
 export const DECISION_UNREVIEWED_KIND = "decision_unreviewed";
@@ -69,6 +75,7 @@ export const BACKDATED_POSTING_KIND = "backdated_posting";
 export const DUPLICATE_PAYMENT_KIND = "duplicate_patient_payment";
 export const DEPOSIT_NOT_BANKED_KIND = "deposit_not_banked";
 export const SOLE_HOLDER_KIND = "sole_holder_critical_duty";
+export const SEALED_DAY_POSTING_KIND = "posting_into_sealed_day";
 
 export const FINDING_KIND_LABEL: Record<string, string> = {
   [UNMATCHED_BANK_LINE_KIND]: "Unmatched bank line older than 48 hours",
@@ -79,6 +86,7 @@ export const FINDING_KIND_LABEL: Record<string, string> = {
   [DUPLICATE_PAYMENT_KIND]: "Duplicate patient payment",
   [DEPOSIT_NOT_BANKED_KIND]: "Deposit not yet at the bank",
   [SOLE_HOLDER_KIND]: "Critical duty held by one person",
+  [SEALED_DAY_POSTING_KIND]: "First posting into a day already sealed",
 };
 
 export type ControlFindingRow = typeof controlFindings.$inferSelect;
@@ -472,6 +480,10 @@ export type LedgerEntryFacts = {
   approvalRequestId: string | null;
   appliedExceptionId: string | null;
   reversesEntryId: string | null;
+  /** Set on both halves of a correction pair; null on a first posting (Increment 1.37). */
+  correctsEntryId: string | null;
+  /** The frozen day close this row landed behind, written by the database (Increment 1.40). */
+  closedDayId: string | null;
 };
 
 /** The same map the Increment 1.13 trigger uses (ledger_release_channel). */
@@ -606,6 +618,55 @@ export function duplicatePaymentCandidates(entries: LedgerEntryFacts[]): Finding
   return out;
 }
 
+/**
+ * One sealed day taking more than one first posting is a pattern rather
+ * than a slip, and the severity says which.
+ */
+export function severityForSealedDayPostings(rowsOnThatDay: number): FindingSeverity {
+  return rowsOnThatDay > 1 ? "high" : "medium";
+}
+
+/**
+ * First postings the database stamped against a day the practice had already
+ * frozen (Increment 1.40).
+ *
+ * Halves of a correction are left out on purpose. A correction names the
+ * entry it replaces, carries a reason, and above the threshold waits for a
+ * second person; it announces itself. A first posting into a sealed day
+ * announces nothing, which is the whole reason to raise it.
+ *
+ * The row's effective date is the sealed day's business date: the trigger
+ * stamps a row only where a frozen close carries that date for that
+ * location, so no join is needed to name the day.
+ */
+export function sealedDayPostingCandidates(entries: LedgerEntryFacts[]): FindingCandidate[] {
+  const late = entries.filter((e) => e.closedDayId !== null && e.correctsEntryId === null);
+  const perDay = new Map<string, number>();
+  for (const e of late) perDay.set(e.closedDayId!, (perDay.get(e.closedDayId!) ?? 0) + 1);
+
+  return late.map((e) => {
+    const onThatDay = perDay.get(e.closedDayId!) ?? 1;
+    const company =
+      onThatDay > 1
+        ? ` ${onThatDay} first postings have landed behind that seal.`
+        : "";
+    return {
+      subjectId: e.id,
+      severity: severityForSealedDayPostings(onThatDay),
+      detail: {
+        kind: e.kind,
+        amountCents: e.amountCents,
+        sealedDay: e.effectiveDate,
+        postedOn: e.postedOn,
+        closedDayId: e.closedDayId,
+        postingsBehindThatSeal: onThatDay,
+        accountId: e.accountId,
+        sentence: `A ${money(e.amountCents)} ${kindWord(e.kind)} posted ${e.postedOn} landed against ${e.effectiveDate}, a day the practice had already sealed. The sealed figures do not move, so that day's count and that day's ledger now differ.${company}`,
+      },
+    };
+  });
+}
+
 async function listLedgerFacts(db: AppDb, tenantId: string, since: Date | null, kinds: string[] | null): Promise<LedgerEntryFacts[]> {
   const filters = [eq(ledgerEntries.tenantId, tenantId)];
   if (since) filters.push(gte(ledgerEntries.postedAt, since));
@@ -621,6 +682,8 @@ async function listLedgerFacts(db: AppDb, tenantId: string, since: Date | null, 
       approvalRequestId: ledgerEntries.approvalRequestId,
       appliedExceptionId: ledgerEntries.appliedExceptionId,
       reversesEntryId: ledgerEntries.reversesEntryId,
+      correctsEntryId: ledgerEntries.correctsEntryId,
+      closedDayId: ledgerEntries.closedDayId,
     })
     .from(ledgerEntries)
     .where(and(...filters));
@@ -634,6 +697,8 @@ async function listLedgerFacts(db: AppDb, tenantId: string, since: Date | null, 
     approvalRequestId: r.approvalRequestId,
     appliedExceptionId: r.appliedExceptionId,
     reversesEntryId: r.reversesEntryId,
+    correctsEntryId: r.correctsEntryId,
+    closedDayId: r.closedDayId,
   }));
 }
 
@@ -667,7 +732,15 @@ export async function refreshLedgerFindings(db: AppDb, tenantId: string, now: Da
   );
   const duplicates = await applyPlan(db, tenantId, DUPLICATE_PAYMENT_KIND, "ledger_entry", duplicatePlan, `reversed or ${windowReason}`, now);
 
-  return [release, backdated, duplicates];
+  const sealedPlan = planFindings(
+    await existingOfKind(db, tenantId, SEALED_DAY_POSTING_KIND),
+    SEALED_DAY_POSTING_KIND,
+    "ledger_entry",
+    sealedDayPostingCandidates(recent)
+  );
+  const sealed = await applyPlan(db, tenantId, SEALED_DAY_POSTING_KIND, "ledger_entry", sealedPlan, windowReason, now);
+
+  return [release, backdated, duplicates, sealed];
 }
 
 // ---------------------------------------------------------------------------

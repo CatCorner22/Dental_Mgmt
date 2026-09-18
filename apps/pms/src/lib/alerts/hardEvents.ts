@@ -11,11 +11,11 @@ import { hoursPhrase, isOutsideHours, localClock, WEEKDAY_LABEL, type Weekday, t
 export { isOutsideHours, localClock, WEEKDAYS, type Weekday, type WeekHours } from "../locations/hours";
 
 /**
- * The six hard events (docs/01 item 14; docs/10 decision 6): the only
+ * The seven hard events (docs/01 item 14; docs/10 decision 6): the only
  * signals that reach the owner one at a time rather than in the weekly
  * digest. after-hours refund, retroactive-dated entry, waived dual
  * control, deposit variance over threshold, audit-chain failure, new
- * device on a financial role. Each is read from rows the product already
+ * device on a financial role, first posting into a sealed day. Each is read from rows the product already
  * holds, computed on every read, so it is immediate the moment the row
  * exists; no push channel exists yet, and the card on the owner board is
  * where they land. Sentences name a row, a location, a time, a duty, never
@@ -28,6 +28,7 @@ export const HARD_EVENT_KINDS = [
   "deposit_variance",
   "chain_failure",
   "new_device_financial_role",
+  "sealed_day_posting",
 ] as const;
 export type HardEventKind = (typeof HARD_EVENT_KINDS)[number];
 
@@ -38,6 +39,7 @@ export const HARD_EVENT_LABEL: Record<HardEventKind, string> = {
   deposit_variance: "Deposit variance over threshold",
   chain_failure: "Audit-chain check failed",
   new_device_financial_role: "New device on a financial role",
+  sealed_day_posting: "First posting into a day already sealed",
 };
 
 /** How far back the card looks. */
@@ -49,6 +51,7 @@ export const HARD_EVENT_ASSUMPTIONS = [
   `A deposit variance over ${formatCents(DEPOSIT_VARIANCE_THRESHOLD_CENTS)} pages the owner; the policy holds no variance threshold yet, so this figure is a constant, not a setting.`,
   "A device is the browser signature a session presents; a fingerprint or device enrolment does not exist yet.",
   "Business hours come from the location's stored week (default 7:00 to 19:00 Monday to Thursday, 7:00 to 17:00 Friday, closed weekends) and the server clock, never the browser.",
+  "A first posting into a sealed day is read from the stamp the database wrote at insert time, never re-derived from dates; halves of a correction are left out, because a correction names the entry it replaces.",
 ];
 
 export type HardEvent = {
@@ -131,6 +134,8 @@ export async function listHardEvents(db: AppDb, tenantId: string, opts: { since:
       postedAt: ledgerEntries.postedAt,
       locationId: ledgerEntries.locationId,
       approvalRequestId: ledgerEntries.approvalRequestId,
+      closedDayId: ledgerEntries.closedDayId,
+      correctsEntryId: ledgerEntries.correctsEntryId,
     })
     .from(ledgerEntries)
     .where(and(eq(ledgerEntries.tenantId, tenantId), gte(ledgerEntries.postedAt, since)));
@@ -146,6 +151,20 @@ export async function listHardEvents(db: AppDb, tenantId: string, opts: { since:
         subjectId: e.id,
         sentence: `A ${formatCents(Math.abs(Number(e.amountCents)))} ${formatLedgerKind(e.kind).toLowerCase()} effective ${String(e.effectiveDate)} was posted on ${postedOn}, ${daysBack} days after its effective date.`,
         href: "/ledger",
+      });
+    }
+    // A first posting into a day the practice had already sealed (Increment 1.42).
+    // The stamp is the database's own, written at insert time; a correction is
+    // left out because it names the entry it replaces and arrives with a reason.
+    if (e.closedDayId !== null && e.correctsEntryId === null) {
+      out.push({
+        kind: "sealed_day_posting",
+        label: HARD_EVENT_LABEL.sealed_day_posting,
+        at: e.postedAt.toISOString(),
+        subjectKind: "ledger_entry",
+        subjectId: e.id,
+        sentence: `A ${formatCents(Math.abs(Number(e.amountCents)))} ${formatLedgerKind(e.kind).toLowerCase()} posted on ${postedOn} landed against ${String(e.effectiveDate)}, a day the practice had already sealed. The sealed figures do not move, so that day's count and that day's ledger now differ.`,
+        href: "/day-close",
       });
     }
     if (e.kind === "refund") {

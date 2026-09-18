@@ -40,6 +40,7 @@ const monthClosesSql = readFileSync(join(here, "../migrations/0029_month_closes.
 const correctionPairsSql = readFileSync(join(here, "../migrations/0030_correction_pairs.sql"), "utf8");
 const correctionHoldsSql = readFileSync(join(here, "../migrations/0031_correction_holds.sql"), "utf8");
 const latePostingsSql = readFileSync(join(here, "../migrations/0032_late_postings.sql"), "utf8");
+const sealedDayFindingSql = readFileSync(join(here, "../migrations/0033_finding_sealed_day_posting.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -339,6 +340,31 @@ describe("Increment 1.38 one approval releases a correction pair", () => {
     expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_approval_request_uidx\s+ON ledger_entries \(approval_request_id\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NULL/);
     expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_correction_approval_uidx\s+ON ledger_entries \(approval_request_id, kind\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NOT NULL/);
     expect(correctionHoldsSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
+  });
+});
+
+describe("Increment 1.42 the sealed-day posting finding", () => {
+  it("widens the finding kinds by one and keeps every kind already in use", () => {
+    expect(sealedDayFindingSql).toMatch(/ALTER TABLE control_findings DROP CONSTRAINT control_findings_kind_check/);
+    expect(sealedDayFindingSql).toMatch(/'posting_into_sealed_day'/);
+    // Dropping and restating the list is how this table widens, so the restatement
+    // must carry every kind forward; a detector whose kind vanished would fail at
+    // insert time, long after the migration ran.
+    for (const kind of [
+      "unmatched_bank_line_48h",
+      "degraded_owner_clearance",
+      "decision_unreviewed",
+      "release_without_approval",
+      "backdated_posting",
+      "duplicate_patient_payment",
+      "deposit_not_banked",
+      "sole_holder_critical_duty",
+    ]) {
+      expect(sealedDayFindingSql).toContain(`'${kind}'`);
+    }
+    // The subject is a ledger entry, which the constraint already admits.
+    expect(sealedDayFindingSql).not.toMatch(/control_findings_subject_kind_check/);
+    expect(sealedDayFindingSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
   });
 });
 

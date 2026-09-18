@@ -583,6 +583,16 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     // Nothing here names a person; the board reports the practice.
     expect(sealedText).not.toMatch(/Riley|Finn/);
     expect(await sealedDays.getByRole("link", { name: "Open the day close" }).getAttribute("href")).toBe("/day-close");
+
+    // And exactly one of those three rows pages the owner (Increment 1.42): the payment.
+    // Both halves of the correction landed against the same sealed day, and neither is a
+    // hard event, because a correction names the entry it replaces.
+    const hardCard = page().locator("section[aria-labelledby=hard-events]");
+    await hardCard.waitFor({ timeout: 30_000 });
+    const sealedAlerts = hardCard.locator("li", { hasText: "First posting into a day already sealed" });
+    expect(await sealedAlerts.count()).toBe(1);
+    expect(await sealedAlerts.first().innerText()).toMatch(/\$40\.00 patient payment[\s\S]*landed against 2026-09-14, a day the practice had already sealed/);
+    expect(await sealedAlerts.first().innerText()).not.toMatch(/Riley|Finn/);
     await b.audit("home (owner, postings into closed days)");
   }, 120_000);
 });

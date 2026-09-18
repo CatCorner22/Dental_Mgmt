@@ -20,6 +20,7 @@ import {
   listControlFindings,
   refreshLedgerFindings,
   RELEASE_WITHOUT_APPROVAL_KIND,
+  SEALED_DAY_POSTING_KIND,
 } from "./detectors";
 
 /**
@@ -48,6 +49,8 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
     pay2: uuidv7(34_005),
     reversal: uuidv7(34_006),
   };
+  // uuidv7 adds randomness to the same stamp, so the sealed-day ids are captured once.
+  const sealedIds = { first: uuidv7(34_041), late: uuidv7(34_051), second: uuidv7(34_052) };
 
   function tx<T>(fn: Parameters<typeof withTenantTransaction<T>>[2]) {
     return withTenantTransaction(tenantId, owner.id, fn, env);
@@ -114,6 +117,7 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
       [RELEASE_WITHOUT_APPROVAL_KIND, 0],
       [BACKDATED_POSTING_KIND, 0],
       [DUPLICATE_PAYMENT_KIND, 0],
+      [SEALED_DAY_POSTING_KIND, 0],
     ]);
   });
 
@@ -174,7 +178,7 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
     expect(open.map((r) => r.kind).sort()).toEqual([BACKDATED_POSTING_KIND, RELEASE_WITHOUT_APPROVAL_KIND]);
   });
 
-  it("reads all six hard events from rows for the owner, immediately and without a name", async () => {
+  it("reads all seven hard events from rows for the owner, immediately and without a name", async () => {
     const since = new Date("2026-09-10T15:00:00Z");
     // A refund needs a reason code; the seed carries none for refunds yet.
     await db.admin.query("INSERT INTO reason_codes (tenant_id, code, kind, label) VALUES ($1, 'overpayment', 'refund', 'Patient overpayment') ON CONFLICT DO NOTHING", [tenantId]);
@@ -215,6 +219,16 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
         [id, tenantId, owner.id, at, ua]
       );
     }
+    // A first posting into a day the practice sealed (Increment 1.42). The seal is on
+    // 2026-09-14 so the later detector case, which seals 2026-09-15, stays separate.
+    await db.admin.query(
+      `INSERT INTO day_closes (id, tenant_id, location_id, business_date, status, deposit_total_cents, day_sheet_total_cents,
+                               variance_cents, summary, created_at, frozen_at, frozen_by_id, frozen_by_name)
+       VALUES ($1, $2, $3, '2026-09-14', 'frozen', 0, 0, 0, '{}', now(), now(), $4, 'Riley Owner')`,
+      [uuidv7(34_040), tenantId, SEED_LEDGER.locationId, owner.id]
+    );
+    await insertEntry({ id: sealedIds.first, kind: "patient_payment", amountCents: -4_500, effectiveDate: "2026-09-14", postedAt: "2026-09-16T16:00:00Z" });
+
     // A dual-control waiver on the chain.
     await tx((d) =>
       appendControlEvent(
@@ -231,6 +245,13 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
     const byKind = new Map(events.map((e) => [e.kind, e]));
     expect([...byKind.keys()].sort()).toEqual([...HARD_EVENT_KINDS].sort());
     expect(events.filter((e) => e.kind === "after_hours_refund")).toHaveLength(1);
+    const sealed = events.filter((e) => e.kind === "sealed_day_posting");
+    expect(sealed.map((e) => e.subjectId)).toEqual([sealedIds.first]);
+    expect(sealed[0]!.href).toBe("/day-close");
+    expect(sealed[0]!.sentence).toBe(
+      "A $45.00 patient payment posted on 2026-09-16 landed against 2026-09-14, a day the practice had already sealed. The sealed figures do not move, so that day's count and that day's ledger now differ."
+    );
+    expect(sealed[0]!.sentence).not.toMatch(/Riley|Finn/);
     expect(byKind.get("after_hours_refund")!.sentence).toBe(
       "A $120.00 refund was posted on Tuesday 2026-09-15 at 21:30 local time; Main is open 07:00 to 19:00 that day. Posted with no second person: the after-hours hold did not run on this row."
     );
@@ -393,5 +414,53 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
         insertEntry({ id: uuidv7(34_044), kind: "write_off", amountCents: -1_200, effectiveDate: today, postedAt: new Date().toISOString() })
       ).rejects.toThrow(/after-hours hold/);
     });
+  });
+
+  // Last, because it seals a second day and posts behind it. The hard-events case
+  // above already sealed 2026-09-14 and planted one row there, so this case reads
+  // the detector rather than re-proving the alert.
+  it("opens a finding for each first posting behind a seal, and reads a second one as a pattern", async () => {
+    const sealedDay = "2026-09-15";
+    const closeId = uuidv7(34_050);
+    await db.admin.query(
+      `INSERT INTO day_closes (id, tenant_id, location_id, business_date, status, deposit_total_cents, day_sheet_total_cents,
+                               variance_cents, summary, created_at, frozen_at, frozen_by_id, frozen_by_name)
+       VALUES ($1, $2, $3, $4, 'frozen', 0, 0, 0, '{}', now(), now(), $5, 'Riley Owner')`,
+      [closeId, tenantId, SEED_LEDGER.locationId, sealedDay, owner.id]
+    );
+
+    // The seal is read at insert time, so this row carries the stamp and names its day.
+    await insertEntry({ id: sealedIds.late, kind: "patient_payment", amountCents: -4_000, effectiveDate: sealedDay, postedAt: "2026-09-17T14:30:00Z" });
+    const stamped = await db.admin.query("SELECT posted_after_close, closed_day_id FROM ledger_entries WHERE id = $1", [sealedIds.late]);
+    expect(stamped.rows[0]).toEqual({ posted_after_close: true, closed_day_id: closeId });
+
+    await tx((d) => refreshLedgerFindings(d, tenantId, now));
+    const openNow = () =>
+      tx((d) => listControlFindings(d, tenantId)).then((rows) => rows.filter((r) => r.kind === SEALED_DAY_POSTING_KIND && r.status === "open"));
+
+    // Two sealed days, one first posting behind each: both slips, neither a pattern.
+    let findings = await openNow();
+    expect(findings.map((r) => r.subjectId).sort()).toEqual([sealedIds.first, sealedIds.late].sort());
+    expect(findings.every((r) => r.severity === "medium")).toBe(true);
+    const mine = findings.find((r) => r.subjectId === sealedIds.late)!;
+    expect(mine).toMatchObject({ subjectKind: "ledger_entry" });
+    expect(mine.detail).toMatchObject({ sealedDay, closedDayId: closeId, postingsBehindThatSeal: 1 });
+    expect((mine.detail as { sentence: string }).sentence).toBe(
+      "A $40.00 patient payment posted 2026-09-17 landed against 2026-09-15, a day the practice had already sealed. The sealed figures do not move, so that day's count and that day's ledger now differ."
+    );
+    expect(JSON.stringify(mine.detail)).not.toMatch(/Riley|Finn/);
+
+    // A second first posting behind the same seal turns that day's rows high; the
+    // lone row behind the other seal stays medium, because it is still a slip.
+    await insertEntry({ id: sealedIds.second, kind: "patient_payment", amountCents: -6_000, effectiveDate: sealedDay, postedAt: "2026-09-17T14:40:00Z" });
+    await tx((d) => refreshLedgerFindings(d, tenantId, now));
+    findings = await openNow();
+    expect(findings).toHaveLength(3);
+    const bySubject = new Map(findings.map((r) => [r.subjectId, r]));
+    expect(bySubject.get(sealedIds.late)!.severity).toBe("high");
+    expect(bySubject.get(sealedIds.second)!.severity).toBe("high");
+    expect(bySubject.get(sealedIds.first)!.severity).toBe("medium");
+    expect((bySubject.get(sealedIds.late)!.detail as { sentence: string }).sentence).toMatch(/2 first postings have landed behind that seal\.$/);
+    expect((bySubject.get(sealedIds.first)!.detail as { sentence: string }).sentence).not.toMatch(/have landed behind that seal/);
   });
 });
