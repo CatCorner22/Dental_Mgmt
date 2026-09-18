@@ -138,7 +138,7 @@
   const HONORIFIC = /^(dr|mr|mrs|ms|mx|prof|sr|fr)\.?$/i;
   // Initials name the person, not the title: "Dr. Hana Kim" read "DH" in the author chip and "HK" in the
   // chair strip, so one shared device showed the same dentist two ways.
-  function initials(name) { const parts = String(name == null ? '' : name).split(/\s+/).filter((p) => p && !HONORIFIC.test(p)); return parts.map((p) => p[0]).join('').slice(0, 2).toUpperCase() || '—'; }
+  function initials(name) { const parts = String(name == null ? '' : name).split(/\s+/).filter((p) => p && !HONORIFIC.test(p)); return parts.map((p) => [...p][0]).slice(0, 2).join('').toUpperCase() || '—'; }
   function displayName(name, privacy) { return privacy ? initials(name) : (name == null ? '—' : name); }
 
   /* One support line for every outage gate. Six screens carried their own copy in two wordings, so the same
