@@ -285,6 +285,10 @@ export const ledgerEntries = pgTable(
     approvalRequestId: uuid("approval_request_id"),
     /** The policy exception that licensed a single release above threshold. */
     appliedExceptionId: text("applied_exception_id"),
+    /** True when this row landed against a day the practice had already frozen (Increment 1.40). */
+    postedAfterClose: boolean("posted_after_close").notNull().default(false),
+    /** The frozen day close this row landed behind; set by the database, never by the writer. */
+    closedDayId: uuid("closed_day_id"),
     tender: text("tender"),
     memo: text("memo"),
     idempotencyKey: text("idempotency_key").notNull(),
@@ -295,6 +299,7 @@ export const ledgerEntries = pgTable(
     index("ledger_entries_tenant_account_idx").on(t.tenantId, t.accountId, t.postedAt),
     index("ledger_entries_tenant_patient_idx").on(t.tenantId, t.patientId, t.effectiveDate),
     uniqueIndex("ledger_entries_tenant_idempotency_uidx").on(t.tenantId, t.idempotencyKey),
+    index("ledger_entries_closed_day_idx").on(t.tenantId, t.closedDayId),
   ]
 );
 

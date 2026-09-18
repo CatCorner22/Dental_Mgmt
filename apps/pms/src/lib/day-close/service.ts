@@ -8,6 +8,7 @@ import {
   hashDomainEvent,
   importRuns,
   importStagedRows,
+  ledgerEntries,
   locations,
   uuidv7,
 } from "@pms/db";
@@ -16,7 +17,7 @@ import { TENANT_CHAIN_LOCK_SQL } from "../auth/postgresStore";
 import { loadActivePolicy } from "../controls/policy";
 import { loadStaff } from "../controls/staff";
 import { canSealDeposits, type SealVerdict } from "./seal";
-import type { DayCloseSnapshot, DepositRow } from "./types";
+import type { DayCloseSnapshot, DepositRow, LatePostingRow } from "./types";
 
 type DepositSlipPayload = {
   kind: "deposit_slip";
@@ -132,6 +133,42 @@ async function sumDaySheetCollections(
   return total;
 }
 
+/**
+ * The rows the database stamped against this frozen day (Increment 1.40).
+ *
+ * `closed_day_id` is written by a trigger at insert time, so this reads the
+ * database's own record of what landed behind the seal rather than re-deriving
+ * it from dates. A day that was open when the row posted carries no stamp, and
+ * a seal taken afterward does not reach back and make one.
+ */
+async function loadLatePostings(db: AppDb, tenantId: string, dayCloseId: string): Promise<LatePostingRow[]> {
+  const rows = await db
+    .select({
+      entryId: ledgerEntries.id,
+      kind: ledgerEntries.kind,
+      amountCents: ledgerEntries.amountCents,
+      postedAt: ledgerEntries.postedAt,
+      createdByName: ledgerEntries.createdByName,
+      reasonCode: ledgerEntries.reasonCode,
+      correctsEntryId: ledgerEntries.correctsEntryId,
+      memo: ledgerEntries.memo,
+    })
+    .from(ledgerEntries)
+    .where(and(eq(ledgerEntries.tenantId, tenantId), eq(ledgerEntries.closedDayId, dayCloseId)))
+    .orderBy(ledgerEntries.postedAt);
+
+  return rows.map((row) => ({
+    entryId: row.entryId,
+    kind: row.kind,
+    amountCents: Number(row.amountCents),
+    postedAt: row.postedAt.toISOString(),
+    createdByName: row.createdByName,
+    reasonCode: row.reasonCode,
+    correctsEntryId: row.correctsEntryId,
+    memo: row.memo,
+  }));
+}
+
 export async function applyStagedDeposits(
   db: AppDb,
   input: {
@@ -231,6 +268,7 @@ export async function getDayCloseSnapshot(
 
   if (closeRow) {
     const summary = (closeRow.summary ?? {}) as { dualRelease?: { status?: string; degradedOwnerSeal?: boolean } };
+    const latePostings = await loadLatePostings(db, tenantId, closeRow.id);
     return {
       dayCloseId: closeRow.id,
       locationId,
@@ -244,6 +282,8 @@ export async function getDayCloseSnapshot(
       frozenByName: closeRow.frozenByName,
       sealStatus: summary.dualRelease?.status ?? null,
       degradedOwnerSeal: summary.dualRelease?.degradedOwnerSeal ?? false,
+      latePostings,
+      latePostingTotalCents: latePostings.reduce((sum, row) => sum + row.amountCents, 0),
     };
   }
 
@@ -260,6 +300,8 @@ export async function getDayCloseSnapshot(
     frozenByName: null,
     sealStatus: null,
     degradedOwnerSeal: false,
+    latePostings: [],
+    latePostingTotalCents: 0,
   };
 }
 

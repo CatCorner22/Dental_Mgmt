@@ -2,10 +2,29 @@
 
 import { useEffect, useState } from "react";
 import { formatCents } from "@/lib/ledger/format";
-import type { DayCloseSnapshot } from "@/lib/day-close/types";
+import type { DayCloseSnapshot, LatePostingRow } from "@/lib/day-close/types";
 
 const DEMO_LOCATION = "0196b0a0-0000-7000-8000-000000000101";
 const DEMO_DATE = "2026-09-14";
+
+/**
+ * What one late row is, in words (Increment 1.40). A correction announces
+ * itself: it names the entry it replaces, and its two halves do different
+ * things. A first posting announces nothing, which is exactly why the seal has
+ * to.
+ */
+function lateRowKind(row: LatePostingRow): string {
+  if (row.correctsEntryId) {
+    return row.kind === "reversal"
+      ? "Correction: clears the earlier entry"
+      : "Correction: replaces it";
+  }
+  return `First posting: ${row.kind.replace(/_/g, " ")}`;
+}
+
+function lateRowWhen(row: LatePostingRow): string {
+  return new Date(row.postedAt).toLocaleString();
+}
 
 type LoadState =
   | { status: "loading" }
@@ -140,7 +159,15 @@ export default function DayClosePage() {
           <p className="mb-4 text-sm text-[var(--ink-2)]">
             Status:{" "}
             <span className="font-semibold text-[var(--ink)]">
-              {state.snapshot.status === "frozen" ? "Frozen" : "Open"}
+              {state.snapshot.status === "frozen" ? (
+                <>
+                  {/* The glyph repeats the word rather than replacing it, so the state
+                      never rests on a symbol alone. */}
+                  <span aria-hidden="true">&#128274;</span> Frozen
+                </>
+              ) : (
+                "Open"
+              )}
             </span>
             {state.snapshot.frozenByName && (
               <> · frozen by {state.snapshot.frozenByName}</>
@@ -204,6 +231,59 @@ export default function DayClosePage() {
               </tbody>
             </table>
           </div>
+
+          {state.snapshot.status === "frozen" && (
+            <section className="mt-8" aria-labelledby="since-the-seal">
+              <h2 id="since-the-seal" className="mb-2 text-lg font-semibold">
+                Since the seal
+              </h2>
+              {state.snapshot.latePostings.length === 0 ? (
+                <p className="max-w-prose text-sm text-[var(--ink-2)]">
+                  Nothing has posted against this day since it was frozen. The figures above are
+                  still the whole of it.
+                </p>
+              ) : (
+                <>
+                  <p className="mb-4 max-w-prose text-sm text-[var(--ink-2)]">
+                    {state.snapshot.latePostings.length === 1 ? "One row" : `${state.snapshot.latePostings.length} rows`}{" "}
+                    posted against this day after it was frozen, together{" "}
+                    <span className="font-semibold tabular-nums text-[var(--ink)]">
+                      {formatCents(state.snapshot.latePostingTotalCents)}
+                    </span>
+                    . The sealed figures above do not move, so the day now reads two ways: what the
+                    practice counted, and what the ledger holds.
+                  </p>
+                  <div className="overflow-x-auto rounded-lg border border-[var(--line)] bg-[var(--surface)]">
+                    <table className="min-w-full text-left text-sm">
+                      <caption className="sr-only">
+                        Ledger rows posted against this day after it was frozen
+                      </caption>
+                      <thead className="border-b border-[var(--line)] bg-[var(--cream)] text-[var(--ink-2)]">
+                        <tr>
+                          <th className="px-4 py-3 font-semibold">Posted</th>
+                          <th className="px-4 py-3 font-semibold">What</th>
+                          <th className="px-4 py-3 font-semibold">Who</th>
+                          <th className="px-4 py-3 font-semibold">Reason</th>
+                          <th className="px-4 py-3 font-semibold tabular-nums">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {state.snapshot.latePostings.map((row) => (
+                          <tr key={row.entryId} className="border-b border-[var(--line)] last:border-0">
+                            <td className="px-4 py-3">{lateRowWhen(row)}</td>
+                            <td className="px-4 py-3">{lateRowKind(row)}</td>
+                            <td className="px-4 py-3">{row.createdByName}</td>
+                            <td className="px-4 py-3">{row.reasonCode ?? "\u2014"}</td>
+                            <td className="px-4 py-3 tabular-nums">{formatCents(row.amountCents)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </section>
+          )}
         </>
       )}
     </main>

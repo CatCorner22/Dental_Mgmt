@@ -39,6 +39,7 @@ const glMappingsSql = readFileSync(join(here, "../migrations/0028_gl_mappings.sq
 const monthClosesSql = readFileSync(join(here, "../migrations/0029_month_closes.sql"), "utf8");
 const correctionPairsSql = readFileSync(join(here, "../migrations/0030_correction_pairs.sql"), "utf8");
 const correctionHoldsSql = readFileSync(join(here, "../migrations/0031_correction_holds.sql"), "utf8");
+const latePostingsSql = readFileSync(join(here, "../migrations/0032_late_postings.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -338,6 +339,38 @@ describe("Increment 1.38 one approval releases a correction pair", () => {
     expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_approval_request_uidx\s+ON ledger_entries \(approval_request_id\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NULL/);
     expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_correction_approval_uidx\s+ON ledger_entries \(approval_request_id, kind\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NOT NULL/);
     expect(correctionHoldsSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
+  });
+});
+
+describe("Increment 1.40 the late posting into a sealed day", () => {
+  it("carries the flag and the day it landed behind as one fact", () => {
+    expect(latePostingsSql).toMatch(/ALTER TABLE ledger_entries ADD COLUMN posted_after_close boolean NOT NULL DEFAULT false/);
+    expect(latePostingsSql).toMatch(/ALTER TABLE ledger_entries ADD COLUMN closed_day_id uuid REFERENCES day_closes\(id\)/);
+    expect(latePostingsSql).toMatch(/CONSTRAINT ledger_entries_late_names_its_day/);
+    expect(latePostingsSql).toMatch(/CHECK \(posted_after_close = \(closed_day_id IS NOT NULL\)\)/);
+    expect(latePostingsSql).toMatch(/CREATE INDEX ledger_entries_closed_day_idx/);
+  });
+
+  it("stamps the row from the database's own reading, and only for a frozen day", () => {
+    expect(latePostingsSql).toMatch(/CREATE OR REPLACE FUNCTION ledger_entries_stamp_late_posting/);
+    // Location-scoped, on the row's effective date, and only where the day is frozen:
+    // an open day is not a seal, and another location's seal is not this row's.
+    expect(latePostingsSql).toMatch(/location_id = NEW\.location_id/);
+    expect(latePostingsSql).toMatch(/business_date = NEW\.effective_date/);
+    expect(latePostingsSql).toMatch(/AND status = 'frozen'/);
+    // The trigger assigns both columns, so whatever the writer passed is overwritten.
+    expect(latePostingsSql).toMatch(/NEW\.closed_day_id := frozen_day;/);
+    expect(latePostingsSql).toMatch(/NEW\.posted_after_close := frozen_day IS NOT NULL;/);
+    expect(latePostingsSql).toMatch(/CREATE TRIGGER ledger_entries_stamp_late_posting\s+BEFORE INSERT ON ledger_entries/);
+  });
+
+  it("records rather than refuses, and lets the append role read the seals", () => {
+    // The month close refuses (migration 0029). A day close is the practice's own,
+    // so a late posting into one is admitted and named, never turned away.
+    expect(latePostingsSql).not.toMatch(/RAISE EXCEPTION/);
+    expect(latePostingsSql).toMatch(/GRANT SELECT ON day_closes TO app_append;/);
+    expect(latePostingsSql).not.toMatch(/GRANT (INSERT|UPDATE|DELETE)[^;]*TO app_append/);
+    expect(latePostingsSql).not.toMatch(/DROP TABLE|DELETE FROM/);
   });
 });
 
