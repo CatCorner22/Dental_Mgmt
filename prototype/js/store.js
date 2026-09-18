@@ -577,9 +577,13 @@
     const fee = (S.cdt[cdtCode] || [null, 0])[1];
     if (wholePatient(cdtCode)) { tooth = null; surfaces = []; }
     else {
-      const t = Number(tooth);
+      // One spelling per tooth and surface set: the row and the duplicate key hold the normalised value, so
+      // 14, "14" and O/o are the same paint and a second one is refused, not billed.
+      const t = /^\d{1,2}$/.test(String(tooth)) ? parseInt(String(tooth), 10) : NaN;
       if (!Number.isInteger(t) || t < 1 || t > 32) return refuse('tooth_required', 'Choose a tooth on the chart', 'Go to the odontogram', 'A procedure that belongs to a tooth has to name one of the 32. A number outside that range would write a chart event nobody can find on the odontogram.');
       if (!Array.isArray(surfaces) || surfaces.some((s) => typeof s !== 'string' || !/^[modbl]$/i.test(s))) return refuse('invalid_input', 'Choose surfaces from the chart', 'Go to the odontogram', 'Surfaces are the letters M, O, D, B and L from the odontogram. A string or an empty value would throw when the note tried to print them.');
+      const order = 'MODBL';
+      tooth = t; surfaces = [...new Set(surfaces.map((s) => s.toUpperCase()))].sort((a, b) => order.indexOf(a) - order.indexOf(b));
     }
     temporality = temporality || 'today';
     if (!['today', 'planned', 'existing'].includes(temporality)) return refuse('invalid_input', 'Choose today, planned or existing', 'Go to temporality', 'Every paint is today, planned or existing. A value outside that list would write a procedure the visit cannot bill.');
