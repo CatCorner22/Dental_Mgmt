@@ -122,10 +122,95 @@ if sess:
     report('docs/14 thresholds are registered no later than the earliest session', probs)
 else:
     print('SKIP beta session checks (no sessions yet)')
-# 9. every data-testid named in the task scripts has a matching builder in prototype/js
+# 9. every data-testid named in the task scripts has a matching builder in prototype/js. A builder is one whole expression:
+#    what is handed to `testid:` or setAttribute('data-testid', …), or a concatenation that opens with an id-shaped literal
+#    (helpers such as padKey and seg take the id positionally). Same-file `const name = …` aliases (and arrow bodies) are
+#    inlined and each runtime segment matches one dot-free segment, so the id has to come out of a single builder, not from a
+#    head and a tail found in different places.
 probs = []; checked = 0
-js = ''
-for f in glob.glob('prototype/js/**/*.js', recursive=True): js += open(f).read()
+WILD = r'[^.]+'
+def js_expr(src, i):
+    """The expression starting at src[i], up to a top-level , ; ) } or newline."""
+    depth = 0; j = i; n = len(src)
+    while j < n:
+        ch = src[j]
+        if ch in '\'"`':
+            k = j + 1
+            while k < n and src[k] != ch:
+                k += 2 if src[k] == '\\' else 1
+            j = k + 1; continue
+        if ch in '([{': depth += 1
+        elif ch in ')]}':
+            if depth == 0: break
+            depth -= 1
+        elif depth == 0 and (ch in ',;\n' or src.startswith('//', j)): break
+        j += 1
+    return src[i:j].strip()
+def split_top(expr, seps):
+    """Split expr on any of seps (strings) at nesting depth 0, outside string literals."""
+    parts = []; depth = 0; cur = ''; i = 0; n = len(expr)
+    while i < n:
+        ch = expr[i]
+        if ch in '\'"`':
+            k = i + 1
+            while k < n and expr[k] != ch:
+                k += 2 if expr[k] == '\\' else 1
+            cur += expr[i:k + 1]; i = k + 1; continue
+        if ch in '([{': depth += 1
+        elif ch in ')]}': depth -= 1
+        if depth == 0:
+            sep = next((s for s in seps if expr.startswith(s, i)), None)
+            if sep:
+                parts.append(cur.strip()); cur = ''; i += len(sep); continue
+        cur += ch; i += 1
+    parts.append(cur.strip())
+    return parts
+STR = re.compile(r"^(['\"])(.*)\1$")
+IDENT = re.compile(r'^[A-Za-z_$][\w$]*$')
+CALL = re.compile(r'^([A-Za-z_$][\w$]*)\(.*\)$')
+ARROW = re.compile(r'^\(?([\w$,\s]*)\)?\s*=>\s*(.*)$', re.S)
+def consts(src):
+    return {m.group(1): js_expr(src, m.end()) for m in re.finditer(r'\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*', src)}
+def patterns(expr, scope, depth=0):
+    """Every regex a builder expression can produce: a list of term lists (literal text or WILD)."""
+    if depth > 6 or not expr: return []
+    m = ARROW.match(expr)
+    if m: return patterns(m.group(2), scope, depth + 1)
+    q = split_top(expr, ['?'])
+    if len(q) == 2:
+        a, b = split_top(q[1], [':'])[:2] if len(split_top(q[1], [':'])) >= 2 else (q[1], '')
+        return patterns(a, scope, depth + 1) + patterns(b, scope, depth + 1)
+    alts = split_top(expr, ['||', '??'])
+    if len(alts) > 1: return [p for a in alts for p in patterns(a, scope, depth + 1)]
+    out = [[]]
+    for term in split_top(expr, ['+']):
+        if not term: return []
+        s = STR.match(term)
+        if s: out = [p + [s.group(2)] for p in out]; continue
+        if IDENT.match(term) and term in scope:
+            sub = patterns(scope[term], scope, depth + 1)
+            out = [p + q for p in out for q in sub] if sub else [p + [WILD] for p in out]; continue
+        c = CALL.match(term)
+        if c and c.group(1) in scope and ARROW.match(scope[c.group(1)]):
+            sub = patterns(scope[c.group(1)], scope, depth + 1)
+            out = [p + q for p in out for q in sub] if sub else [p + [WILD] for p in out]; continue
+        out = [p + [WILD] for p in out]
+    return out
+full, suffix = [], []
+SITE = re.compile(r"(?:\btestid'?\s*:\s*|setAttribute\('data-testid',\s*)|(?<![\w$.'\"])(?='[a-z][a-z0-9]*(?:\.[a-z0-9-]+)+\.?')")
+for f in glob.glob('prototype/js/**/*.js', recursive=True):
+    src = open(f).read(); scope = consts(src)
+    for m in SITE.finditer(src):
+        if src[:m.start()].rstrip().endswith('+'): continue  # mid-concatenation: the head is the earlier term, not this literal
+        for terms in patterns(js_expr(src, m.end()), scope):
+            if not terms or terms[0] == WILD and all(t == WILD for t in terms): continue
+            rx = ''.join(t if t == WILD else re.escape(t) for t in terms[1:])
+            if terms[0] == WILD: suffix.append(re.compile('^(.+?)' + rx + '$'))
+            else: full.append(re.compile('^' + re.escape(terms[0]) + rx + '$'))
+def built(s, depth=0):
+    if any(rx.match(s) for rx in full): return True
+    # a wrapper that appends to a caller's id (opts.testid + '.confirm'): the id it was handed must itself be built
+    return depth < 2 and any(built(m.group(1), depth + 1) for rx in suffix for m in [rx.match(s)] if m)
 tid = re.compile(r'^([a-z0-9]+)\.([a-z0-9-]+)(?:\.[a-z0-9<>-]+)*\.([a-z0-9-]+)$')
 for f in glob.glob('scripts/beta/tasks/*.json'):
     T = json.load(open(f))
@@ -135,11 +220,8 @@ for f in glob.glob('scripts/beta/tasks/*.json'):
             m = tid.match(s)
             if not m: continue
             checked += 1
-            head = m.group(1) + '.' + m.group(2); tail = m.group(3)
-            dynamic_tail = tail.isdigit() or len(tail) == 1  # tooth numbers and surface letters are built at runtime
-            ok = (head in js) and (dynamic_tail or ((("'" + tail + "'") in js) or (('.' + tail + "'") in js) or (('.' + tail + '"') in js) or (tail + '`' in js) or ((head + '.' + tail) in js)))
-            if not ok: probs.append(f'{os.path.basename(f)} {task["id"]}: {s}')
-report('task-script test ids have builders in prototype/js', probs, f'{checked} ids checked')
+            if not built(s): probs.append(f'{os.path.basename(f)} {task["id"]}: {s}')
+report('task-script test ids have builders in prototype/js', probs, f'{checked} ids checked against {len(full)} builders')
 # 10. function audit (docs/15): rules registered before results, inventory total matches the code, every function has a row once results exist
 if os.path.exists('docs/15-function-audit.md'):
     d15 = open('docs/15-function-audit.md').read(); probs = []
