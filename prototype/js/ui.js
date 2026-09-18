@@ -190,12 +190,15 @@
     const root = dialogRoot();
     const box = h('div', { class: 'dialog', role: 'dialog', 'aria-modal': 'true', 'aria-label': opts.label || 'Dialog' }, content);
     const overlay = h('div', { class: 'overlay' }, box);
-    const prev = document.activeElement; const prevId = prev && prev.getAttribute ? prev.getAttribute('data-testid') : null;
+    let prev = document.activeElement; let prevId = prev && prev.getAttribute ? prev.getAttribute('data-testid') : null;
     let closed = false;
-    function close() { if (closed) return; closed = true; overlay.remove(); if (!root.children.length) shadowGates(false); document.removeEventListener('keydown', onKey, true); window.removeEventListener('hashchange', close); if (opts.onClose) opts.onClose(); landFocus(prev, prevId); }
+    function close() { if (closed) return; closed = true; overlay.remove(); if (!root.children.length) shadowGates(false); document.removeEventListener('keydown', onKey, true); window.removeEventListener('hashchange', onHash); if (opts.onClose) opts.onClose(); landFocus(prev, prevId); }
+    // A route change closes the dialog without handing the keyboard back to the old screen's opener: the arriving
+    // screen's heading takes it, as after any other navigation.
+    function onHash() { prev = null; prevId = null; close(); }
     if (!root.children.length) shadowGates(true);
     overlay._close = close;                        // closeDialogs() reaches every open dialog through its overlay
-    window.addEventListener('hashchange', close); // a dialog never outlives the route it opened on
+    window.addEventListener('hashchange', onHash); // a dialog never outlives the route it opened on
     function onKey(ev) {
       if (ev.key === 'Escape') { ev.stopPropagation(); close(); }
       if (ev.key === 'Tab') {
