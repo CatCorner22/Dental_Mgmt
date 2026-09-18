@@ -1,4 +1,5 @@
 import type { DualReleasePolicy } from "@pms/controls-engine";
+import type { ReasonKind } from "./reasons";
 
 /**
  * A reason code's own dual-release threshold (Increment 1.46).
@@ -49,3 +50,39 @@ export function tightenPolicyForReason(
     rules: policy.rules.map((r) => (r.channel === channel ? { ...r, thresholdUsd: effective / 100 } : r)),
   };
 }
+
+/**
+ * Whether the change lets through what used to wait. Null is the loosest state
+ * of all, because it hands the row back to the channel's own figure; 0 is the
+ * strictest, because every posting waits.
+ */
+export function isLoosening(before: number | null, after: number | null): boolean {
+  if (after === null) return before !== null;
+  if (before === null) return false;
+  return after > before;
+}
+
+/**
+ * The release channel a reason kind's postings run through (Increment 1.48), so
+ * a reason's figure can be read beside the channel figure it tightens.
+ *
+ * It states the composition of two maps the product already holds:
+ * `REASON_KIND_FOR_POSTING` (reasons.ts) from posting kind to reason kind, and
+ * `CHANNEL_BY_KIND` (packages/ledger/src/postGuarded.ts) from posting kind to
+ * channel, which itself mirrors `ledger_release_channel()` in migration 0014.
+ * It is written out rather than composed at run time, because composing it
+ * would pull the ledger package into the browser bundle; `reasonThreshold.test.ts`
+ * composes the two and asserts this map equals the result, so the four cannot
+ * drift apart in silence.
+ *
+ * `variance` belongs to bank reconciliation rather than to any posting, so a
+ * reason of that kind reaches no release channel and tightens nothing.
+ */
+export const CHANNEL_FOR_REASON_KIND: Record<ReasonKind, string | null> = {
+  adjustment: "writeoff",
+  write_off: "writeoff",
+  refund: "check",
+  reversal: "writeoff",
+  transfer: "ach",
+  variance: null,
+};

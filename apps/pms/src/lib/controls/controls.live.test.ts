@@ -475,8 +475,11 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     const versionsBefore = (await db.admin.query("SELECT max(version) AS v FROM control_policies WHERE tenant_id = $1", [tenant.id])).rows[0].v as number;
 
     // No decision: refused, and no policy version is written.
+    // 409: the request is well formed, and the practice's state is what refuses
+    // it until a decision stands beside it — the same answer setReasonThreshold
+    // gives for the same condition (Increment 1.48).
     const bare = await tx((d) => retireException(d, { tenantId: tenant.id, actor: asOwner, exceptionId: holdId, reason: "Evening clinic." }));
-    expect(bare).toMatchObject({ ok: false, status: 400, code: "needs_decision" });
+    expect(bare).toMatchObject({ ok: false, status: 409, code: "needs_decision" });
     if (bare.ok) return;
     expect(bare.errors[0]).toMatch(/^Switching off "After-hours hold" loosens a control\./);
 

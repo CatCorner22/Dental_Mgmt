@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { ControlDecision } from "@pms/controls-engine";
 import {
+  centsPhrase,
   conflictDecisionState,
   decisionStateLabel,
   dutiesByPerson,
   grantRefusal,
   provenanceSentence,
+  reasonTighteningSentence,
+  reasonTighteningsForChannel,
 } from "./riskView";
+import type { ReasonCodeRow } from "../ledger/reasons";
 
 const conflict = { id: "u-om:rule-custody-rec", ruleId: "rule-custody-rec" };
 
@@ -101,5 +105,99 @@ describe("dutiesByPerson", () => {
     ]);
     expect(rows.map((r) => r.personName)).toEqual(["Amy", "Zed"]);
     expect(rows[1]?.entitlements).toEqual(["bank_reconcile"]);
+  });
+});
+
+describe("reason thresholds beside the coverage they tighten", () => {
+  function reason(over: Partial<ReasonCodeRow>): ReasonCodeRow {
+    return {
+      code: "courtesy",
+      kind: "write_off",
+      label: "Courtesy",
+      active: true,
+      reserved: false,
+      requiresApprovalOverCents: null,
+      entries: 0,
+      ...over,
+    };
+  }
+
+  const rows: ReasonCodeRow[] = [
+    reason({ code: "courtesy", label: "Courtesy", requiresApprovalOverCents: 5_000 }),
+    reason({ code: "contractual_ppo", label: "Contractual PPO", requiresApprovalOverCents: 0 }),
+    // No figure: the channel's own governs, so it holds nothing to show.
+    reason({ code: "prior_period", kind: "adjustment", label: "Prior period", reserved: true }),
+    // Retired: it reaches no form, so it holds nothing either.
+    reason({ code: "old_courtesy", label: "Old courtesy", active: false, requiresApprovalOverCents: 100 }),
+    // Another channel's: a refund runs through check, not write-off.
+    reason({ code: "overpayment", kind: "refund", label: "Overpayment", requiresApprovalOverCents: 2_500 }),
+  ];
+
+  it("names only the active codes carrying a figure on this channel, loosest first", () => {
+    const found = reasonTighteningsForChannel({
+      channel: "writeoff",
+      channelThresholdUsd: 150,
+      rows,
+      decisions: [],
+    });
+    expect(found.map((t) => t.code)).toEqual(["courtesy", "contractual_ppo"]);
+    expect(found[0]).toMatchObject({ cents: 5_000, effectiveCents: 5_000, redundant: false, decision: null });
+    expect(found[1]).toMatchObject({ cents: 0, effectiveCents: 0, redundant: false });
+  });
+
+  it("puts a refund reason on the channel a refund runs through", () => {
+    const found = reasonTighteningsForChannel({ channel: "check", channelThresholdUsd: 500, rows, decisions: [] });
+    expect(found.map((t) => t.code)).toEqual(["overpayment"]);
+    expect(found[0]?.effectiveCents).toBe(2_500);
+  });
+
+  it("says so where a reason's figure is not below the channel's, rather than implying it tightens", () => {
+    const loose = [reason({ code: "courtesy", label: "Courtesy", requiresApprovalOverCents: 90_000 })];
+    const [t] = reasonTighteningsForChannel({ channel: "writeoff", channelThresholdUsd: 150, rows: loose, decisions: [] });
+    expect(t).toMatchObject({ cents: 90_000, effectiveCents: 15_000, redundant: true });
+    expect(reasonTighteningSentence(t!)).toBe(
+      "Courtesy: $900 — not below the channel, so it holds nothing extra today"
+    );
+  });
+
+  it("names the decision standing on a reason the practice loosened", () => {
+    const licensing = decision({
+      id: "d-reason",
+      subjectKind: "reason_code",
+      subjectId: "courtesy",
+      kind: "accept_residual",
+      decidedByName: "Riley Owner",
+      reviewBy: "2026-12-01",
+    });
+    const [t] = reasonTighteningsForChannel({
+      channel: "writeoff",
+      channelThresholdUsd: 150,
+      rows: [reason({ requiresApprovalOverCents: 10_000 })],
+      decisions: [licensing],
+    });
+    expect(t?.decision?.id).toBe("d-reason");
+    expect(reasonTighteningSentence(t!)).toBe(
+      "Courtesy: $100 · loosened under Accept residual by Riley Owner, review by 2026-12-01"
+    );
+  });
+
+  it("names no decision once the practice has tightened back and the decision is retired", () => {
+    // `latestDecisionFor` reads a retire as nothing standing, which is what
+    // tightening back writes (Increment 1.47).
+    const retired = decision({ id: "d-gone", subjectKind: "reason_code", subjectId: "courtesy", kind: "retire" });
+    const [t] = reasonTighteningsForChannel({
+      channel: "writeoff",
+      channelThresholdUsd: 150,
+      rows: [reason({ requiresApprovalOverCents: 10_000 })],
+      decisions: [retired],
+    });
+    expect(t?.decision).toBeNull();
+    expect(reasonTighteningSentence(t!)).toBe("Courtesy: $100");
+  });
+
+  it("writes cents the way the page writes money", () => {
+    expect(centsPhrase(0)).toBe("every one");
+    expect(centsPhrase(15_000)).toBe("$150");
+    expect(centsPhrase(125_050)).toBe("$1,250.50");
   });
 });

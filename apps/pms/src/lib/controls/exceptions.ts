@@ -14,6 +14,7 @@ import { listDecisions, recordDecision, reviewDecision } from "./decisions";
 import { ENFORCEMENT } from "./enforcement";
 import { appendControlEvent } from "./events";
 import { lockTenantPolicy } from "./locks";
+import { NEEDS_DECISION_CODE, NEEDS_DECISION_STATUS, RECORD_THE_DECISION } from "./needsDecision";
 import { loadActivePolicy, writePolicyVersion, type ActivePolicy } from "./policy";
 
 export type ExceptionsView = {
@@ -127,7 +128,8 @@ export async function addException(
  * Retiring a tightening exception (a force_dual such as the after-hours
  * hold, or a lower_threshold) loosens one, so it is a control decision, not
  * a settings change (docs/13 item 25, Increment 1.31): the owner accepts the
- * residual or names what compensates, says why, and sets a review date. The
+ * residual or names what compensates, says why, and sets the day the practice
+ * looks at this again. The
  * decision row, the policy version, and both chain events are written in the
  * caller's one transaction, and the decision's subject is the exception, so
  * the register and the owner home can say "off since, review due".
@@ -153,13 +155,15 @@ export async function retireException(
 
   const tightens = exceptionTightens(current);
   if (tightens && !input.decision) {
+    // 409 rather than 400, in the words setReasonThreshold uses for the same
+    // condition: the request is well formed and succeeds the moment a decision
+    // stands beside it, so what refuses it is the practice's state, not the
+    // request (Increment 1.48).
     return {
       ok: false,
-      status: 400,
-      code: "needs_decision",
-      errors: [
-        `Switching off "${current.label}" loosens a control. Record a decision: accept the residual or name what compensates, say why, and set a review date.`,
-      ],
+      status: NEEDS_DECISION_STATUS,
+      code: NEEDS_DECISION_CODE,
+      errors: [`Switching off "${current.label}" loosens a control. ${RECORD_THE_DECISION}`],
     };
   }
   if (tightens && input.decision) {

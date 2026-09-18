@@ -43,6 +43,7 @@ const latePostingsSql = readFileSync(join(here, "../migrations/0032_late_posting
 const sealedDayFindingSql = readFileSync(join(here, "../migrations/0033_finding_sealed_day_posting.sql"), "utf8");
 const packageSchemaSql = readFileSync(join(here, "../migrations/0034_package_schema_version.sql"), "utf8");
 const reasonThresholdSql = readFileSync(join(here, "../migrations/0035_reason_thresholds.sql"), "utf8");
+const reasonDecisionSql = readFileSync(join(here, "../migrations/0036_decision_on_reason_code.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -342,6 +343,24 @@ describe("Increment 1.38 one approval releases a correction pair", () => {
     expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_approval_request_uidx\s+ON ledger_entries \(approval_request_id\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NULL/);
     expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_correction_approval_uidx\s+ON ledger_entries \(approval_request_id, kind\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NOT NULL/);
     expect(correctionHoldsSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
+  });
+});
+
+describe("Increment 1.47 a decision about a reason code", () => {
+  it("widens the decision subjects by one and carries every one already in use forward", () => {
+    expect(reasonDecisionSql).toMatch(/'reason_code'/);
+    for (const subject of [
+      "sod_finding",
+      "grant",
+      "control",
+      "exception",
+      "scenario",
+      "knowledge",
+      "detector_finding",
+    ]) {
+      expect(reasonDecisionSql).toContain(`'${subject}'`);
+    }
+    expect(reasonDecisionSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
   });
 });
 
