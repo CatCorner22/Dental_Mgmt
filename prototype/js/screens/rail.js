@@ -345,7 +345,13 @@
         h('div', { class: 'btnrow' },
           btn('Explain', { kind: 'reversible', testid: 'ledger.explain', pressed: pressed(st.explain), onClick: () => { st.explain = !st.explain; rerender(r, 'ledger.explain'); } }),
           // The accessible name leads with the printed words and stays under twelve (CLT-label-words); the same name as Checkout's.
-          btn('Show patient', { kind: 'reversible', testid: 'ledger.showpatient', pressed: pressed(st.patientVoice), ariaLabel: st.patientVoice ? 'Show patient: on; press to return to the staff view' : 'Show patient: the same rows in plain words', onClick: () => { st.patientVoice = !st.patientVoice; if (st.patientVoice) st.explain = true; rerender(r, 'ledger.showpatient'); } })),
+          // The patient view is a screen disclosure: the reveal follows the store's row, the same verb the phone card and Daily Close write.
+          btn('Show patient', { kind: 'reversible', testid: 'ledger.showpatient', pressed: pressed(st.patientVoice), ariaLabel: st.patientVoice ? 'Show patient: on; press to return to the staff view' : 'Show patient: the same rows in plain words', onClick: () => {
+            if (st.patientVoice) { st.patientVoice = false; rerender(r, 'ledger.showpatient'); return; }
+            const res = Proto.store.disclose({ patientId: pid, purpose: 'patient_view', recordIds: S().ledger.filter((e) => e.patientId === pid).map((e) => e.id) });
+            if (res && res.ok) { st.patientVoice = true; st.explain = true; }
+            rerender(r, 'ledger.showpatient');
+          } })),
         st.explain ? explainBlock(pid, st, r) : null),
       st.asofOpen ? section('As of', asOfBlock(pid, st, r, all)) : null,
       section('Rows', h('p', { class: 'small muted', text: 'Newest first by posted date. Reversals and reposts name the row they correct; nothing is edited in place.' }), ledgerTable(rows, st)),
