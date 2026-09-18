@@ -490,8 +490,9 @@
       else if (k.fix === 'money') { const m = 'Take the amount out; the quoted figure lives on the plan card.'; if (MONEY_CUE.test(x.note.assessment || '')) e.assessment = m; if (MONEY_CUE.test(x.note.plan || '')) e.plan = m; }
       else if (k.fix === 'contradiction') {
         const mm = String(k.verb || '').match(/#(\d{1,2})/); const ct = k.chartTooth != null ? String(k.chartTooth) : mm ? mm[1] : null;
+        const nt = k.noteTooth != null ? String(k.noteTooth) : null;
         const m = 'Name the same tooth as the chart' + (ct ? ' (#' + ct + ')' : '') + '.';
-        for (const id of ['assessment', 'plan']) { const txt = x.note[id] || ''; if (ct ? new RegExp('#(?!' + ct + '\\b)\\d{1,2}\\b').test(txt) : /#\d{1,2}\b/.test(txt)) e[id] = m; }
+        for (const id of ['assessment', 'plan']) { const txt = x.note[id] || ''; if (nt ? new RegExp('(?:#|\\btooth\\s+#?)' + nt + '\\b', 'i').test(txt) : ct ? new RegExp('#(?!' + ct + '\\b)\\d{1,2}\\b').test(txt) : /#\d{1,2}\b/.test(txt)) e[id] = m; }
       }
     }
     return e;
@@ -656,7 +657,10 @@
       // verb was rewritten, and the fix silently did nothing.
       const m = String(k.verb || '').match(/#(\d{1,2})/);
       const chartTooth = k.chartTooth != null ? String(k.chartTooth) : m ? m[1] : null; if (!chartTooth) return;
-      const fix = (txt) => (txt || '').replace(/#(\d{1,2})\b/g, (all, n) => (n === chartTooth ? all : '#' + chartTooth));
+      // Only the contradicted token moves; a tooth the chart does carry keeps its own number.
+      const wm = String(k.why || '').match(/note says #(\d{1,2})/);
+      const noteTooth = k.noteTooth != null ? String(k.noteTooth) : wm ? wm[1] : null;
+      const fix = (txt) => (txt || '').replace(/(#|\btooth\s+#?)(\d{1,2})\b/gi, (all, pre, n) => (noteTooth == null ? n !== chartTooth : n === noteTooth) ? pre + chartTooth : all);
       x.note.assessment = fix(x.note.assessment); x.note.plan = fix(x.note.plan);
       x.killers = Proto.store.noteKillers(enc.id, x.note).slice(0, 3); rerender(r);
       focusGateVerb() || focusFirst('enc.file'); Proto.router.announce('Note now says #' + chartTooth + ', matching the chart'); return;

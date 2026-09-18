@@ -723,7 +723,11 @@
     const named = [...text.matchAll(/(?:#|\btooth\s+#?)(\d{1,2})\b/gi)].map((m) => Number(m[1]));
     const wrong = named.find((t) => !toothed.some((c) => c.tooth === t));
     if (wrong != null && toothed.length) {
-      const c = toothed[0];
+      // The chart tooth offered for a wrong token is the paint its own sentence names (by procedure name), else
+      // a live tooth the note has not named yet: the correct #NN tokens are never the ones rewritten.
+      const sentence = text.split(/[.;!?\n]/).find((s) => new RegExp('(?:#|\\btooth\\s+#?)' + wrong + '\\b', 'i').test(s)) || '';
+      const byName = toothed.find((ce) => { const nm = ((S.cdt[ce.cdt] || [''])[0].match(/^[A-Za-z]+/) || [])[0]; return nm && new RegExp('\\b' + nm + '\\b', 'i').test(sentence); });
+      const c = byName || toothed.find((ce) => !named.includes(ce.tooth)) || toothed[0];
       killers.push({ code: 'contradiction', verb: 'Use the chart tooth #' + c.tooth, control: 'Use chart tooth', fix: 'contradiction', why: 'The note says #' + wrong + ' and the chart says #' + c.tooth + '. A wrong-tooth claim is denied or paid wrongly, so the two must agree before filing.', noteTooth: wrong, chartTooth: c.tooth });
     }
     // The assessment is the dentist's to write, so a hygienist is not handed a control that lands on a readonly field: her
