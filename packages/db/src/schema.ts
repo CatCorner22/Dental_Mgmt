@@ -355,6 +355,8 @@ export const approvalRequests = pgTable(
     requestedAt: timestamp("requested_at", { withTimezone: true }).notNull(),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     resultingEntryId: uuid("resulting_entry_id"),
+    /** Set when this approval releases a correction pair for that entry (Increment 1.38). */
+    correctsEntryId: uuid("corrects_entry_id"),
   },
   (t) => [index("approval_requests_tenant_status_idx").on(t.tenantId, t.status, t.requestedAt)]
 );

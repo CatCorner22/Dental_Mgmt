@@ -465,7 +465,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().getByRole("button", { name: "Cancel" }).click();
     expect(await page().getByRole("button", { name: "Close it for good" }).count()).toBe(0);
   }, 150_000);
-  it("corrects a posted entry as a reversal-and-repost pair, or says why a second person must release it", async () => {
+  it("corrects a posted entry as a reversal-and-repost pair, or holds the whole correction for a second person", async () => {
     await b.signIn("ridgeview-front", "/ledger");
     await page().getByRole("heading", { name: "Ledger" }).waitFor({ timeout: 60_000 });
     await page().getByRole("link", { name: "Jane Doe" }).click();
@@ -489,13 +489,15 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     // this channel outside the location's business hours, and CI runs at every hour. Both outcomes
     // are the product working; each has to say plainly which one happened.
     const done = page().getByText(/the entry is reversed and reposted/);
-    const refused = page().getByText(/needs a second person, and a pair has to land in one transaction/);
+    const refused = page().getByText(/approving it writes both the reversal and the repost/);
     await Promise.race([done.waitFor({ timeout: 30_000 }), refused.waitFor({ timeout: 30_000 })]);
 
     if (await refused.count()) {
-      // Refused: the pair never half-lands, so the ledger is exactly as it was.
+      // Held, not refused (Increment 1.38): one request names the correction, nothing posts
+      // until a second person approves it, and the ledger is exactly as it was meanwhile.
+      expect(await refused.innerText()).toMatch(/\(request [0-9a-f-]{36}\)/);
       expect(await ledger.locator("tbody tr").count()).toBe(before);
-      await b.audit("account explanation (correction needs a second person)");
+      await b.audit("account explanation (correction held for a second person)");
       return;
     }
 

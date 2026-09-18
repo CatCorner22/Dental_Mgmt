@@ -13,6 +13,8 @@ type LoadState =
 
 type CorrectionReply = {
   ok?: boolean;
+  code?: string;
+  approvalRequestId?: string;
   reasonCode?: string;
   closedMonth?: string | null;
   verb?: string;
@@ -108,6 +110,12 @@ export default function LedgerAccountPage() {
         body: JSON.stringify({ entryId, amountCents: Math.round(dollars * 100), reasonCode: reason.trim() }),
       });
       const body = (await res.json()) as CorrectionReply;
+      if (body.code === "needs_second" && body.approvalRequestId) {
+        // Held, not refused: the request is open and the second person releases both halves.
+        setCorrecting(null);
+        setNotice(`${body.why} (request ${body.approvalRequestId})`);
+        return;
+      }
       if (!res.ok || !body.ok) {
         setNotice(body.why ?? body.error ?? "The correction was refused.");
         return;

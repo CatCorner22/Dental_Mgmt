@@ -51,6 +51,22 @@ export const POST = withGuard(
       );
     }
 
+    // A correction waiting on a second person is not a refusal: the request exists,
+    // and approving it writes both halves (Increment 1.38).
+    if (result.code === "needs_second") {
+      return Response.json(
+        {
+          ok: false,
+          code: result.code,
+          approvalRequestId: result.approvalRequestId,
+          verb: result.verb,
+          control: result.control,
+          why: result.why,
+        },
+        { status: 202 }
+      );
+    }
+
     return Response.json(
       { ok: false, code: result.code, verb: result.verb, control: result.control, why: result.why },
       { status: result.code === "entry_not_found" ? 404 : 403 }

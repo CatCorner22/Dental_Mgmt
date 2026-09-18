@@ -5,6 +5,21 @@ import type { PostEntryInput } from "@pms/ledger";
 import type { AppDb } from "../db/client";
 import { appendControlEvent as appendEvent } from "./events";
 
+/**
+ * The repost half of a held correction (Increment 1.38). The held payload is
+ * the reversal; this rides beside it so the second person's approval writes
+ * both halves in one transaction, as Increment 1.37's service does inline.
+ */
+export type HeldCorrection = {
+  correctsEntryId: string;
+  repostKind: string;
+  repostAmountCents: number;
+  repostTender: string | null;
+};
+
+/** A held ledger posting, and — for a correction — the repost written with it. */
+export type HeldPayload = PostEntryInput & { correction?: HeldCorrection };
+
 export type ApprovalRow = {
   id: string;
   tenantId: string;
@@ -14,7 +29,7 @@ export type ApprovalRow = {
   currency: string;
   subjectKind: string;
   subjectId: string | null;
-  heldPayload: PostEntryInput;
+  heldPayload: HeldPayload;
   evaluation: ReleaseEvaluation;
   requesterId: string;
   requesterName: string;
@@ -24,17 +39,21 @@ export type ApprovalRow = {
   requestedAt: Date;
   decidedAt: Date | null;
   resultingEntryId: string | null;
+  /** The entry a correction hold releases the pair for, or null on an ordinary posting. */
+  correctsEntryId: string | null;
 };
 
 type CreateInput = {
   tenantId: string;
   channel: string;
   amountCents: number;
-  heldPayload: PostEntryInput;
+  heldPayload: HeldPayload;
   evaluation: ReleaseEvaluation;
   requesterId: string;
   requesterName: string;
   subjectId?: string | null;
+  /** Set to hold a correction pair: both halves post under this one approval. */
+  correctsEntryId?: string | null;
   now?: Date;
 };
 
@@ -48,7 +67,7 @@ function mapRow(row: typeof approvalRequests.$inferSelect): ApprovalRow {
     currency: row.currency,
     subjectKind: row.subjectKind,
     subjectId: row.subjectId,
-    heldPayload: row.heldPayload as PostEntryInput,
+    heldPayload: row.heldPayload as HeldPayload,
     evaluation: row.evaluation as ReleaseEvaluation,
     requesterId: row.requesterId,
     requesterName: row.requesterName,
@@ -58,6 +77,7 @@ function mapRow(row: typeof approvalRequests.$inferSelect): ApprovalRow {
     requestedAt: row.requestedAt,
     decidedAt: row.decidedAt,
     resultingEntryId: row.resultingEntryId,
+    correctsEntryId: row.correctsEntryId,
   };
 }
 
@@ -83,6 +103,7 @@ export async function createApprovalRequest(
     eligibleSecondRoles: eligible,
     requesterId: input.requesterId,
     requesterName: input.requesterName,
+    correctsEntryId: input.correctsEntryId ?? null,
     requestedAt: now,
   });
 

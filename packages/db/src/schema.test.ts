@@ -38,6 +38,7 @@ const hardEventAcksSql = readFileSync(join(here, "../migrations/0027_hard_event_
 const glMappingsSql = readFileSync(join(here, "../migrations/0028_gl_mappings.sql"), "utf8");
 const monthClosesSql = readFileSync(join(here, "../migrations/0029_month_closes.sql"), "utf8");
 const correctionPairsSql = readFileSync(join(here, "../migrations/0030_correction_pairs.sql"), "utf8");
+const correctionHoldsSql = readFileSync(join(here, "../migrations/0031_correction_holds.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -306,6 +307,37 @@ describe("Increment 1.37 the reversal-and-repost correction pair", () => {
     // The trigger itself is not re-created: migration 0029 already attached it to the same function.
     expect(correctionPairsSql).not.toMatch(/CREATE TRIGGER ledger_entries_month_not_closed/);
     expect(correctionPairsSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
+  });
+});
+
+describe("Increment 1.38 one approval releases a correction pair", () => {
+  it("lets an approval name the entry being corrected", () => {
+    expect(correctionHoldsSql).toMatch(/ALTER TABLE approval_requests ADD COLUMN corrects_entry_id uuid REFERENCES ledger_entries\(id\)/);
+    expect(correctionHoldsSql).toMatch(/CREATE OR REPLACE FUNCTION ledger_entries_requires_approval/);
+    expect(correctionHoldsSql).toMatch(/req\.corrects_entry_id IS NOT NULL/);
+    expect(correctionHoldsSql).toMatch(/NEW\.corrects_entry_id IS DISTINCT FROM req\.corrects_entry_id/);
+    // Neither half may exceed the figure the second person approved.
+    expect(correctionHoldsSql).toMatch(/amount_cents > abs\(req\.amount_cents\)/);
+    expect(correctionHoldsSql).toMatch(/RAISE EXCEPTION 'dual_release_required: approval request % approved up to % cents/);
+  });
+
+  it("carries the whole trigger forward, after-hours hold included, rather than reverting it", () => {
+    // Rebuilding this function from an older migration's text would silently drop the
+    // after-hours hold that migration 0026 added to it. These lines are that guarantee.
+    expect(correctionHoldsSql).toMatch(/after_hours_hold boolean := false;/);
+    expect(correctionHoldsSql).toMatch(/ledger_posted_outside_hours\(NEW\.tenant_id, NEW\.location_id, NEW\.posted_at\)/);
+    expect(correctionHoldsSql).toMatch(/IF amount_cents <= threshold_cents AND NOT after_hours_hold THEN/);
+    expect(correctionHoldsSql).toMatch(/was posted outside the location''s business hours \(after-hours hold\)/);
+    // And the ordinary rules still stand for an ordinary approval.
+    expect(correctionHoldsSql).toMatch(/abs\(req\.amount_cents\) <> amount_cents/);
+    expect(correctionHoldsSql).toMatch(/req\.resulting_entry_id IS NOT NULL AND req\.resulting_entry_id <> NEW\.id/);
+  });
+
+  it("restates one-row-per-approval as one row per kind for a correction", () => {
+    expect(correctionHoldsSql).toMatch(/DROP INDEX ledger_entries_approval_request_uidx/);
+    expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_approval_request_uidx\s+ON ledger_entries \(approval_request_id\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NULL/);
+    expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_correction_approval_uidx\s+ON ledger_entries \(approval_request_id, kind\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NOT NULL/);
+    expect(correctionHoldsSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
   });
 });
 
