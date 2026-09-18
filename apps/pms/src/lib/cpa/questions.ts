@@ -3,6 +3,8 @@ import { cpaThreadMessages, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { appendControlEvent } from "../controls/events";
 import { computeMonthPackage, packageHash, packageRows } from "./package";
+import { listMonthCloses, loadMonthClose } from "./close";
+import { closedMonthNote, type ClosedMonthNote } from "./closedMonthNote";
 
 /**
  * The question verb (Increment 1.50, docs/13 item 22).
@@ -48,6 +50,14 @@ export type Thread = {
   messages: ThreadMessage[];
   /** True while the last word is the accountant's: the practice owes an answer. */
   awaitingPractice: boolean;
+  /**
+   * Set once the month this thread is about has been closed (Increment 1.54).
+   *
+   * A thread about a closed month calls for a different answer from one about
+   * an open month, and read alike they are indistinguishable. Null means the
+   * month is still open, not that nobody looked.
+   */
+  closedMonth: ClosedMonthNote | null;
   askedAt: string;
   lastAt: string;
 };
@@ -86,7 +96,10 @@ export async function listThreads(db: AppDb, tenantId: string, month: string): P
     .where(and(eq(cpaThreadMessages.tenantId, tenantId), eq(cpaThreadMessages.month, month)))
     .orderBy(asc(cpaThreadMessages.createdAt));
   const labels = await labelsFor(db, tenantId, month);
-  return gather(rows.map(toMessage), (m) => labels.get(m.subjectKey) ?? null);
+  // One month, so one close to read.
+  const close = await loadMonthClose(db, tenantId, month);
+  const note = close ? closedMonthNote({ month, closedAt: close.closedAt, closedByName: close.closedByName }) : null;
+  return gather(rows.map(toMessage), (m) => labels.get(m.subjectKey) ?? null, () => note);
 }
 
 /**
@@ -96,6 +109,11 @@ export async function listThreads(db: AppDb, tenantId: string, month: string): P
  * costs one whole month-end package to compute. The question's own words carry
  * the meaning and the subject key names the line; the `/cpa` screen, which has
  * already computed that month's package, is where the line reads in full.
+ *
+ * It does resolve the close (Increment 1.54), because that costs one indexed
+ * read for every thread rather than a package apiece, and because it changes
+ * what a true answer says: the owner answering a question about a month they
+ * have closed needs to know that before they answer, not after.
  */
 export async function threadsAwaitingPractice(db: AppDb, tenantId: string): Promise<Thread[]> {
   const rows = await db
@@ -103,7 +121,10 @@ export async function threadsAwaitingPractice(db: AppDb, tenantId: string): Prom
     .from(cpaThreadMessages)
     .where(eq(cpaThreadMessages.tenantId, tenantId))
     .orderBy(asc(cpaThreadMessages.createdAt));
-  return gather(rows.map(toMessage), () => null).filter((t) => t.awaitingPractice);
+  const notes = new Map(
+    (await listMonthCloses(db, tenantId)).map((c) => [c.month, closedMonthNote({ month: c.month, closedAt: c.closedAt, closedByName: c.closedByName })])
+  );
+  return gather(rows.map(toMessage), () => null, (month) => notes.get(month) ?? null).filter((t) => t.awaitingPractice);
 }
 
 /**
@@ -122,7 +143,11 @@ async function labelsFor(db: AppDb, tenantId: string, month: string): Promise<Ma
   return new Map(rows.map((r) => [`${r.section}|${r.key}`, r.label]));
 }
 
-function gather(messages: ThreadMessage[], labelOf: (m: ThreadMessage) => string | null): Thread[] {
+function gather(
+  messages: ThreadMessage[],
+  labelOf: (m: ThreadMessage) => string | null,
+  closeOf: (month: string) => ClosedMonthNote | null
+): Thread[] {
   const byThread = new Map<string, ThreadMessage[]>();
   for (const m of messages) {
     const list = byThread.get(m.threadId);
@@ -140,6 +165,7 @@ function gather(messages: ThreadMessage[], labelOf: (m: ThreadMessage) => string
       subjectLabel: labelOf(opener),
       messages: list,
       awaitingPractice: last.authorSeat === "accountant",
+      closedMonth: closeOf(opener.month),
       askedAt: opener.createdAt,
       lastAt: last.createdAt,
     });
@@ -256,5 +282,11 @@ async function loadThread(db: AppDb, tenantId: string, threadId: string, labels:
     .where(and(eq(cpaThreadMessages.tenantId, tenantId), eq(cpaThreadMessages.threadId, threadId)))
     .orderBy(asc(cpaThreadMessages.createdAt));
   if (rows.length === 0) return null;
-  return gather(rows.map(toMessage), (m) => labels.get(m.subjectKey) ?? null)[0] ?? null;
+  // The thread a write returns reads the close exactly as a later list of it
+  // will: a message written into a closed month says so from the moment it
+  // lands, rather than only once the screen is loaded again.
+  const month = rows[0]!.month;
+  const close = await loadMonthClose(db, tenantId, month);
+  const note = close ? closedMonthNote({ month, closedAt: close.closedAt, closedByName: close.closedByName }) : null;
+  return gather(rows.map(toMessage), (m) => labels.get(m.subjectKey) ?? null, () => note)[0] ?? null;
 }
