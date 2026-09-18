@@ -74,12 +74,24 @@
     if (!Proto.store.patient(pid)) { announce(Proto.store.notFound('patient').verb); return; }
     if (rail.pid !== pid) { rail.explain = false; rail.msg = null; }
     rail.pid = pid; if (r) rail.r = r;
+    // Close gives the keyboard back to the control that opened the rail, so the opener is remembered by test id.
+    const act = document.activeElement; const opener = act && act.closest ? act.closest('[data-railopen]') : null;
+    rail.openerId = opener ? opener.getAttribute('data-testid') : (opts && opts.keepFocus ? rail.openerId : null);
     const box = document.getElementById('rail'); if (box) box.hidden = false;
     renderRail();
     syncOpeners();
     if (!(opts && opts.keepFocus)) { const c = document.querySelector('[data-testid="rail.close"]'); if (c) c.focus(); }
   }
   function close() { rail.pid = null; rail.msg = null; const box = document.getElementById('rail'); if (box) { box.replaceChildren(); box.hidden = true; } syncOpeners(); }
+  /* Focus after Close: the opener if it is still on the screen, else its card, else the canvas heading. */
+  function closeToOpener() {
+    const pid = rail.pid; const id = rail.openerId; close(); rail.openerId = null;
+    const opener = id ? document.querySelector('[data-testid="' + id + '"]') : null;
+    const target = opener || (pid ? document.querySelector('[data-railopen="' + pid + '"]') : null)
+      || (id ? document.querySelector('[data-testid="' + id.replace(/\.rail$/, '') + '"]') : null)
+      || document.querySelector('#canvas h1') || document.getElementById('canvas');
+    if (target) target.focus();
+  }
   function isOpen() { return !!rail.pid; }
   function button(pid, r, testid) {
     const p = Proto.store.patient(pid);
@@ -166,7 +178,7 @@
     const explainRows = rail.explain ? Proto.store.explain(rail.pid) : [];
     const explainBody = rail.explain ? h('div', { class: 'explain' }, explainRows.length ? explainRows.map((x) => h('p', { class: 'sentence' }, boldAmounts(x.sentence))) : h('p', { class: 'sentence muted', text: explainEmpty(false) })) : null;
     box.replaceChildren(...[
-      h('div', { class: 'rail-head' }, h('div', null, h('div', { class: 'name', text: displayName(p.name, priv) }), h('div', { class: 'rail-ids', text: identLine(p, priv) })), btn('Close', { kind: 'quiet', class: 'compact', testid: 'rail.close', ariaLabel: 'Close the patient rail', onClick: () => { close(); const c = document.getElementById('canvas'); if (c) c.focus(); } })),
+      h('div', { class: 'rail-head' }, h('div', null, h('div', { class: 'name', text: displayName(p.name, priv) }), h('div', { class: 'rail-ids', text: identLine(p, priv) })), btn('Close', { kind: 'quiet', class: 'compact', testid: 'rail.close', ariaLabel: 'Close the patient rail', onClick: closeToOpener })),
       alertbar, tabs,
       rail.msg ? h('p', { class: 'rail-msg', text: rail.msg }) : null,   // the verb line is announced once, from tabGo
       summary('appts', 'Appointments', ...apptSummary(rail.pid)),
