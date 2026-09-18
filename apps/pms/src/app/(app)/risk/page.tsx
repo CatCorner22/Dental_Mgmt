@@ -21,7 +21,10 @@ import {
   dutiesByPerson,
   grantRefusal,
   provenanceSentence,
+  reasonTighteningSentence,
+  reasonTighteningsForChannel,
 } from "@/lib/controls/riskView";
+import type { ReasonCodeRow } from "@/lib/ledger/reasons";
 import { DecisionForm, type DecisionDraft } from "./decision-form";
 import { Refusal, type RefusalContent } from "./refusal";
 
@@ -52,6 +55,8 @@ type ExceptionsResponse = {
   exceptions: ThresholdException[];
   summary: { total: number; raises: number; forceDual: number; waives: number; expiringSoon: number };
 };
+
+type ReasonCodesResponse = { items: ReasonCodeRow[] };
 
 type Me = { ok: boolean; role?: string; displayName?: string };
 
@@ -94,6 +99,7 @@ type Loaded = {
   decisions: DecisionsResponse;
   exceptions: ExceptionsResponse;
   findings: FindingsResponse;
+  reasonCodes: ReasonCodesResponse;
 };
 
 type LoadState =
@@ -135,14 +141,15 @@ export default function PracticeRiskPage() {
   const [grantRefused, setGrantRefused] = useState<(RefusalContent & { canLicense: boolean }) | null>(null);
 
   const load = useCallback(async (fresh = false) => {
-    const [risk, sod, decisions, exceptions, findings] = await Promise.all([
+    const [risk, sod, decisions, exceptions, findings, reasonCodes] = await Promise.all([
       getJson<RiskResponse>(`/api/controls/risk${fresh ? "?fresh=1" : ""}`),
       getJson<SodResponse>("/api/controls/sod"),
       getJson<DecisionsResponse>("/api/controls/decisions"),
       getJson<ExceptionsResponse>("/api/controls/exceptions"),
       getJson<FindingsResponse>("/api/controls/findings"),
+      getJson<ReasonCodesResponse>("/api/reason-codes"),
     ]);
-    return { risk, sod, decisions, exceptions, findings };
+    return { risk, sod, decisions, exceptions, findings, reasonCodes };
   }, []);
 
   useEffect(() => {
@@ -458,7 +465,7 @@ function RiskBody({
   onRevoke: (person: RoleAssignment, entitlement: string) => void;
   exceptionControls: ExceptionControls;
 }) {
-  const { risk, sod, decisions, exceptions, findings } = data;
+  const { risk, sod, decisions, exceptions, findings, reasonCodes } = data;
   const s = risk.snapshot;
   const conflicts = [...sod.conflicts]
     .filter((c) => showFamily || c.severity !== "family")
@@ -559,7 +566,9 @@ function RiskBody({
         </h2>
         <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
           Only an enforced or recorded channel may lower a score. A channel whose data the product does
-          not hold is shown as attested, never as enforced, so this table cannot show a false green.
+          not hold is shown as attested, never as enforced, so this table cannot show a false green. A
+          reason code may hold a channel to less than its own figure; where one does, it is named under
+          the figure it tightens, with the decision that licensed any loosening.
         </p>
         <div className="overflow-x-auto rounded-lg border border-[var(--line)] bg-[var(--surface)]">
           <table className="min-w-full text-left text-sm">
@@ -584,6 +593,14 @@ function RiskBody({
                   </td>
                   <td className="px-4 py-3 tabular-nums">
                     {row.policyEnabled ? `$${row.thresholdUsd.toLocaleString()}` : "—"}
+                    {row.policyEnabled && (
+                      <ReasonTightenings
+                        channel={row.channel}
+                        thresholdUsd={row.thresholdUsd}
+                        rows={reasonCodes.items}
+                        decisions={decisions.items}
+                      />
+                    )}
                   </td>
                   <td className="px-4 py-3">{row.countsTowardScores ? "Yes" : "No"}</td>
                   <td className="px-4 py-3 tabular-nums">{row.activeExceptions}</td>
@@ -1019,6 +1036,33 @@ function Tile({ label, value }: { label: string; value: string }) {
       <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">{label}</p>
       <p className="mt-1 text-xl font-semibold tabular-nums">{value}</p>
     </div>
+  );
+}
+
+/**
+ * The reason codes holding one channel to less than its own figure
+ * (Increment 1.48). A reader of this table who could not see them would read a
+ * figure that no longer governs every posting on the channel.
+ */
+function ReasonTightenings({
+  channel,
+  thresholdUsd,
+  rows,
+  decisions,
+}: {
+  channel: string;
+  thresholdUsd: number;
+  rows: ReasonCodeRow[];
+  decisions: ControlDecision[];
+}) {
+  const tightenings = reasonTighteningsForChannel({ channel, channelThresholdUsd: thresholdUsd, rows, decisions });
+  if (tightenings.length === 0) return null;
+  return (
+    <ul className="mt-1 space-y-0.5 text-xs font-normal tabular-nums text-[var(--ink-3)]">
+      {tightenings.map((t) => (
+        <li key={t.code}>{reasonTighteningSentence(t)}</li>
+      ))}
+    </ul>
   );
 }
 

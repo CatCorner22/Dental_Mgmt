@@ -248,6 +248,62 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     expect(await page().locator("section[aria-labelledby=after-hours-hold]").count()).toBe(0);
   }, 150_000);
 
+  it("names on the coverage table the reason codes holding a channel to less, and the decision behind a loosening", async () => {
+    // The coverage table says what a channel holds. A reason code may hold that
+    // channel to less (Increment 1.46), and the practice may loosen what a
+    // reason holds only under a decision (Increment 1.47) — so a reader of the
+    // table who cannot see the reasons is reading a figure that no longer
+    // governs every posting on the channel (Increment 1.48).
+    const coverage = () => page().locator("section[aria-labelledby=coverage] tbody tr", { hasText: "Write-offs / adjustments" });
+    const reviewDue = addDays(new Date().toISOString().slice(0, 10), 120);
+
+    // Nothing to say yet: no seeded reason carries a figure of its own.
+    await page().goto(`${app.base}/risk`);
+    await page().getByRole("heading", { name: "Headline" }).waitFor({ timeout: 60_000 });
+    expect(await coverage().innerText()).toMatch(/\$150/);
+    expect(await coverage().innerText()).not.toMatch(/Courtesy adjustment/);
+
+    // Hold courtesy write-offs to $50. That tightens, so it is a settings change.
+    await b.signIn("ridgeview-owner", "/reason-codes");
+    await page().getByRole("heading", { name: "Why money moved" }).waitFor({ timeout: 60_000 });
+    const courtesy = page().locator("tr", { hasText: "courtesy" });
+    await courtesy.waitFor({ timeout: 30_000 });
+    await courtesy.getByRole("button", { name: "Set threshold for courtesy" }).click();
+    await page().getByLabel("Second person over, in dollars, for courtesy").fill("50");
+    await courtesy.getByRole("button", { name: "Save" }).click();
+    await page().getByText(/^Set the threshold succeeded\.$/).waitFor({ timeout: 30_000 });
+
+    // Practice Risk names it under the channel figure it tightens.
+    await page().goto(`${app.base}/risk`);
+    await page().getByRole("heading", { name: "Headline" }).waitFor({ timeout: 60_000 });
+    await expect.poll(async () => coverage().innerText(), { timeout: 30_000 }).toMatch(/\$150[\s\S]*Courtesy adjustment: \$50/);
+    // A reason reaches one channel, so the figure sits on that row and no other.
+    const checkRow = page().locator("section[aria-labelledby=coverage] tbody tr", { hasText: "Paper checks" });
+    expect(await checkRow.innerText()).not.toMatch(/Courtesy adjustment/);
+    await b.audit("practice risk, a reason holding a channel to less");
+
+    // Moving it to $100 lets through what used to wait, so it takes a decision.
+    await page().goto(`${app.base}/reason-codes`);
+    await page().getByRole("heading", { name: "Why money moved" }).waitFor({ timeout: 60_000 });
+    const again = page().locator("tr", { hasText: "courtesy" });
+    await again.waitFor({ timeout: 30_000 });
+    await again.getByRole("button", { name: "Set threshold for courtesy" }).click();
+    await page().getByLabel("Second person over, in dollars, for courtesy").fill("100");
+    await page().getByText(/That lets through what used to wait for a second person/).waitFor({ timeout: 30_000 });
+    await page().getByLabel("Why").fill("One biller writes off the small courtesy balances; the owner reads the weekly digest.");
+    await page().getByLabel("Review by").fill(reviewDue);
+    await again.getByRole("button", { name: "Save" }).click();
+    await page().getByText(/^Set the threshold succeeded\.$/).waitFor({ timeout: 30_000 });
+
+    // The coverage row now carries the figure and the decision that licensed it.
+    await page().goto(`${app.base}/risk`);
+    await page().getByRole("heading", { name: "Headline" }).waitFor({ timeout: 60_000 });
+    await expect
+      .poll(async () => coverage().innerText(), { timeout: 30_000 })
+      .toMatch(new RegExp(`Courtesy adjustment: \\$100 · loosened under Accept residual by Riley Owner, review by ${reviewDue}`));
+    await b.audit("practice risk, a loosened reason naming its decision");
+  }, 150_000);
+
   it("shows a user-rank account the Refusal, not the page", async () => {
     await b.signIn("ridgeview-front", "/risk");
     await page().locator("main [role=alert]").waitFor({ timeout: 30_000 });

@@ -2,6 +2,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { ledgerEntries, reasonCodes } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { appendControlEvent } from "../controls/events";
+import { NEEDS_DECISION_CODE, NEEDS_DECISION_STATUS, RECORD_THE_DECISION } from "../controls/needsDecision";
 import { listDecisions, recordDecision, reviewDecision } from "../controls/decisions";
 import { decisionPermitsRetirement, latestDecisionFor, type ControlDecision } from "@pms/controls-engine";
 import { isLoosening } from "./reasonThreshold";
@@ -146,15 +147,15 @@ export async function setReasonThreshold(
   const loosened = isLoosening(before, input.cents);
   if (loosened && !input.decision) {
     // 409, not 400: the figure was well formed and the request was fine; the
-    // practice's current state is what refuses it until a decision stands beside
-    // it. (`retireException` still answers 400 for the same condition — worth
-    // unifying, but not by widening this increment.)
+    // practice's current state is what refuses it until a decision stands
+    // beside it. `retireException` answers the same way in the same words
+    // (Increment 1.48).
     return {
       ok: false,
-      status: 409,
-      code: "needs_decision",
+      status: NEEDS_DECISION_STATUS,
+      code: NEEDS_DECISION_CODE,
       verb: "Record a decision",
-      why: `Moving "${row.code}" from ${figurePhrase(before)} to ${figurePhrase(input.cents)} lets through what used to wait for a second person. Accept the residual or name what compensates, say why, and set the day the practice looks at this again.`,
+      why: `Moving "${row.code}" from ${figurePhrase(before)} to ${figurePhrase(input.cents)} lets through what used to wait for a second person. ${RECORD_THE_DECISION}`,
     };
   }
   if (loosened && input.decision) {
