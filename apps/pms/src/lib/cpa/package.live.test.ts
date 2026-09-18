@@ -54,10 +54,13 @@ describe.skipIf(!adminUrl)("CPA month-end package (live)", () => {
       ["register_equals_deposits", true],
       // Nothing is mapped on a fresh practice (Increment 1.35), and the chain has no check yet.
       ["journal_mapped", false],
+      // No day is sealed on a fresh practice, so nothing can have landed behind one.
+      ["sealed_days_undisturbed", true],
       ["chain_verified", false],
     ]);
     expect(pkg.mappings).toEqual({ approved: 0, pending: 0, unmappedLines: pkg.journal.rows.length });
-    expect(pkg.tieOut[3]!.detail).toMatch(/^No chain check recorded yet/);
+    expect(pkg.sealedDays).toEqual({ closesFrozen: 0, daysDisturbed: [], postings: 0, firstPostings: 0, totalCents: 0 });
+    expect(pkg.tieOut.find((t) => t.key === "chain_verified")!.detail).toMatch(/^No chain check recorded yet/);
     expect(pkg.controls.coverage.map((c) => c.channel)).toEqual(["ach", "check", "writeoff", "vendor_new", "deposit", "payroll"]);
     // The development seed carries the engine's demo exceptions beside the after-hours hold; a real tenant
     // (defaultTenantPolicy) starts with the hold alone. Only the enabled, in-window ones are listed.
@@ -116,5 +119,65 @@ describe.skipIf(!adminUrl)("CPA month-end package (live)", () => {
     expect(moved.journal.entryCount).toBe(afterExport.journal.entryCount + 1);
     expect(packageHash(moved)).not.toBe(packageHash(afterExport));
     expect(moved.tieOut[0]!.holds).toBe(true);
+  });
+
+  // Last, because it seals a day and posts behind it, which the cases above would
+  // otherwise see in their own figures.
+  it("reports the days of the month the practice sealed and what landed behind them (Increment 1.44)", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const clean = await tx((d) => computeMonthPackage(d, tenantId, month));
+    expect(clean.sealedDays.daysDisturbed).toEqual([]);
+    expect(clean.sealedDays.postings).toBe(0);
+    const undisturbed = clean.tieOut.find((t) => t.key === "sealed_days_undisturbed")!;
+    expect(undisturbed.holds).toBe(true);
+    expect(undisturbed.detail).toMatch(/none disturbed afterward\.$/);
+    const cleanHash = packageHash(clean);
+
+    const closeId = uuidv7(36_100);
+    await db.admin.query(
+      `INSERT INTO day_closes (id, tenant_id, location_id, business_date, status, deposit_total_cents, day_sheet_total_cents,
+                               variance_cents, summary, created_at, frozen_at, frozen_by_id, frozen_by_name)
+       VALUES ($1, $2, $3, $4, 'frozen', 0, 0, 0, '{}', now(), now(), $5, 'Riley Owner')`,
+      [closeId, tenantId, SEED_LEDGER.locationId, today, owner.id]
+    );
+    // Freezing a day changes the denominator but disturbs nothing, so the tie-out still holds.
+    const sealed = await tx((d) => computeMonthPackage(d, tenantId, month));
+    expect(sealed.sealedDays.closesFrozen).toBe(1);
+    expect(sealed.sealedDays.daysDisturbed).toEqual([]);
+    expect(sealed.tieOut.find((t) => t.key === "sealed_days_undisturbed")!.holds).toBe(true);
+    // The section is inside the hash, so the count of frozen days moving moves it.
+    expect(packageHash(sealed)).not.toBe(cleanHash);
+
+    for (const [seq, cents] of [
+      [1, -2_500],
+      [2, -1_500],
+    ] as const) {
+      await db.admin.query(
+        `INSERT INTO ledger_entries (id, tenant_id, account_id, patient_id, location_id, kind, gl_bucket, amount_cents,
+                                     effective_date, posted_at, created_by_id, created_by_name, idempotency_key, created_at)
+         VALUES ($1, $2, $3, $4, $5, 'patient_payment', 'patient_ar', $6, $7, now(), $8, 'Riley Owner', $9, now())`,
+        [uuidv7(36_100 + seq), tenantId, SEED_LEDGER.accountDoeId, SEED_LEDGER.patientJaneId, SEED_LEDGER.locationId, cents, today, owner.id, `cpa-sealed-${seq}`]
+      );
+    }
+
+    const disturbed = await tx((d) => computeMonthPackage(d, tenantId, month));
+    expect(disturbed.sealedDays.closesFrozen).toBe(1);
+    expect(disturbed.sealedDays.daysDisturbed).toEqual([
+      { businessDate: today, closes: 1, postings: 2, firstPostings: 2, cents: -4_000 },
+    ]);
+    expect(disturbed.sealedDays).toMatchObject({ postings: 2, firstPostings: 2, totalCents: -4_000 });
+
+    const tie = disturbed.tieOut.find((t) => t.key === "sealed_days_undisturbed")!;
+    expect(tie.holds).toBe(false);
+    expect(tie.detail).toMatch(/^2 rows totalling -\$40\.00 landed against 1 of 1 sealed day, 2 of them first postings\./);
+    expect(tie.detail).toMatch(/those days read two ways\.$/);
+    expect(tie.label).not.toMatch(/Riley|Finn/);
+
+    // The CSV carries the section and its denominator.
+    const rows = packageRows(disturbed, packageHash(disturbed));
+    const dayRow = rows.find((r) => r.section === "sealed_days" && r.key === today)!;
+    expect(dayRow).toMatchObject({ count: 2, cents: -4_000 });
+    expect(dayRow.label).toBe(`${today} \u00b7 1 seal \u00b7 2 first postings`);
+    expect(rows.find((r) => r.key === "closes_frozen")).toMatchObject({ section: "sealed_days", count: 1 });
   });
 });
