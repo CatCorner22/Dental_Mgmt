@@ -195,7 +195,7 @@ What the storms did not prove is the same as before, with one addition. The rand
 
 | Measure | Count |
 |---|---|
-| Functions in `prototype/js` (`scripts/audit/inventory.mjs`) | 842 |
+| Functions in `prototype/js` (`scripts/audit/inventory.mjs`) | 845 |
 | Of those, from the registered audited universe of 497 | 486 |
 | Registered functions the fix round removed or renamed | 10 |
 | Registered functions the five storms removed | 1 |
@@ -1016,6 +1016,7 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `syncOpeners` | `screens/rail.js` | 62 | operational | route sweep · frontdesk; route sweep · biller; route sweep · hygienist | V8 recorded 10 executions across 10 driven legs (route sweep · frontdesk; route sweep · biller; route sweep ·… |
 | `open` | `screens/rail.js` | 73 | operational | board.card.a-1042.rail, chairs.card.a-1042.rail, palette.confirm.go, renderLedger, Proto.… | S1 afterOpen (click seq 2); S1b unknown.live 'Patient not found'; S1b afterOpen.name 'Jonah Ortiz' after writ… |
 | `close` | `screens/rail.js` | 82 | operational | rail.close; hashchange to #/signin | S1 afterClose (click seq 43), afterSignin |
+| `closeToOpener` | `screens/rail.js` | 84 | operational | rail.close | S2-shell-board-a11y-3: after Close, document.activeElement is the opener `board.card.a-1044.rail` (falls back to the card, then the canvas heading), never the bare #canvas |
 | `isOpen` | `screens/rail.js` | 83 | operational | shell.render, hashchange listener, MutationObserver | S1 afterOpen.isOpen, afterClose.isOpen |
 | `button` | `screens/rail.js` | 84 | operational | board.js:184, chairs.js:152, checkout.js:239, encounter.js:124 | S1 ariaLabelBtn, afterOpen.focused rail.close, pressedAfter 'false'; S1b api.btnTestid 'rail.open.p-301' |
 | `summaryFor` | `screens/rail.js` | 89 | operational | rail.tab.imaging\|claims\|docs\|profile | S1 tabMsgs.profile.msg; drive2 rail['tab.docs'].text |
@@ -1175,6 +1176,7 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `decideApproval` | `store.js` | 343 | operational | phone.stepup.submit (approve), phone.request.<id>.decline (decline), pre-check on phone.r… | S2c seq 37-43; S2d seq 12-15 and 26-28; S2c.decideAgainStore writeoffRowsForAr1 2. |
 | `requestWriteoff` | `store.js` | 374 | operational | money.writeoff.post (moneydesk.js:138), phone.simulate (phone.js:119) | S2d seq 7-10; S6 seq 43-52 ledger/le-5002 −10000; S2d seq 33-36 approvals/ar-2; S6.evaluate requestWriteoff_*. |
 | `savePerio` | `store.js` | 394 | operational | perio.save, perio.licence.confirm (perio.js:174) | S4 seq 173-187; S4b omission seq 101-115, screening seq 19-23; S4b.evaluate. |
+| `perioRecall` | `store.js` | 530 | operational | perio.js savedCard, chairs.js perio lines, rail.js recallLine | S2-perio-encounter-lineage-4: one recall word per patient — perio card, Chairs card and rail all read 'Full chart due' after a code-4 screening |
 | `clinician` | `store.js` | 433 | operational | A-storm2-store-13, A-storm2-polish-2, A-storm-enc-9 | One clinician rule for chartPaint, addTag, readyForExam and savePerio: a pass, then a licence or clinical entitlement, else licence_scope with Switch author; perio.js carried its own copy |
 | `addTag` | `store.js` | 439 | operational | perio.tag.save (perio.js:196) | S4 seq 188-195; S4b.evaluate addTag_ok, addTag_unknownEnc ok:true. |
 | `readyForExam` | `store.js` | 446 | operational | chairs.card.<id>.ready (chairs.js:102), encounter killer fix licence (encounter.js:361) | S3 seq 11-15; S5b_hyg seq 6-11; S3b refusal outage; S1.evaluate readyForExam_unknown threw. |
@@ -1250,6 +1252,7 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `shadowGates` | `ui.js` | 150 | operational | A-storm2-shell-7, A-storm3-shell-4 | Renames gates beneath an open dialog to refusal.prior.* and back on close, so the contract selector resolves to the live gate; a repaint under the dialog keeps the shadow |
 | `dialog` | `ui.js` | 154 | operational | topbar.author → openPinPad (shell.js:85), topbar.search → palette, phone step-up, rail di… | raw.json S5-pin-*.opened {role:dialog, aria-modal:true, label:'Switch author'}, focus pin.key.1; tabwrap forw… |
 | `close` | `ui.js` | 161 | operational | Escape, Cancel, overlay click, hashchange, refusal control 'Keep current author', success… | raw.json S5-pin-desk.dana.afterControl {dialogOpen:false, focus:topbar.author}; S6-topbar-*.searchEscape {pal… |
+| `onHash` | `ui.js` | 164 | operational | hashchange while a dialog stands | S2-shell-board-a11y-2: Back from Settings, the author pad or the palette closes the dialog and focus lands on the arriving screen's h1, not the top-bar opener |
 | `onKey` | `ui.js` | 165 | operational | Any key while a dialog is open. | raw.json S5-pin-*.escape {dialogOpen:false}; tabwrap.forwardFromLast = pin.key.1, backFromFirst = pin.cancel. |
 | `closeDialogs` | `ui.js` | 185 | operational | A-storm2-shell-5 | Closes every standing dialog through its own close on __proto.reset, so no pad stands over a store that no longer holds its request |
 | `section` | `ui.js` | 187 | operational | Screen modules (24 uses in dailyclose, 16 in moneydesk, …); page.evaluate. | raw.json S4-ui.helpers.section: '<section class="card stack" aria-label="Title"><h2>Title</h2><p>x</p></secti… |
