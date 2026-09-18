@@ -58,7 +58,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               </Link>
             ))}
           </nav>
-          <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.49</p>
+          <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.50</p>
         </div>
       </header>
       <div className="mx-auto max-w-5xl px-6 py-10">{children}</div>

@@ -44,6 +44,7 @@ const sealedDayFindingSql = readFileSync(join(here, "../migrations/0033_finding_
 const packageSchemaSql = readFileSync(join(here, "../migrations/0034_package_schema_version.sql"), "utf8");
 const reasonThresholdSql = readFileSync(join(here, "../migrations/0035_reason_thresholds.sql"), "utf8");
 const reasonDecisionSql = readFileSync(join(here, "../migrations/0036_decision_on_reason_code.sql"), "utf8");
+const cpaQuestionsSql = readFileSync(join(here, "../migrations/0037_cpa_questions.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -343,6 +344,40 @@ describe("Increment 1.38 one approval releases a correction pair", () => {
     expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_approval_request_uidx\s+ON ledger_entries \(approval_request_id\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NULL/);
     expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_correction_approval_uidx\s+ON ledger_entries \(approval_request_id, kind\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NOT NULL/);
     expect(correctionHoldsSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
+  });
+});
+
+describe("Increment 1.50 the accountant's question and the practice's answer", () => {
+  it("holds a thread in one append-only table, keyed to the package line it is about", () => {
+    expect(cpaQuestionsSql).toMatch(/CREATE TABLE cpa_thread_messages/);
+    // The opener carries its own id, so a thread is one indexed read.
+    expect(cpaQuestionsSql).toMatch(/thread_id uuid NOT NULL/);
+    expect(cpaQuestionsSql).toMatch(/CREATE INDEX cpa_thread_messages_thread_idx ON cpa_thread_messages \(tenant_id, thread_id, created_at\)/);
+    // A month, a package line, and a body that says something.
+    expect(cpaQuestionsSql).toMatch(/month text NOT NULL CHECK \(month ~ '\^\[0-9\]\{4\}-\[0-9\]\{2\}\$'\)/);
+    expect(cpaQuestionsSql).toMatch(/subject_key text NOT NULL CHECK \(length\(btrim\(subject_key\)\) > 0\)/);
+    expect(cpaQuestionsSql).toMatch(/body text NOT NULL CHECK \(length\(btrim\(body\)\) >= 10\)/);
+    // Which side spoke, which is what decides whether an answer is still owed.
+    expect(cpaQuestionsSql).toMatch(/author_seat text NOT NULL CHECK \(author_seat IN \('accountant', 'practice'\)\)/);
+  });
+
+  it("is append-only, and a reply joins a thread that opens in the same practice", () => {
+    expect(cpaQuestionsSql).toMatch(/cpa_thread_messages is append-only/);
+    expect(cpaQuestionsSql).toMatch(/TRIGGER cpa_thread_messages_no_update[\s\S]*BEFORE UPDATE/);
+    expect(cpaQuestionsSql).toMatch(/TRIGGER cpa_thread_messages_no_delete[\s\S]*BEFORE DELETE/);
+    expect(cpaQuestionsSql).toMatch(/TRIGGER cpa_thread_messages_joins_its_thread[\s\S]*BEFORE INSERT/);
+    expect(cpaQuestionsSql).toMatch(/does not open in this practice/);
+    expect(cpaQuestionsSql).toMatch(/a reply carries its thread''s month and subject/);
+  });
+
+  it("is tenant-isolated under FORCE RLS and readable and writable by app_rw alone", () => {
+    expect(cpaQuestionsSql).toMatch(/ALTER TABLE cpa_thread_messages ENABLE ROW LEVEL SECURITY/);
+    expect(cpaQuestionsSql).toMatch(/ALTER TABLE cpa_thread_messages FORCE ROW LEVEL SECURITY/);
+    expect(cpaQuestionsSql).toMatch(/CREATE POLICY cpa_thread_messages_isolation/);
+    expect(cpaQuestionsSql).toMatch(/GRANT SELECT, INSERT ON cpa_thread_messages TO app_rw;/);
+    // No UPDATE or DELETE is granted to anyone: the triggers are the second lock, not the only one.
+    expect(cpaQuestionsSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON cpa_thread_messages/);
+    expect(cpaQuestionsSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON cpa_thread_messages/);
   });
 });
 

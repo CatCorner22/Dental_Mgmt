@@ -799,4 +799,56 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().getByText(/You do not have access to this action\./).waitFor({ timeout: 60_000 });
     await b.audit("ledger (outside accountant refused)");
   }, 150_000);
+
+  it("lets the accountant ask about a line of the month, and the practice answer it from the board", async () => {
+    // The package was one-way until now: read it, export it, and ask about a
+    // figure by email, where the question ends up somewhere other than the
+    // month it is about (Increment 1.50).
+    await b.signIn("ridgeview-cpa", "/cpa");
+    await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
+    const questions = page().locator("section[aria-labelledby=package-questions]");
+    await questions.waitFor({ timeout: 30_000 });
+    expect(await questions.innerText()).toMatch(/No one has asked about this month yet/);
+    await b.audit("month-end package (questions, none yet)");
+
+    // The line is chosen from the ones the package states, never typed.
+    // By role: the section's own heading reads "Questions about this month", so
+    // a label match on "About" reaches the region as well as the control.
+    await questions.getByRole("combobox").selectOption("journal|total");
+    await questions.getByLabel("Question", { exact: true }).fill("The journal total sits under the deposits for the month. What am I missing?");
+    await questions.getByRole("button", { name: "Ask", exact: true }).click();
+    await page().getByText(/^Asked\. The practice sees it on the home board\.$/).waitFor({ timeout: 30_000 });
+    await expect
+      .poll(async () => questions.innerText(), { timeout: 30_000 })
+      .toMatch(/Journal total[\s\S]*Accountant · Casey Prentice[\s\S]*Waiting on the practice/);
+    await b.audit("month-end package (a question waiting)");
+
+    // The practice reads it on the board, where the work of the day is.
+    await b.signIn("ridgeview-owner", "/home");
+    const card = page().locator("section[aria-labelledby=accountant-asked]");
+    await card.waitFor({ timeout: 60_000 });
+    expect(await card.innerText()).toMatch(/1 question waiting on the practice[\s\S]*journal\|total[\s\S]*What am I missing\?/);
+    await card.getByRole("button", { name: "Answer this" }).click();
+    const answer = page().getByLabel("Your answer");
+    await answer.waitFor({ timeout: 30_000 });
+    // An answer says something: the button holds until it does.
+    await answer.fill("too short");
+    expect(await card.getByRole("button", { name: "Answer", exact: true }).isDisabled()).toBe(true);
+    await answer.fill("Two deposits landed on the first of next month, so they are in that month's journal.");
+    await b.audit("home board, the accountant's question");
+    await card.getByRole("button", { name: "Answer", exact: true }).click();
+    await page().getByText(/^Answered\. The accountant reads it on the month-end package\.$/).waitFor({ timeout: 30_000 });
+    // Answered, so nobody is owed anything and the card leaves the board.
+    await expect.poll(async () => page().locator("section[aria-labelledby=accountant-asked]").count(), { timeout: 30_000 }).toBe(0);
+
+    // And the accountant reads the answer beside the figure it is about.
+    await b.signIn("ridgeview-cpa", "/cpa");
+    await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
+    const answered = page().locator("section[aria-labelledby=package-questions]");
+    await answered.waitFor({ timeout: 30_000 });
+    await expect
+      .poll(async () => answered.innerText(), { timeout: 30_000 })
+      .toMatch(/Practice · Riley Owner[\s\S]*Two deposits landed[\s\S]*Waiting on nobody/);
+    await b.audit("month-end package (the question answered)");
+  }, 150_000);
 });

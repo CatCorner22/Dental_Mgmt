@@ -7,6 +7,7 @@ import { ANY_REASON, GL_BUCKETS, GL_KINDS, GL_SIDES, type GlMapping } from "@/li
 import type { MonthClose } from "@/lib/cpa/close";
 import type { MonthPackage, PackageExport } from "@/lib/cpa/package";
 import { formatCents } from "@/lib/ledger/format";
+import { QuestionsView } from "./questions-view";
 
 type Me = { ok: boolean; role?: string; entitlements?: string[] };
 
@@ -464,6 +465,9 @@ export function PackageView() {
               empty=""
             />
           </div>
+          {/* Either side may ask about a line of this month (Increment 1.50). */}
+          <QuestionsView month={month} />
+
           {/* The chart of accounts is the practice's own maker-checker, so the
               outside accountant is not offered it; each journal line above
               already carries the account it was mapped to. */}

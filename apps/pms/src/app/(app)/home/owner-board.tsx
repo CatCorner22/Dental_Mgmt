@@ -90,6 +90,9 @@ async function loadAlerts(isAdmin: boolean): Promise<Alerts | null> {
 export function OwnerBoard() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [message, setMessage] = useState<string | null>(null);
+  // The thread the owner is answering, and what they have typed so far.
+  const [answering, setAnswering] = useState<string | null>(null);
+  const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   // The review being composed: which decision, which action, and the note so far.
   const [review, setReview] = useState<{ id: string; action: ReviewAction; note: string } | null>(null);
@@ -135,6 +138,32 @@ export function OwnerBoard() {
       setMessage(body.sentence ?? "Review recorded.");
     } catch (err: unknown) {
       setMessage(err instanceof Error ? err.message : "The review was not recorded.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * The practice's answer to the accountant (Increment 1.50). Append-only, like
+   * every other message in the thread; the card is re-read from rows afterwards.
+   */
+  async function answerAccountant(threadId: string, body: string) {
+    if (state.status !== "ready") return;
+    setBusy(threadId);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/cpa/questions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "reply", threadId, body }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { why?: string; verb?: string };
+      if (!res.ok) throw new Error(`${payload.verb ?? "Not sent"}: ${payload.why ?? "The answer was not sent."}`);
+      setAnswering(null);
+      setState({ ...state, board: await loadBoard() });
+      setMessage("Answered. The accountant reads it on the month-end package.");
+    } catch (err: unknown) {
+      setMessage(err instanceof Error ? err.message : "The answer was not sent.");
     } finally {
       setBusy(null);
     }
@@ -240,6 +269,75 @@ export function OwnerBoard() {
           </Link>
         )}
       </section>
+
+      {/* What the outside accountant asked and the practice has not answered
+          (Increment 1.50). Shown only when something waits: unlike the sealed-days
+          card, silence here means nobody is owed anything, not that nothing was
+          measured. The line reads by its key; the question's own words carry it. */}
+      {b.accountantAsked.length > 0 && (
+        <section aria-labelledby="accountant-asked" className="rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">The accountant asked</p>
+          <p id="accountant-asked" className="mt-1 font-semibold text-[var(--ink)]">
+            {b.accountantAsked.length} question{b.accountantAsked.length === 1 ? "" : "s"} waiting on the practice
+          </p>
+          <ul className="mt-3 space-y-3">
+            {b.accountantAsked.map((t) => {
+              const asked = t.messages[0];
+              return (
+                <li key={t.id} className="rounded-md border border-[var(--line)] p-3">
+                  <p className="text-xs text-[var(--ink-3)]">
+                    {t.month} · {t.subjectKey} · asked {t.askedAt.slice(0, 10)} by {asked?.authorName}
+                  </p>
+                  <p className="mt-1 text-sm text-[var(--ink-2)]">{asked?.body}</p>
+                  {answering === t.id ? (
+                    <span className="mt-2 flex flex-wrap items-end gap-2">
+                      <label className="flex flex-col text-sm">
+                        <span className="mb-1 font-semibold">Your answer</span>
+                        <input
+                          className="w-80 rounded-md border border-[var(--line)] bg-[var(--bg)] px-2 py-1"
+                          value={answer}
+                          onChange={(e) => setAnswer(e.target.value)}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-3 py-1 text-sm font-semibold disabled:opacity-50"
+                        disabled={busy !== null || answer.trim().length < 10}
+                        onClick={() => void answerAccountant(t.id, answer.trim())}
+                      >
+                        {busy === t.id ? "Sending…" : "Answer"}
+                      </button>
+                      <button
+                        type="button"
+                        className="min-h-[var(--target)] rounded-md border border-[var(--line)] px-3 py-1 text-sm"
+                        onClick={() => setAnswering(null)}
+                      >
+                        Cancel
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="mt-2 min-h-[var(--target)] rounded-md border border-[var(--line)] px-3 py-1 text-sm"
+                      onClick={() => {
+                        setAnswering(t.id);
+                        setAnswer("");
+                        setMessage(null);
+                      }}
+                    >
+                      Answer this
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          <p className="mt-3 max-w-prose text-sm text-[var(--ink-2)]">
+            An answer is append-only and reaches the chain, so the month carries what was asked and what was said about
+            it. The figure itself reads in full on the month-end package.
+          </p>
+        </section>
+      )}
 
       {b.afterHoursHold && !b.afterHoursHold.on && (
         <section aria-labelledby="after-hours-hold" className="rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] p-4">
