@@ -838,6 +838,29 @@ export const cpaThreadMessages = pgTable(
   (t) => [index("cpa_thread_messages_thread_idx").on(t.tenantId, t.threadId, t.createdAt)]
 );
 
+/**
+ * One dated assertion that somebody reviewed one external channel's month
+ * (Increment 1.51). One row per practice, month and channel; append-only, so a
+ * later opinion is a later month's row rather than an edit of this one.
+ */
+export const channelAttestations = pgTable(
+  "channel_attestations",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    month: text("month").notNull(),
+    channel: text("channel").notNull(),
+    /** What was reviewed and against what; at least ten characters. */
+    note: text("note").notNull(),
+    /** Whether the outside accountant or the practice itself reviewed it. */
+    attestedSeat: text("attested_seat").notNull(),
+    attestedById: uuid("attested_by_id").notNull(),
+    attestedByName: text("attested_by_name").notNull(),
+    attestedAt: timestamp("attested_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [uniqueIndex("channel_attestations_month_channel_uidx").on(t.tenantId, t.month, t.channel)]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "reason_codes",
@@ -876,4 +899,5 @@ export const TENANT_SCOPED_TABLES = [
   "gl_mappings",
   "month_closes",
   "cpa_thread_messages",
+  "channel_attestations",
 ] as const;

@@ -7,6 +7,7 @@ import { ANY_REASON, GL_BUCKETS, GL_KINDS, GL_SIDES, type GlMapping } from "@/li
 import type { MonthClose } from "@/lib/cpa/close";
 import type { MonthPackage, PackageExport } from "@/lib/cpa/package";
 import { formatCents } from "@/lib/ledger/format";
+import { AttestView } from "./attest-view";
 import { QuestionsView } from "./questions-view";
 
 type Me = { ok: boolean; role?: string; entitlements?: string[] };
@@ -465,6 +466,9 @@ export function PackageView() {
               empty=""
             />
           </div>
+          {/* What stands behind the word "attested" on the coverage table (Increment 1.51). */}
+          <AttestView month={month} />
+
           {/* Either side may ask about a line of this month (Increment 1.50). */}
           <QuestionsView month={month} />
 

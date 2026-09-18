@@ -20,11 +20,14 @@ import {
   decisionStateLabel,
   dutiesByPerson,
   grantRefusal,
+  attestationSentence,
+  lastCompleteMonth,
   provenanceSentence,
   reasonTighteningSentence,
   reasonTighteningsForChannel,
 } from "@/lib/controls/riskView";
 import type { ReasonCodeRow } from "@/lib/ledger/reasons";
+import type { AttestationRow } from "@/lib/controls/attestations";
 import { DecisionForm, type DecisionDraft } from "./decision-form";
 import { Refusal, type RefusalContent } from "./refusal";
 
@@ -57,6 +60,8 @@ type ExceptionsResponse = {
 };
 
 type ReasonCodesResponse = { items: ReasonCodeRow[] };
+
+type AttestationsResponse = { month: string; items: AttestationRow[] };
 
 type Me = { ok: boolean; role?: string; displayName?: string };
 
@@ -100,6 +105,7 @@ type Loaded = {
   exceptions: ExceptionsResponse;
   findings: FindingsResponse;
   reasonCodes: ReasonCodesResponse;
+  attestations: AttestationsResponse;
 };
 
 type LoadState =
@@ -141,15 +147,20 @@ export default function PracticeRiskPage() {
   const [grantRefused, setGrantRefused] = useState<(RefusalContent & { canLicense: boolean }) | null>(null);
 
   const load = useCallback(async (fresh = false) => {
-    const [risk, sod, decisions, exceptions, findings, reasonCodes] = await Promise.all([
+    const [risk, sod, decisions, exceptions, findings, reasonCodes, attestations] = await Promise.all([
       getJson<RiskResponse>(`/api/controls/risk${fresh ? "?fresh=1" : ""}`),
       getJson<SodResponse>("/api/controls/sod"),
       getJson<DecisionsResponse>("/api/controls/decisions"),
       getJson<ExceptionsResponse>("/api/controls/exceptions"),
       getJson<FindingsResponse>("/api/controls/findings"),
       getJson<ReasonCodesResponse>("/api/reason-codes"),
+      // The month that has ended: "reviewed this month" means a month somebody
+      // could have reviewed, and the one still filling is not one.
+      getJson<AttestationsResponse>(
+        `/api/controls/attestations?month=${lastCompleteMonth(new Date().toISOString().slice(0, 10))}`
+      ),
     ]);
-    return { risk, sod, decisions, exceptions, findings, reasonCodes };
+    return { risk, sod, decisions, exceptions, findings, reasonCodes, attestations };
   }, []);
 
   useEffect(() => {
@@ -465,7 +476,7 @@ function RiskBody({
   onRevoke: (person: RoleAssignment, entitlement: string) => void;
   exceptionControls: ExceptionControls;
 }) {
-  const { risk, sod, decisions, exceptions, findings, reasonCodes } = data;
+  const { risk, sod, decisions, exceptions, findings, reasonCodes, attestations } = data;
   const s = risk.snapshot;
   const conflicts = [...sod.conflicts]
     .filter((c) => showFamily || c.severity !== "family")
@@ -590,6 +601,17 @@ function RiskBody({
                   </td>
                   <td className="px-4 py-3">
                     <StatusChip status={row.status} />
+                    {/* What stands behind the word on a channel the product
+                        cannot hold (Increment 1.51). Without it the row reads
+                        as though "attested" meant somebody had said something. */}
+                    {row.status === "external" && (
+                      <p className="mt-1 text-xs font-normal text-[var(--ink-3)]">
+                        {attestationSentence(
+                          attestations.items.find((a) => a.channel === row.channel)?.attestation ?? null,
+                          attestations.month
+                        )}
+                      </p>
+                    )}
                   </td>
                   <td className="px-4 py-3 tabular-nums">
                     {row.policyEnabled ? `$${row.thresholdUsd.toLocaleString()}` : "—"}

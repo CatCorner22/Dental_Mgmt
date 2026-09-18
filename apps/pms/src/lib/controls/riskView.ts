@@ -206,3 +206,29 @@ export function reasonTighteningSentence(t: ReasonTightening): string {
   const review = t.decision.reviewBy ? `, review by ${t.decision.reviewBy}` : "";
   return `${head} · loosened under ${DECISION_KIND_LABEL[t.decision.kind]} by ${t.decision.decidedByName}${review}`;
 }
+
+/**
+ * The last month that has ended, as of a date (Increment 1.51).
+ *
+ * The coverage table names an attestation for this month rather than the one
+ * running: "reviewed this month" means a month somebody could have reviewed,
+ * and a month still filling is not one.
+ */
+export function lastCompleteMonth(asOf: string): string {
+  const [year, month] = asOf.slice(0, 7).split("-").map(Number);
+  return month === 1 ? `${year! - 1}-12` : `${year}-${String(month! - 1).padStart(2, "0")}`;
+}
+
+/**
+ * What the coverage table says about a channel the product cannot enforce.
+ * Where nobody has said anything, it says that rather than leaving the row to
+ * read as though "attested" meant somebody had.
+ */
+export function attestationSentence(
+  attestation: { byName: string; seat: string; at: string } | null,
+  month: string
+): string {
+  if (!attestation) return `Nobody has reviewed ${month}.`;
+  const who = attestation.seat === "accountant" ? "the accountant" : "the practice itself";
+  return `Reviewed for ${month} by ${attestation.byName} (${who}) on ${attestation.at.slice(0, 10)}.`;
+}
