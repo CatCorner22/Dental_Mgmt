@@ -52,6 +52,7 @@ export async function listReasonCodes(db: AppDb, tenantId: string): Promise<Reas
       kind: reasonCodes.kind,
       label: reasonCodes.label,
       active: reasonCodes.active,
+      requiresApprovalOverCents: reasonCodes.requiresApprovalOverCents,
       entries: sql<number>`(
         SELECT count(*)::int FROM ${ledgerEntries}
         WHERE ${ledgerEntries.tenantId} = ${reasonCodes.tenantId}
@@ -68,8 +69,64 @@ export async function listReasonCodes(db: AppDb, tenantId: string): Promise<Reas
     label: r.label,
     active: r.active,
     reserved: isReserved(r.code),
+    requiresApprovalOverCents: r.requiresApprovalOverCents === null ? null : Number(r.requiresApprovalOverCents),
     entries: Number(r.entries),
   }));
+}
+
+/**
+ * The threshold one reason carries, or null where the practice set none
+ * (Increment 1.46). The posting paths read this and tighten the policy with it
+ * before evaluating, so the service and the database trigger reach the same
+ * figure; where they disagree the practice meets a crash instead of a hold.
+ */
+export async function loadReasonThresholdCents(db: AppDb, tenantId: string, code: string | null): Promise<number | null> {
+  if (!code) return null;
+  const rows = await db
+    .select({ cents: reasonCodes.requiresApprovalOverCents })
+    .from(reasonCodes)
+    .where(and(eq(reasonCodes.tenantId, tenantId), eq(reasonCodes.code, code)))
+    .limit(1);
+  const cents = rows[0]?.cents;
+  return cents === null || cents === undefined ? null : Number(cents);
+}
+
+/** Sets or clears what one reason requires. Tightening is free; loosening is the risk. */
+export async function setReasonThreshold(
+  db: AppDb,
+  input: { tenantId: string; actor: { id: string; name: string }; code: string; cents: number | null; now?: Date }
+): Promise<ReasonCodeResult> {
+  const now = input.now ?? new Date();
+  if (input.cents !== null && (!Number.isInteger(input.cents) || input.cents < 0)) {
+    return { ok: false, status: 400, code: "invalid", verb: "Enter a figure", why: "A threshold is a whole number of cents, or none at all." };
+  }
+  const row = await loadOne(db, input.tenantId, input.code);
+  if (!row) return { ok: false, status: 404, code: "not_found", verb: "Choose a code", why: "This practice holds no such reason code." };
+  const before = await loadReasonThresholdCents(db, input.tenantId, input.code);
+  if (before === input.cents) {
+    return { ok: false, status: 400, code: "unchanged", verb: "Change the figure", why: "That is what it requires already." };
+  }
+
+  await db
+    .update(reasonCodes)
+    .set({ requiresApprovalOverCents: input.cents })
+    .where(and(eq(reasonCodes.tenantId, input.tenantId), eq(reasonCodes.code, input.code)));
+  await appendControlEvent(
+    db,
+    input.tenantId,
+    input.actor.id,
+    "reason_code.threshold_changed",
+    { code: row.code, beforeCents: before ?? -1, afterCents: input.cents ?? -1, loosened: looser(before, input.cents) },
+    now
+  );
+  return { ok: true, row: { ...row, requiresApprovalOverCents: input.cents } };
+}
+
+/** Whether the change lets more through than it used to; null is the loosest state of all. */
+function looser(before: number | null, after: number | null): boolean {
+  if (after === null) return before !== null;
+  if (before === null) return false;
+  return after > before;
 }
 
 async function loadOne(db: AppDb, tenantId: string, code: string): Promise<ReasonCodeRow | null> {

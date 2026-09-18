@@ -9,6 +9,8 @@ import { loadActivePolicy } from "../controls/policy";
 import { loadStaff } from "../controls/staff";
 import { PRIOR_PERIOD_REASON } from "../cpa/close";
 import { afterHoursFactsFor, glBucketForKind } from "./post";
+import { loadReasonThresholdCents } from "./reasonCodes";
+import { tightenPolicyForReason } from "./reasonThreshold";
 
 /**
  * Correcting a posted entry (docs/13 feature 20 and item 22; Increment 1.37).
@@ -205,8 +207,11 @@ export async function correctEntry(db: AppDb, input: CorrectEntryInput): Promise
   }
   const { people } = await loadStaff(db, input.tenantId, now);
   const afterHours = await afterHoursFactsFor(db, input.tenantId, original.locationId, now);
+  // A correction cites a reason too, and the same tightening applies to it
+  // (Increment 1.46): the database will use least(channel, reason), so this must.
+  const reasonThresholdCents = await loadReasonThresholdCents(db, input.tenantId, reasonCode);
   const evaluation = evaluateRelease(
-    active.policy,
+    tightenPolicyForReason(active.policy, CHANNEL_BY_KIND.reversal!, reasonThresholdCents),
     {
       channel: CHANNEL_BY_KIND.reversal!,
       amountUsd: releaseCents / 100,

@@ -259,7 +259,13 @@ export const reasonCodes = pgTable(
     code: text("code").notNull(),
     kind: text("kind").notNull(),
     label: text("label").notNull(),
-    requiresApprovalOverCents: bigint("requires_approval_over_cents", { mode: "number" }).notNull().default(0),
+    /**
+     * The figure above which a posting under this reason waits for a second
+     * person (Increment 1.46). Null means the practice set no rule and the
+     * channel's threshold governs; 0 means every one of them waits. It only
+     * tightens: the effective threshold is the lesser of this and the channel's.
+     */
+    requiresApprovalOverCents: bigint("requires_approval_over_cents", { mode: "number" }),
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   },

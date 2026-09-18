@@ -458,13 +458,60 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     // A retired code and the reserved one are both absent.
     expect(offered.join("|")).not.toMatch(/Insurance contractual adjustment|Prior period/);
 
+    // A reason may tighten the channel's threshold (Increment 1.46). The seeded
+    // writeoff channel holds at $150; hold contractual_ppo to $50 and a $100
+    // write-off must be HELD by the service rather than posting and then failing
+    // at the trigger — the service and the database have to reach one figure.
+    await page().goto(`${app.base}/reason-codes`);
+    await page().getByRole("heading", { name: "Why money moved" }).waitFor({ timeout: 60_000 });
+    const ppo = page().locator("tr", { hasText: "contractual_ppo" });
+    await ppo.waitFor({ timeout: 30_000 });
+    expect(await ppo.innerText()).toMatch(/the channel's figure/);
+    await ppo.getByRole("button", { name: "Set threshold for contractual_ppo" }).click();
+    await page().getByLabel("Second person over, in dollars, for contractual_ppo").fill("50");
+    await ppo.getByRole("button", { name: "Save" }).click();
+    await page().getByText(/^Set the threshold succeeded\.$/).waitFor({ timeout: 30_000 });
+    await expect
+      .poll(async () => page().locator("tr", { hasText: "contractual_ppo" }).innerText(), { timeout: 30_000 })
+      .toMatch(/\$50\.00/);
+
+    // The front desk initiates write-off releases; the owner may not (the SoD rule
+    // from Increment 1.14), so the hold is driven from the seat that would meet it.
+    await b.signIn("ridgeview-front", "/ledger/post");
+    await page().getByRole("heading", { name: "Post to ledger" }).waitFor({ timeout: 60_000 });
+    const ppoAccount = page().getByLabel("Guarantor account");
+    await ppoAccount.locator("option", { hasText: "Jane Doe" }).waitFor({ state: "attached", timeout: 30_000 });
+    await ppoAccount.selectOption((await ppoAccount.locator("option", { hasText: "Jane Doe" }).getAttribute("value"))!);
+    await page().getByLabel("Kind").selectOption("write_off");
+    await page().getByLabel("Amount (USD)").fill("100");
+    await page().getByLabel("Reason code").selectOption("contractual_ppo");
+    await page().getByRole("button", { name: "Post", exact: true }).click();
+    // Held in words, not a 500: the reason's figure governed, and the service knew it.
+    // $100 sits under the channel's own $150, so only the reason's $50 can hold it.
+    await flash(/^Needs second approver:/).waitFor({ timeout: 30_000 });
+    await b.audit("post to ledger (held by the reason's own threshold)");
+
     // The front desk reads the list and is offered nothing to change.
     await b.signIn("ridgeview-front", "/reason-codes");
     await page().getByRole("heading", { name: "Why money moved" }).waitFor({ timeout: 60_000 });
     await page().getByText(/Adopting, relabelling, and retiring a reason code is the administrator/).waitFor({ timeout: 30_000 });
     expect(await page().getByRole("button", { name: /^Retire / }).count()).toBe(0);
     expect(await page().getByRole("button", { name: "Adopt", exact: true }).count()).toBe(0);
+    expect(await page().getByRole("button", { name: /^Set threshold for / }).count()).toBe(0);
     await b.audit("reason codes (front desk)");
+
+    // Put the threshold back, so the cases after this read the seeded practice.
+    await b.signIn("ridgeview-owner", "/reason-codes");
+    await page().getByRole("heading", { name: "Why money moved" }).waitFor({ timeout: 60_000 });
+    const ppoAgain = page().locator("tr", { hasText: "contractual_ppo" });
+    await ppoAgain.waitFor({ timeout: 30_000 });
+    await ppoAgain.getByRole("button", { name: "Set threshold for contractual_ppo" }).click();
+    await page().getByLabel("Second person over, in dollars, for contractual_ppo").fill("");
+    await ppoAgain.getByRole("button", { name: "Save" }).click();
+    await page().getByText(/^Set the threshold succeeded\.$/).waitFor({ timeout: 30_000 });
+    await expect
+      .poll(async () => page().locator("tr", { hasText: "contractual_ppo" }).innerText(), { timeout: 30_000 })
+      .toMatch(/the channel's figure/);
   }, 150_000);
 
   it("renders the month-end package for the owner, exports it as CSV onto the chain, and shows the front desk the seat message", async () => {

@@ -4,7 +4,7 @@ import { seedDatabase } from "@pms/db/seed";
 import { DEV_TENANTS, DEV_USERS, SEED_LEDGER } from "@pms/db/seed-data";
 import { uuidv7 } from "@pms/db";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
-import { addReasonCode, listReasonCodes, renameReasonCode, setReasonCodeActive } from "./reasonCodes";
+import { addReasonCode, listReasonCodes, loadReasonThresholdCents, renameReasonCode, setReasonCodeActive, setReasonThreshold } from "./reasonCodes";
 
 /**
  * The practice's reason codes as app_rw (Increment 1.45). The code is a
@@ -138,6 +138,90 @@ describe.skipIf(!adminUrl)("Reason codes (live)", () => {
     expect(await tx((d) => renameReasonCode(d, { tenantId, actor, code: "prior_period", label: "Prior period (accountant)" }))).toMatchObject({
       ok: true,
     });
+  });
+
+  it("carries no threshold until the practice sets one, and refuses a figure that is not one", async () => {
+    // Every row backfilled to NULL in migration 0035: nothing had ever read the
+    // column, so no practice had expressed a rule through it.
+    const rows = await tx((d) => listReasonCodes(d, tenantId));
+    expect(rows.every((r) => r.requiresApprovalOverCents === null)).toBe(true);
+    expect(await tx((d) => loadReasonThresholdCents(d, tenantId, "courtesy"))).toBeNull();
+    // And a code the practice does not hold carries none either, rather than raising.
+    expect(await tx((d) => loadReasonThresholdCents(d, tenantId, "never_adopted"))).toBeNull();
+    expect(await tx((d) => loadReasonThresholdCents(d, tenantId, null))).toBeNull();
+
+    for (const cents of [-1, 12.5]) {
+      expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "courtesy", cents })), String(cents)).toMatchObject({
+        ok: false,
+        status: 400,
+        code: "invalid",
+      });
+    }
+    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "nope", cents: 100 }))).toMatchObject({ ok: false, status: 404 });
+    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "courtesy", cents: null }))).toMatchObject({
+      ok: false,
+      code: "unchanged",
+    });
+  });
+
+  it("records a threshold change on the chain, and says which way it moved", async () => {
+    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "courtesy", cents: 5_000 }))).toMatchObject({ ok: true });
+    expect(await tx((d) => loadReasonThresholdCents(d, tenantId, "courtesy"))).toBe(5_000);
+    expect((await events("reason_code.threshold_changed"))[0]).toMatchObject({
+      code: "courtesy",
+      beforeCents: -1,
+      afterCents: 5_000,
+      loosened: false,
+    });
+
+    // Tightening further is not a loosening; raising it is; clearing it is the loosest of all.
+    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "courtesy", cents: 2_500 }))).toMatchObject({ ok: true });
+    expect((await events("reason_code.threshold_changed"))[1]).toMatchObject({ beforeCents: 5_000, afterCents: 2_500, loosened: false });
+    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "courtesy", cents: 9_000 }))).toMatchObject({ ok: true });
+    expect((await events("reason_code.threshold_changed"))[2]).toMatchObject({ beforeCents: 2_500, afterCents: 9_000, loosened: true });
+    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "courtesy", cents: null }))).toMatchObject({ ok: true });
+    expect((await events("reason_code.threshold_changed"))[3]).toMatchObject({ beforeCents: 9_000, afterCents: -1, loosened: true });
+  });
+
+  it("tightens the channel at the database, and never loosens it", async () => {
+    // The seeded policy holds the writeoff channel to a second person above $150.
+    const policy = await db.admin.query("SELECT policy FROM control_policies WHERE tenant_id = $1 ORDER BY version DESC LIMIT 1", [tenantId]);
+    const rule = (policy.rows[0].policy as { rules: { channel: string; thresholdUsd: number }[] }).rules.find((r) => r.channel === "writeoff")!;
+    expect(rule.thresholdUsd).toBe(150);
+
+    async function writeOff(seq: number, cents: number, code: string) {
+      const id = uuidv7(38_100 + seq);
+      return db.admin.query(
+        `INSERT INTO ledger_entries (id, tenant_id, account_id, patient_id, location_id, kind, gl_bucket, amount_cents,
+                                     effective_date, posted_at, created_by_id, created_by_name, reason_code, idempotency_key, created_at)
+         VALUES ($1, $2, $3, $4, $5, 'write_off', 'patient_ar', $6, current_date, now(), $7, 'Riley Owner', $8, $9, now())`,
+        [id, tenantId, SEED_LEDGER.accountDoeId, SEED_LEDGER.patientJaneId, SEED_LEDGER.locationId, cents, owner.id, code, `rt-${id}`]
+      );
+    }
+
+    // With no reason rule, $100 sits under the channel's $150 and posts.
+    expect(await tx((d) => loadReasonThresholdCents(d, tenantId, "contractual_ppo"))).toBeNull();
+    await expect(writeOff(1, -10_000, "contractual_ppo")).resolves.toBeTruthy();
+
+    // Hold that same reason to $50 and the same figure now needs a second person.
+    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "contractual_ppo", cents: 5_000 }))).toMatchObject({ ok: true });
+    await expect(writeOff(2, -10_000, "contractual_ppo")).rejects.toThrow(/dual_release_required[\s\S]*exceeds 5000 cents/);
+    // And one under the tightened figure still posts.
+    await expect(writeOff(3, -4_000, "contractual_ppo")).resolves.toBeTruthy();
+
+    // Zero holds every one of them, however small.
+    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "contractual_ppo", cents: 0 }))).toMatchObject({ ok: true });
+    await expect(writeOff(4, -100, "contractual_ppo")).rejects.toThrow(/dual_release_required[\s\S]*exceeds 0 cents/);
+
+    // A reason set ABOVE the channel never loosens it: least() is the whole rule,
+    // or a practice could undo dual release by inventing a reason.
+    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "contractual_ppo", cents: 90_000 }))).toMatchObject({ ok: true });
+    await expect(writeOff(5, -20_000, "contractual_ppo")).rejects.toThrow(/dual_release_required[\s\S]*exceeds 15000 cents/);
+    // $100 is under the channel's own figure, so it posts, exactly as it did before.
+    await expect(writeOff(6, -10_000, "contractual_ppo")).resolves.toBeTruthy();
+
+    // Put it back, so what follows reads the seeded practice.
+    expect(await tx((d) => setReasonThreshold(d, { tenantId, actor, code: "contractual_ppo", cents: null }))).toMatchObject({ ok: true });
   });
 
   it("lets an adopted code reach an entry, which is the whole point of adopting one", async () => {
