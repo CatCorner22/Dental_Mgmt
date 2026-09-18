@@ -538,6 +538,18 @@
     retireChip('perio'); retireChip('save');
     return { ok: true, exam };
   }
+  /* One recall status per patient (A5): the perio card, the Chairs card and the rail all read this row. The latest
+     exam row is the record (an addendum supersedes the exam it amends); a screening coded 3 or 4 books the full chart,
+     a full chart with a 5 mm pocket books perio maintenance, anything else the 6-month recall. */
+  function perioRecall(patientId) {
+    const exams = S.perioExams.filter((e) => e.patientId === patientId).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const last = exams[exams.length - 1];
+    if (!last) return null;
+    const screening = last.mode === 'screening';
+    const fullChartDue = screening && (last.sextantCodes || []).some((c) => c === '3' || c === '4');
+    const deepPockets = !screening && (last.deepest || 0) >= 5;
+    return { examId: last.id, date: last.date, mode: last.mode, fullChartDue, deepPockets, sev: fullChartDue || deepPockets ? 'required' : 'clear', word: fullChartDue ? 'Full chart due' : deepPockets ? '4-month perio maintenance with BWX' : '6-month recall' };
+  }
   /* Charting is clinical work under a licence: a pass-less temp is nobody, and a seat with neither a licence nor a
      clinical entitlement (the front desk) does not write on the chart. The front desk used to paint chart events
      with pending charges, and a temp with no pass tagged teeth as "No day pass issued". */
@@ -1080,5 +1092,5 @@
   reset = function (seedNum) { const s = _reset(seedNum); for (const t of TABLES) if (!s[t]) s[t] = []; return s; };
 
   const LICENCE_WORDS = { implant: 'implant', crown_margin: 'crown margin', not_tolerated: 'patient could not tolerate probing', third_molar_absent: 'third molar absent' };
-  Proto.store = { reset, get, railStateFor, prefsFor, setPref, resetPrefs, PREF_OPTIONS, PREF_DEFAULTS, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, windowEstimate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, clinician, addTag, readyForExam, wholePatient, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, claimAction, disclose, sendStatement, raiseStatement, openStatement, requirePin, verifyPin, pinLockout, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, passState, passLive, livePasses, railSteps, retireChip, search, refuse, notFound };
+  Proto.store = { reset, get, railStateFor, prefsFor, setPref, resetPrefs, PREF_OPTIONS, PREF_DEFAULTS, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, windowEstimate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, perioRecall, clinician, addTag, readyForExam, wholePatient, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, claimAction, disclose, sendStatement, raiseStatement, openStatement, requirePin, verifyPin, pinLockout, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, passState, passLive, livePasses, railSteps, retireChip, search, refuse, notFound };
 })();

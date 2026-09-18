@@ -514,7 +514,7 @@
     return wrap;
   }
   function savedCard(st, r) {
-    const note = S().notes[st.encId] || {}; const deep = deepest(st);
+    const note = S().notes[st.encId] || {};
     // Each fact once: the chip word names the state, the heading names the thing, and neither repeats the other.
     const card = h('section', { class: 'card stack pe-saved', 'aria-labelledby': 'pe-savedhead' },
       h('div', { class: 'row' }, chip('clear', 'Saved'), h('h2', { id: 'pe-savedhead', text: (st.mode === 'screening' ? 'Screening' : 'Full chart') + (st.saved.amendsExamId ? ' addendum' : '') })),
@@ -527,10 +527,9 @@
     else { card.append(h('p', { class: 'pe-note', text: note.perioSummary || '' })); if (note.srpEvidence) card.append(h('p', { class: 'pe-note', text: note.srpEvidence })); }
     if (st.mode === 'full' && !st.saved.skipped) card.append(h('p', { class: 'small muted', style: 'color: var(--ink-2)', text: 'Chart status: full-mouth six-point chart recorded on ' + total(st) + ' sites.' }));
     if (st.mode === 'full' && st.saved.skipped) card.append(h('p', { class: 'small muted', style: 'color: var(--ink-2)', text: 'Chart status: partial chart; ' + st.saved.skipped + (st.saved.skipped === 1 ? ' site' : ' sites') + ' not probed (' + (LICENCES.find(([c]) => c === st.saved.licence) || ['', st.saved.licence])[1] + '). This never reads as a full chart.' }));
-    const fullChartDue = st.mode === 'screening' && st.sextants.some((c) => c === '3' || c === '4');
-    const deepPockets = st.mode === 'full' && deep >= 5;
     // The chip carries the interval; the line beside it says whose rule it is, and says it only once.
-    card.append(h('div', { class: 'row pe-next' }, chip(fullChartDue || deepPockets ? 'required' : 'clear', recallLine(st)), h('span', { text: 'Next visit, by practice policy, not a recommendation' })));
+    const rc = Proto.store.perioRecall(st.saved.patientId);
+    card.append(h('div', { class: 'row pe-next' }, chip(rc ? rc.sev : 'clear', rc ? rc.word : recallLine(st)), h('span', { text: 'Next visit, by practice policy, not a recommendation' })));
     card.append(h('details', null, h('summary', { class: 'pe-summary', testid: 'perio.saved.why' }, 'Why these numbers'), h('p', { class: 'small muted', style: 'color: var(--ink-2)', text: 'Deepest depth, bleeding count, and the chart-status sentence are computed from the frozen site rows in one transaction. The recall interval comes from the practice rule (4 months with BWX when any site is 5 mm or deeper, else 6 months); the dentist\'s plan supersedes it. No quadrant count proposes a billable code.' })));
     card.append(tagBlock(st, r));
     return card;

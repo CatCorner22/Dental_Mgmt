@@ -73,7 +73,8 @@
       // A screening records six codes, not sites; a 3 or 4 books the full chart (docs/13 feature 5).
       const codes = today.sextantCodes || [];
       out.push({ sev: 'clear', word: 'Perio charted today', text: 'screening, ' + codes.length + ' sextants coded' });
-      if (codes.some((x) => x === '3' || x === '4')) out.push({ sev: 'required', word: 'Full chart due', text: 'screening code 3 or 4' });
+      const rc = Proto.store.perioRecall(a.patientId);
+      if (rc && rc.fullChartDue) out.push({ sev: rc.sev, word: rc.word, text: 'screening code 3 or 4' });
     } else if (today) out.push({ sev: 'clear', word: 'Perio charted today', text: today.probed + ' sites probed, deepest ' + today.deepest + ' mm' });
     // The alert itself stands in the Alerts row above; the delta names the change once rather than printing the alert twice.
     for (const alert of pt.alerts || []) if (MED_HX.test(alert)) { out.push({ sev: 'stop', word: 'Med hx changed', text: 'see the alert above' }); break; }

@@ -121,8 +121,9 @@
     return [h('div', { text: nextLine }), h('div', { class: 'muted', text: lastLine })];
   }
   function recallLine(pid) {
-    const a = apptsToday(pid).find((x) => x.perioLast); const pe = S().perioExams.filter((x) => x.patientId === pid).sort((x, y) => y.date.localeCompare(x.date))[0];
-    if (pe && pe.date === today()) return 'Perio charted today; next full chart in 12 months';
+    const a = apptsToday(pid).find((x) => x.perioLast); const rc = Proto.store.perioRecall(pid);
+    // The status word is the store's, the same one the perio card and the Chairs card print.
+    if (rc && rc.date === today()) return 'Perio charted today; ' + rc.word;
     // One months-since helper serves the Chairs delta strip and this line; the local days ÷ 30.44 rounding read a
     // month older than the Chairs card for any last chart in the first days of a month.
     if (a && a.perioLast) { const monthsAgo = (Proto.screens.chairs || {}).monthsAgo; const m = monthsAgo ? monthsAgo(a.perioLast) : null; return 'Perio due: last full chart ' + longDate(a.perioLast) + (m == null ? '' : ' (' + m + (m === 1 ? ' month ago)' : ' months ago)')); }
