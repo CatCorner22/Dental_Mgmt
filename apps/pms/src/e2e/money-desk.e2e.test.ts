@@ -353,6 +353,15 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     // The variance acknowledged on the board above; the held write-off counts as an after-hours hold only when CI runs at night.
     expect(await row("digest-alerts", "Hard events acknowledged").innerText()).toMatch(/\b1$/);
     expect(await row("digest-alerts", "After-hours holds").innerText()).toMatch(/\b[01]$/);
+    // Nobody has attested anything yet this week (Increment 1.53). The row reads
+    // zero rather than being absent, and the standing debt sits in its own
+    // section, marked as where the practice stands rather than as the week's.
+    expect(await row("digest-alerts", "Channels attested").innerText()).toMatch(/\b0$/);
+    const standing = section("digest-attested");
+    await standing.waitFor({ timeout: 30_000 });
+    expect(await standing.innerText()).toMatch(/Standing, not this week/i);
+    expect(await standing.innerText()).toMatch(/outside the figures the acknowledgment stamps/);
+    expect(await standing.innerText()).toMatch(/Nobody has reviewed new vendors and payroll for \d{4}-\d{2}/);
     const whole = await page().locator("main").innerText();
     expect(whole).toMatch(/Chain · \d+ events, sequence \d+ to \d+/);
     expect(whole).toMatch(/no row here names anyone/);
@@ -959,4 +968,31 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await card.getByRole("link", { name: "Attest them on the month-end package" }).count()).toBe(0);
     await b.audit("home board, every external channel vouched for");
   }, 150_000);
+
+  // Last of all, because it reads back what every case above did to the week.
+  it("counts this week's attestations on the digest, and clears the standing line once the month is covered", async () => {
+    // Increment 1.53. Three attestations happened above: payroll for the month
+    // still running (1.51), then payroll and new vendors for the month that
+    // ended (1.52). All three are acts of this week, so all three count here.
+    await b.signIn("ridgeview-owner", "/digest");
+    await page().getByRole("heading", { name: "The week, counted" }).waitFor({ timeout: 60_000 });
+    const section = (id: string) => page().locator(`section[aria-labelledby=${id}]`);
+    const row = (id: string, label: string) => section(id).locator("tr", { has: page().locator(`th:text-is("${label}")`) });
+    await section("digest-chain").waitFor({ timeout: 60_000 });
+
+    expect(await row("digest-alerts", "Channels attested").innerText()).toMatch(/\b3$/);
+    // The standing line reads the month that has ended, which is now covered, and
+    // names who said each -- the same sentence the owner board and the month-end
+    // package carry, because all three read one function over the same rows.
+    const standing = section("digest-attested");
+    expect(await standing.innerText()).toMatch(/carries an attestation for \d{4}-\d{2}/);
+    // The accountant made both of the ended month's attestations above, so
+    // neither carries the practice's own word and the line marks neither.
+    expect(await standing.innerText()).toContain("payroll by Casey Prentice");
+    expect(await standing.innerText()).toContain("new vendors by Casey Prentice");
+    expect(await standing.innerText()).not.toContain("(the practice itself)");
+    // It is still marked as standing rather than as one of the week's counts.
+    expect(await standing.innerText()).toMatch(/Standing, not this week/i);
+    await b.audit("digest, the week's attestations and what still stands");
+  }, 90_000);
 });

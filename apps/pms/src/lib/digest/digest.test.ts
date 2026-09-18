@@ -22,7 +22,7 @@ function digest(over: Partial<WeeklyDigest> = {}): WeeklyDigest {
     findings: { opened: [{ key: "unmatched_bank_line_48h", label: "Unmatched bank line older than 48 hours", count: 1 }], closed: [], openNow: 1 },
     decisions: { recorded: [], reviews: { keep: 0, tighten: 0, retire: 0 }, overdueNow: 0, snapshotsFrozen: 1 },
     access: { signIns: 4, mfaEnrolled: 0, sessionsRevoked: 0, granted: 2, revoked: 1, policyChanges: 0 },
-    alerts: { afterHoursHolds: 0, hardEventsAcknowledged: 0 },
+    alerts: { afterHoursHolds: 0, hardEventsAcknowledged: 0, channelsAttested: 0 },
     chain: { events: 14, firstSeq: 3, lastSeq: 16, acknowledgments: 0, otherKinds: [] },
     scope: SCOPE_SENTENCE,
     ...over,
@@ -37,6 +37,31 @@ describe("periodEnding", () => {
     expect(p.endAt.toISOString()).toBe("2026-09-18T00:00:00.000Z");
     expect(periodEnding("2026-03-03").start).toBe("2026-02-25");
     expect(() => periodEnding("2026-02-30")).toThrow(/calendar date/);
+  });
+});
+
+describe("what the digest may carry (Increment 1.53)", () => {
+  it("counts the week's attestations, and moves the acknowledgment hash when that count moves", () => {
+    // A count of what happened in the seven days is a fact about the week, so it
+    // belongs inside the figures the owner stamps as read -- and moving it has to
+    // move the hash, or the stamp would not describe what they read.
+    const none = digest();
+    const one = digest({ alerts: { afterHoursHolds: 0, hardEventsAcknowledged: 0, channelsAttested: 1 } });
+    expect(none.alerts.channelsAttested).toBe(0);
+    expect(digestHash(one)).not.toBe(digestHash(none));
+  });
+
+  it("carries no standing figure, so attesting today cannot unsettle a week already stamped", () => {
+    // The rule Increment 1.36 established and this increment had to obey: the
+    // digest states its seven days and nothing about where the practice stands
+    // now. The month-end package folds the whole digest into its own hash, so a
+    // standing figure in here would move every closed month's hash the moment
+    // somebody attested anything, and would make a given acknowledgment read as
+    // stale. The unattested months therefore ride beside the digest on the route,
+    // never inside it -- which this asserts by shape rather than by convention.
+    const keys = Object.keys(digest().alerts);
+    expect(keys).toEqual(["afterHoursHolds", "hardEventsAcknowledged", "channelsAttested"]);
+    expect(JSON.stringify(digest())).not.toMatch(/unattested|Nobody has reviewed/);
   });
 });
 

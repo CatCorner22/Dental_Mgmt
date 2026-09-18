@@ -32,7 +32,7 @@ function pkg(over: Partial<MonthPackage> = {}): MonthPackage {
       findings: { opened: [], closed: [], openNow: 0 },
       decisions: { recorded: [{ key: "monitor", label: "Monitor", count: 1 }], reviews: { keep: 0, tighten: 0, retire: 0 }, overdueNow: 0, snapshotsFrozen: 1 },
       access: { signIns: 3, mfaEnrolled: 0, sessionsRevoked: 0, granted: 0, revoked: 0, policyChanges: 0 },
-      alerts: { afterHoursHolds: 0, hardEventsAcknowledged: 1 },
+      alerts: { afterHoursHolds: 0, hardEventsAcknowledged: 1, channelsAttested: 0 },
       chain: { events: 12, firstSeq: 1, lastSeq: 12, acknowledgments: 0, otherKinds: [] },
       scope: SCOPE_SENTENCE,
     },
@@ -117,7 +117,7 @@ describe("packageHash and the flat rows", () => {
     // The hash is self-describing: the version is inside it, so a package computed
     // under a different shape cannot silently produce a comparable-looking digest.
     expect(hashedView(pkg()).schema).toBe(PACKAGE_SCHEMA_VERSION);
-    expect(PACKAGE_SCHEMA_VERSION).toBe("package-v5");
+    expect(PACKAGE_SCHEMA_VERSION).toBe("package-v6");
   });
 
   it("folds the whole digest into the hash, so a new digest field moves every frozen month", () => {

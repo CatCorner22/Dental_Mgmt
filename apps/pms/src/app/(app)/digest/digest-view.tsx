@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
 import { formatCents } from "@/lib/ledger/format";
 import type { CountRow, DigestAck, WeeklyDigest } from "@/lib/digest/digest";
+import type { AttestationCoverage } from "@/lib/controls/attestationCoverage";
 
 type Me = { ok: boolean; role?: string };
 
@@ -11,6 +12,7 @@ type DigestResponse = {
   digest: WeeklyDigest;
   summaryHash: string;
   ack: DigestAck | null;
+  attestations: AttestationCoverage;
   changedSinceAck: boolean;
   computedAt: string;
 };
@@ -271,10 +273,27 @@ export function DigestView() {
               rows={pairs([
                 ["After-hours holds", state.data.digest.alerts.afterHoursHolds],
                 ["Hard events acknowledged", state.data.digest.alerts.hardEventsAcknowledged],
+                ["Channels attested", state.data.digest.alerts.channelsAttested],
               ])}
               empty="No hard events."
             />
           </div>
+
+          {/* What nobody has vouched for, for the month that has ended
+              (Increment 1.53). It sits apart from the counts above, and says so,
+              because those state the week and this states where the practice
+              stands today. The owner stamps the week, never this line: a debt
+              that is still owed is not something anybody can mark as read. */}
+          <section aria-labelledby="digest-attested" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+            <h2 id="digest-attested" className="mb-1 text-base font-semibold">
+              Standing, not this week &middot; channels the product cannot hold
+            </h2>
+            <p className="mb-2 text-xs text-[var(--ink-3)]">
+              Every count above is the week&apos;s. This one is where the practice stands today, for {state.data.attestations.month},
+              so it is outside the figures the acknowledgment stamps.
+            </p>
+            <p className="max-w-prose text-sm text-[var(--ink-2)]">{state.data.attestations.sentence}</p>
+          </section>
 
           <Rows
             id="digest-chain"

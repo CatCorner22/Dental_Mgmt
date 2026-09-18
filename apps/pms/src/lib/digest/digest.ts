@@ -83,8 +83,14 @@ export type WeeklyDigest = {
     snapshotsFrozen: number;
   };
   access: { signIns: number; mfaEnrolled: number; sessionsRevoked: number; granted: number; revoked: number; policyChanges: number };
-  /** The week's hard events (Increment 1.33): postings the after-hours hold caught, and events the owner acknowledged. */
-  alerts: { afterHoursHolds: number; hardEventsAcknowledged: number };
+  /**
+   * The week's hard events (Increment 1.33): postings the after-hours hold caught,
+   * and events the owner acknowledged. Since Increment 1.53 it also counts the
+   * channels somebody attested this week -- a fact about the week, which is the
+   * only kind of figure this object may carry, because the month-end package
+   * folds the digest in whole and hashes it.
+   */
+  alerts: { afterHoursHolds: number; hardEventsAcknowledged: number; channelsAttested: number };
   chain: { events: number; firstSeq: number | null; lastSeq: number | null; acknowledgments: number; otherKinds: CountRow[] };
   /** The sentence that says what these numbers are and are not. */
   scope: string;
@@ -115,6 +121,8 @@ const EVENT_FIELDS: Record<string, string> = {
   "location.hours_changed": "access.policyChanges",
   "digest.acknowledged": "chain.acknowledgments",
   "hard_event.acknowledged": "alerts.hardEventsAcknowledged",
+  /** Somebody vouched for a channel the product cannot enforce (Increment 1.53). */
+  "control.channel_attested": "alerts.channelsAttested",
 };
 
 /** Kinds counted from their own tables or from the chain but shown elsewhere; not listed twice. */
@@ -168,7 +176,7 @@ export async function computeDigest(db: AppDb, tenantId: string, period: DigestP
     findings: { opened: [], closed: [], openNow: 0 },
     decisions: { recorded: [], reviews: { keep: 0, tighten: 0, retire: 0 }, overdueNow: 0, snapshotsFrozen: 0 },
     access: { signIns: 0, mfaEnrolled: 0, sessionsRevoked: 0, granted: 0, revoked: 0, policyChanges: 0 },
-    alerts: { afterHoursHolds: 0, hardEventsAcknowledged: 0 },
+    alerts: { afterHoursHolds: 0, hardEventsAcknowledged: 0, channelsAttested: 0 },
     chain: { events: 0, firstSeq: null, lastSeq: null, acknowledgments: 0, otherKinds: [] },
     scope: SCOPE_SENTENCE,
   };

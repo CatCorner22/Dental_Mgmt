@@ -355,8 +355,9 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
  * v3: the sealed-days section and its tie-out (1.44).
  * v4: who attested each external channel for the month (1.51).
  * v5: the tie-out line for the channels nobody vouched for (1.52).
+ * v6: the digest's count of channels attested in the period (1.53).
  */
-export const PACKAGE_SCHEMA_VERSION = "package-v5";
+export const PACKAGE_SCHEMA_VERSION = "package-v6";
 
 /**
  * What the hash covers: every figure the package states about the month.

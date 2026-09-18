@@ -154,7 +154,7 @@ describe.skipIf(!adminUrl)("Hard-event acknowledgments (live)", () => {
         await createApprovalRequest(d, { tenantId, channel: "check", amountCents: 1_200, heldPayload: payload, evaluation, requesterId: front.id, requesterName: front.displayName });
       });
       const digest = await tx((d) => computeDigest(d, tenantId, periodEnding(new Date().toISOString().slice(0, 10))));
-      expect(digest.alerts).toEqual({ afterHoursHolds: 1, hardEventsAcknowledged: 1 });
+      expect(digest.alerts).toEqual({ afterHoursHolds: 1, hardEventsAcknowledged: 1, channelsAttested: 0 });
       expect(digest.chain.otherKinds.map((k) => k.key)).not.toContain("hard_event.acknowledged");
     } finally {
       await db.admin.query("UPDATE locations SET hours = $2::jsonb WHERE id = $1", [SEED_LEDGER.locationId, JSON.stringify(rows[0].hours)]);
