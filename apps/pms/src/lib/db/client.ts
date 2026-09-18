@@ -23,10 +23,28 @@ export async function ensureProductionRuntimeRole(
   await runtimeRoleProbe;
 }
 
+/**
+ * A pool whose idle-client failures are handled rather than fatal.
+ *
+ * `pg` emits `error` on the pool when a client sitting idle in it fails: the
+ * database restarted, a failover moved it, an administrator terminated the
+ * backend. In Node an `error` event with no listener is an uncaught exception,
+ * so an untended pool turns a routine connection drop into a crashed server —
+ * and, in the test harness, into a run that fails after every test passed,
+ * which is how this was found. The pool has already discarded that client by
+ * the time this runs; the next caller is handed a fresh one.
+ */
+function handleIdleErrors(created: Pool, role: string): Pool {
+  created.on("error", (err: unknown) => {
+    console.error(`[db] ${role} pool discarded an idle connection: ${err instanceof Error ? err.message : String(err)}`);
+  });
+  return created;
+}
+
 export function getPool(env: Record<string, string | undefined> = process.env): Pool {
   const url = env.POSTGRES_URL;
   if (!url) throw new Error("POSTGRES_URL is not set.");
-  pool ??= new Pool({ connectionString: url });
+  pool ??= handleIdleErrors(new Pool({ connectionString: url }), "runtime");
   void ensureProductionRuntimeRole(env);
   return pool;
 }
@@ -47,7 +65,7 @@ export async function ensureProductionAppendRole(
 export function getAppendPool(env: Record<string, string | undefined> = process.env): Pool {
   const url = env.APPEND_ROLE_DSN ?? env.POSTGRES_URL;
   if (!url) throw new Error("APPEND_ROLE_DSN or POSTGRES_URL is required for ledger appends.");
-  appendPool ??= new Pool({ connectionString: url });
+  appendPool ??= handleIdleErrors(new Pool({ connectionString: url }), "append");
   void ensureProductionAppendRole(env);
   return appendPool;
 }
