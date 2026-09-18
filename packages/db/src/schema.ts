@@ -810,6 +810,34 @@ export const monthCloses = pgTable(
   (t) => [uniqueIndex("month_closes_tenant_month_uidx").on(t.tenantId, t.month)]
 );
 
+/**
+ * One append-only message in a thread the accountant and the practice hold
+ * about one month-end package line (Increment 1.50). The message that opened a
+ * thread carries its own id in `threadId`; a reply carries the opener's, and
+ * the database refuses a reply whose thread does not open in this practice or
+ * whose month and subject differ from it.
+ */
+export const cpaThreadMessages = pgTable(
+  "cpa_thread_messages",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    /** The opening message's id; the opener carries its own. */
+    threadId: uuid("thread_id").notNull(),
+    month: text("month").notNull(),
+    /** The package line it hangs on: the section and key `packageRows` gives every row. */
+    subjectKey: text("subject_key").notNull(),
+    /** What was asked or answered; at least ten characters. */
+    body: text("body").notNull(),
+    /** Which side spoke: 'accountant' or 'practice'. A seat, not a rank. */
+    authorSeat: text("author_seat").notNull(),
+    authorId: uuid("author_id").notNull(),
+    authorName: text("author_name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("cpa_thread_messages_thread_idx").on(t.tenantId, t.threadId, t.createdAt)]
+);
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "reason_codes",
@@ -847,4 +875,5 @@ export const TENANT_SCOPED_TABLES = [
   "hard_event_acks",
   "gl_mappings",
   "month_closes",
+  "cpa_thread_messages",
 ] as const;

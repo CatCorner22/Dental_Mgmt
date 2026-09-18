@@ -20,6 +20,7 @@ import { computeSnapshot } from "../controls/snapshots";
 import { getDayCloseSnapshot } from "../day-close/service";
 import { listReconciliationRuns } from "../reconciliation/queries";
 import { afterCloseCard, countPostingsAfterClose, type AfterCloseCard } from "./afterClose";
+import { threadsAwaitingPractice, type Thread } from "../cpa/questions";
 import { measuredEffectSentence, measuredEffectSince } from "./measuredEffect";
 
 /**
@@ -286,6 +287,13 @@ export type OwnerBoard = {
   matching: MatchingMeasurementSummary;
   /** What has posted into days the practice had already sealed (Increment 1.41). */
   afterClose: AfterCloseCard;
+  /**
+   * Threads the outside accountant opened on a month-end package line and the
+   * practice has not answered yet (Increment 1.50). Read without computing any
+   * month's package, so the board costs nothing extra: the question's own words
+   * carry the meaning and `/cpa` is where the line reads in full.
+   */
+  accountantAsked: Thread[];
 };
 
 /**
@@ -347,5 +355,6 @@ export async function buildOwnerBoard(db: AppDb, tenantId: string, viewerId: str
     reconciliation: measurementSummary(ctx.reconciliation),
     matching: matchingSummary(ctx.matching),
     afterClose: afterCloseCard(await countPostingsAfterClose(db, tenantId, asOf, yesterday)),
+    accountantAsked: await threadsAwaitingPractice(db, tenantId),
   };
 }
