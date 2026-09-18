@@ -17,6 +17,13 @@ function pkg(over: Partial<MonthPackage> = {}): MonthPackage {
     reasons: { rows: [{ code: "courtesy", kind: "write_off", label: "Write-off · courtesy", count: 1, cents: -20_000, withApproval: 1 }] },
     depositRegister: { rows: [{ method: "cash", status: "open", count: 1, cents: 25_000 }], count: 1, totalCents: 25_000 },
     mappings: { approved: 1, pending: 1, unmappedLines: 1 },
+    sealedDays: {
+      closesFrozen: 2,
+      daysDisturbed: [{ businessDate: "2026-09-14", closes: 1, postings: 3, firstPostings: 1, cents: 1_000 }],
+      postings: 3,
+      firstPostings: 1,
+      totalCents: 1_000,
+    },
     counts: {
       period: { start: "2026-09-01", end: "2026-09-30", days: 30 },
       money: { postings: [{ key: "patient_payment", label: "Patient payment", count: 2, cents: -7_500 }], postingCount: 2, guardedWithSecond: 1, guardedWithoutSecond: 0 },
@@ -56,7 +63,12 @@ describe("monthPeriod (Increment 1.34)", () => {
 describe("packageHash and the flat rows", () => {
   it("is stable across key order and moves when a figure moves", () => {
     const a = pkg();
-    const reordered = JSON.parse(JSON.stringify({ scope: a.scope, tieOut: a.tieOut, chain: a.chain, controls: a.controls, mappings: a.mappings, counts: a.counts, depositRegister: a.depositRegister, reasons: a.reasons, journal: a.journal, period: a.period, month: a.month })) as MonthPackage;
+    // The keys reversed, derived rather than hand-listed: a package field added
+    // later must keep this honest instead of quietly dropping out of the check.
+    const reordered = JSON.parse(
+      JSON.stringify(Object.fromEntries(Object.entries(a).reverse()))
+    ) as MonthPackage;
+    expect(Object.keys(reordered)).toEqual(Object.keys(a).reverse());
     expect(packageHash(reordered)).toBe(packageHash(a));
     expect(packageHash(pkg({ journal: { ...a.journal, totalCents: -7_600 } }))).not.toBe(packageHash(a));
   });
@@ -104,7 +116,7 @@ describe("packageHash and the flat rows", () => {
     // The hash is self-describing: the version is inside it, so a package computed
     // under a different shape cannot silently produce a comparable-looking digest.
     expect(hashedView(pkg()).schema).toBe(PACKAGE_SCHEMA_VERSION);
-    expect(PACKAGE_SCHEMA_VERSION).toBe("package-v2");
+    expect(PACKAGE_SCHEMA_VERSION).toBe("package-v3");
   });
 
   it("folds the whole digest into the hash, so a new digest field moves every frozen month", () => {

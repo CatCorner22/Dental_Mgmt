@@ -416,6 +416,13 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await section("package-reasons").innerText()).toMatch(/Write-off · courtesy · 1 with approval/);
     expect(await section("package-deposits").innerText()).toMatch(/cash · /);
     expect(await section("package-controls").innerText()).toMatch(/Exception · After-hours hold · force dual[\s\S]*open/);
+    // One day sealed so far this month, and nothing behind it yet (Increment 1.44).
+    const sealedSection = await section("package-sealed-days").innerText();
+    expect(sealedSection).toMatch(/Sealed days · 1 frozen · 0 posted behind them/);
+    expect(sealedSection).toMatch(/1 day close frozen this month, and nothing posted against any of them afterward\./);
+    expect(await section("package-tieout").innerText()).toMatch(
+      /No row posted against a day this month after the practice sealed it: yes\. 1 day sealed this month, none disturbed afterward\./
+    );
     const whole = await page().locator("main").innerText();
     expect(whole).not.toMatch(/Riley|Finn|Jane Doe|John Smith/);
     await b.audit("month-end package (owner)");
@@ -606,5 +613,24 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     const bankRow = (label: string) => bank.locator("tr", { has: page().locator(`th:text-is("${label}")`) });
     expect(await bankRow("Postings into sealed days").innerText()).toMatch(/\b3$/);
     expect(await bankRow("\u2026of those, first postings").innerText()).toMatch(/\b1$/);
+
+    // And the month-end package names the day itself, so the accountant reconciling
+    // daily slips against the journal is pointed straight at it (Increment 1.44).
+    await page().goto(`${app.base}/cpa`);
+    await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
+    const packageSealed = page().locator("section[aria-labelledby=package-sealed-days]");
+    await packageSealed.waitFor({ timeout: 30_000 });
+    const packageSealedText = await packageSealed.innerText();
+    expect(packageSealedText).toMatch(/Sealed days · 1 frozen · 3 posted behind them/);
+    expect(packageSealedText).toMatch(/2026-09-14 · 1 first posting/);
+    expect(await page().locator("section[aria-labelledby=package-tieout]").innerText()).toMatch(
+      /No row posted against a day this month after the practice sealed it: no\. 3 rows totalling \$10\.00 landed against 1 of 1 sealed day, 1 of them first postings\./
+    );
+    // The sealed-days section and the tie-out name days and figures, never a person.
+    // (The chart-of-accounts table below them does name two people, and must: the
+    // control is that the proposer and the approver are different ones.)
+    expect(packageSealedText).not.toMatch(/Riley|Finn|Jane Doe/);
+    expect(await page().locator("section[aria-labelledby=package-tieout]").innerText()).not.toMatch(/Riley|Finn|Jane Doe/);
+    await b.audit("month-end package (sealed days disturbed)");
   }, 120_000);
 });

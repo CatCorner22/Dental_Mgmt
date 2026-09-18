@@ -370,6 +370,40 @@ export function PackageView() {
               rows={state.data.package.depositRegister.rows.map((r) => ({ key: `${r.method}|${r.status}`, label: `${r.method} · ${r.status}`, count: r.count, cents: r.cents }))}
               empty="No deposits prepared this month."
             />
+            {/* What landed behind this month's seals (Increment 1.44). Windowed on the
+                sealed day rather than the posting, which is why a row can appear here
+                and not in this month's journal; the sentence says so. */}
+            <Rows
+              id="package-sealed-days"
+              title={`Sealed days · ${state.data.package.sealedDays.closesFrozen} frozen · ${state.data.package.sealedDays.postings} posted behind them`}
+              rows={[
+                ...state.data.package.sealedDays.daysDisturbed.map((d) => ({
+                  key: d.businessDate,
+                  label: `${d.businessDate} · ${d.firstPostings} first posting${d.firstPostings === 1 ? "" : "s"}${d.closes > 1 ? ` · ${d.closes} seals` : ""}`,
+                  count: d.postings,
+                  cents: d.cents,
+                })),
+                // The total only earns a row once there is more than one day to total.
+                ...(state.data.package.sealedDays.daysDisturbed.length > 1
+                  ? [
+                      {
+                        key: "total",
+                        label: "Total behind this month's seals",
+                        count: state.data.package.sealedDays.postings,
+                        cents: state.data.package.sealedDays.totalCents,
+                      },
+                    ]
+                  : []),
+              ]}
+              empty={`${state.data.package.sealedDays.closesFrozen} day close${state.data.package.sealedDays.closesFrozen === 1 ? "" : "s"} frozen this month, and nothing posted against any of them afterward.`}
+            />
+            {state.data.package.sealedDays.postings > 0 && (
+              <p className="max-w-prose text-sm text-[var(--ink-2)]">
+                These rows are counted against the day they were dated for, not the month they
+                posted in, so a row that posted later than this month appears here and not in this
+                month&apos;s journal. The sealed figures themselves did not move.
+              </p>
+            )}
             <Rows
               id="package-bank"
               title="Bank, close, approvals"

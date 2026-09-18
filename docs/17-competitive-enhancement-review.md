@@ -555,6 +555,18 @@ The CPA month-end package, `docs/13` item 22, has sat in every "not in" list sin
 
 **Not in Increment 1.35.** QuickBooks Online and Xero export shapes (the mapping is theirs to feed, but the formats are not written); a starter chart of accounts; reason-code-level mappings in the page's form (the service and the resolver take them; the form proposes the wildcard); the CPA seat; month close.
 
+## Increment 1.44
+
+Increment 1.43 gave the package a schema version so its shape could grow honestly. This is the first growth it makes room for, and the one the sealed-day work has been heading toward since 1.40: the accountant's own copy of the month says which of its days moved after the practice counted them.
+
+- **A sealed-days section.** How many day closes the month froze, a row per sealed date that a posting landed against — the count, the first postings among them, and the net — and the totals. Aggregate: a date two locations both sealed is one row, and `closes` says how many seals it covers. Nothing in it names a person.
+- **Windowed on the sealed day, not the posting.** This differs from the journal, which windows on `posted_at`, and the difference is the point. A row posted in a later month against one of this month's sealed days appears in this section and *not* in this month's journal — which is exactly the row an accountant reconciling daily deposit slips against the journal would otherwise hunt for. The page says so in its own words rather than leaving the reader to infer it.
+- **A tie-out of its own.** "No row posted against a day this month after the practice sealed it", holding when nothing landed, and otherwise naming the rows, the total, how many of the month's sealed days took them, and how many were first postings.
+- **`package-v3`.** The section and the tie-out both sit inside `hashedView`, so the version moves with them, in the same commit — which is what Increment 1.43 built the version to make possible.
+- **Tests.** Unit: the fixture carrying the section, the version pinned by name, and the key-order check rebuilt to derive its reordering rather than hand-list every field, so a package field added later cannot quietly drop out of it. Live: a fresh practice reporting nothing with the tie-out holding; freezing a day moving the denominator and the hash while the tie-out still holds; two postings behind that seal giving one row, the right split, and a tie-out that names them; and the CSV carrying both the day row and the frozen-day count. Browser: the package reading one frozen day and nothing behind it, then, after the sealed-day case posts, naming 2026-09-14 with three rows and $10.00, with the section and the tie-out naming no person.
+
+**Not in Increment 1.44.** A migration that re-hashes historical closes under the current schema, which would defeat the point of freezing them; reason codes as practice-editable rows with a screen of their own; and the CPA seat, questions, and the attestation tab.
+
 ## Increment 1.43
 
 Increment 1.42 left one item deliberately unbuilt and said why: the digest's count of postings into sealed days could not be added, because `hashedView` folds the whole weekly digest into the month-end package hash and `canonicalJson` serializes every key. Adding one digest field would change the hash of every month already closed, and each would begin reporting `changedSinceClose` — permanently, which also means the flag stops being read. This increment fixes the cause, then adds the count.

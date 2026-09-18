@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, lte, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { activeDecisions, channelCoverage, overdueReviews, type ThresholdException } from "@pms/controls-engine";
-import { auditChainChecks, deposits, domainEvent, ledgerEntries } from "@pms/db";
+import { auditChainChecks, dayCloses, deposits, domainEvent, ledgerEntries } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { listDecisions } from "../controls/decisions";
 import { ENFORCEMENT } from "../controls/enforcement";
@@ -52,6 +52,20 @@ export type ReasonRow = { code: string; kind: string; label: string; count: numb
 export type DepositRow = { method: string; status: string; count: number; cents: number };
 export type TieOut = { key: string; label: string; holds: boolean; detail: string };
 
+/**
+ * One day of this month that the practice sealed and that a ledger row then
+ * landed against (Increment 1.44). Aggregate: a date two locations both sealed
+ * is one row, and `closes` says how many seals it covers.
+ */
+export type SealedDayRow = {
+  businessDate: string;
+  closes: number;
+  postings: number;
+  /** Of those, the ones that are not half of a correction: a first posting names nothing. */
+  firstPostings: number;
+  cents: number;
+};
+
 export type MonthPackage = {
   month: string;
   period: { start: string; end: string; days: number };
@@ -62,6 +76,13 @@ export type MonthPackage = {
   counts: WeeklyDigest;
   /** The chart-of-accounts mapping in force, and what is still unmapped or waiting (Increment 1.35). */
   mappings: { approved: number; pending: number; unmappedLines: number };
+  /**
+   * The days of this month the practice sealed, and what posted against them
+   * afterward (Increment 1.44). Windowed on the sealed day, not on the posting:
+   * the question is which days of this month moved after they were counted, and
+   * a row posted in a later month against one of them is exactly that case.
+   */
+  sealedDays: { closesFrozen: number; daysDisturbed: SealedDayRow[]; postings: number; firstPostings: number; totalCents: number };
   controls: {
     coverage: { channel: string; label: string; enforcement: string; status: string; thresholdUsd: number; activeExceptions: number }[];
     activeExceptions: { id: string; label: string; action: string; channels: string[]; effectiveTo: string | null }[];
@@ -148,6 +169,57 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
     .groupBy(sql`${domainEvent.payload}->>'channel'`)
     .orderBy(sql`${domainEvent.payload}->>'channel'`);
 
+  // The days this month that the practice sealed, and what landed behind them
+  // (Increment 1.44). The window is the sealed day, not the posting: a row that
+  // posted in a later month against one of this month's sealed days is precisely
+  // the case an accountant reconciling daily slips against the journal will hit,
+  // because the journal windows on posted_at and so does not carry that row.
+  const [frozen] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(dayCloses)
+    .where(
+      and(
+        eq(dayCloses.tenantId, tenantId),
+        eq(dayCloses.status, "frozen"),
+        gte(dayCloses.businessDate, period.start),
+        lte(dayCloses.businessDate, period.end)
+      )
+    );
+  const sealedRows = await db
+    .select({
+      businessDate: dayCloses.businessDate,
+      closes: sql<number>`count(DISTINCT ${dayCloses.id})::int`,
+      postings: sql<number>`count(*)::int`,
+      firstPostings: sql<number>`count(*) FILTER (WHERE ${ledgerEntries.correctsEntryId} IS NULL)::int`,
+      cents: sql<number>`coalesce(sum(${ledgerEntries.amountCents}), 0)::bigint`,
+    })
+    .from(ledgerEntries)
+    .innerJoin(dayCloses, eq(dayCloses.id, ledgerEntries.closedDayId))
+    .where(
+      and(
+        eq(ledgerEntries.tenantId, tenantId),
+        eq(ledgerEntries.postedAfterClose, true),
+        gte(dayCloses.businessDate, period.start),
+        lte(dayCloses.businessDate, period.end)
+      )
+    )
+    .groupBy(dayCloses.businessDate)
+    .orderBy(dayCloses.businessDate);
+  const daysDisturbed: SealedDayRow[] = sealedRows.map((r) => ({
+    businessDate: String(r.businessDate),
+    closes: Number(r.closes),
+    postings: Number(r.postings),
+    firstPostings: Number(r.firstPostings),
+    cents: Number(r.cents),
+  }));
+  const sealedDays = {
+    closesFrozen: Number(frozen?.n ?? 0),
+    daysDisturbed,
+    postings: daysDisturbed.reduce((n, r) => n + r.postings, 0),
+    firstPostings: daysDisturbed.reduce((n, r) => n + r.firstPostings, 0),
+    totalCents: daysDisturbed.reduce((n, r) => n + r.cents, 0),
+  };
+
   // The chain head as of now, and the last nightly check.
   const [head] = await db
     .select({ seq: domainEvent.seq, hash: domainEvent.hash })
@@ -191,6 +263,15 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
           : `${unmappedLines} of ${journal.length} lines have no approved mapping${pending.length ? `; ${pending.length} proposal${pending.length === 1 ? "" : "s"} waiting for a second person` : ""}.`,
     },
     {
+      key: "sealed_days_undisturbed",
+      label: "No row posted against a day this month after the practice sealed it",
+      holds: sealedDays.postings === 0,
+      detail:
+        sealedDays.postings === 0
+          ? `${sealedDays.closesFrozen} day${sealedDays.closesFrozen === 1 ? "" : "s"} sealed this month, none disturbed afterward.`
+          : `${sealedDays.postings} row${sealedDays.postings === 1 ? "" : "s"} totalling ${formatCents(sealedDays.totalCents)} landed against ${sealedDays.daysDisturbed.length} of ${sealedDays.closesFrozen} sealed day${sealedDays.closesFrozen === 1 ? "" : "s"}, ${sealedDays.firstPostings} of them first postings. The sealed figures did not move, so those days read two ways.`,
+    },
+    {
       key: "chain_verified",
       label: "The audit chain verified at its last check",
       holds: check?.ok === true,
@@ -207,6 +288,7 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
     reasons: { rows: reasons },
     depositRegister: { rows: register, count: registerCount, totalCents: registerTotal },
     counts,
+    sealedDays,
     mappings: { approved: active.size, pending: pending.length, unmappedLines },
     controls: {
       coverage: coverage.map((c) => ({ channel: c.channel, label: c.label, enforcement: c.enforcement, status: c.status, thresholdUsd: c.thresholdUsd, activeExceptions: c.activeExceptions })),
@@ -240,8 +322,9 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
  * answering in the hash's place.
  *
  * v1: Increments 1.34 to 1.42. v2: the digest's sealed-day counts (1.43).
+ * v3: the sealed-days section and its tie-out (1.44).
  */
-export const PACKAGE_SCHEMA_VERSION = "package-v2";
+export const PACKAGE_SCHEMA_VERSION = "package-v3";
 
 /**
  * What the hash covers: every figure the package states about the month.
@@ -283,6 +366,7 @@ export function hashedView(pkg: MonthPackage) {
       decisions: { recorded: decisions.recorded, reviews: decisions.reviews, snapshotsFrozen: decisions.snapshotsFrozen },
     },
     unmappedLines: pkg.mappings.unmappedLines,
+    sealedDays: pkg.sealedDays,
     controls: pkg.controls,
     eventsInMonth: pkg.chain.eventsInMonth,
     tieOut: pkg.tieOut.filter((t) => t.key !== "chain_verified").map((t) => ({ key: t.key, holds: t.holds })),
@@ -310,6 +394,16 @@ export function packageRows(pkg: MonthPackage, hash: string): CsvRow[] {
   rows.push({ section: "journal", key: "total", label: "Journal total", count: pkg.journal.entryCount, cents: pkg.journal.totalCents });
   for (const r of pkg.reasons.rows) rows.push({ section: "reasons", key: `${r.kind}|${r.code}`, label: `${r.label} (with approval: ${r.withApproval})`, count: r.count, cents: r.cents });
   for (const r of pkg.depositRegister.rows) rows.push({ section: "deposits", key: `${r.method}|${r.status}`, label: `${r.method} · ${r.status}`, count: r.count, cents: r.cents });
+  for (const r of pkg.sealedDays.daysDisturbed) {
+    rows.push({
+      section: "sealed_days",
+      key: r.businessDate,
+      label: `${r.businessDate} · ${r.closes} seal${r.closes === 1 ? "" : "s"} · ${r.firstPostings} first posting${r.firstPostings === 1 ? "" : "s"}`,
+      count: r.postings,
+      cents: r.cents,
+    });
+  }
+  rows.push({ section: "sealed_days", key: "closes_frozen", label: "Day closes frozen this month", count: pkg.sealedDays.closesFrozen, cents: "" });
   for (const r of pkg.counts.money.postings) rows.push({ section: "postings", key: r.key, label: r.label, count: r.count, cents: r.cents ?? "" });
   const c = pkg.counts;
   const flat: [string, string, number][] = [
