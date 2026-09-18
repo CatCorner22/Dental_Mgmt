@@ -35,7 +35,9 @@ export async function requireAccess(
   }
 
   if (opts.minRank && !meetsRole(user.role, opts.minRank)) {
-    return deny(403, "You do not have access to this action.");
+    // A grant may open the route in the rank's place (Increment 1.49).
+    const opened = opts.orEntitlement !== undefined && user.entitlements.includes(opts.orEntitlement);
+    if (!opened) return deny(403, "You do not have access to this action.");
   }
 
   if (opts.entitlements?.length) {

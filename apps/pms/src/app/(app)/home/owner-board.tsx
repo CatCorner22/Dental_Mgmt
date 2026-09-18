@@ -168,7 +168,7 @@ export function OwnerBoard() {
   if (state.status === "not_for_seat") {
     return (
       <p className="max-w-prose text-[var(--ink-2)]">
-        The board is for the manager and owner seats. Your seat works from the links below.
+        The board is for the manager and owner seats. Your seat works from the links in the header.
       </p>
     );
   }

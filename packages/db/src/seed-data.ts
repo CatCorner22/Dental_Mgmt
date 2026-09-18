@@ -61,7 +61,7 @@ export type SeedUserSpec = {
   tenantId: string;
   username: string;
   displayName: string;
-  role: "admin" | "user";
+  role: "admin" | "user" | "readonly";
   clinicalRole: string;
   entitlements: string[];
   /** When false, the user must enroll MFA on first password sign-in. */
@@ -98,6 +98,22 @@ export const DEV_USERS: readonly SeedUserSpec[] = [
     clinicalRole: "unset",
     entitlements: [],
     mfaEnrolled: false,
+  },
+  {
+    // The outside accountant's seat (Increment 1.49): the lowest rank the
+    // product has, holding the reporting grant and nothing else, so it reaches
+    // the month-end package and no other screen. Its duty pairs with no other
+    // in the SoD rulebook, so inviting it creates no conflict; and because it
+    // never posts, prepares, or clears, it is the independent reconciler the
+    // controls design wants rather than another pair of the practice's hands.
+    id: "0196b0a0-0000-7000-8000-000000000014",
+    tenantId: DEV_TENANTS[0].id,
+    username: "ridgeview-cpa",
+    displayName: "Casey Prentice",
+    role: "readonly",
+    clinicalRole: "unset",
+    entitlements: ["view_reports_only"],
+    mfaEnrolled: true,
   },
   {
     id: "0196b0a0-0000-7000-8000-000000000021",

@@ -114,7 +114,7 @@ export function DigestView() {
   }
 
   if (state.status === "not_for_seat") {
-    return <p className="max-w-prose text-[var(--ink-2)]">The digest is for the manager and owner seats. Your seat works from the home links.</p>;
+    return <p className="max-w-prose text-[var(--ink-2)]">The digest is for the manager and owner seats. Your seat works from the links in the header.</p>;
   }
 
   return (

@@ -1,3 +1,4 @@
+import { CPA_SEAT_ENTITLEMENT } from "@/lib/auth/seats";
 import { withGuard } from "@/lib/auth/withGuard";
 import { withTenantTransaction } from "@/lib/db/client";
 import { computeMonthPackage, isMonth, listPackageExports, packageHash, PACKAGE_SCHEMA_VERSION } from "@/lib/cpa/package";
@@ -50,5 +51,6 @@ export const GET = withGuard(
       computedAt: new Date().toISOString(),
     });
   },
-  { minRank: "manager" }
+  // The outside accountant reaches this and no other screen (Increment 1.49).
+  { minRank: "manager", orEntitlement: CPA_SEAT_ENTITLEMENT }
 );

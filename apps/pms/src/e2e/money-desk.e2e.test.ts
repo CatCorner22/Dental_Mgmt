@@ -758,4 +758,40 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await page().locator("section[aria-labelledby=package-tieout]").innerText()).not.toMatch(/Riley|Finn|Jane Doe/);
     await b.audit("month-end package (sealed days disturbed)");
   }, 120_000);
+
+  it("lets the outside accountant read and export the month, and gives that seat no other screen", async () => {
+    // The seat is the reporting grant below every rank the practice's own
+    // screens need (Increment 1.49). It reads the package, takes the month
+    // away, and meets a refusal everywhere else.
+    await b.signIn("ridgeview-cpa", "/cpa");
+    await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
+
+    // The header offers one screen rather than eleven that would refuse it.
+    const nav = page().locator("header nav");
+    expect(await nav.getByRole("link").allInnerTexts()).toEqual(["Month-end"]);
+    await b.audit("month-end package (outside accountant)");
+
+    // It reads the month, and the chart of accounts — the practice's own
+    // maker-checker — is not the seat's to run, so it is not offered at all.
+    expect(await page().locator("section[aria-labelledby=package-stamp]").innerText()).toMatch(/Package hash/);
+    expect(await page().locator("section[aria-labelledby=package-mappings]").count()).toBe(0);
+    expect(await page().getByRole("button", { name: "Close month" }).count()).toBe(0);
+    expect(await page().getByRole("button", { name: "Propose mapping" }).count()).toBe(0);
+
+    // It takes the month away, and the export is a chain event like any other.
+    const downloading = page().waitForEvent("download", { timeout: 30_000 });
+    await page().getByRole("button", { name: "Download CSV" }).click();
+    expect((await downloading).suggestedFilename()).toMatch(/^month-end-\d{4}-\d{2}\.csv$/);
+    await flash(/^Exported as CSV: \d+ rows, package hash [0-9a-f]{12}…, recorded on the chain\./).waitFor({ timeout: 30_000 });
+
+    // Every other screen refuses it in words, which is the whole of the seat.
+    await page().goto(`${app.base}/risk`);
+    await page().locator("main [role=alert]").waitFor({ timeout: 60_000 });
+    expect(await page().locator("main [role=alert]").innerText()).toMatch(/Practice Risk did not load/);
+    await page().goto(`${app.base}/home`);
+    await page().getByText(/The board is for the manager and owner seats/).waitFor({ timeout: 60_000 });
+    await page().goto(`${app.base}/ledger`);
+    await page().getByText(/You do not have access to this action\./).waitFor({ timeout: 60_000 });
+    await b.audit("ledger (outside accountant refused)");
+  }, 150_000);
 });
