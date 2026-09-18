@@ -230,6 +230,20 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
 }
 
 /**
+ * The shape of what the package states about a month (Increment 1.43).
+ *
+ * Bump this whenever a field enters or leaves `hashedView` — adding a count to
+ * the weekly digest does exactly that, because the digest is folded in whole.
+ * Hashes compare only within one version: a close records the version it froze,
+ * and a month closed under an earlier one is reported as incomparable rather
+ * than as changed, with the figures the close froze in their own columns
+ * answering in the hash's place.
+ *
+ * v1: Increments 1.34 to 1.42. v2: the digest's sealed-day counts (1.43).
+ */
+export const PACKAGE_SCHEMA_VERSION = "package-v2";
+
+/**
  * What the hash covers: every figure the package states about the month.
  *
  * A package mixes two kinds of figure. Most state something about the month
@@ -246,10 +260,18 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
  * own event landed, and every closed month would report a change it never
  * had. A tie-out's prose is left out for the same reason — it quotes those
  * practice-wide counts; its key and its verdict carry the fact.
+ *
+ * The view carries its own schema version (Increment 1.43). What the package
+ * states about a month is a shape that grows: the weekly digest is folded in
+ * whole, so one field added to the digest changes the hash of every month
+ * already closed. Naming the shape inside the hash makes a close say which
+ * one it froze, so the page can tell "the shape changed" from "a figure
+ * moved" rather than reporting the first as the second forever.
  */
 export function hashedView(pkg: MonthPackage) {
   const { findings, decisions, ...counts } = pkg.counts;
   return {
+    schema: PACKAGE_SCHEMA_VERSION,
     month: pkg.month,
     period: pkg.period,
     journal: pkg.journal,

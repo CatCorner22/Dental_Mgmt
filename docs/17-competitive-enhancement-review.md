@@ -555,6 +555,19 @@ The CPA month-end package, `docs/13` item 22, has sat in every "not in" list sin
 
 **Not in Increment 1.35.** QuickBooks Online and Xero export shapes (the mapping is theirs to feed, but the formats are not written); a starter chart of accounts; reason-code-level mappings in the page's form (the service and the resolver take them; the form proposes the wildcard); the CPA seat; month close.
 
+## Increment 1.43
+
+Increment 1.42 left one item deliberately unbuilt and said why: the digest's count of postings into sealed days could not be added, because `hashedView` folds the whole weekly digest into the month-end package hash and `canonicalJson` serializes every key. Adding one digest field would change the hash of every month already closed, and each would begin reporting `changedSinceClose` — permanently, which also means the flag stops being read. This increment fixes the cause, then adds the count.
+
+- **The hash names the shape it covers.** `PACKAGE_SCHEMA_VERSION` sits inside `hashedView`, so a hash is self-describing and two hashes are only ever compared within one version. v1 is Increments 1.34 to 1.42; v2 is this one.
+- **A close records the shape it froze.** `month_closes.package_schema` (migration 0034). Months closed before this carry `package-v1`, backfilled by the column's default, which is then dropped: a close states the schema it used rather than inheriting one.
+- **The page tells a shape change from a figure moving.** Where the close's schema differs from the one running, the CPA page says the two hashes do not compare and that neither says anything about the figures — rather than claiming a change it cannot evidence.
+- **And it still answers.** The close froze the entry count and the journal total in their own columns, and no change of shape touches those. Where the hashes are incomparable the page checks those two against the month as it computes today, so a close stays verifiable across a schema change instead of going silent. That is a better answer than the hash alone, and it only exists because the schema version forced the question.
+- **The digest count, now safe to add.** Postings into sealed days over the week, and how many of them are first postings, on the digest's bank section. Adding them is what took the package to v2.
+- **Tests.** Unit: the version present in the hashed view and pinned by name; the digest-shape coupling still pinned, its comment now recording that adding a digest field means bumping the version in the same commit. Live: the close recording the running schema on the row and on the chain event; and a month rewritten to `package-v1` reading as incomparable while the two frozen figures still answer. Browser: the digest's rows reading zero before anything lands behind a seal, and reading three and one after the sealed-day case posts.
+
+**Not in Increment 1.43.** The CPA package reporting sealed-day postings as a section of its own rather than only through the digest counts; a migration that re-hashes historical closes under the current schema, which would defeat the point of freezing them; reason codes as practice-editable rows with a screen of their own; and the CPA seat, questions, and the attestation tab.
+
 ## Increment 1.42
 
 Increments 1.40 and 1.41 made the database stamp what lands behind a seal and put the counts on the board. A count is something the owner has to go and read. The two signals the practice already has for "look at this now" are the detector register and the hard-event card, and a first posting into a sealed day belongs in both.

@@ -221,6 +221,8 @@ export function DigestView() {
                 ["Variances cleared with a reason", state.data.digest.bank.variancesClearedWithReason],
                 ["Deposits prepared", state.data.digest.bank.depositsPrepared],
                 ["Day closes frozen", state.data.digest.bank.dayClosesFrozen],
+                ["Postings into sealed days", state.data.digest.bank.postingsIntoSealedDays],
+                ["\u2026of those, first postings", state.data.digest.bank.firstPostingsIntoSealedDays],
                 ["Patient statements issued", state.data.digest.bank.statementsIssued],
                 ["Patient statements held", state.data.digest.bank.statementsHeld],
                 ["Patient statements voided", state.data.digest.bank.statementsVoided],

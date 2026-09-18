@@ -782,6 +782,8 @@ export const monthCloses = pgTable(
     periodStart: date("period_start").notNull(),
     periodEnd: date("period_end").notNull(),
     packageHash: text("package_hash").notNull(),
+    /** The package shape the hash was computed under (Increment 1.43); hashes compare only within one. */
+    packageSchema: text("package_schema").notNull(),
     entryCount: integer("entry_count").notNull(),
     totalCents: bigint("total_cents", { mode: "number" }).notNull(),
     closedById: uuid("closed_by_id").notNull(),

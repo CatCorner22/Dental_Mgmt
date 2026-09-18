@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isMonth, monthPeriod, packageHash, packageRows, toCsv, PACKAGE_SCOPE, type MonthPackage } from "./package";
+import { hashedView, isMonth, monthPeriod, packageHash, packageRows, toCsv, PACKAGE_SCHEMA_VERSION, PACKAGE_SCOPE, type MonthPackage } from "./package";
 import { SCOPE_SENTENCE } from "../digest/digest";
 
 function pkg(over: Partial<MonthPackage> = {}): MonthPackage {
@@ -21,7 +21,7 @@ function pkg(over: Partial<MonthPackage> = {}): MonthPackage {
       period: { start: "2026-09-01", end: "2026-09-30", days: 30 },
       money: { postings: [{ key: "patient_payment", label: "Patient payment", count: 2, cents: -7_500 }], postingCount: 2, guardedWithSecond: 1, guardedWithoutSecond: 0 },
       approvals: { requested: 1, given: 1, declined: 0, cancelled: 0 },
-      bank: { statementsImported: 1, runsCleared: 1, runsOwnerOnly: 1, variancesClearedWithReason: 0, depositsPrepared: 1, dayClosesFrozen: 1, statementsIssued: 0, statementsHeld: 0, statementsVoided: 0 },
+      bank: { statementsImported: 1, runsCleared: 1, runsOwnerOnly: 1, variancesClearedWithReason: 0, depositsPrepared: 1, dayClosesFrozen: 1, postingsIntoSealedDays: 0, firstPostingsIntoSealedDays: 0, statementsIssued: 0, statementsHeld: 0, statementsVoided: 0 },
       findings: { opened: [], closed: [], openNow: 0 },
       decisions: { recorded: [{ key: "monitor", label: "Monitor", count: 1 }], reviews: { keep: 0, tighten: 0, retire: 0 }, overdueNow: 0, snapshotsFrozen: 1 },
       access: { signIns: 3, mfaEnrolled: 0, sessionsRevoked: 0, granted: 0, revoked: 0, policyChanges: 0 },
@@ -100,13 +100,21 @@ describe("packageHash and the flat rows", () => {
     expect(csv.trimEnd().split("\n")).toHaveLength(rows.length + 1);
   });
 
+  it("names the shape it hashed, so two hashes are only ever compared within one version", () => {
+    // The hash is self-describing: the version is inside it, so a package computed
+    // under a different shape cannot silently produce a comparable-looking digest.
+    expect(hashedView(pkg()).schema).toBe(PACKAGE_SCHEMA_VERSION);
+    expect(PACKAGE_SCHEMA_VERSION).toBe("package-v2");
+  });
+
   it("folds the whole digest into the hash, so a new digest field moves every frozen month", () => {
     // Discovered while building Increment 1.42: hashedView spreads pkg.counts, and
     // canonicalJson serializes every key, so adding one field to the weekly digest
-    // changes the hash of months already closed and makes them read "changed since
-    // close" forever. This pins the coupling: a digest field is a package schema
-    // change, and the package needs a schema version recorded at close before one
-    // can be added. See docs/17, "Not in Increment 1.42".
+    // changes the hash of months already closed. This pins the coupling, and it is
+    // why a digest field is a package schema change: Increment 1.43 made the version
+    // part of the hash and recorded it on the close, so a month closed under an
+    // earlier shape reads as incomparable rather than as changed. Adding a digest
+    // field means bumping PACKAGE_SCHEMA_VERSION in the same commit.
     const before = packageHash(pkg());
     const widened = pkg();
     (widened.counts.bank as unknown as Record<string, number>).aNewlyAddedCount = 0;
