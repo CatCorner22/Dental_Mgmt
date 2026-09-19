@@ -6,7 +6,7 @@ import { withGuard } from "@/lib/auth/withGuard";
 import { withTenantTransaction } from "@/lib/db/client";
 import { currentAddress, setAddress } from "@/lib/notices/addresses";
 import { renderMessage } from "@/lib/notices/message";
-import { currentProof } from "@/lib/notices/proof";
+import { currentProof, proofLapsesAt, proofStanding } from "@/lib/notices/proof";
 import { lastRound } from "@/lib/notices/round";
 import { lastSend } from "@/lib/notices/send";
 import { collectOutstanding, type NoticeSeat } from "@/lib/notices/outstanding";
@@ -36,7 +36,7 @@ export const GET = withGuard(
   async (req, ctx) => {
     const user = ctx.access.user;
     const seat = seatOf(user);
-    const { address, notices, practiceName, sent, proof, round } = await withTenantTransaction(user.tenantId, user.id, async (db) => {
+    const { address, notices, practiceName, sent, proof, round, standing } = await withTenantTransaction(user.tenantId, user.id, async (db) => {
       const address = await currentAddress(db, user.tenantId, user.id);
       return {
       address,
@@ -44,6 +44,9 @@ export const GET = withGuard(
       // (Increment 1.61). It is read per row rather than per person, so a
       // changed address is unproved without anything having to clear a flag.
       proof: address === null ? null : await currentProof(db, user.tenantId, address.id),
+      // A proof stands for a year (Increment 1.65), so the screen says where
+      // this one stands rather than only that one exists.
+      standing: address === null ? "none" : proofStanding(await currentProof(db, user.tenantId, address.id), new Date()),
       // The last attempt and how it went (Increment 1.59), so a failure is read
       // on the screen rather than swallowed.
       sent: await lastSend(db, user.tenantId, user.id),
@@ -62,6 +65,8 @@ export const GET = withGuard(
       seat,
       address,
       proof,
+      standing,
+      lapsesAt: proof === null ? null : proofLapsesAt(proof),
       lastSend: sent,
       lastRound: round,
       // Null when this seat owes nothing: there is no message, because a

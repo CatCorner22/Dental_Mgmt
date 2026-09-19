@@ -287,6 +287,87 @@ describe.skipIf(!adminUrl)("a notice round (live)", () => {
     });
   });
 
+  describe("a proof that lapses, and a person who has left", () => {
+    // Increment 1.65.
+    const codeRows = async () =>
+      (
+        await db.admin.query(
+          "SELECT attempted_at FROM notice_sends WHERE tenant_id = $1 AND kind = 'proof_code' ORDER BY attempted_at, id",
+          [tenantId]
+        )
+      ).rows;
+
+    beforeAll(async () => {
+      // Its own address, proved at a pinned past date, so the lapse arithmetic
+      // is exact: proved on 2026-09-03 stands until 2027-09-03, and the window
+      // opens thirty days before that.
+      await tx((d) => setAddress(d, tenantId, owner.id, owner.displayName, "riley@ridgeview-lapse.example"));
+      const codes = memoryTransport();
+      const provedOn = new Date("2026-09-03T09:00:00.000Z");
+      await tx((d) =>
+        sendProofCode(d, {
+          tenantId,
+          userId: owner.id,
+          userName: owner.displayName,
+          seat: "owner",
+          practiceName: "Ridgeview Dental",
+          appUrl: "https://app.example",
+          transport: codes,
+          at: provedOn,
+          pause: async () => {},
+          unlimited: true,
+        })
+      );
+      const code = /Your code is ([A-HJKMNP-Z2-9]{10})/.exec(codes.sent[0].message.body)?.[1] ?? "";
+      expect(await tx((d) => proveAddress(d, tenantId, owner.id, owner.displayName, code, provedOn))).toMatchObject({
+        ok: true,
+      });
+    });
+
+    it("asks for a new code inside the last thirty days, before anything stops", async () => {
+      // The proof lapses on 2027-09-03, so the window opened on 2027-08-04:
+      // the round asks inside it rather than letting the notices stop in
+      // silence a month later.
+      const before = (await codeRows()).length;
+      await round(new Date("2027-09-01T09:00:00.000Z"));
+      expect((await codeRows()).length).toBe(before + 1);
+    });
+
+    it("asks once per window rather than every day", async () => {
+      const before = (await codeRows()).length;
+      await round(new Date("2027-09-02T09:00:00.000Z"));
+      await round(new Date("2027-09-05T09:00:00.000Z"));
+      expect((await codeRows()).length).toBe(before);
+    });
+
+    it("stops sending once the proof has lapsed, and says which it is", async () => {
+      const report = await round(new Date("2027-10-05T09:00:00.000Z"));
+      expect(report.unreachable).toBe(1);
+      expect(report.sent).toBe(0);
+      const { rows } = await db.admin.query(
+        "SELECT detail FROM notice_sends WHERE tenant_id = $1 AND kind = 'notices' AND outcome = 'unreachable' ORDER BY attempted_at DESC, id DESC LIMIT 1",
+        [tenantId]
+      );
+      // A lapsed proof is no proof, and refuses exactly as a never-proved one
+      // does — what differs is the reason, because "nobody ever said" and
+      // "nobody has said lately" call for different things from the reader.
+      expect(rows[0].detail).toMatch(/The proof that this address reaches you lapsed on \d{4}-\d{2}-\d{2}/);
+    });
+
+    it("sends nothing at all to somebody who has left the practice", async () => {
+      // A defect until this increment: a deactivated account kept receiving the
+      // practice's notices at an address nobody had revisited. Not counted as
+      // unreachable — that count is about people the round could not reach, and
+      // this is a person it must not reach.
+      await db.admin.query("UPDATE users SET active = false WHERE id = $1", [owner.id]);
+      const report = await round(new Date("2027-10-06T09:00:00.000Z"));
+      expect(report.considered).toBe(0);
+      expect(report.unreachable).toBe(0);
+      expect(report.sent).toBe(0);
+      await db.admin.query("UPDATE users SET active = true WHERE id = $1", [owner.id]);
+    });
+  });
+
   describe("what the database holds past the service", () => {
     async function refusalFrom(fn: () => Promise<unknown>): Promise<string> {
       try {

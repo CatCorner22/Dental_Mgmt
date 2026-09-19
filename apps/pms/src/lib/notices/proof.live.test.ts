@@ -208,6 +208,77 @@ describe.skipIf(!adminUrl)("proving an address (live)", () => {
     expect(text).not.toMatch(/[A-HJKMNP-Z2-9]{10}/);
   });
 
+  describe("a proof that has a life", () => {
+    // Increment 1.65. A proof stands for a year, and an address is proved again
+    // before it lapses rather than after the notices have stopped.
+    // Both in the PAST relative to the real clock, deliberately. The ask limit
+    // (Increment 1.63) counts challenges issued within the last hour, and a
+    // future-dated one satisfies "within the last hour" — so pinning these
+    // ahead of now would spend the ask-limit cases' allowance and refuse them
+    // for a reason that has nothing to do with the rule they name.
+    const provedLongAgo = new Date("2025-09-20T09:00:00.000Z");
+    const nearlyLapsed = new Date("2026-09-01T09:00:00.000Z");
+
+    const ask = (at: Date, unlimited = false) =>
+      tx((d) =>
+        sendProofCode(d, {
+          tenantId,
+          userId: owner.id,
+          userName: owner.displayName,
+          seat: "owner",
+          practiceName: "Ridgeview Dental",
+          appUrl: "https://app.example",
+          transport: codes,
+          at,
+          pause: async () => {},
+          unlimited,
+        })
+      );
+    let codes = memoryTransport();
+
+    beforeAll(async () => {
+      // A fresh address so nothing above refuses these first, proved at a date
+      // a year in the past so the window is reachable without waiting.
+      await tx((d) => setAddress(d, tenantId, owner.id, owner.displayName, "riley@ridgeview-life.example"));
+      codes = memoryTransport();
+      const issued = await ask(provedLongAgo, true);
+      expect(issued.ok).toBe(true);
+      const code = codeIn(codes.sent[codes.sent.length - 1].message.body);
+      expect(await tx((d) => proveAddress(d, tenantId, owner.id, owner.displayName, code, provedLongAgo))).toMatchObject({
+        ok: true,
+      });
+    });
+
+    it("refuses a new code while the proof stands comfortably, and names the day it lapses", async () => {
+      const refused = await ask(new Date("2026-01-15T09:00:00.000Z"), true);
+      expect(refused).toMatchObject({ ok: false, code: "already_proved" });
+      if (refused.ok) throw new Error("unreachable");
+      expect(refused.why).toContain("stands until 2026-09-20");
+    });
+
+    it("sends one inside the last thirty days, because waiting for it to stop is the silence this refuses", async () => {
+      const before = codes.sent.length;
+      const issued = await ask(nearlyLapsed, true);
+      expect(issued.ok).toBe(true);
+      expect(codes.sent.length).toBe(before + 1);
+    });
+
+    it("proves the address again on the new code, which the old one cannot do", async () => {
+      const fresh = codeIn(codes.sent[codes.sent.length - 1].message.body);
+      const done = await tx((d) => proveAddress(d, tenantId, owner.id, owner.displayName, fresh, nearlyLapsed));
+      expect(done).toMatchObject({ ok: true });
+      // Two proofs on one address now, and the newest is the one that stands.
+      const held = await tx((d) => currentAddress(d, tenantId, owner.id));
+      const now = await tx((d) => currentProof(d, tenantId, held!.id));
+      expect(now!.provedAt).toBe(nearlyLapsed.toISOString());
+      const { rows } = await db.admin.query(
+        "SELECT count(*)::int AS n FROM notice_address_proofs WHERE tenant_id = $1 AND address_id = $2",
+        [tenantId, held!.id]
+      );
+      expect(rows[0].n).toBe(2);
+    });
+  });
+
   describe("how often the product can be made to send", () => {
     // Increment 1.63. The abuse worth limiting is not guessing a code — a
     // person can only prove their own address, which they could prove by
@@ -327,7 +398,11 @@ describe.skipIf(!adminUrl)("proving an address (live)", () => {
       expect(why).toMatch(/no acting user in this transaction/);
     });
 
-    it("admits one proof per address, whatever the service believes", async () => {
+    it("redeems a code once, whatever the service believes", async () => {
+      // Increment 1.65 moved this guarantee off the address and onto the code.
+      // "One proof per address" meant "a code is used once" only while a proof
+      // was forever; once a proof can lapse it would mean an address may never
+      // be proved twice, which is a different and wrong rule.
       const proof = await oneRow("SELECT address_id, challenge_id, user_id FROM notice_address_proofs WHERE tenant_id = $1 LIMIT 1");
       const why = await refusalActingAs(
         proof.user_id,
@@ -335,7 +410,7 @@ describe.skipIf(!adminUrl)("proving an address (live)", () => {
          VALUES (gen_random_uuid(), $1, $2, $3, $4, now())`,
         [tenantId, proof.user_id, proof.address_id, proof.challenge_id]
       );
-      expect(why).toMatch(/notice_address_proofs_one_per_address/);
+      expect(why).toMatch(/notice_address_proofs_one_per_challenge/);
     });
 
     it("refuses a proof answering a code issued for another address", async () => {
@@ -344,14 +419,15 @@ describe.skipIf(!adminUrl)("proving an address (live)", () => {
       // would pass while asserting nothing about the key it names.
       await tx((d) => setAddress(d, tenantId, owner.id, owner.displayName, "riley@ridgeview-three.example"));
       const fresh = await tx((d) => currentAddress(d, tenantId, owner.id));
-      // Live, and newest: an expired challenge would trip the in-time trigger
-      // first, which fires before any foreign key, and this case would pass
-      // while asserting nothing about the key it names. An unordered LIMIT 1
-      // here made that a coin toss rather than a bug, which is worse.
+      // Live, unredeemed, and newest. An expired challenge would trip the
+      // in-time trigger, and one already answered would trip the single-use
+      // index (Increment 1.65) — either fires before this foreign key, and the
+      // case would pass while asserting nothing about the key it names.
       const { rows } = await db.admin.query(
         `SELECT c.id AS challenge_id, c.user_id, $2::uuid AS other_address
            FROM notice_address_challenges c
           WHERE c.tenant_id = $1 AND c.address_id <> $2::uuid AND c.expires_at > now()
+            AND NOT EXISTS (SELECT 1 FROM notice_address_proofs p WHERE p.challenge_id = c.id)
           ORDER BY c.issued_at DESC LIMIT 1`,
         [tenantId, fresh!.id]
       );

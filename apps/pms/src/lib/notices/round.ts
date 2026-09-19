@@ -5,7 +5,7 @@ import { appendControlEvent } from "../controls/events";
 import { isRole } from "../auth/roles";
 import { CPA_SEAT_ENTITLEMENT, isCpaSeat } from "../auth/seats";
 import { currentAddress } from "./addresses";
-import { currentProof } from "./proof";
+import { REPROVE_WINDOW_MS, currentProof, proofLapsesAt, proofStanding, sendProofCode } from "./proof";
 import { renderMessage } from "./message";
 import { collectOutstanding, type NoticeSeat } from "./outstanding";
 import { computeDigest, loadDigestAck, periodEnding } from "../digest/digest";
@@ -230,23 +230,69 @@ export async function runNoticeRound(db: AppDb, input: RoundInput): Promise<Roun
     else digests.failed += 1;
   };
 
+  /**
+   * Asks for a new code while a proof is inside its last thirty days.
+   *
+   * Before the lapse rather than after it, because a proof that expired in
+   * silence would stop the notices with no warning — and stopping without
+   * saying so is the failure this whole arc refuses. One ask per window, which
+   * is answered the same way the digest's is: has a code reached this person
+   * since the window opened?
+   */
+  const maybeAskToReprove = async (
+    userId: string,
+    displayName: string,
+    seat: NoticeSeat,
+    proof: { provedAt: string } | null
+  ): Promise<void> => {
+    if (proof === null || proofStanding(proof, at) !== "expiring") return;
+    const windowOpened = new Date(new Date(proofLapsesAt(proof)).getTime() - REPROVE_WINDOW_MS);
+    const lastCode = await lastDelivered(db, input.tenantId, userId, "proof_code");
+    if (lastCode !== null && lastCode.at >= windowOpened) return;
+    await sendProofCode(db, {
+      tenantId: input.tenantId,
+      userId,
+      userName: displayName,
+      seat,
+      practiceName: input.practiceName,
+      appUrl: input.appUrl,
+      transport: input.transport,
+      at: input.at,
+      pause: input.pause,
+      // The round is not a person pressing a button, and the address is one
+      // this person already proved, so the limit on asking has no stranger to
+      // protect here.
+      unlimited: true,
+    });
+  };
+
   for (const { userId } of everSaid) {
     const held = await currentAddress(db, input.tenantId, userId);
     if (held === null || held.address === null) continue;
     considered += 1;
-    const proved = (await currentProof(db, input.tenantId, held.id)) !== null;
+    const proofNow = await currentProof(db, input.tenantId, held.id);
+    // A lapsed proof is no proof: an address nobody has confirmed in a year is
+    // not a destination, and it refuses exactly as a never-proved one does
+    // rather than earning an outcome of its own.
+    const standing = proofStanding(proofNow, at);
+    const proved = standing === "good" || standing === "expiring";
 
     const person = (
       await db
-        .select({ displayName: users.displayName, role: users.role })
+        .select({ displayName: users.displayName, role: users.role, active: users.active })
         .from(users)
         .where(and(eq(users.tenantId, input.tenantId), eq(users.id, userId)))
         .limit(1)
     )[0];
-    if (!person) {
-      // An address whose person is gone. Nothing to send and nobody to send it
-      // to, and a round that counted it as unreachable would report a person
-      // this practice does not have.
+    // An address whose person is gone, or who has left the practice.
+    //
+    // The second was a defect until Increment 1.65: a deactivated account kept
+    // receiving the practice's notices, at an address nobody had revisited,
+    // which is the same silent delivery to a mailbox nobody reads that the
+    // proof exists to prevent — and worse, because the person is known to have
+    // gone. Neither is counted as unreachable: that count is about people this
+    // round could not reach, and these are people it must not reach.
+    if (!person || !person.active) {
       considered -= 1;
       continue;
     }
@@ -301,6 +347,7 @@ export async function runNoticeRound(db: AppDb, input: RoundInput): Promise<Roun
     else counts.nothingOwed += 1;
 
     await maybeSendDigest(userId, person.displayName, seat, held.address, proved);
+    await maybeAskToReprove(userId, person.displayName, seat, proofNow);
   }
 
   const roundId = uuidv7();

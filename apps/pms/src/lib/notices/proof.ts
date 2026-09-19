@@ -73,6 +73,52 @@ const CODE_LENGTH = 10;
 export const ASKS_PER_WINDOW = 5;
 export const ASK_WINDOW_MS = 60 * 60 * 1000;
 
+/**
+ * How long a proof stands before it must be given again (Increment 1.65).
+ *
+ * A proof was forever, which quietly reintroduced the failure Increment 1.61
+ * exists to prevent. A mailbox somebody loses access to — they leave, the
+ * provider changes, a shared inbox is reassigned — stays proved, and the
+ * notices keep arriving somewhere nobody reads. That is the same silent
+ * success as a typo, only delayed.
+ *
+ * A year is a decision about the practice rather than about the code, and this
+ * is the product's default rather than a law: long enough that nobody is
+ * nagged, short enough that a mailbox nobody holds any more is caught within a
+ * plausible turn of staff.
+ *
+ * It is **derived, never stored**. `notice_address_proofs` already dates every
+ * proof and never changes one, so when a proof lapses is arithmetic on a row
+ * that cannot drift — no expiry column, nothing to keep in step, and no job
+ * that has to remember to run.
+ */
+export const PROOF_LIFE_MS = 365 * 24 * 60 * 60 * 1000;
+
+/** How long before a proof lapses the product starts asking for a new code. */
+export const REPROVE_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Where a proof stands right now.
+ *
+ * Pure, so the rule can be read without a transaction, and four states rather
+ * than a boolean because the interesting one is `expiring`: a product that
+ * only knew proved-or-not would have nothing to say until the day it stopped
+ * sending, and stopping without warning is the silence this arc refuses.
+ */
+export type ProofStanding = "none" | "good" | "expiring" | "lapsed";
+
+export function proofStanding(proof: { provedAt: string } | null, at: Date): ProofStanding {
+  if (proof === null) return "none";
+  const lapsesAt = new Date(proof.provedAt).getTime() + PROOF_LIFE_MS;
+  if (at.getTime() >= lapsesAt) return "lapsed";
+  return at.getTime() >= lapsesAt - REPROVE_WINDOW_MS ? "expiring" : "good";
+}
+
+/** When this proof lapses, as an ISO timestamp. */
+export function proofLapsesAt(proof: { provedAt: string }): string {
+  return new Date(new Date(proof.provedAt).getTime() + PROOF_LIFE_MS).toISOString();
+}
+
 export type ProofState = {
   /** Which address row was proved. */
   addressId: string;
@@ -116,12 +162,21 @@ export function hashCode(code: string): string {
 
 const isWellFormed = (code: string) => code.length === CODE_LENGTH && [...code].every((c) => CODE_ALPHABET.includes(c));
 
-/** Whether this exact address row has been proved, and when. Null where it has not. */
+/**
+ * The newest proof of this exact address row, or null where it has never been
+ * proved.
+ *
+ * Newest wins, because a proof stands for a year and an address is proved
+ * again before it lapses (Increment 1.65). Ordering is explicit: an unordered
+ * limit over rows that now accumulate would return whichever the planner chose,
+ * which is a coin toss rather than an answer.
+ */
 export async function currentProof(db: AppDb, tenantId: string, addressId: string): Promise<ProofState | null> {
   const rows = await db
     .select()
     .from(noticeAddressProofs)
     .where(and(eq(noticeAddressProofs.tenantId, tenantId), eq(noticeAddressProofs.addressId, addressId)))
+    .orderBy(desc(noticeAddressProofs.provedAt), desc(noticeAddressProofs.id))
     .limit(1);
   const row = rows[0];
   return row ? { addressId: row.addressId, provedAt: row.provedAt.toISOString() } : null;
@@ -190,6 +245,8 @@ export async function sendProofCode(
     transport: Transport;
     at?: Date;
     pause?: (ms: number) => Promise<void>;
+    /** The round asking on the product's behalf rather than a person pressing a button (Increment 1.65). */
+    unlimited?: boolean;
   }
 ): Promise<ChallengeResult> {
   const at = input.at ?? new Date();
@@ -207,20 +264,31 @@ export async function sendProofCode(
     };
   }
   const already = await currentProof(db, input.tenantId, held.id);
-  if (already !== null) {
+  // A proof that still stands comfortably needs no code. One inside its last
+  // thirty days does: refusing there would mean the only way to re-prove an
+  // address is to wait for it to lapse and for the notices to stop, which is
+  // exactly the silence this increment removes.
+  if (already !== null && proofStanding(already, at) === "good") {
     return {
       ok: false,
       status: 409,
       code: "already_proved",
       verb: "send a code",
-      why: `${held.address} was proved on ${already.provedAt.slice(0, 10)}. Change the address if it is wrong; a new one is proved again.`,
+      why: `${held.address} was proved on ${already.provedAt.slice(0, 10)} and stands until ${proofLapsesAt(already).slice(0, 10)}. Change the address if it is wrong; a new one is proved again.`,
     };
   }
 
   // A limit on asking (Increment 1.63), checked before anything is minted or
   // written: a refused ask must leave no trace, or the refusal would itself
   // spend part of the next window.
-  const waitUntil = await nextAskAllowedAt(db, input.tenantId, input.userId, at);
+  //
+  // The round does not count against it (Increment 1.65). That limit exists
+  // because a person can type a stranger's address and press the button; the
+  // round acts for nobody and only ever writes to an address that this person
+  // already proved, so there is no stranger it could reach. A round is reached
+  // from the command line and from no route, so nothing a caller does can turn
+  // this into a way around the limit.
+  const waitUntil = input.unlimited === true ? null : await nextAskAllowedAt(db, input.tenantId, input.userId, at);
   if (waitUntil !== null) {
     return {
       ok: false,
@@ -315,13 +383,13 @@ export async function proveAddress(
     };
   }
   const already = await currentProof(db, tenantId, held.id);
-  if (already !== null) {
+  if (already !== null && proofStanding(already, at) === "good") {
     return {
       ok: false,
       status: 409,
       code: "already_proved",
       verb: "prove this address",
-      why: `${held.address} was already proved, on ${already.provedAt.slice(0, 10)}.`,
+      why: `${held.address} was already proved, on ${already.provedAt.slice(0, 10)}, and stands until ${proofLapsesAt(already).slice(0, 10)}.`,
     };
   }
 

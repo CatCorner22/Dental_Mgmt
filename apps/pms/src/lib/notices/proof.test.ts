@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hashCode, mintCode, normaliseCode } from "./proof";
+import { PROOF_LIFE_MS, REPROVE_WINDOW_MS, hashCode, mintCode, normaliseCode, proofLapsesAt, proofStanding } from "./proof";
 import { CODE_WINDOW_HOURS, renderProofMessage } from "./proofMessage";
 
 /**
@@ -67,5 +67,37 @@ describe("the message that carries a code", () => {
 
   it("names nobody, like every message this product sends", () => {
     expect(message.body).toContain("This message names no patient and quotes nobody's words.");
+  });
+});
+
+describe("how long a proof stands", () => {
+  // Increment 1.65. A proof was forever, which quietly reintroduced the failure
+  // Increment 1.61 exists to prevent: a mailbox somebody loses access to stays
+  // proved, and the notices keep arriving where nobody reads them.
+  const provedAt = "2026-01-15T09:00:00.000Z";
+  const proof = { provedAt };
+  const after = (ms: number) => new Date(new Date(provedAt).getTime() + ms);
+
+  it("says nothing about an address nobody ever proved", () => {
+    expect(proofStanding(null, new Date())).toBe("none");
+  });
+
+  it("stands for a year", () => {
+    expect(proofStanding(proof, after(0))).toBe("good");
+    expect(proofStanding(proof, after(PROOF_LIFE_MS - REPROVE_WINDOW_MS - 1))).toBe("good");
+    expect(proofLapsesAt(proof)).toBe("2027-01-15T09:00:00.000Z");
+  });
+
+  it("starts asking thirty days out, rather than the day it stops", () => {
+    // Four states rather than a boolean, and this is why: a product that knew
+    // only proved-or-not would have nothing to say until the day the notices
+    // stopped, and stopping without warning is the silence this arc refuses.
+    expect(proofStanding(proof, after(PROOF_LIFE_MS - REPROVE_WINDOW_MS))).toBe("expiring");
+    expect(proofStanding(proof, after(PROOF_LIFE_MS - 1))).toBe("expiring");
+  });
+
+  it("has lapsed on the day, not the day after", () => {
+    expect(proofStanding(proof, after(PROOF_LIFE_MS))).toBe("lapsed");
+    expect(proofStanding(proof, after(PROOF_LIFE_MS * 2))).toBe("lapsed");
   });
 });

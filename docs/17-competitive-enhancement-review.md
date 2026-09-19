@@ -555,6 +555,31 @@ The CPA month-end package, `docs/13` item 22, has sat in every "not in" list sin
 
 **Not in Increment 1.35.** QuickBooks Online and Xero export shapes (the mapping is theirs to feed, but the formats are not written); a starter chart of accounts; reason-code-level mappings in the page's form (the service and the resolver take them; the form proposes the wildcard); the CPA seat; month close.
 
+## Increment 1.65
+
+Increment 1.61 stopped a message going to a mailbox nobody had confirmed. It did not stop one going to a mailbox that **used to be** confirmed, because a proof was forever.
+
+A person leaves. A provider changes. A shared inbox is reassigned. The address stays proved, the notices keep arriving where nobody reads them — and that is the same silent success as a typo, merely delayed by however long the practice has existed.
+
+- **A proof stands for a year.** That is a decision about the practice rather than about the code, and it is the product's default rather than a law: long enough that nobody is nagged, short enough that a mailbox nobody holds any more is caught within a plausible turn of staff.
+- **Derived, never stored.** `notice_address_proofs` already dates every proof and never changes one, so when a proof lapses is arithmetic on a row that cannot drift. No expiry column to keep in step with the row beside it, and no job that has to remember to run.
+- **Four states, not a boolean, and `expiring` is the point.** A product that knew only proved-or-not would have nothing to say until the day it stopped sending — and stopping without warning is exactly the silence this arc refuses. So the round asks for a new code inside the last thirty days, once per window, answered the same way the digest's is.
+- **A lapsed proof refuses exactly as a never-proved one does.** No new outcome: an address nobody has confirmed in a year is not a destination, which is the rule 1.61 already wrote. What differs is only the reason, because "nobody ever said" and "nobody has said lately" call for different things from the reader.
+
+## Two rules that turned out to be in the wrong place
+
+- **Single use belongs to the code.** Increment 1.61 made a code single-use with a unique index on `address_id`. That worked while a proof was forever; the moment a proof can lapse, "one proof per address" stops meaning "a code is used once" and starts meaning **an address can never be proved twice** — which would leave a person with a lapsed proof no way back except to retype their address into a new row and lie about when they chose it. Migration 0047 moves the index onto the challenge, which is the thing the guarantee was always about.
+- **The own-user rule was about proving, not about asking.** The round acts for nobody, so `app.user_id` is empty, and Increment 1.61's trigger refused that outright. Borrowing somebody's identity so the round could send them a code would put a lie in the one column the rule is enforced against. Migration 0048 splits it: a **proof** stays strict and must be written by the person it names, while a **challenge** may also be written with no acting user at all, which is the product acting for itself. That is safe because of what a challenge is — it sends a code to the address already on file, confers nothing, and reaches nobody the person did not choose — and because every route in this product runs under a guard with a real user, so "no acting user" is reachable only from a job the practice runs. The limit on asking (Increment 1.63) does not bind the round for the same reason: that limit exists because a person can type a stranger's address, and the round only ever writes to an address this person already proved.
+
+## A defect the increment went looking for and found next door
+
+The round read `users` and never checked `active`. **A person who had left the practice kept receiving its notices**, at an address nobody had revisited — the same silent delivery the proof exists to prevent, and worse, because the product knew they had gone. They are now skipped entirely, and not counted as unreachable: that count is about people a round could not reach, and this is a person it must not reach.
+
+- **Three more tests that first passed for the wrong reason**, all the same family this arc keeps meeting. The new life cases were pinned at dates in the *future*, and Increment 1.63's ask limit counts challenges issued "within the last hour" — which a future-dated row satisfies, so they silently spent the ask-limit cases' allowance and refused them for an unrelated reason. The foreign-key case began picking codes that the new re-proving had already redeemed, so the single-use index fired before the key it names. And the round's lapse cases first sat where an earlier case leaves the owner withdrawn, with no address to lapse at all. Each was moved rather than patched.
+- **Tests.** Unit: nothing proved; a year's standing; the window opening thirty days out and not on the day it stops; lapsed on the day rather than the day after. Live: a code refused while the proof stands comfortably, naming the day it lapses; one sent inside the last thirty days; the address proved again on the new code with two proofs on one address and the newest standing; the round asking inside the window and only once; the notices stopping after the lapse with the reason naming it; a deactivated person considered not at all; and, past the service, a code redeemed once. Browser: the screen says when the proof needs giving again rather than waiting for the day it stops.
+
+**Not in Increment 1.65.** A per-practice choice of how long a proof stands — one number in one place, and nobody has yet found it wrong. Re-proving prompted from the screen rather than only by the round, which would be a second path to the same act. Retiring an address nobody re-proves, which is the practice's decision rather than the product's. The month-end package delivered, a way for a stranger to stop a code they did not ask for, and an address for somebody who is not a user, all still.
+
 ## Increment 1.64
 
 "A digest across several notices" sat on three Not-in lists. The first honest question was whether it is a new thing at all — and it is not.
