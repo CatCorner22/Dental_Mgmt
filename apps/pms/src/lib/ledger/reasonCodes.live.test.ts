@@ -98,11 +98,27 @@ describe.skipIf(!adminUrl)("Reason codes (live)", () => {
 
   it("retires a code in use without removing it, and restores it", async () => {
     // Put the code into use first: retiring one nothing cites would prove nothing.
+    //
+    // These inserts go straight at the table to prove a foreign key and a count,
+    // so they meet the after-hours hold (Increment 1.30), which refuses a
+    // write-off or an adjustment posted outside the location's week whatever the
+    // amount. `now()` therefore made these cases pass by day and fail by night,
+    // here and in CI, which runs at every hour. Midweek at 14:00 in the
+    // location's own timezone -- read from the row rather than written twice --
+    // is inside every seeded window, and the Wednesday before this week's Monday
+    // is always in the past. The fourth insert below needs it too: a case that
+    // asserts a foreign-key refusal has to meet that refusal and not the hold.
+    //
+    // The `::timestamp` cast is the whole of it: `date_trunc` on a date returns
+    // timestamptz, and `AT TIME ZONE` on a timestamptz converts the other way --
+    // UTC to local rather than local to UTC -- which lands the row at 09:00 UTC,
+    // 04:00 in Chicago, before the window opens. The cast makes 14:00 mean 14:00
+    // where the location is.
     const cited = uuidv7(38_000);
     await db.admin.query(
       `INSERT INTO ledger_entries (id, tenant_id, account_id, patient_id, location_id, kind, gl_bucket, amount_cents,
                                    effective_date, posted_at, created_by_id, created_by_name, reason_code, idempotency_key, created_at)
-       VALUES ($1, $2, $3, $4, $5, 'write_off', 'patient_ar', -1500, current_date, now(), $6, 'Riley Owner', 'courtesy', $7, now())`,
+       VALUES ($1, $2, $3, $4, $5, 'write_off', 'patient_ar', -1500, current_date, (((date_trunc('week', current_date) - interval '5 days') + interval '14 hours')::timestamp AT TIME ZONE (SELECT timezone FROM locations WHERE id = $5)), $6, 'Riley Owner', 'courtesy', $7, now())`,
       [cited, tenantId, SEED_LEDGER.accountDoeId, SEED_LEDGER.patientJaneId, SEED_LEDGER.locationId, owner.id, `rc-${cited}`]
     );
     const before = (await tx((d) => listReasonCodes(d, tenantId))).find((r) => r.code === "courtesy")!;
@@ -265,7 +281,7 @@ describe.skipIf(!adminUrl)("Reason codes (live)", () => {
       return db.admin.query(
         `INSERT INTO ledger_entries (id, tenant_id, account_id, patient_id, location_id, kind, gl_bucket, amount_cents,
                                      effective_date, posted_at, created_by_id, created_by_name, reason_code, idempotency_key, created_at)
-         VALUES ($1, $2, $3, $4, $5, 'write_off', 'patient_ar', $6, current_date, now(), $7, 'Riley Owner', $8, $9, now())`,
+         VALUES ($1, $2, $3, $4, $5, 'write_off', 'patient_ar', $6, current_date, (((date_trunc('week', current_date) - interval '5 days') + interval '14 hours')::timestamp AT TIME ZONE (SELECT timezone FROM locations WHERE id = $5)), $7, 'Riley Owner', $8, $9, now())`,
         [id, tenantId, SEED_LEDGER.accountDoeId, SEED_LEDGER.patientJaneId, SEED_LEDGER.locationId, cents, owner.id, code, `rt-${id}`]
       );
     }
@@ -325,7 +341,7 @@ describe.skipIf(!adminUrl)("Reason codes (live)", () => {
     await db.admin.query(
       `INSERT INTO ledger_entries (id, tenant_id, account_id, patient_id, location_id, kind, gl_bucket, amount_cents,
                                    effective_date, posted_at, created_by_id, created_by_name, reason_code, idempotency_key, created_at)
-       VALUES ($1, $2, $3, $4, $5, 'adjustment', 'patient_ar', -500, current_date, now(), $6, 'Riley Owner', 'insurance_adjustment', $7, now())`,
+       VALUES ($1, $2, $3, $4, $5, 'adjustment', 'patient_ar', -500, current_date, (((date_trunc('week', current_date) - interval '5 days') + interval '14 hours')::timestamp AT TIME ZONE (SELECT timezone FROM locations WHERE id = $5)), $6, 'Riley Owner', 'insurance_adjustment', $7, now())`,
       [id, tenantId, SEED_LEDGER.accountDoeId, SEED_LEDGER.patientJaneId, SEED_LEDGER.locationId, owner.id, `rc-${id}`]
     );
     expect((await tx((d) => listReasonCodes(d, tenantId))).find((r) => r.code === "insurance_adjustment")!.entries).toBe(1);
@@ -335,7 +351,7 @@ describe.skipIf(!adminUrl)("Reason codes (live)", () => {
       db.admin.query(
         `INSERT INTO ledger_entries (id, tenant_id, account_id, patient_id, location_id, kind, gl_bucket, amount_cents,
                                      effective_date, posted_at, created_by_id, created_by_name, reason_code, idempotency_key, created_at)
-         VALUES ($1, $2, $3, $4, $5, 'adjustment', 'patient_ar', -500, current_date, now(), $6, 'Riley Owner', 'never_adopted', $7, now())`,
+         VALUES ($1, $2, $3, $4, $5, 'adjustment', 'patient_ar', -500, current_date, (((date_trunc('week', current_date) - interval '5 days') + interval '14 hours')::timestamp AT TIME ZONE (SELECT timezone FROM locations WHERE id = $5)), $6, 'Riley Owner', 'never_adopted', $7, now())`,
         [uuidv7(38_002), tenantId, SEED_LEDGER.accountDoeId, SEED_LEDGER.patientJaneId, SEED_LEDGER.locationId, owner.id, "rc-never"]
       )
     ).rejects.toThrow(/ledger_entries_reason_fk|violates foreign key/);
