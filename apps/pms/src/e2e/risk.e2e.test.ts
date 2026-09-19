@@ -446,6 +446,9 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await expect
       .poll(async () => await delivery.innerText(), { timeout: 30_000 })
       .toMatch(/Proved on \d{4}-\d{2}-\d{2}: somebody opened this address/);
+    // Increment 1.65: a proof stands for a year, and the screen says when
+    // rather than waiting for the day the notices stop.
+    expect(await delivery.innerText()).toMatch(/It stands until \d{4}-\d{2}-\d{2}, when it needs proving again\./);
     await b.audit("practice risk, a proved address");
 
     // And now the notices go.

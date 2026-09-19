@@ -3,7 +3,7 @@ import { noticeSends, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { appendControlEvent } from "../controls/events";
 import { currentAddress } from "./addresses";
-import { currentProof } from "./proof";
+import { currentProof, proofLapsesAt, proofStanding } from "./proof";
 import { renderMessage, type Message } from "./message";
 import type { Notice, NoticeSeat } from "./outstanding";
 import type { FailureKind, SendOutcome, SendRecord } from "./sendOutcome";
@@ -313,12 +313,25 @@ export async function sendNotices(db: AppDb, input: SendInput): Promise<SendResu
     why = "Nobody has said where to send these, so there was nowhere to send them.";
   } else if (held.address === null) {
     why = `You asked on ${held.setAt.slice(0, 10)} not to receive these, so there was nowhere to send them.`;
-  } else if ((await currentProof(db, input.tenantId, held.id)) === null) {
-    why =
-      "Nobody has proved that this address reaches you, so nothing was sent to it. " +
-      "Ask for a code and bring it back, and these will go out.";
   } else {
-    address = held.address;
+    // A lapsed proof is no proof (Increment 1.65). An address nobody has
+    // confirmed in a year is not a destination, and it refuses exactly as a
+    // never-proved one does rather than earning an outcome of its own — what
+    // differs is only the reason, because "nobody ever said" and "nobody has
+    // said lately" call for different things from the reader.
+    const proof = await currentProof(db, input.tenantId, held.id);
+    const standing = proofStanding(proof, at);
+    if (standing === "none") {
+      why =
+        "Nobody has proved that this address reaches you, so nothing was sent to it. " +
+        "Ask for a code and bring it back, and these will go out.";
+    } else if (standing === "lapsed") {
+      why =
+        `The proof that this address reaches you lapsed on ${proofLapsesAt(proof!).slice(0, 10)}, so nothing was sent to it. ` +
+        "Ask for a code and bring it back, and these will go out.";
+    } else {
+      address = held.address;
+    }
   }
 
   const { record, attempts } = await deliverMessage(db, {

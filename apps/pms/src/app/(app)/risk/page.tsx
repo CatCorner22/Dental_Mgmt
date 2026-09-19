@@ -74,6 +74,9 @@ type AddressResponse = {
   address: { id: string; address: string | null; setAt: string } | null;
   /** Whether this exact address row was proved to reach this person (Increment 1.61); null where it was not. */
   proof: { addressId: string; provedAt: string } | null;
+  /** Where that proof stands: a proof lasts a year (Increment 1.65). */
+  standing: "none" | "good" | "expiring" | "lapsed";
+  lapsesAt: string | null;
   /** The last attempt and how it went (Increment 1.59); null where nobody has tried. */
   lastSend: SendRecord | null;
   /** When the scheduled sender last ran, whatever it found (Increment 1.62); null where it never has. */
@@ -1299,10 +1302,15 @@ function RiskBody({
             by whoever does own that mailbox, so nothing but a code coming back
             tells the practice the difference. */}
         {delivery.address?.address ? (
-          delivery.proof ? (
+          delivery.proof && delivery.standing !== "lapsed" ? (
             <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
               Proved on {delivery.proof.provedAt.slice(0, 10)}: somebody opened this address and brought back the code sent
-              to it. Changing the address means proving the new one, because a proof names the address rather than you.
+              to it. Changing the address means proving the new one, because a proof names the address rather than you.{" "}
+              {/* A proof stands for a year (Increment 1.65), and the screen says
+                  when rather than waiting for the day the notices stop. */}
+              {delivery.standing === "expiring"
+                ? `It needs proving again by ${delivery.lapsesAt?.slice(0, 10)}, and a code is on its way: bring it back and nothing stops.`
+                : `It stands until ${delivery.lapsesAt?.slice(0, 10)}, when it needs proving again.`}
             </p>
           ) : (
             <form
@@ -1313,7 +1321,12 @@ function RiskBody({
               }}
             >
               <p className="mb-2 text-sm">
-                <strong>Nobody has proved this address reaches you</strong>, so nothing is sent to it. A mistyped address
+                <strong>
+                  {delivery.standing === "lapsed"
+                    ? `The proof that this address reaches you lapsed on ${delivery.lapsesAt?.slice(0, 10)}`
+                    : "Nobody has proved this address reaches you"}
+                </strong>
+                , so nothing is sent to it. A mistyped address
                 does not bounce — it is accepted by whoever does own that mailbox — so the practice asks you to fetch a
                 code from it instead. This practice will send at most five codes an hour, because an address you type is
                 somebody else&apos;s inbox until it is proved.

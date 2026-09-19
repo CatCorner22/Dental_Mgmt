@@ -54,6 +54,8 @@ const failureKindSql = readFileSync(join(here, "../migrations/0043_notice_send_f
 const proofsSql = readFileSync(join(here, "../migrations/0044_notice_address_proofs.sql"), "utf8");
 const roundsSql = readFileSync(join(here, "../migrations/0045_notice_rounds.sql"), "utf8");
 const kindSql = readFileSync(join(here, "../migrations/0046_notice_send_kind.sql"), "utf8");
+const perCodeSql = readFileSync(join(here, "../migrations/0047_proof_is_per_code.sql"), "utf8");
+const roundCodeSql = readFileSync(join(here, "../migrations/0048_round_may_send_a_code.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -444,6 +446,37 @@ describe("Increment 1.60 a refusal that can pass, and one that cannot", () => {
     // How many times the practice tried is answered by counting attempts. A
     // number stored next to them is a status the rows can contradict.
     expect(failureKindSql).not.toMatch(/attempt_count|retries|retry_count|tries/);
+  });
+});
+
+describe("Increment 1.65 single use belongs to the code", () => {
+  it("moves the guarantee off the address and onto the code it is true of", () => {
+    // One proof per address meant "a code is used once" only while a proof was
+    // forever. Once a proof can lapse it means "an address can never be proved
+    // twice", which is a different and wrong rule.
+    expect(perCodeSql).toMatch(/DROP INDEX notice_address_proofs_one_per_address;/);
+    expect(perCodeSql).toMatch(
+      /CREATE UNIQUE INDEX notice_address_proofs_one_per_challenge ON notice_address_proofs \(challenge_id\);/
+    );
+  });
+
+  it("indexes the newest proof per address, which is the only read it has", () => {
+    expect(perCodeSql).toMatch(/notice_address_proofs_latest_idx ON notice_address_proofs \(tenant_id, address_id, proved_at DESC\)/);
+  });
+
+  it("lets the product ask for a code, and still only a person prove", () => {
+    // The round acts for nobody. Borrowing somebody's identity to send them a
+    // code would put a lie in the one column the rule is enforced against.
+    expect(roundCodeSql).toMatch(/IF actor IS NULL THEN RETURN NEW; END IF;/);
+    expect(roundCodeSql).toMatch(/a person asks only for their own address/);
+    // Only the challenge trigger is replaced; the proof's stays strict.
+    expect(roundCodeSql).toMatch(/DROP TRIGGER notice_address_challenges_are_ones_own ON notice_address_challenges;/);
+    expect(roundCodeSql).not.toMatch(/notice_address_proofs_are_ones_own/);
+    expect(roundCodeSql).not.toMatch(/notice_address_checks_are_ones_own\(\)\s*RETURNS/);
+  });
+
+  it("stores no expiry, because a dated append-only row already says when one lapses", () => {
+    expect(perCodeSql).not.toMatch(/expires|lapses|valid_until/);
   });
 });
 
