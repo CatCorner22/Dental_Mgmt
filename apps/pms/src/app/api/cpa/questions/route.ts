@@ -2,6 +2,7 @@ import { CPA_SEAT_ENTITLEMENT, isCpaSeat } from "@/lib/auth/seats";
 import { withGuard } from "@/lib/auth/withGuard";
 import { withTenantTransaction } from "@/lib/db/client";
 import { askAboutLine, listLines, listThreads, replyToThread, type ThreadSeat } from "@/lib/cpa/questions";
+import { latestReads, markThreadRead, unreadFor } from "@/lib/cpa/threadReads";
 import { isRole } from "@/lib/auth/roles";
 
 /**
@@ -22,11 +23,19 @@ export const GET = withGuard(
   async (req, ctx) => {
     const user = ctx.access.user;
     const month = new URL(req.url).searchParams.get("month") ?? new Date().toISOString().slice(0, 7);
-    const { items, lines } = await withTenantTransaction(user.tenantId, user.id, async (db) => ({
+    const seat = seatOf(user);
+    const { items, lines, reads } = await withTenantTransaction(user.tenantId, user.id, async (db) => ({
       items: await listThreads(db, user.tenantId, month),
       lines: await listLines(db, user.tenantId, month),
+      // One query for every thread; the reading is this seat's own (Increment 1.55).
+      reads: await latestReads(db, user.tenantId, seat),
     }));
-    return Response.json({ month, items, lines, seat: seatOf(user) });
+    return Response.json({
+      month,
+      items: items.map((t) => ({ ...t, unread: unreadFor(t, seat, reads.get(t.id)), lastRead: reads.get(t.id) ?? null })),
+      lines,
+      seat,
+    });
   },
   { minRank: "manager", orEntitlement: CPA_SEAT_ENTITLEMENT }
 );
@@ -55,12 +64,15 @@ export const POST = withGuard(
       if (body.action === "reply") {
         return replyToThread(db, { tenantId: user.tenantId, actor, seat, threadId: body.threadId ?? "", body: body.body ?? "" });
       }
+      if (body.action === "read") {
+        return markThreadRead(db, { tenantId: user.tenantId, actor, seat, threadId: body.threadId ?? "" });
+      }
       return null;
     });
 
-    if (!result) return Response.json({ error: "The action must be ask or reply." }, { status: 400 });
+    if (!result) return Response.json({ error: "The action must be ask, reply, or read." }, { status: 400 });
     if (!result.ok) return Response.json({ error: result.code, verb: result.verb, why: result.why }, { status: result.status });
-    return Response.json({ ok: true, thread: result.thread });
+    return Response.json("thread" in result ? { ok: true, thread: result.thread } : { ok: true, read: result.read });
   },
   { minRank: "manager", orEntitlement: CPA_SEAT_ENTITLEMENT }
 );
