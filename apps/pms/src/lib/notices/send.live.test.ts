@@ -1,0 +1,201 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createLiveDatabase, liveAdminUrl, type LiveDatabase } from "@pms/db/testing";
+import { seedDatabase } from "@pms/db/seed";
+import { DEV_TENANTS, DEV_USERS } from "@pms/db/seed-data";
+import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
+import { setAddress } from "./addresses";
+import { collectOutstanding } from "./outstanding";
+import { lastSend, sendNotices } from "./send";
+import { memoryTransport, unconfiguredTransport } from "./transport";
+
+/**
+ * Sending, and failing to send (Increment 1.59).
+ *
+ * The rule worth proving is the one the table exists for: an attempt that
+ * failed leaves a row saying so. A product that swallowed a failure would be
+ * worse than one that never sent, because its reader would believe they had
+ * been told.
+ *
+ * Skipped without PMS_TEST_POSTGRES_URL; mandatory under PMS_TEST_POSTGRES_REQUIRED=1.
+ */
+
+const adminUrl = liveAdminUrl();
+const tenantId = DEV_TENANTS[0]!.id;
+const owner = DEV_USERS[0]!;
+
+describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
+  let db: LiveDatabase;
+  let env: Record<string, string | undefined>;
+
+  function tx<T>(fn: Parameters<typeof withTenantTransaction<T>>[2]) {
+    return withTenantTransaction(tenantId, owner.id, fn, env);
+  }
+
+  /** The seeded practice owes an unattested month, so there is always something to send. */
+  const base = async (transport: Parameters<typeof sendNotices>[1]["transport"]) => ({
+    tenantId,
+    recipientId: owner.id,
+    recipientName: owner.displayName,
+    seat: "owner" as const,
+    practiceName: "Ridgeview Dental",
+    appUrl: "https://app.example",
+    notices: await tx((d) => collectOutstanding(d, tenantId)),
+    transport,
+  });
+
+  const rows = async () =>
+    (
+      await db.admin.query(
+        "SELECT outcome, address, detail, subject, body, notice_count FROM notice_sends WHERE tenant_id = $1 ORDER BY attempted_at",
+        [tenantId]
+      )
+    ).rows;
+
+  beforeAll(async () => {
+    db = await createLiveDatabase(adminUrl!);
+    await resetDbPoolForTests();
+    await seedDatabase(db.admin, { env: { ENCRYPTION_KEY: "b".repeat(64), BCRYPT_COST: "4" } });
+    env = { POSTGRES_URL: await db.loginAs("app_rw"), APPEND_ROLE_DSN: await db.loginAs("app_append"), BCRYPT_COST: "4" };
+  }, 90_000);
+
+  afterAll(async () => {
+    await resetDbPoolForTests();
+    await db?.destroy();
+  });
+
+  it("records that something was owed and there was nowhere to send it", async () => {
+    // Nobody has given an address yet. Not an error, and not nothing: the
+    // practice owes something and no one will hear about it.
+    const result = await tx(async (d) => sendNotices(d, await base(memoryTransport())));
+    expect(result.outcome).toBe("unreachable");
+    if (result.outcome === "nothing_owed") throw new Error("unreachable");
+    expect(result.record.address).toBeNull();
+    expect(result.record.detail).toContain("Nobody has said where to send these");
+    expect(result.record.noticeCount).toBeGreaterThan(0);
+    const all = await rows();
+    expect(all.map((r) => r.outcome)).toEqual(["unreachable"]);
+    // The message was still built, so a reader can see what would have gone.
+    expect(all[0].subject).toContain("Ridgeview Dental");
+  });
+
+  it("records a failure with the transport's own words, and says nothing arrived", async () => {
+    await tx((d) => setAddress(d, tenantId, owner.id, owner.displayName, "riley@ridgeview.example"));
+    const transport = unconfiguredTransport("This practice has no way to send messages yet.");
+    const result = await tx(async (d) => sendNotices(d, await base(transport)));
+    expect(result.outcome).toBe("failed");
+    if (result.outcome === "nothing_owed") throw new Error("unreachable");
+    expect(result.record.detail).toBe("This practice has no way to send messages yet.");
+    // The address it tried is kept, because "where did it try" is the question.
+    expect(result.record.address).toBe("riley@ridgeview.example");
+    expect((await rows()).map((r) => r.outcome)).toEqual(["unreachable", "failed"]);
+  });
+
+  it("sends, hands the transport exactly what it recorded, and keeps the body", async () => {
+    const transport = memoryTransport();
+    const result = await tx(async (d) => sendNotices(d, await base(transport)));
+    expect(result.outcome).toBe("sent");
+    expect(transport.sent.length).toBe(1);
+    expect(transport.sent[0].to).toBe("riley@ridgeview.example");
+
+    const all = await rows();
+    const sent = all[all.length - 1];
+    expect(sent.outcome).toBe("sent");
+    expect(sent.detail).toBeNull();
+    // What the transport carried is what the row keeps, because "what did they
+    // actually receive" cannot be re-derived from rows that move.
+    expect(sent.subject).toBe(transport.sent[0].message.subject);
+    expect(sent.body).toBe(transport.sent[0].message.body);
+  });
+
+  it("keeps no patient and quotes nobody, at rest", async () => {
+    // The guarantee Increment 1.58 made at the type level, asserted on the row
+    // that outlives the request.
+    const { rows: stored } = await db.admin.query("SELECT body FROM notice_sends WHERE tenant_id = $1", [tenantId]);
+    for (const r of stored) {
+      expect(r.body).toContain("This message names no patient and quotes nobody's words.");
+    }
+  });
+
+  it("reports the latest attempt, and the earlier ones stay as they were", async () => {
+    const held = await tx((d) => lastSend(d, tenantId, owner.id));
+    expect(held?.outcome).toBe("sent");
+    // Three attempts, three rows: an attempt is never rewritten.
+    expect((await rows()).length).toBe(3);
+  });
+
+  it("writes no row at all when nothing is owed", async () => {
+    const before = (await rows()).length;
+    const result = await tx(async (d) =>
+      sendNotices(d, { ...(await base(memoryTransport())), notices: [] })
+    );
+    // Nothing owed is not an act, and a table of rows saying nothing happened
+    // is a table nobody can read.
+    expect(result.outcome).toBe("nothing_owed");
+    expect((await rows()).length).toBe(before);
+  });
+
+  it("records the act on the chain without the address or the body", async () => {
+    const { rows: events } = await db.admin.query(
+      "SELECT kind, payload FROM domain_event WHERE tenant_id = $1 AND kind = 'notice.sent' ORDER BY seq",
+      [tenantId]
+    );
+    expect(events.map((e) => (e.payload as { outcome: string }).outcome)).toEqual(["unreachable", "failed", "sent"]);
+    const text = JSON.stringify(events.map((e) => e.payload));
+    expect(text).not.toContain("ridgeview.example");
+    expect(text).not.toContain("quotes nobody");
+  });
+
+  describe("what the database holds past the service", () => {
+    async function refusalFrom(fn: () => Promise<unknown>): Promise<string> {
+      try {
+        await fn();
+      } catch (e) {
+        const err = e as { message: string; cause?: { message?: string } };
+        return err.cause?.message ?? err.message;
+      }
+      throw new Error("expected the database to refuse this, and it did not");
+    }
+
+    it("refuses a failure that does not say what failed", async () => {
+      const why = await refusalFrom(() =>
+        db.admin.query(
+          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, subject, body, notice_count, attempted_at)
+           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'failed', NULL, 's', 'b', 1, now())`,
+          [tenantId, owner.id]
+        )
+      );
+      expect(why).toMatch(/notice_sends_failure_says_why/);
+    });
+
+    it("refuses a send that claims to have gone nowhere", async () => {
+      const why = await refusalFrom(() =>
+        db.admin.query(
+          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, subject, body, notice_count, attempted_at)
+           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', NULL, 'sent', NULL, 's', 'b', 1, now())`,
+          [tenantId, owner.id]
+        )
+      );
+      expect(why).toMatch(/notice_sends_sent_is_complete/);
+    });
+
+    it("refuses a fourth outcome", async () => {
+      const why = await refusalFrom(() =>
+        db.admin.query(
+          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, subject, body, notice_count, attempted_at)
+           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'maybe', NULL, 's', 'b', 1, now())`,
+          [tenantId, owner.id]
+        )
+      );
+      expect(why).toMatch(/notice_sends_outcome_check/);
+    });
+
+    it("refuses an edit and a delete", async () => {
+      const { rows: one } = await db.admin.query("SELECT id FROM notice_sends WHERE tenant_id = $1 LIMIT 1", [tenantId]);
+      const id = one[0].id as string;
+      await expect(db.admin.query("UPDATE notice_sends SET outcome = 'sent' WHERE id = $1", [id])).rejects.toThrow(
+        /notice_sends is append-only/
+      );
+      await expect(db.admin.query("DELETE FROM notice_sends WHERE id = $1", [id])).rejects.toThrow(/notice_sends is append-only/);
+    });
+  });
+});

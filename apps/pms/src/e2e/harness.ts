@@ -82,6 +82,11 @@ export async function startProductionApp(): Promise<E2eApp> {
     BACKUP_TARGET: "file:///tmp/pms-e2e-backups",
     OBJECT_STORAGE_URL: "file:///tmp/pms-e2e-heads",
     BCRYPT_COST: "4",
+    // A transport that reaches no network (Increment 1.59), so the browser can
+    // drive delivery end to end without a message escaping to a real person.
+    // Unset, the product refuses to send and says so, which the unit and live
+    // suites cover; here the working path is what needs proving.
+    PMS_NOTICE_TRANSPORT: "memory",
   };
   // The test runner sets development shortcuts that production refuses.
   delete env.DEV_MFA_KEY;

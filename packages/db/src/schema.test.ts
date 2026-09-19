@@ -49,6 +49,7 @@ const attestationsSql = readFileSync(join(here, "../migrations/0038_channel_atte
 const threadReadsSql = readFileSync(join(here, "../migrations/0039_cpa_thread_reads.sql"), "utf8");
 const rehashSql = readFileSync(join(here, "../migrations/0040_month_close_rehashes.sql"), "utf8");
 const addressesSql = readFileSync(join(here, "../migrations/0041_notice_addresses.sql"), "utf8");
+const sendsSql = readFileSync(join(here, "../migrations/0042_notice_sends.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -373,6 +374,40 @@ describe("Increment 1.51 attesting a channel the product cannot enforce", () => 
     expect(attestationsSql).toMatch(/GRANT SELECT, INSERT ON channel_attestations TO app_rw;/);
     expect(attestationsSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON channel_attestations/);
     expect(attestationsSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON channel_attestations/);
+  });
+});
+
+describe("Increment 1.59 sending, and failing to send", () => {
+  it("records one row per attempt, append-only", () => {
+    expect(sendsSql).toMatch(/CREATE TABLE notice_sends/);
+    expect(sendsSql).toMatch(/notice_sends is append-only/);
+    expect(sendsSql).toMatch(/TRIGGER notice_sends_no_update[\s\S]*BEFORE UPDATE/);
+    expect(sendsSql).toMatch(/TRIGGER notice_sends_no_delete[\s\S]*BEFORE DELETE/);
+  });
+
+  it("admits three outcomes and no fourth", () => {
+    // A send that "maybe" went is the silence this table exists to prevent.
+    expect(sendsSql).toMatch(/outcome text NOT NULL CHECK \(outcome IN \('sent', 'failed', 'unreachable'\)\)/);
+  });
+
+  it("refuses a failure that does not say what failed", () => {
+    expect(sendsSql).toMatch(/notice_sends_failure_says_why CHECK \(outcome <> 'failed' OR detail IS NOT NULL\)/);
+    // And an unreachable row has no address and says why in words.
+    expect(sendsSql).toMatch(/notice_sends_unreachable_has_no_address/);
+  });
+
+  it("refuses a send that claims to have gone nowhere, or to have said nothing", () => {
+    expect(sendsSql).toMatch(/notice_sends_sent_is_complete/);
+    expect(sendsSql).toMatch(/address IS NOT NULL AND subject IS NOT NULL AND body IS NOT NULL AND detail IS NULL/);
+  });
+
+  it("is tenant-isolated under FORCE RLS and never granted an update or a delete", () => {
+    expect(sendsSql).toMatch(/TRIGGER notice_sends_match_their_tenant[\s\S]*BEFORE INSERT/);
+    expect(sendsSql).toMatch(/ALTER TABLE notice_sends FORCE ROW LEVEL SECURITY/);
+    expect(sendsSql).toMatch(/CREATE POLICY notice_sends_isolation/);
+    expect(sendsSql).toMatch(/GRANT SELECT, INSERT ON notice_sends TO app_rw;/);
+    expect(sendsSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON notice_sends/);
+    expect(sendsSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON notice_sends/);
   });
 });
 

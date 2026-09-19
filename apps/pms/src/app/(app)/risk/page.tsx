@@ -63,12 +63,19 @@ type ReasonCodesResponse = { items: ReasonCodeRow[] };
 
 import type { Notice, NoticeSeat } from "@/lib/notices/outstanding";
 import type { Message } from "@/lib/notices/message";
+import { sendSentence, type SendRecord } from "@/lib/notices/sendOutcome";
 
 type AttestationsResponse = { month: string; items: AttestationRow[] };
 
 type OutstandingResponse = { notices: Notice[]; counts: Record<NoticeSeat, number>; computedAt: string };
 /** Where this viewer's notices would go, and what would go there. Nothing is sent (Increment 1.58). */
-type AddressResponse = { seat: NoticeSeat; address: { address: string | null; setAt: string } | null; message: Message | null };
+type AddressResponse = {
+  seat: NoticeSeat;
+  address: { address: string | null; setAt: string } | null;
+  /** The last attempt and how it went (Increment 1.59); null where nobody has tried. */
+  lastSend: SendRecord | null;
+  message: Message | null;
+};
 
 type Me = { ok: boolean; role?: string; displayName?: string };
 
@@ -252,6 +259,27 @@ export default function PracticeRiskPage() {
         if (!res.ok) throw new Error(body.why ?? body.error ?? "Could not record that.");
         setAddressDraft(null);
         return address === "" ? "You will receive no messages." : `Messages would go to ${address}.`;
+      },
+      false
+    );
+  }
+
+  /**
+   * Sends this person their own notices now (Increment 1.59). Every outcome is
+   * reported in words, the failure loudest of all: a delivery that failed
+   * silently would leave the reader believing they had been told.
+   */
+  async function sendNoticesNow() {
+    await run(
+      "Send this to me now",
+      async () => {
+        const res = await fetch("/api/notices/send", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+        const body = (await res.json().catch(() => ({}))) as
+          | { outcome: "nothing_owed" }
+          | { outcome: "sent" | "failed" | "unreachable"; record: SendRecord };
+        if (!res.ok) throw new Error("Could not attempt a send.");
+        if (body.outcome === "nothing_owed") return "Nothing is owed, so nothing was sent.";
+        return sendSentence(body.record);
       },
       false
     );
@@ -447,6 +475,7 @@ export default function PracticeRiskPage() {
             draft: addressDraft,
             setDraft: setAddressDraft,
             save: (address) => void saveAddress(address),
+            sendNow: () => void sendNoticesNow(),
           }}
           grantForm={{
             person: grantPerson,
@@ -498,6 +527,8 @@ type AddressFormState = {
   draft: string | null;
   setDraft: (v: string | null) => void;
   save: (address: string) => void;
+  /** Sends this viewer their own notices now and records what happened (Increment 1.59). */
+  sendNow: () => void;
 };
 
 function RiskBody({
@@ -1167,6 +1198,15 @@ function RiskBody({
           <button type="submit" className="rounded-md border border-[var(--line)] px-3 py-1 text-sm" disabled={busy !== null}>
             Save address
           </button>
+          {/* Increment 1.59: the act, and its outcome in words. */}
+          <button
+            type="button"
+            className="rounded-md border border-[var(--line)] px-3 py-1 text-sm"
+            disabled={busy !== null}
+            onClick={() => addressForm.sendNow()}
+          >
+            Send this to me now
+          </button>
           {delivery.address?.address ? (
             <button
               type="button"
@@ -1185,6 +1225,15 @@ function RiskBody({
             : delivery.address.address === null
               ? `You asked on ${delivery.address.setAt.slice(0, 10)} not to receive these, so nothing would go anywhere.`
               : `Recorded on ${delivery.address.setAt.slice(0, 10)}. Only you can change this: the database refuses an address set by anybody else.`}
+        </p>
+
+        {/* How the last attempt went, whatever way it went (Increment 1.59). A
+            delivery that failed silently would leave its reader believing they
+            had been told, which is worse than never having sent. */}
+        <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
+          {delivery.lastSend === null
+            ? "Nothing has been sent to you yet."
+            : sendSentence(delivery.lastSend)}
         </p>
 
         {delivery.message === null ? (
