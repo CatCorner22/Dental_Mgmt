@@ -29,7 +29,8 @@
     "check:versions": "bash scripts/check-version-stamps.sh",
     "secret-scan": "bash scripts/secret-scan.sh",
     "review": "bash scripts/final-review.sh",
-    "ci": "pnpm typecheck && pnpm test:packages && pnpm check:routes && pnpm check:versions && pnpm secret-scan && pnpm run syntax && pnpm run verify-docs"
+    "ci": "pnpm typecheck && pnpm test:packages && pnpm check:routes && pnpm check:versions && pnpm secret-scan && pnpm run syntax && pnpm run verify-docs",
+    "notices:round": "pnpm --filter @pms/app notices:round"
   },
   "devDependencies": {
     "playwright": "1.63.0",

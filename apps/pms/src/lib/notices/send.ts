@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import { noticeSends, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { appendControlEvent } from "../controls/events";
@@ -158,6 +158,42 @@ export async function lastSend(db: AppDb, tenantId: string, recipientId: string)
     noticeCount: row.noticeCount,
     attemptedAt: row.attemptedAt.toISOString(),
   };
+}
+
+/**
+ * What the last message of notices that actually reached this person said, and
+ * when — or null where none has.
+ *
+ * "Reached", not "attempted": a send that failed told them nothing, so it must
+ * not suppress the next one (Increment 1.62). And `notice_count > 0` keeps the
+ * code that proves an address out of it, since that message carried no notices
+ * and is no evidence about what this person has been told they owe.
+ *
+ * It returns the body rather than a `SendRecord` because the body is what the
+ * round compares: two identical bodies say the same thing, and comparing what
+ * was actually sent is one fewer thing that can drift than comparing a digest
+ * computed beside it.
+ */
+export async function lastDelivered(
+  db: AppDb,
+  tenantId: string,
+  recipientId: string
+): Promise<{ body: string; at: Date } | null> {
+  const rows = await db
+    .select({ body: noticeSends.body, attemptedAt: noticeSends.attemptedAt })
+    .from(noticeSends)
+    .where(
+      and(
+        eq(noticeSends.tenantId, tenantId),
+        eq(noticeSends.recipientId, recipientId),
+        eq(noticeSends.outcome, "sent"),
+        gt(noticeSends.noticeCount, 0)
+      )
+    )
+    .orderBy(desc(noticeSends.attemptedAt), desc(noticeSends.id))
+    .limit(1);
+  const row = rows[0];
+  return row && row.body !== null ? { body: row.body, at: row.attemptedAt } : null;
 }
 
 /**

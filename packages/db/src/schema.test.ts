@@ -52,6 +52,7 @@ const addressesSql = readFileSync(join(here, "../migrations/0041_notice_addresse
 const sendsSql = readFileSync(join(here, "../migrations/0042_notice_sends.sql"), "utf8");
 const failureKindSql = readFileSync(join(here, "../migrations/0043_notice_send_failure_kind.sql"), "utf8");
 const proofsSql = readFileSync(join(here, "../migrations/0044_notice_address_proofs.sql"), "utf8");
+const roundsSql = readFileSync(join(here, "../migrations/0045_notice_rounds.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -442,6 +443,36 @@ describe("Increment 1.60 a refusal that can pass, and one that cannot", () => {
     // How many times the practice tried is answered by counting attempts. A
     // number stored next to them is a status the rows can contradict.
     expect(failureKindSql).not.toMatch(/attempt_count|retries|retry_count|tries/);
+  });
+});
+
+describe("Increment 1.62 the round that runs without anybody pressing anything", () => {
+  it("writes a row for every round, including the quiet ones", () => {
+    // The one place this codebase writes a row saying nothing happened, and
+    // the reason is the whole increment: a scheduler that died must not look
+    // like a practice that owes nothing.
+    expect(roundsSql).toMatch(/CREATE TABLE notice_rounds/);
+    expect(roundsSql).toMatch(/indistinguishable from a practice that owes\s*--\s*nothing/);
+  });
+
+  it("refuses counts that do not account for everybody considered", () => {
+    expect(roundsSql).toMatch(
+      /notice_rounds_counts_add_up[\s\S]*CHECK \(considered = sent \+ failed \+ unchanged \+ nothing_owed \+ unreachable\)/
+    );
+  });
+
+  it("is append-only, tenant-isolated, and never granted an update or a delete", () => {
+    expect(roundsSql).toMatch(/TRIGGER notice_rounds_no_update[\s\S]*BEFORE UPDATE/);
+    expect(roundsSql).toMatch(/TRIGGER notice_rounds_no_delete[\s\S]*BEFORE DELETE/);
+    expect(roundsSql).toMatch(/ALTER TABLE notice_rounds FORCE ROW LEVEL SECURITY/);
+    expect(roundsSql).toMatch(/CREATE POLICY notice_rounds_isolation/);
+    expect(roundsSql).toMatch(/GRANT SELECT, INSERT ON notice_rounds TO app_rw;/);
+    expect(roundsSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON notice_rounds/);
+    expect(roundsSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON notice_rounds/);
+  });
+
+  it("asks for no acting user, because a round runs with nobody signed in", () => {
+    expect(roundsSql).not.toMatch(/app\.user_id/);
   });
 });
 

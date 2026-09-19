@@ -893,6 +893,30 @@ export const noticeSends = pgTable(
 );
 
 /**
+ * One run of the scheduled sender (Increment 1.62), including the quiet ones.
+ *
+ * Written even when the round had nothing to do, which is the opposite of this
+ * codebase's usual rule, and deliberately: a round that wrote nothing when
+ * nothing happened would make a scheduler that died look exactly like a
+ * practice that owes nothing, and telling those apart is the whole job.
+ */
+export const noticeRounds = pgTable(
+  "notice_rounds",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    ranAt: timestamp("ran_at", { withTimezone: true }).notNull(),
+    considered: integer("considered").notNull(),
+    sent: integer("sent").notNull(),
+    failed: integer("failed").notNull(),
+    unchanged: integer("unchanged").notNull(),
+    nothingOwed: integer("nothing_owed").notNull(),
+    unreachable: integer("unreachable").notNull(),
+  },
+  (t) => [index("notice_rounds_latest_idx").on(t.tenantId, t.ranAt)]
+);
+
+/**
  * One code sent to an address so the person can prove it reaches them
  * (Increment 1.61). The code itself lives only in the message; this row keeps
  * its SHA-256 so the database can recognise the right one and not produce one.
@@ -1042,5 +1066,6 @@ export const TENANT_SCOPED_TABLES = [
   "notice_addresses",
   "notice_address_challenges",
   "notice_address_proofs",
+  "notice_rounds",
   "notice_sends",
 ] as const;

@@ -392,6 +392,11 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     expect(await delivery.innerText()).toContain(
       "A refusal that can pass is tried up to three times in one send; a refusal that cannot is tried once."
     );
+    // Increment 1.62: whether anything sends these without being asked, said
+    // plainly. A scheduler that stopped must not read as a quiet practice.
+    expect(await delivery.innerText()).toContain(
+      "Nothing sends these on a schedule yet, so they go out only when somebody asks."
+    );
     await b.audit("practice risk, nowhere to send it");
 
     // An address on its own is still nowhere to send (Increment 1.61): a
