@@ -116,6 +116,18 @@ export async function listThreads(db: AppDb, tenantId: string, month: string): P
  * have closed needs to know that before they answer, not after.
  */
 export async function threadsAwaitingPractice(db: AppDb, tenantId: string): Promise<Thread[]> {
+  return (await allThreadsUnlabelled(db, tenantId)).filter((t) => t.awaitingPractice);
+}
+
+/**
+ * Every thread of every month, label-free, for a reader that needs them all.
+ *
+ * Label-free for the reason `threadsAwaitingPractice` is: one label costs a
+ * whole month-end package to compute, and a caller that wants them all would
+ * pay that per month. `/cpa`, which has already computed one month's package,
+ * is where a line reads in full.
+ */
+export async function allThreadsUnlabelled(db: AppDb, tenantId: string): Promise<Thread[]> {
   const rows = await db
     .select()
     .from(cpaThreadMessages)
@@ -124,7 +136,7 @@ export async function threadsAwaitingPractice(db: AppDb, tenantId: string): Prom
   const notes = new Map(
     (await listMonthCloses(db, tenantId)).map((c) => [c.month, closedMonthNote({ month: c.month, closedAt: c.closedAt, closedByName: c.closedByName })])
   );
-  return gather(rows.map(toMessage), () => null, (month) => notes.get(month) ?? null).filter((t) => t.awaitingPractice);
+  return gather(rows.map(toMessage), () => null, (month) => notes.get(month) ?? null);
 }
 
 /**
