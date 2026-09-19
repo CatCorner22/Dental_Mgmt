@@ -6,6 +6,7 @@ import { isCpaSeat } from "@/lib/auth/seats";
 import { ANY_REASON, GL_BUCKETS, GL_KINDS, GL_SIDES, type GlMapping } from "@/lib/cpa/types";
 import type { MonthClose } from "@/lib/cpa/close";
 import type { MonthPackage, PackageExport } from "@/lib/cpa/package";
+import type { CloseComparison, RehashBaseline } from "@/lib/cpa/rehash";
 import { formatCents } from "@/lib/ledger/format";
 import { AttestView } from "./attest-view";
 import { QuestionsView } from "./questions-view";
@@ -18,6 +19,9 @@ type PackageResponse = {
   close: MonthClose | null;
   packageSchema: string;
   schemaChanged: boolean;
+  /** What a reader may conclude about this close right now, and from which date (Increment 1.56). */
+  comparison: CloseComparison;
+  baseline: RehashBaseline | null;
   changedSinceClose: boolean;
   frozenFiguresHold: boolean;
   package: MonthPackage;
@@ -130,6 +134,35 @@ export function PackageView() {
       cancelled = true;
     };
   }, [load, month]);
+
+  /**
+   * Takes the baseline for a month closed under an older shape (Increment 1.56).
+   *
+   * It writes a new row and rewrites nothing: the close's own frozen hash goes
+   * on saying what the accountant received. What changes is what a later reader
+   * may conclude, and the date that claim runs from.
+   */
+  async function recordBaseline() {
+    setBusy("baseline");
+    setMessage(null);
+    try {
+      const res = await fetch("/api/cpa/rehash", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ month }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { why?: string; verb?: string };
+      if (!res.ok) {
+        setMessage(`${body.verb ?? "Not recorded"}: ${body.why ?? "The baseline was not recorded."}`);
+        return;
+      }
+      setMessage(`Baseline recorded for ${month}. From today, this month can be asked again whether a figure moved.`);
+      const [data, mappings] = await Promise.all([loadPackage(month), loadMappings()]);
+      setState((s) => (s.status === "ready" ? { ...s, data, mappings } : s));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   /** Exports through the chain-recording route, then hands the browser the file and re-reads the exports list. */
   async function download(format: "json" | "csv") {
@@ -291,6 +324,27 @@ export function PackageView() {
                     : "This month still reads as the accountant received it. A later correction into it posts today with reason prior_period, and is reported in the month it posts."}
               </p>
             )}
+            {/* A month closed under an older shape can be compared again, from a
+                baseline rather than from the close (Increment 1.56). The close's
+                own frozen hash is never rewritten: it records what the accountant
+                received, and the table refuses every update. */}
+            {(state.data.comparison.state === "older_shape_no_baseline" ||
+              state.data.comparison.state === "older_shape_with_baseline") && (
+              <div className="mt-2 rounded-md border border-[var(--line)] p-3">
+                <p className="max-w-prose text-sm text-[var(--ink-2)]">{state.data.comparison.sentence}</p>
+                {state.data.comparison.state === "older_shape_no_baseline" && state.isAdmin && (
+                  <button
+                    type="button"
+                    className="mt-2 min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                    disabled={busy !== null}
+                    onClick={() => void recordBaseline()}
+                  >
+                    {busy === "baseline" ? "Recording…" : "Record a baseline under the current shape"}
+                  </button>
+                )}
+              </div>
+            )}
+
             {state.isAdmin || state.seat ? (
               <div className="mt-3 flex flex-wrap gap-2">
                 <button

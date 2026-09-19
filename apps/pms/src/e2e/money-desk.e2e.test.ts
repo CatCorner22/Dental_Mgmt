@@ -1030,6 +1030,16 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().getByRole("button", { name: "Close it for good" }).click();
     await page().getByText(new RegExp(`^Closed ${ended}\\.`)).waitFor({ timeout: 30_000 });
 
+    // Closed under the shape in force, so its own frozen hash answers and no
+    // baseline is offered (Increment 1.56). The state that offers one — a close
+    // taken under an older shape — cannot arise in a fresh database, because
+    // every close here is made under the current shape; the live suite drives
+    // that path. This is the guard that the control stays away until then.
+    const stamp = page().locator("section[aria-labelledby=package-stamp]");
+    await expect.poll(async () => stamp.innerText(), { timeout: 30_000 }).toContain("still reads as the accountant received it");
+    expect(await stamp.getByRole("button", { name: "Record a baseline under the current shape" }).count()).toBe(0);
+    expect(await stamp.innerText()).not.toContain("do not compare and nothing here can say whether a figure moved");
+
     // The accountant asks about a line of that now-frozen month.
     await b.signIn("ridgeview-cpa", "/cpa");
     await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
