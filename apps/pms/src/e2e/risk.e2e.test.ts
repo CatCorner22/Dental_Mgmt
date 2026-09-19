@@ -387,6 +387,11 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await expect
       .poll(async () => await delivery.innerText(), { timeout: 30_000 })
       .toMatch(/Nothing was sent on \d{4}-\d{2}-\d{2}/);
+    // Increment 1.60. A reader deciding whether to press the button again is
+    // told what pressing it already did, on the screen rather than in a doc.
+    expect(await delivery.innerText()).toContain(
+      "A refusal that can pass is tried up to three times in one send; a refusal that cannot is tried once."
+    );
     await b.audit("practice risk, nowhere to send it");
 
     // With an address, the same act delivers and says where.

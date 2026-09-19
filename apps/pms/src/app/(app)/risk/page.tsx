@@ -276,10 +276,14 @@ export default function PracticeRiskPage() {
         const res = await fetch("/api/notices/send", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
         const body = (await res.json().catch(() => ({}))) as
           | { outcome: "nothing_owed" }
-          | { outcome: "sent" | "failed" | "unreachable"; record: SendRecord };
+          | { outcome: "sent" | "failed" | "unreachable"; record: SendRecord; attempts: number };
         if (!res.ok) throw new Error("Could not attempt a send.");
         if (body.outcome === "nothing_owed") return "Nothing is owed, so nothing was sent.";
-        return sendSentence(body.record);
+        // The attempt count belongs to the act the person just asked for, and
+        // only to it: the table keeps the attempts, and a reader looking later
+        // counts rows rather than trusting a number stored beside them.
+        const tries = body.attempts > 1 ? ` The practice tried ${body.attempts} times.` : "";
+        return `${sendSentence(body.record)}${tries}`;
       },
       false
     );
@@ -1230,10 +1234,18 @@ function RiskBody({
         {/* How the last attempt went, whatever way it went (Increment 1.59). A
             delivery that failed silently would leave its reader believing they
             had been told, which is worse than never having sent. */}
-        <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
+        <p className="mb-1 max-w-prose text-sm text-[var(--ink-2)]">
           {delivery.lastSend === null
             ? "Nothing has been sent to you yet."
             : sendSentence(delivery.lastSend)}
+        </p>
+
+        {/* The standing rule, beside the outcome it governs (Increment 1.60).
+            It is on the screen because a reader deciding whether to press the
+            button again deserves to know what pressing it already did. */}
+        <p className="mb-3 max-w-prose text-sm text-[var(--ink-3)]">
+          A refusal that can pass is tried up to three times in one send; a refusal that cannot is tried once. Every
+          attempt is kept, so the count is the attempts themselves rather than a number beside them.
         </p>
 
         {delivery.message === null ? (
