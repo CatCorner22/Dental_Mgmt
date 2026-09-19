@@ -1,0 +1,299 @@
+import { createHash, randomInt } from "node:crypto";
+import { and, desc, eq } from "drizzle-orm";
+import { noticeAddressChallenges, noticeAddressProofs, uuidv7 } from "@pms/db";
+import type { AppDb } from "../db/client";
+import { appendControlEvent } from "../controls/events";
+import { currentAddress } from "./addresses";
+import { deliverMessage, type Delivered } from "./send";
+import type { NoticeSeat } from "./outstanding";
+import { CODE_WINDOW_HOURS, renderProofMessage } from "./proofMessage";
+import type { Transport } from "./transport";
+
+/**
+ * Proving that an address reaches the person who typed it (Increment 1.61).
+ *
+ * Increment 1.58 stopped one person redirecting another's notices: the database
+ * refuses an address row naming anybody but the caller. It did not stop a
+ * person redirecting their own into a typo, and the typo is the likelier
+ * accident. `riley@ridgeveiw.example` passes every shape check there is and
+ * reaches either nobody or a stranger — and Increment 1.59's guarantee does not
+ * help, because a message a stranger's mailbox accepts **does not fail**. It
+ * succeeds, silently, which is the one outcome this arc exists to prevent.
+ *
+ * So the product stops taking the practice's word for it. A code goes to the
+ * address; the person brings it back; the coming back is the proof.
+ *
+ * **A code, not a link.** A link is a state-changing GET, and it puts a bearer
+ * secret in a URL that a browser keeps, a proxy logs, and a referrer leaks. A
+ * code carried from the inbox to a screen the person is already signed into
+ * proves both halves at once — the token proves who can open the mailbox, and
+ * the session proves who is asking — and neither proof is written down
+ * anywhere a third party sees.
+ *
+ * **Proved, not verified.** `packages/verifier` verifies the hash chain, which
+ * is a different thing entirely, and one word for two concepts is how a reader
+ * ends up believing a claim nobody made.
+ *
+ * **The proof belongs to the address row.** Changing an address writes a new
+ * row with a new id, which no proof points at, so a changed address is unproved
+ * by the shape rather than by anything remembering to clear a flag. A signal
+ * that never clears is not a signal; this one cannot fail to clear.
+ */
+
+/**
+ * No I, L, O, 0 or 1: the code is read off a screen and typed into another one,
+ * and a person who mistakes O for 0 gets told their code is wrong when it was
+ * the alphabet that was wrong.
+ */
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+const CODE_LENGTH = 10;
+
+export type ProofState = {
+  /** Which address row was proved. */
+  addressId: string;
+  /** ISO timestamp. */
+  provedAt: string;
+};
+
+export type ProofRefusal = {
+  ok: false;
+  status: 400 | 409;
+  code: "malformed" | "unknown" | "expired" | "already_proved" | "no_address";
+  verb: string;
+  why: string;
+};
+
+export type ProofResult = { ok: true; proof: ProofState } | ProofRefusal;
+export type ChallengeResult = { ok: true; delivered: Delivered; expiresAt: string } | ProofRefusal;
+
+/** A fresh code, from the system's own randomness rather than anything derived from the row. */
+export function mintCode(): string {
+  let code = "";
+  for (let i = 0; i < CODE_LENGTH; i += 1) code += CODE_ALPHABET[randomInt(CODE_ALPHABET.length)];
+  return code;
+}
+
+/**
+ * What a person typed, as the code they were sent.
+ *
+ * People retype a code with the spaces and hyphens they saw, and in whatever
+ * case their keyboard was in. Refusing that would be refusing a correct answer
+ * for being punctuated, so the reading is normalised and the comparison stays
+ * exact.
+ */
+export function normaliseCode(raw: string): string {
+  return raw.replace(/[\s-]/g, "").toUpperCase();
+}
+
+export function hashCode(code: string): string {
+  return createHash("sha256").update(normaliseCode(code)).digest("hex");
+}
+
+const isWellFormed = (code: string) => code.length === CODE_LENGTH && [...code].every((c) => CODE_ALPHABET.includes(c));
+
+/** Whether this exact address row has been proved, and when. Null where it has not. */
+export async function currentProof(db: AppDb, tenantId: string, addressId: string): Promise<ProofState | null> {
+  const rows = await db
+    .select()
+    .from(noticeAddressProofs)
+    .where(and(eq(noticeAddressProofs.tenantId, tenantId), eq(noticeAddressProofs.addressId, addressId)))
+    .limit(1);
+  const row = rows[0];
+  return row ? { addressId: row.addressId, provedAt: row.provedAt.toISOString() } : null;
+}
+
+/**
+ * Sends a code to the address on file, and records the attempt like any other.
+ *
+ * The message goes through `deliverMessage`, so it meets the same transport,
+ * the same retry rule, and the same row per attempt as a message of notices —
+ * which means a code that could not be delivered is as visible as anything
+ * else, and a person is never left waiting for something that never left.
+ *
+ * The row it writes carries `noticeCount: 0`. That is not a placeholder: a
+ * message of no notices is never sent, because nothing owed writes no row at
+ * all, so a zero there means exactly "this message carried no notices" and
+ * names this one message in the whole table.
+ */
+export async function sendProofCode(
+  db: AppDb,
+  input: {
+    tenantId: string;
+    userId: string;
+    userName: string;
+    seat: NoticeSeat;
+    practiceName: string;
+    appUrl: string;
+    transport: Transport;
+    at?: Date;
+    pause?: (ms: number) => Promise<void>;
+  }
+): Promise<ChallengeResult> {
+  const at = input.at ?? new Date();
+  const held = await currentAddress(db, input.tenantId, input.userId);
+  if (held === null || held.address === null) {
+    return {
+      ok: false,
+      status: 409,
+      code: "no_address",
+      verb: "send a code",
+      why:
+        held === null
+          ? "There is no address to prove. Save one first, and a code will go to it."
+          : `You asked on ${held.setAt.slice(0, 10)} not to receive messages, so there is nowhere to send a code.`,
+    };
+  }
+  const already = await currentProof(db, input.tenantId, held.id);
+  if (already !== null) {
+    return {
+      ok: false,
+      status: 409,
+      code: "already_proved",
+      verb: "send a code",
+      why: `${held.address} was proved on ${already.provedAt.slice(0, 10)}. Change the address if it is wrong; a new one is proved again.`,
+    };
+  }
+
+  const code = mintCode();
+  const expiresAt = new Date(at.getTime() + CODE_WINDOW_HOURS * 60 * 60 * 1000);
+  const challengeId = uuidv7();
+  // The challenge is written before the message goes, so a code that reaches
+  // somebody is always a code this database can recognise. Written after, a
+  // send that succeeded while the write failed would leave a person holding a
+  // code nothing accepts.
+  await db.insert(noticeAddressChallenges).values({
+    id: challengeId,
+    tenantId: input.tenantId,
+    userId: input.userId,
+    addressId: held.id,
+    tokenHash: hashCode(code),
+    issuedAt: at,
+    expiresAt,
+  });
+
+  const delivered = await deliverMessage(db, {
+    tenantId: input.tenantId,
+    recipientId: input.userId,
+    recipientName: input.userName,
+    seat: input.seat,
+    message: renderProofMessage({ practiceName: input.practiceName, code, appUrl: input.appUrl }),
+    noticeCount: 0,
+    address: held.address,
+    why: null,
+    transport: input.transport,
+    at: input.at,
+    pause: input.pause,
+  });
+
+  // The chain names the act and never the code or the address: a code on the
+  // chain would be a bearer secret readable by everyone who may govern this
+  // practice, which is the opposite of what it is for.
+  await appendControlEvent(
+    db,
+    input.tenantId,
+    input.userId,
+    "notice.address_code_sent",
+    { by: input.userName, outcome: delivered.record.outcome, attempts: delivered.attempts },
+    at
+  );
+
+  return { ok: true, delivered, expiresAt: expiresAt.toISOString() };
+}
+
+/**
+ * Takes a code back and records the proof, or says in words why it will not.
+ *
+ * The lookup is scoped to the caller's own rows, so a code issued to somebody
+ * else does not match rather than matching and being refused. That is why there
+ * is no "this is not your code" refusal to write: the query cannot see one.
+ */
+export async function proveAddress(
+  db: AppDb,
+  tenantId: string,
+  userId: string,
+  userName: string,
+  raw: string,
+  at: Date = new Date()
+): Promise<ProofResult> {
+  const code = normaliseCode(raw);
+  if (!isWellFormed(code)) {
+    return {
+      ok: false,
+      status: 400,
+      code: "malformed",
+      verb: "prove this address",
+      why: `A code is ${CODE_LENGTH} letters and digits. "${raw.trim()}" is not one, so nothing was checked.`,
+    };
+  }
+
+  const held = await currentAddress(db, tenantId, userId);
+  if (held === null || held.address === null) {
+    return {
+      ok: false,
+      status: 409,
+      code: "no_address",
+      verb: "prove this address",
+      why: "There is no address on file to prove. Save one, ask for a code, and bring it back.",
+    };
+  }
+  const already = await currentProof(db, tenantId, held.id);
+  if (already !== null) {
+    return {
+      ok: false,
+      status: 409,
+      code: "already_proved",
+      verb: "prove this address",
+      why: `${held.address} was already proved, on ${already.provedAt.slice(0, 10)}.`,
+    };
+  }
+
+  const rows = await db
+    .select()
+    .from(noticeAddressChallenges)
+    .where(
+      and(
+        eq(noticeAddressChallenges.tenantId, tenantId),
+        eq(noticeAddressChallenges.userId, userId),
+        eq(noticeAddressChallenges.tokenHash, hashCode(code))
+      )
+    )
+    .orderBy(desc(noticeAddressChallenges.issuedAt))
+    .limit(1);
+  const challenge = rows[0];
+  // A code for an address that is no longer the one on file is as unknown as a
+  // code nobody issued: it proves a row the practice has moved on from.
+  if (!challenge || challenge.addressId !== held.id) {
+    // 409 rather than 404: this route addresses no resource by name, so nothing
+    // here can be missing. What refuses is the practice's state — there is no
+    // outstanding code of that shape — which is what 409 says everywhere else
+    // in this product. It also leaves a 404 from an API route meaning the one
+    // thing it should mean, that the route is not there.
+    return {
+      ok: false,
+      status: 409,
+      code: "unknown",
+      verb: "prove this address",
+      why: "That code does not match one sent to this address. Ask for another, and use the newest one.",
+    };
+  }
+  if (at > challenge.expiresAt) {
+    return {
+      ok: false,
+      status: 409,
+      code: "expired",
+      verb: "prove this address",
+      why: `That code stopped working on ${challenge.expiresAt.toISOString().slice(0, 10)}. Ask for another.`,
+    };
+  }
+
+  await db.insert(noticeAddressProofs).values({
+    id: uuidv7(),
+    tenantId,
+    userId,
+    addressId: held.id,
+    challengeId: challenge.id,
+    provedAt: at,
+  });
+  await appendControlEvent(db, tenantId, userId, "notice.address_proved", { by: userName }, at);
+  return { ok: true, proof: { addressId: held.id, provedAt: at.toISOString() } };
+}

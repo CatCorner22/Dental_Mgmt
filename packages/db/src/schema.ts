@@ -893,6 +893,42 @@ export const noticeSends = pgTable(
 );
 
 /**
+ * One code sent to an address so the person can prove it reaches them
+ * (Increment 1.61). The code itself lives only in the message; this row keeps
+ * its SHA-256 so the database can recognise the right one and not produce one.
+ */
+export const noticeAddressChallenges = pgTable(
+  "notice_address_challenges",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    /** The exact address row the code went to, so a later address is not proved by an earlier code. */
+    addressId: uuid("address_id").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("notice_address_challenges_lookup_idx").on(t.tenantId, t.userId, t.tokenHash)]
+);
+
+/**
+ * That one address row was proved to reach the person it names (Increment
+ * 1.61). One row per address, forever: changing an address writes a new
+ * address row, which no proof points at, so a changed address is unproved by
+ * the shape rather than by anything remembering to clear a flag.
+ */
+export const noticeAddressProofs = pgTable("notice_address_proofs", {
+  id: uuid("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  addressId: uuid("address_id").notNull(),
+  /** Which code proved it, so "how do we know" has an answer rather than a date. */
+  challengeId: uuid("challenge_id").notNull(),
+  provedAt: timestamp("proved_at", { withTimezone: true }).notNull(),
+});
+
+/**
  * One append-only message in a thread the accountant and the practice hold
  * about one month-end package line (Increment 1.50). The message that opened a
  * thread carries its own id in `threadId`; a reply carries the opener's, and
@@ -1004,5 +1040,7 @@ export const TENANT_SCOPED_TABLES = [
   "cpa_thread_reads",
   "month_close_rehashes",
   "notice_addresses",
+  "notice_address_challenges",
+  "notice_address_proofs",
   "notice_sends",
 ] as const;

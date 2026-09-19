@@ -71,7 +71,9 @@ type OutstandingResponse = { notices: Notice[]; counts: Record<NoticeSeat, numbe
 /** Where this viewer's notices would go, and what would go there. Nothing is sent (Increment 1.58). */
 type AddressResponse = {
   seat: NoticeSeat;
-  address: { address: string | null; setAt: string } | null;
+  address: { id: string; address: string | null; setAt: string } | null;
+  /** Whether this exact address row was proved to reach this person (Increment 1.61); null where it was not. */
+  proof: { addressId: string; provedAt: string } | null;
   /** The last attempt and how it went (Increment 1.59); null where nobody has tried. */
   lastSend: SendRecord | null;
   message: Message | null;
@@ -158,6 +160,7 @@ export default function PracticeRiskPage() {
 
   // Where my own notices would go (Increment 1.58). Nothing is sent.
   const [addressDraft, setAddressDraft] = useState<string | null>(null);
+  const [codeDraft, setCodeDraft] = useState("");
 
   // Grant form
   const [grantPerson, setGrantPerson] = useState("");
@@ -284,6 +287,55 @@ export default function PracticeRiskPage() {
         // counts rows rather than trusting a number stored beside them.
         const tries = body.attempts > 1 ? ` The practice tried ${body.attempts} times.` : "";
         return `${sendSentence(body.record)}${tries}`;
+      },
+      false
+    );
+  }
+
+  /**
+   * Asks for a code to be sent to the address on file (Increment 1.61).
+   *
+   * The outcome of the send is reported in the same words a send of notices
+   * gets, because it is the same act through the same transport: a person left
+   * waiting for a code that never left would conclude the product is broken,
+   * or worse, that their address works.
+   */
+  async function askForCode() {
+    await run(
+      "Send me a code",
+      async () => {
+        const res = await fetch("/api/notices/prove", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        });
+        const body = (await res.json().catch(() => ({}))) as {
+          why?: string;
+          error?: string;
+          delivered?: { record: SendRecord; attempts: number };
+        };
+        if (!res.ok) throw new Error(body.why ?? body.error ?? "Could not send a code.");
+        const record = body.delivered?.record;
+        return record ? sendSentence(record) : "A code was sent.";
+      },
+      false
+    );
+  }
+
+  /** Brings a code back, which is the proof (Increment 1.61). */
+  async function proveAddressNow(code: string) {
+    await run(
+      "Prove this address",
+      async () => {
+        const res = await fetch("/api/notices/prove", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ code }),
+        });
+        const body = (await res.json().catch(() => ({}))) as { why?: string; error?: string };
+        if (!res.ok) throw new Error(body.why ?? body.error ?? "Could not check that code.");
+        setCodeDraft("");
+        return "This address is proved. Your notices will go to it.";
       },
       false
     );
@@ -480,6 +532,10 @@ export default function PracticeRiskPage() {
             setDraft: setAddressDraft,
             save: (address) => void saveAddress(address),
             sendNow: () => void sendNoticesNow(),
+            codeDraft,
+            setCodeDraft,
+            askForCode: () => void askForCode(),
+            prove: (code: string) => void proveAddressNow(code),
           }}
           grantForm={{
             person: grantPerson,
@@ -533,6 +589,11 @@ type AddressFormState = {
   save: (address: string) => void;
   /** Sends this viewer their own notices now and records what happened (Increment 1.59). */
   sendNow: () => void;
+  /** Asks for a code, and brings one back (Increment 1.61). */
+  codeDraft: string;
+  setCodeDraft: (v: string) => void;
+  askForCode: () => void;
+  prove: (code: string) => void;
 };
 
 function RiskBody({
@@ -1230,6 +1291,56 @@ function RiskBody({
               ? `You asked on ${delivery.address.setAt.slice(0, 10)} not to receive these, so nothing would go anywhere.`
               : `Recorded on ${delivery.address.setAt.slice(0, 10)}. Only you can change this: the database refuses an address set by anybody else.`}
         </p>
+
+        {/* Whether anybody has proved this address reaches this person
+            (Increment 1.61). A mistyped address does not fail: it is accepted
+            by whoever does own that mailbox, so nothing but a code coming back
+            tells the practice the difference. */}
+        {delivery.address?.address ? (
+          delivery.proof ? (
+            <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
+              Proved on {delivery.proof.provedAt.slice(0, 10)}: somebody opened this address and brought back the code sent
+              to it. Changing the address means proving the new one, because a proof names the address rather than you.
+            </p>
+          ) : (
+            <form
+              className="mb-3 max-w-prose rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3"
+              onSubmit={(e) => {
+                e.preventDefault();
+                addressForm.prove(addressForm.codeDraft);
+              }}
+            >
+              <p className="mb-2 text-sm">
+                <strong>Nobody has proved this address reaches you</strong>, so nothing is sent to it. A mistyped address
+                does not bounce — it is accepted by whoever does own that mailbox — so the practice asks you to fetch a
+                code from it instead.
+              </p>
+              <div className="flex flex-wrap items-end gap-2">
+                <button
+                  type="button"
+                  className="rounded-md border border-[var(--line)] px-3 py-1 text-sm"
+                  disabled={busy !== null}
+                  onClick={() => addressForm.askForCode()}
+                >
+                  Send me a code
+                </button>
+                <label className="flex flex-col text-sm">
+                  <span className="mb-1 font-medium">Code from that message</span>
+                  <input
+                    type="text"
+                    className="w-48 rounded-md border border-[var(--line)] bg-[var(--surface)] px-2 py-1 font-mono uppercase"
+                    placeholder="ABCD234XYZ"
+                    value={addressForm.codeDraft}
+                    onChange={(e) => addressForm.setCodeDraft(e.target.value)}
+                  />
+                </label>
+                <button type="submit" className="rounded-md border border-[var(--line)] px-3 py-1 text-sm" disabled={busy !== null}>
+                  Prove this address
+                </button>
+              </div>
+            </form>
+          )
+        ) : null}
 
         {/* How the last attempt went, whatever way it went (Increment 1.59). A
             delivery that failed silently would leave its reader believing they

@@ -3,6 +3,7 @@ import { noticeSends, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { appendControlEvent } from "../controls/events";
 import { currentAddress } from "./addresses";
+import { currentProof } from "./proof";
 import { renderMessage, type Message } from "./message";
 import type { Notice, NoticeSeat } from "./outstanding";
 import type { FailureKind, SendOutcome, SendRecord } from "./sendOutcome";
@@ -101,6 +102,30 @@ const MAX_ATTEMPTS = PAUSES_MS.length + 1;
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** What one message needs to reach one person, or to be recorded as having reached nobody. */
+export type DeliveryInput = {
+  tenantId: string;
+  recipientId: string;
+  recipientName: string;
+  seat: NoticeSeat;
+  message: Message;
+  /**
+   * How many things the message named. Zero belongs to the message that
+   * carries no notices at all — the code that proves an address (Increment
+   * 1.61) — because a send of no notices never happens: nothing owed writes no
+   * row.
+   */
+  noticeCount: number;
+  /** Where it goes, or null for "nowhere, and `why` says so". */
+  address: string | null;
+  why: string | null;
+  transport: Transport;
+  at?: Date;
+  pause?: (ms: number) => Promise<void>;
+};
+
+export type Delivered = { record: SendRecord; attempts: number };
+
 /**
  * The latest attempt for one person, or null where nobody has ever tried.
  *
@@ -143,27 +168,20 @@ export async function lastSend(db: AppDb, tenantId: string, recipientId: string)
  * reading could differ from the one they were looking at, and a message that
  * disagrees with the screen it came from is worse than no message.
  */
-export async function sendNotices(db: AppDb, input: SendInput): Promise<SendResult> {
-  const at = input.at ?? new Date();
+/**
+ * The attempt loop, and the only copy of it.
+ *
+ * Both the notices a seat owes and the code that proves an address reach a
+ * person through here (Increment 1.61), so the retry rule, the row per
+ * attempt, and the stamp on each attempt are written once. A second copy would
+ * be a second rule, and the two would drift the first time one was changed.
+ *
+ * A null `address` means there was nowhere to send, and `why` says so; the
+ * transport is not asked, and no attempt is counted.
+ */
+export async function deliverMessage(db: AppDb, input: DeliveryInput): Promise<Delivered> {
   const pause = input.pause ?? sleep;
-  const message: Message | null = renderMessage({
-    practiceName: input.practiceName,
-    seat: input.seat,
-    notices: input.notices,
-    appUrl: input.appUrl,
-  });
 
-  // Nothing owed is not an act. No message, no attempt, no row.
-  if (message === null) return { outcome: "nothing_owed" };
-
-  const held = await currentAddress(db, input.tenantId, input.recipientId);
-  const count = input.notices.filter((n) => n.seat === input.seat).length;
-
-  /**
-   * Writes one attempt and hands back what it wrote, so the row and the answer
-   * cannot drift apart: the caller reports what the database now holds rather
-   * than a parallel account of it.
-   */
   const record = async (
     outcome: SendRecord["outcome"],
     address: string | null,
@@ -187,9 +205,9 @@ export async function sendNotices(db: AppDb, input: SendInput): Promise<SendResu
       failureKind,
       // A message was built either way, and what it said is what somebody would
       // have received; keeping it on a failure is what makes the failure legible.
-      subject: message.subject,
-      body: message.body,
-      noticeCount: count,
+      subject: input.message.subject,
+      body: input.message.body,
+      noticeCount: input.noticeCount,
       attemptedAt,
     });
     return {
@@ -199,53 +217,95 @@ export async function sendNotices(db: AppDb, input: SendInput): Promise<SendResu
       outcome,
       detail,
       failureKind,
-      subject: message.subject,
-      noticeCount: count,
+      subject: input.message.subject,
+      noticeCount: input.noticeCount,
       attemptedAt: attemptedAt.toISOString(),
     };
   };
 
-  /**
-   * Closes the act: one chain event naming what was asked for and how it ended.
-   *
-   * One event for the act rather than one per attempt, because a person asked
-   * to be sent their notices once. The attempts are in the table, where a
-   * reader who wants them can count them; the chain is read by people who may
-   * govern this practice without being this person, so it names the act and its
-   * outcome, never the address and never the body.
-   */
-  const close = async (result: SendRecord, attempts: number): Promise<SendResult> => {
-    await appendControlEvent(
-      db,
-      input.tenantId,
-      input.recipientId,
-      "notice.sent",
-      { seat: input.seat, outcome: result.outcome, count, attempts },
-      at
-    );
-    return { outcome: result.outcome, record: result, attempts };
-  };
-
-  if (held === null || held.address === null) {
-    // Something is owed and there is nowhere to send it. Not an error, and not
-    // nothing: a practice owes something and no one will hear about it. No
-    // transport is asked, so there is nothing to retry and nothing to count.
-    const why =
-      held === null
-        ? "Nobody has said where to send these, so there was nowhere to send them."
-        : `You asked on ${held.setAt.slice(0, 10)} not to receive these, so there was nowhere to send them.`;
-    return close(await record("unreachable", null, why, null), 0);
+  if (input.address === null) {
+    return { record: await record("unreachable", null, input.why, null), attempts: 0 };
   }
 
-  const address = held.address;
+  const address = input.address;
   for (let attempt = 1; ; attempt += 1) {
-    const delivery = await input.transport.send(address, message);
-    if (delivery.ok) return close(await record("sent", address, null, null), attempt);
+    const delivery = await input.transport.send(address, input.message);
+    if (delivery.ok) return { record: await record("sent", address, null, null), attempts: attempt };
 
     const written = await record("failed", address, delivery.why, delivery.kind);
     // A permanent refusal ends the act here. Trying an address that does not
     // exist a second time changes nothing and spends the waiting person's time.
-    if (delivery.kind === "permanent" || attempt >= MAX_ATTEMPTS) return close(written, attempt);
+    if (delivery.kind === "permanent" || attempt >= MAX_ATTEMPTS) return { record: written, attempts: attempt };
     await pause(PAUSES_MS[attempt - 1]!);
   }
+}
+
+export async function sendNotices(db: AppDb, input: SendInput): Promise<SendResult> {
+  const at = input.at ?? new Date();
+  const message: Message | null = renderMessage({
+    practiceName: input.practiceName,
+    seat: input.seat,
+    notices: input.notices,
+    appUrl: input.appUrl,
+  });
+
+  // Nothing owed is not an act. No message, no attempt, no row.
+  if (message === null) return { outcome: "nothing_owed" };
+
+  const held = await currentAddress(db, input.tenantId, input.recipientId);
+  const count = input.notices.filter((n) => n.seat === input.seat).length;
+
+  /**
+   * Where this goes, or why it goes nowhere.
+   *
+   * Three ways to have nowhere to send, and the third is Increment 1.61's: an
+   * address nobody has proved reaches this person is not a destination. A
+   * message to a mistyped address does not fail — it is accepted by whoever
+   * does own that mailbox, silently, which is the one outcome this arc exists
+   * to prevent. So an unproved address is `unreachable` rather than `sent`,
+   * recorded like any other, and the reason says what would change it.
+   */
+  let address: string | null = null;
+  let why: string | null = null;
+  if (held === null) {
+    why = "Nobody has said where to send these, so there was nowhere to send them.";
+  } else if (held.address === null) {
+    why = `You asked on ${held.setAt.slice(0, 10)} not to receive these, so there was nowhere to send them.`;
+  } else if ((await currentProof(db, input.tenantId, held.id)) === null) {
+    why =
+      "Nobody has proved that this address reaches you, so nothing was sent to it. " +
+      "Ask for a code and bring it back, and these will go out.";
+  } else {
+    address = held.address;
+  }
+
+  const { record, attempts } = await deliverMessage(db, {
+    tenantId: input.tenantId,
+    recipientId: input.recipientId,
+    recipientName: input.recipientName,
+    seat: input.seat,
+    message,
+    noticeCount: count,
+    address,
+    why,
+    transport: input.transport,
+    at: input.at,
+    pause: input.pause,
+  });
+
+  // The chain names the act and its outcome, never the address and never the
+  // body: the chain is read by people who may govern this practice without
+  // being this person. One event for the act rather than one per attempt,
+  // because a person asked to be sent their notices once; the attempts are in
+  // the table, where a reader who wants them can count them.
+  await appendControlEvent(
+    db,
+    input.tenantId,
+    input.recipientId,
+    "notice.sent",
+    { seat: input.seat, outcome: record.outcome, count, attempts },
+    at
+  );
+
+  return { outcome: record.outcome, record, attempts };
 }

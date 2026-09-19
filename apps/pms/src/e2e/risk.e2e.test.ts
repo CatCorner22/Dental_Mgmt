@@ -365,7 +365,7 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await b.audit("practice risk, asked not to receive");
   }, 120_000);
 
-  it("sends, says where it went, and says plainly when there was nowhere to send", async () => {
+  it("sends only to an address somebody proved, and says plainly when there was nowhere to send", async () => {
     // Increment 1.59. The half that matters is the failure: a delivery that
     // went nowhere and said nothing would leave its reader believing they had
     // been told.
@@ -394,10 +394,53 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     );
     await b.audit("practice risk, nowhere to send it");
 
-    // With an address, the same act delivers and says where.
+    // An address on its own is still nowhere to send (Increment 1.61): a
+    // mistyped one does not bounce, it is accepted by whoever owns that
+    // mailbox, so nothing but a code coming back tells the practice apart from
+    // a stranger.
     await delivery.getByLabel("Your address").fill("riley@ridgeview.example");
     await delivery.getByRole("button", { name: "Save address" }).click();
     await flash(/Messages would go to riley@ridgeview\.example\./).waitFor({ timeout: 30_000 });
+    await delivery.getByRole("button", { name: "Send this to me now" }).click();
+    await expect
+      .poll(async () => await banner.innerText(), { timeout: 30_000 })
+      .toMatch(/Nobody has proved that this address reaches you/);
+    await b.audit("practice risk, an address nobody has proved");
+
+    // The code goes to the address, through the same transport and the same
+    // retry rule as anything else, so a code that could not be delivered would
+    // read exactly as a failed send.
+    await delivery.getByRole("button", { name: "Send me a code" }).click();
+    await expect
+      .poll(async () => await banner.innerText(), { timeout: 30_000 })
+      .toMatch(/Sent to riley@ridgeview\.example on \d{4}-\d{2}-\d{2}\./);
+
+    // A code nobody sent proves nothing, and says so rather than failing quietly.
+    await delivery.getByLabel("Code from that message").fill("ABCDEFGHJK");
+    await delivery.getByRole("button", { name: "Prove this address" }).click();
+    await expect
+      .poll(async () => await banner.innerText(), { timeout: 30_000 })
+      .toMatch(/That code does not match one sent to this address/);
+
+    // The real code, read out of the row the product wrote when it sent the
+    // message — which is the only place it exists, since the code is stored as
+    // a hash and never appears on the chain.
+    const { rows } = await app.db.admin.query(
+      "SELECT body FROM notice_sends WHERE notice_count = 0 ORDER BY attempted_at DESC, id DESC LIMIT 1"
+    );
+    const code = /Your code is ([A-HJKMNP-Z2-9]{10})/.exec(rows[0].body as string)?.[1] ?? "";
+    expect(code).toHaveLength(10);
+    await delivery.getByLabel("Code from that message").fill(code);
+    await delivery.getByRole("button", { name: "Prove this address" }).click();
+    await expect
+      .poll(async () => await banner.innerText(), { timeout: 30_000 })
+      .toMatch(/This address is proved\./);
+    await expect
+      .poll(async () => await delivery.innerText(), { timeout: 30_000 })
+      .toMatch(/Proved on \d{4}-\d{2}-\d{2}: somebody opened this address/);
+    await b.audit("practice risk, a proved address");
+
+    // And now the notices go.
     await delivery.getByRole("button", { name: "Send this to me now" }).click();
     await expect
       .poll(async () => await banner.innerText(), { timeout: 30_000 })
@@ -406,7 +449,7 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
       .poll(async () => await delivery.innerText(), { timeout: 30_000 })
       .toMatch(/Sent to riley@ridgeview\.example on \d{4}-\d{2}-\d{2}\./);
     await b.audit("practice risk, sent");
-  }, 120_000);
+  }, 180_000);
 
   it("shows a user-rank account the Refusal, not the page", async () => {
     await b.signIn("ridgeview-front", "/risk");
