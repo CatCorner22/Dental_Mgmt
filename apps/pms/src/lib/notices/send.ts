@@ -1,4 +1,4 @@
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { noticeSends, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { appendControlEvent } from "../controls/events";
@@ -103,17 +103,20 @@ const MAX_ATTEMPTS = PAUSES_MS.length + 1;
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /** What one message needs to reach one person, or to be recorded as having reached nobody. */
+/** What a message is, said on its row rather than inferred from its shape (Increment 1.64). */
+export type MessageKind = "notices" | "proof_code" | "digest";
+
 export type DeliveryInput = {
   tenantId: string;
+  kind: MessageKind;
   recipientId: string;
   recipientName: string;
   seat: NoticeSeat;
   message: Message;
   /**
-   * How many things the message named. Zero belongs to the message that
-   * carries no notices at all — the code that proves an address (Increment
-   * 1.61) — because a send of no notices never happens: nothing owed writes no
-   * row.
+   * How many things the message named. Zero belongs to the code that proves an
+   * address and to nothing else, which the database now holds as a rule rather
+   * than leaving a reader to infer (Increment 1.64).
    */
   noticeCount: number;
   /** Where it goes, or null for "nowhere, and `why` says so". */
@@ -165,9 +168,10 @@ export async function lastSend(db: AppDb, tenantId: string, recipientId: string)
  * when — or null where none has.
  *
  * "Reached", not "attempted": a send that failed told them nothing, so it must
- * not suppress the next one (Increment 1.62). And `notice_count > 0` keeps the
- * code that proves an address out of it, since that message carried no notices
- * and is no evidence about what this person has been told they owe.
+ * not suppress the next one (Increment 1.62). The kind keeps the three
+ * messages apart, since what a person was last told they owe says nothing
+ * about when they were last sent a digest, and neither says anything about a
+ * code (Increment 1.64).
  *
  * It returns the body rather than a `SendRecord` because the body is what the
  * round compares: two identical bodies say the same thing, and comparing what
@@ -177,7 +181,8 @@ export async function lastSend(db: AppDb, tenantId: string, recipientId: string)
 export async function lastDelivered(
   db: AppDb,
   tenantId: string,
-  recipientId: string
+  recipientId: string,
+  kind: MessageKind = "notices"
 ): Promise<{ body: string; at: Date } | null> {
   const rows = await db
     .select({ body: noticeSends.body, attemptedAt: noticeSends.attemptedAt })
@@ -187,7 +192,7 @@ export async function lastDelivered(
         eq(noticeSends.tenantId, tenantId),
         eq(noticeSends.recipientId, recipientId),
         eq(noticeSends.outcome, "sent"),
-        gt(noticeSends.noticeCount, 0)
+        eq(noticeSends.kind, kind)
       )
     )
     .orderBy(desc(noticeSends.attemptedAt), desc(noticeSends.id))
@@ -239,6 +244,7 @@ export async function deliverMessage(db: AppDb, input: DeliveryInput): Promise<D
       outcome,
       detail,
       failureKind,
+      kind: input.kind,
       // A message was built either way, and what it said is what somebody would
       // have received; keeping it on a failure is what makes the failure legible.
       subject: input.message.subject,
@@ -317,6 +323,7 @@ export async function sendNotices(db: AppDb, input: SendInput): Promise<SendResu
 
   const { record, attempts } = await deliverMessage(db, {
     tenantId: input.tenantId,
+    kind: "notices",
     recipientId: input.recipientId,
     recipientName: input.recipientName,
     seat: input.seat,

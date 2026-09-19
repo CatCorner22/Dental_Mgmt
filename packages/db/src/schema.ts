@@ -884,6 +884,8 @@ export const noticeSends = pgTable(
      * other outcome, and on a failure recorded before the distinction existed.
      */
     failureKind: text("failure_kind"),
+    /** 'notices' | 'proof_code' | 'digest' (Increment 1.64): what this message was, said rather than inferred. */
+    kind: text("kind").notNull(),
     subject: text("subject"),
     body: text("body"),
     noticeCount: integer("notice_count").notNull(),
@@ -912,6 +914,9 @@ export const noticeRounds = pgTable(
     unchanged: integer("unchanged").notNull(),
     nothingOwed: integer("nothing_owed").notNull(),
     unreachable: integer("unreachable").notNull(),
+    /** A second axis over the same people (Increment 1.64), counted beside the sum rather than folded into it. */
+    digestsSent: integer("digests_sent").notNull(),
+    digestsFailed: integer("digests_failed").notNull(),
   },
   (t) => [index("notice_rounds_latest_idx").on(t.tenantId, t.ranAt)]
 );

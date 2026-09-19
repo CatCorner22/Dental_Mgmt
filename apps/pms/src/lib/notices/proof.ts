@@ -250,6 +250,7 @@ export async function sendProofCode(
 
   const delivered = await deliverMessage(db, {
     tenantId: input.tenantId,
+    kind: "proof_code",
     recipientId: input.userId,
     recipientName: input.userName,
     seat: input.seat,

@@ -5,7 +5,7 @@ import { DEV_TENANTS, DEV_USERS } from "@pms/db/seed-data";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { setAddress } from "./addresses";
 import { proveAddress, sendProofCode } from "./proof";
-import { lastRound, runNoticeRound } from "./round";
+import { lastCompleteWeek, lastRound, runNoticeRound } from "./round";
 import { memoryTransport, refusingTransport, type Transport } from "./transport";
 
 /**
@@ -51,7 +51,7 @@ describe.skipIf(!adminUrl)("a notice round (live)", () => {
   const noticeRows = async () =>
     (
       await db.admin.query(
-        "SELECT outcome, notice_count, attempted_at FROM notice_sends WHERE tenant_id = $1 AND notice_count > 0 ORDER BY attempted_at, id",
+        "SELECT outcome, notice_count, attempted_at FROM notice_sends WHERE tenant_id = $1 AND kind = 'notices' ORDER BY attempted_at, id",
         [tenantId]
       )
     ).rows;
@@ -182,6 +182,111 @@ describe.skipIf(!adminUrl)("a notice round (live)", () => {
     expect(text).not.toContain("ridgeview.example");
   });
 
+  describe("the week's digest, on its own rule", () => {
+    // Increment 1.64. The digest answers a different question from the notices
+    // — "has a week passed?" rather than "has anything changed?" — and its
+    // counts move every day, so the change-or-stale rule would make it daily,
+    // which is the noise that rule exists to prevent.
+    //
+    // A fresh address, proved, well clear of everything above: the cases here
+    // are about the digest and must not be refused first by something else.
+    const monday = new Date("2026-11-02T09:00:00.000Z");
+
+    const digestRows = async () =>
+      (
+        await db.admin.query(
+          "SELECT subject, body, notice_count, attempted_at FROM notice_sends WHERE tenant_id = $1 AND kind = 'digest' ORDER BY attempted_at, id",
+          [tenantId]
+        )
+      ).rows;
+
+    beforeAll(async () => {
+      await tx((d) => setAddress(d, tenantId, owner.id, owner.displayName, "riley@ridgeview-week.example"));
+      const codes = memoryTransport();
+      await tx((d) =>
+        sendProofCode(d, {
+          tenantId,
+          userId: owner.id,
+          userName: owner.displayName,
+          seat: "owner",
+          practiceName: "Ridgeview Dental",
+          appUrl: "https://app.example",
+          transport: codes,
+          pause: async () => {},
+        })
+      );
+      const code = /Your code is ([A-HJKMNP-Z2-9]{10})/.exec(codes.sent[0].message.body)?.[1] ?? "";
+      expect(await tx((d) => proveAddress(d, tenantId, owner.id, owner.displayName, code))).toMatchObject({ ok: true });
+    });
+
+    it("names the seven days ending on the Sunday before, whatever day it runs", () => {
+      // A fixed boundary rather than a rolling window: a rolling one would name
+      // a different week on Monday than on Tuesday, and a message whose subject
+      // changed daily would be a new message daily.
+      expect(lastCompleteWeek(new Date("2026-11-02T09:00:00Z"))).toMatchObject({ start: "2026-10-26", end: "2026-11-01" });
+      expect(lastCompleteWeek(new Date("2026-11-05T23:00:00Z"))).toMatchObject({ start: "2026-10-26", end: "2026-11-01" });
+      // On a Sunday the week that ended is the one before, not the one in progress.
+      expect(lastCompleteWeek(new Date("2026-11-08T12:00:00Z"))).toMatchObject({ start: "2026-10-26", end: "2026-11-01" });
+      expect(lastCompleteWeek(new Date("2026-11-09T00:30:00Z"))).toMatchObject({ start: "2026-11-02", end: "2026-11-08" });
+    });
+
+    it("sends the week's digest, naming the week and no person and no money", async () => {
+      // The rounds above each sent their own week's digest, so these cases
+      // measure what this round added rather than what the table holds — an
+      // absolute count here would be asserting the suite's history.
+      const before = (await digestRows()).length;
+      const report = await round(monday);
+      expect(report.digestsSent).toBe(1);
+      const sent = await digestRows();
+      expect(sent).toHaveLength(before + 1);
+      const latest = sent[sent.length - 1];
+      expect(latest.subject).toBe("Ridgeview Dental: your week, 2026-10-26 to 2026-11-01");
+      // Safe to send for a property the product proved for another purpose: the
+      // digest's queries carry no person dimension, so no count names anyone.
+      expect(latest.body).toContain("No count names a person, and no amount of money is in this message.");
+      expect(latest.body).not.toMatch(/\$\d/);
+      expect(latest.body).not.toContain(owner.displayName);
+    });
+
+    it("says that reading it is not stamping it", async () => {
+      // The digest is acknowledged on the screen, by an act. A message that
+      // implied otherwise would quietly retire a control.
+      const sent = await digestRows();
+      expect(sent[sent.length - 1].body).toContain("Reading this is not stamping it");
+      const { rows } = await db.admin.query("SELECT count(*)::int AS n FROM digest_acks WHERE tenant_id = $1", [tenantId]);
+      expect(rows[0].n).toBe(0);
+    });
+
+    it("does not send it again later the same week", async () => {
+      const before = (await digestRows()).length;
+      // Later the same day, and again three days on: the week has not ended, so
+      // there is nothing new to report.
+      expect((await round(new Date("2026-11-02T18:00:00.000Z"))).digestsSent).toBe(0);
+      expect((await round(new Date("2026-11-05T09:00:00.000Z"))).digestsSent).toBe(0);
+      expect((await digestRows()).length).toBe(before);
+    });
+
+    it("sends it again once another week has ended", async () => {
+      const before = (await digestRows()).length;
+      const report = await round(new Date("2026-11-09T09:00:00.000Z"));
+      expect(report.digestsSent).toBe(1);
+      const sent = await digestRows();
+      expect(sent).toHaveLength(before + 1);
+      expect(sent[sent.length - 1].subject).toBe("Ridgeview Dental: your week, 2026-11-02 to 2026-11-08");
+    });
+
+    it("counts the digest beside the notices rather than inside them", async () => {
+      // considered = sent + failed + unchanged + nothing_owed + unreachable is
+      // about each person's notices, and the database refuses a row that breaks
+      // it. A digest is a second message to the same person, so folding it in
+      // would make that invariant say nothing about anything.
+      const held = await tx((d) => lastRound(d, tenantId));
+      expect(held).not.toBeNull();
+      expect(held!.considered).toBe(held!.sent + held!.failed + held!.unchanged + held!.nothingOwed + held!.unreachable);
+      expect(held!.digestsSent).toBe(1);
+    });
+  });
+
   describe("what the database holds past the service", () => {
     async function refusalFrom(fn: () => Promise<unknown>): Promise<string> {
       try {
@@ -196,8 +301,8 @@ describe.skipIf(!adminUrl)("a notice round (live)", () => {
     it("refuses counts that do not account for everybody considered", async () => {
       const why = await refusalFrom(() =>
         db.admin.query(
-          `INSERT INTO notice_rounds (id, tenant_id, ran_at, considered, sent, failed, unchanged, nothing_owed, unreachable)
-           VALUES (gen_random_uuid(), $1, now(), 5, 1, 0, 0, 0, 0)`,
+          `INSERT INTO notice_rounds (id, tenant_id, ran_at, considered, sent, failed, unchanged, nothing_owed, unreachable, digests_sent, digests_failed)
+           VALUES (gen_random_uuid(), $1, now(), 5, 1, 0, 0, 0, 0, 0, 0)`,
           [tenantId]
         )
       );
