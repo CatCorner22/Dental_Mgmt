@@ -410,6 +410,9 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await expect
       .poll(async () => await banner.innerText(), { timeout: 30_000 })
       .toMatch(/Nobody has proved that this address reaches you/);
+    // Increment 1.63: how often the product can be made to send, said where a
+    // person about to press the button will read it.
+    expect(await delivery.innerText()).toContain("This practice will send at most five codes an hour");
     await b.audit("practice risk, an address nobody has proved");
 
     // The code goes to the address, through the same transport and the same

@@ -1315,7 +1315,8 @@ function RiskBody({
               <p className="mb-2 text-sm">
                 <strong>Nobody has proved this address reaches you</strong>, so nothing is sent to it. A mistyped address
                 does not bounce — it is accepted by whoever does own that mailbox — so the practice asks you to fetch a
-                code from it instead.
+                code from it instead. This practice will send at most five codes an hour, because an address you type is
+                somebody else&apos;s inbox until it is proved.
               </p>
               <div className="flex flex-wrap items-end gap-2">
                 <button
