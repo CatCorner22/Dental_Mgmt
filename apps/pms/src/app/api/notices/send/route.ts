@@ -27,6 +27,14 @@ import { transportFromEnv } from "@/lib/notices/transport";
  * record is written, and the answer says how it went; an HTTP error would make
  * a failed delivery look like a failed request, which is the confusion the
  * whole increment exists to prevent.
+ *
+ * One request can now hold more than one attempt (Increment 1.60): a transient
+ * refusal is tried again, up to three times, with the stated pauses between
+ * them, so a request that meets a busy provider takes up to two seconds longer
+ * than one that does not. That is the right place for the wait — the person
+ * asked to be sent their notices now and is waiting for the answer, and a
+ * retry moved off the request would need a queue, which is the shape this
+ * table exists not to be.
  */
 
 function seatOf(user: { role: string; entitlements: string[] }): NoticeSeat {

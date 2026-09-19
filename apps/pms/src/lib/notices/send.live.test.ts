@@ -6,7 +6,7 @@ import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { setAddress } from "./addresses";
 import { collectOutstanding } from "./outstanding";
 import { lastSend, sendNotices } from "./send";
-import { memoryTransport, unconfiguredTransport } from "./transport";
+import { flakyTransport, memoryTransport, refusingTransport, unconfiguredTransport } from "./transport";
 
 /**
  * Sending, and failing to send (Increment 1.59).
@@ -15,6 +15,11 @@ import { memoryTransport, unconfiguredTransport } from "./transport";
  * failed leaves a row saying so. A product that swallowed a failure would be
  * worse than one that never sent, because its reader would believe they had
  * been told.
+ *
+ * Increment 1.60 adds the half that makes a failure actionable: a refusal that
+ * can pass is tried again, one that cannot is not, and every attempt leaves its
+ * own row — so how many times the practice tried is answered by counting rows
+ * rather than by a number beside them that the rows could contradict.
  *
  * Skipped without PMS_TEST_POSTGRES_URL; mandatory under PMS_TEST_POSTGRES_REQUIRED=1.
  */
@@ -41,12 +46,16 @@ describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
     appUrl: "https://app.example",
     notices: await tx((d) => collectOutstanding(d, tenantId)),
     transport,
+    // The rule under test is how many attempts happen and what each one leaves,
+    // never how long the product waits between them; a suite that slept the
+    // real pauses would prove `setTimeout` works and little else.
+    pause: async () => {},
   });
 
   const rows = async () =>
     (
       await db.admin.query(
-        "SELECT outcome, address, detail, subject, body, notice_count FROM notice_sends WHERE tenant_id = $1 ORDER BY attempted_at",
+        "SELECT outcome, address, detail, failure_kind, subject, body, notice_count FROM notice_sends WHERE tenant_id = $1 ORDER BY attempted_at, id",
         [tenantId]
       )
     ).rows;
@@ -87,7 +96,60 @@ describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
     expect(result.record.detail).toBe("This practice has no way to send messages yet.");
     // The address it tried is kept, because "where did it try" is the question.
     expect(result.record.address).toBe("riley@ridgeview.example");
+    // Increment 1.60: nothing is configured, so no retry could reach an outcome
+    // and exactly one attempt happened.
+    expect(result.record.failureKind).toBe("permanent");
+    expect(result.attempts).toBe(1);
     expect((await rows()).map((r) => r.outcome)).toEqual(["unreachable", "failed"]);
+  });
+
+  it("tries a transient refusal again, and the attempt that worked ends the act", async () => {
+    // Increment 1.60, and the reason the increment exists: a provider that was
+    // busy for a second used to cost the practice the whole message.
+    const before = (await rows()).length;
+    const transport = flakyTransport(1, "The provider was busy.");
+    const result = await tx(async (d) => sendNotices(d, await base(transport)));
+    expect(result.outcome).toBe("sent");
+    if (result.outcome === "nothing_owed") throw new Error("unreachable");
+    expect(result.attempts).toBe(2);
+    expect(transport.attempts).toBe(2);
+    // Two attempts, two rows. The failure is not erased by the success that
+    // followed it: a reader asking "did this practice have trouble reaching me"
+    // gets an answer.
+    const added = (await rows()).slice(before);
+    expect(added.map((r) => r.outcome)).toEqual(["failed", "sent"]);
+    expect(added.map((r) => r.failure_kind)).toEqual(["transient", null]);
+    expect(added[0].detail).toBe("The provider was busy.");
+  });
+
+  it("stops at three attempts and says the last one failed", async () => {
+    const before = (await rows()).length;
+    const transport = flakyTransport(99, "The provider was busy.");
+    const result = await tx(async (d) => sendNotices(d, await base(transport)));
+    expect(result.outcome).toBe("failed");
+    if (result.outcome === "nothing_owed") throw new Error("unreachable");
+    // Three, and three is the rule rather than the fixture: PAUSES_MS has two
+    // entries, so a fourth attempt would mean the rule changed.
+    expect(result.attempts).toBe(3);
+    expect(transport.attempts).toBe(3);
+    const added = (await rows()).slice(before);
+    expect(added.map((r) => r.outcome)).toEqual(["failed", "failed", "failed"]);
+    expect(added.map((r) => r.failure_kind)).toEqual(["transient", "transient", "transient"]);
+  });
+
+  it("tries a permanent refusal exactly once", async () => {
+    // The other half of the rule. A second attempt at an address that does not
+    // exist changes nothing and spends the waiting person's time.
+    const before = (await rows()).length;
+    const transport = refusingTransport("No such address.", "permanent");
+    const result = await tx(async (d) => sendNotices(d, await base(transport)));
+    expect(result.outcome).toBe("failed");
+    if (result.outcome === "nothing_owed") throw new Error("unreachable");
+    expect(result.attempts).toBe(1);
+    expect(transport.attempts).toBe(1);
+    const added = (await rows()).slice(before);
+    expect(added.map((r) => r.outcome)).toEqual(["failed"]);
+    expect(added[0].failure_kind).toBe("permanent");
   });
 
   it("sends, hands the transport exactly what it recorded, and keeps the body", async () => {
@@ -117,10 +179,15 @@ describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
   });
 
   it("reports the latest attempt, and the earlier ones stay as they were", async () => {
+    const before = (await rows()).length;
+    const transport = memoryTransport();
+    await tx(async (d) => sendNotices(d, await base(transport)));
     const held = await tx((d) => lastSend(d, tenantId, owner.id));
     expect(held?.outcome).toBe("sent");
-    // Three attempts, three rows: an attempt is never rewritten.
-    expect((await rows()).length).toBe(3);
+    expect(held?.failureKind).toBeNull();
+    // Every attempt this suite has made is still a row of its own: an attempt
+    // is never rewritten, and a later one is another row.
+    expect((await rows()).length).toBe(before + 1);
   });
 
   it("writes no row at all when nothing is owed", async () => {
@@ -139,7 +206,20 @@ describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
       "SELECT kind, payload FROM domain_event WHERE tenant_id = $1 AND kind = 'notice.sent' ORDER BY seq",
       [tenantId]
     );
-    expect(events.map((e) => (e.payload as { outcome: string }).outcome)).toEqual(["unreachable", "failed", "sent"]);
+    // One event per act, never one per attempt: a person asked to be sent their
+    // notices once, and the attempts are in the table for whoever wants them.
+    expect(events.map((e) => (e.payload as { outcome: string }).outcome)).toEqual([
+      "unreachable",
+      "failed",
+      "sent",
+      "failed",
+      "failed",
+      "sent",
+      "sent",
+    ]);
+    // Nowhere to send asks no transport, so it counts no attempts; the two
+    // retried acts are the only ones above one.
+    expect(events.map((e) => (e.payload as { attempts: number }).attempts)).toEqual([0, 1, 2, 3, 1, 1, 1]);
     const text = JSON.stringify(events.map((e) => e.payload));
     expect(text).not.toContain("ridgeview.example");
     expect(text).not.toContain("quotes nobody");
@@ -157,14 +237,53 @@ describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
     }
 
     it("refuses a failure that does not say what failed", async () => {
+      // The kind is supplied so that this row breaks one rule and no other:
+      // Postgres names whichever constraint it checks first, and a case that
+      // could be satisfied by either is a case that asserts neither.
       const why = await refusalFrom(() =>
         db.admin.query(
-          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, subject, body, notice_count, attempted_at)
-           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'failed', NULL, 's', 'b', 1, now())`,
+          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, failure_kind, subject, body, notice_count, attempted_at)
+           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'failed', NULL, 'permanent', 's', 'b', 1, now())`,
           [tenantId, owner.id]
         )
       );
       expect(why).toMatch(/notice_sends_failure_says_why/);
+    });
+
+    it("refuses a failure that does not say whether asking again could work", async () => {
+      // Increment 1.60. A failure with no kind leaves its reader with nothing
+      // to do, which is the silence this table was opened to prevent.
+      const why = await refusalFrom(() =>
+        db.admin.query(
+          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, failure_kind, subject, body, notice_count, attempted_at)
+           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'failed', 'It refused.', NULL, 's', 'b', 1, now())`,
+          [tenantId, owner.id]
+        )
+      );
+      expect(why).toMatch(/notice_sends_failure_says_which_kind/);
+    });
+
+    it("refuses a third kind of refusal", async () => {
+      const why = await refusalFrom(() =>
+        db.admin.query(
+          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, failure_kind, subject, body, notice_count, attempted_at)
+           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'failed', 'It refused.', 'maybe', 's', 'b', 1, now())`,
+          [tenantId, owner.id]
+        )
+      );
+      expect(why).toMatch(/notice_sends_failure_kind_is_one_of/);
+    });
+
+    it("refuses a kind of refusal on a send that worked", async () => {
+      // Only a refusal has a kind of refusal to have.
+      const why = await refusalFrom(() =>
+        db.admin.query(
+          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, failure_kind, subject, body, notice_count, attempted_at)
+           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'sent', NULL, 'transient', 's', 'b', 1, now())`,
+          [tenantId, owner.id]
+        )
+      );
+      expect(why).toMatch(/notice_sends_only_a_failure_has_a_kind/);
     });
 
     it("refuses a send that claims to have gone nowhere", async () => {

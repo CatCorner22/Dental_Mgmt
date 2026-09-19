@@ -879,6 +879,11 @@ export const noticeSends = pgTable(
     outcome: text("outcome").notNull(),
     /** The transport's own words on a failure, or why there was nowhere to send. */
     detail: text("detail"),
+    /**
+     * 'transient' | 'permanent' on a failure (Increment 1.60). Null on any
+     * other outcome, and on a failure recorded before the distinction existed.
+     */
+    failureKind: text("failure_kind"),
     subject: text("subject"),
     body: text("body"),
     noticeCount: integer("notice_count").notNull(),

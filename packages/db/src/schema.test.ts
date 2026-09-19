@@ -50,6 +50,7 @@ const threadReadsSql = readFileSync(join(here, "../migrations/0039_cpa_thread_re
 const rehashSql = readFileSync(join(here, "../migrations/0040_month_close_rehashes.sql"), "utf8");
 const addressesSql = readFileSync(join(here, "../migrations/0041_notice_addresses.sql"), "utf8");
 const sendsSql = readFileSync(join(here, "../migrations/0042_notice_sends.sql"), "utf8");
+const failureKindSql = readFileSync(join(here, "../migrations/0043_notice_send_failure_kind.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -408,6 +409,38 @@ describe("Increment 1.59 sending, and failing to send", () => {
     expect(sendsSql).toMatch(/GRANT SELECT, INSERT ON notice_sends TO app_rw;/);
     expect(sendsSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON notice_sends/);
     expect(sendsSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON notice_sends/);
+  });
+});
+
+describe("Increment 1.60 a refusal that can pass, and one that cannot", () => {
+  it("admits two kinds of refusal and no third", () => {
+    expect(failureKindSql).toMatch(/ALTER TABLE notice_sends ADD COLUMN failure_kind text;/);
+    expect(failureKindSql).toMatch(
+      /notice_sends_failure_kind_is_one_of[\s\S]*failure_kind IN \('transient', 'permanent'\)/
+    );
+  });
+
+  it("gives a kind only to a refusal, because only a refusal has one to give", () => {
+    expect(failureKindSql).toMatch(
+      /notice_sends_only_a_failure_has_a_kind[\s\S]*failure_kind IS NULL OR outcome = 'failed'/
+    );
+  });
+
+  it("binds every later failure to say which kind, and invents nothing about the earlier ones", () => {
+    // NOT VALID is the whole point: a failure recorded before this migration
+    // does not know its kind, and filling one in would be advice to a reader on
+    // evidence nobody ever had.
+    expect(failureKindSql).toMatch(
+      /notice_sends_failure_says_which_kind[\s\S]*outcome <> 'failed' OR failure_kind IS NOT NULL\) NOT VALID;/
+    );
+    expect(failureKindSql).not.toMatch(/UPDATE notice_sends/);
+    expect(failureKindSql).not.toMatch(/DEFAULT '(transient|permanent)'/);
+  });
+
+  it("adds no counter beside the rows", () => {
+    // How many times the practice tried is answered by counting attempts. A
+    // number stored next to them is a status the rows can contradict.
+    expect(failureKindSql).not.toMatch(/attempt_count|retries|retry_count|tries/);
   });
 });
 
