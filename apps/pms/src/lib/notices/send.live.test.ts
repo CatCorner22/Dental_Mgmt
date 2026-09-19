@@ -56,15 +56,15 @@ describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
   /**
    * The sends that carried notices.
    *
-   * A notice_count of zero is the code that proves an address (Increment
-   * 1.61), which reaches this person through the same table and the same
-   * retry rule. This suite is about sending what a seat owes, so it reads the
-   * rows that carried something owed.
+   * Three kinds of message reach a person through this table and the same
+   * retry rule. Since Increment 1.64 each row says which it was, so this suite
+   * — which is about sending what a seat owes — reads that kind by name rather
+   * than inferring it from a count.
    */
   const rows = async () =>
     (
       await db.admin.query(
-        "SELECT outcome, address, detail, failure_kind, subject, body, notice_count FROM notice_sends WHERE tenant_id = $1 AND notice_count > 0 ORDER BY attempted_at, id",
+        "SELECT outcome, address, detail, failure_kind, subject, body, notice_count FROM notice_sends WHERE tenant_id = $1 AND kind = 'notices' ORDER BY attempted_at, id",
         [tenantId]
       )
     ).rows;
@@ -279,8 +279,8 @@ describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
       // could be satisfied by either is a case that asserts neither.
       const why = await refusalFrom(() =>
         db.admin.query(
-          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, failure_kind, subject, body, notice_count, attempted_at)
-           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'failed', NULL, 'permanent', 's', 'b', 1, now())`,
+          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, failure_kind, subject, body, notice_count, attempted_at, kind)
+           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'failed', NULL, 'permanent', 's', 'b', 1, now(), 'notices')`,
           [tenantId, owner.id]
         )
       );
@@ -292,8 +292,8 @@ describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
       // to do, which is the silence this table was opened to prevent.
       const why = await refusalFrom(() =>
         db.admin.query(
-          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, failure_kind, subject, body, notice_count, attempted_at)
-           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'failed', 'It refused.', NULL, 's', 'b', 1, now())`,
+          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, failure_kind, subject, body, notice_count, attempted_at, kind)
+           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'failed', 'It refused.', NULL, 's', 'b', 1, now(), 'notices')`,
           [tenantId, owner.id]
         )
       );
@@ -303,8 +303,8 @@ describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
     it("refuses a third kind of refusal", async () => {
       const why = await refusalFrom(() =>
         db.admin.query(
-          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, failure_kind, subject, body, notice_count, attempted_at)
-           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'failed', 'It refused.', 'maybe', 's', 'b', 1, now())`,
+          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, failure_kind, subject, body, notice_count, attempted_at, kind)
+           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'failed', 'It refused.', 'maybe', 's', 'b', 1, now(), 'notices')`,
           [tenantId, owner.id]
         )
       );
@@ -315,8 +315,8 @@ describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
       // Only a refusal has a kind of refusal to have.
       const why = await refusalFrom(() =>
         db.admin.query(
-          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, failure_kind, subject, body, notice_count, attempted_at)
-           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'sent', NULL, 'transient', 's', 'b', 1, now())`,
+          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, failure_kind, subject, body, notice_count, attempted_at, kind)
+           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'sent', NULL, 'transient', 's', 'b', 1, now(), 'notices')`,
           [tenantId, owner.id]
         )
       );
@@ -326,8 +326,8 @@ describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
     it("refuses a send that claims to have gone nowhere", async () => {
       const why = await refusalFrom(() =>
         db.admin.query(
-          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, subject, body, notice_count, attempted_at)
-           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', NULL, 'sent', NULL, 's', 'b', 1, now())`,
+          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, subject, body, notice_count, attempted_at, kind)
+           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', NULL, 'sent', NULL, 's', 'b', 1, now(), 'notices')`,
           [tenantId, owner.id]
         )
       );
@@ -337,8 +337,8 @@ describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
     it("refuses a fourth outcome", async () => {
       const why = await refusalFrom(() =>
         db.admin.query(
-          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, subject, body, notice_count, attempted_at)
-           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'maybe', NULL, 's', 'b', 1, now())`,
+          `INSERT INTO notice_sends (id, tenant_id, seat, recipient_id, recipient_name, address, outcome, detail, subject, body, notice_count, attempted_at, kind)
+           VALUES (gen_random_uuid(), $1, 'owner', $2, 'Riley Owner', 'a@b.example', 'maybe', NULL, 's', 'b', 1, now(), 'notices')`,
           [tenantId, owner.id]
         )
       );

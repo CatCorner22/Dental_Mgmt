@@ -116,7 +116,7 @@ describe.skipIf(!adminUrl)("proving an address (live)", () => {
     // Nothing owed writes no row, so a notice_count of zero names this one
     // message in the whole table rather than being a placeholder.
     const { rows } = await db.admin.query(
-      "SELECT notice_count, subject, body FROM notice_sends WHERE tenant_id = $1 AND notice_count = 0",
+      "SELECT kind, notice_count, subject, body FROM notice_sends WHERE tenant_id = $1 AND kind = 'proof_code'",
       [tenantId]
     );
     expect(rows).toHaveLength(1);

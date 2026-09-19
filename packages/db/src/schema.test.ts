@@ -53,6 +53,7 @@ const sendsSql = readFileSync(join(here, "../migrations/0042_notice_sends.sql"),
 const failureKindSql = readFileSync(join(here, "../migrations/0043_notice_send_failure_kind.sql"), "utf8");
 const proofsSql = readFileSync(join(here, "../migrations/0044_notice_address_proofs.sql"), "utf8");
 const roundsSql = readFileSync(join(here, "../migrations/0045_notice_rounds.sql"), "utf8");
+const kindSql = readFileSync(join(here, "../migrations/0046_notice_send_kind.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -443,6 +444,39 @@ describe("Increment 1.60 a refusal that can pass, and one that cannot", () => {
     // How many times the practice tried is answered by counting attempts. A
     // number stored next to them is a status the rows can contradict.
     expect(failureKindSql).not.toMatch(/attempt_count|retries|retry_count|tries/);
+  });
+});
+
+describe("Increment 1.64 what a message was, said rather than inferred", () => {
+  it("admits three kinds and no fourth", () => {
+    expect(kindSql).toMatch(/notice_sends_kind_is_one_of[\s\S]*kind IN \('notices', 'proof_code', 'digest'\)/);
+  });
+
+  it("recovers the kind of every earlier row rather than guessing it", () => {
+    // Increment 1.60 grandfathered its column under NOT VALID because the fact
+    // was unknowable. Here it is knowable — nothing owed writes no row, so a
+    // zero count names the proof code — so it is read back rather than left
+    // null, and the two migrations differ because the evidence differs.
+    expect(kindSql).toMatch(/UPDATE notice_sends SET kind = CASE WHEN notice_count = 0 THEN 'proof_code' ELSE 'notices' END;/);
+    expect(kindSql).toMatch(/ALTER TABLE notice_sends ALTER COLUMN kind SET NOT NULL;/);
+    expect(kindSql).not.toMatch(/ADD COLUMN kind text NOT NULL DEFAULT/);
+  });
+
+  it("holds the rule the backfill read, so a later writer cannot quietly break it", () => {
+    expect(kindSql).toMatch(
+      /notice_sends_only_a_code_carries_nothing[\s\S]*CHECK \(\(kind = 'proof_code'\) = \(notice_count = 0\)\)/
+    );
+  });
+
+  it("counts the digest beside the sum that must add up, never inside it", () => {
+    // considered = sent + failed + unchanged + nothing_owed + unreachable says
+    // every person became exactly one notices outcome. A digest is a second
+    // message to the same person; folding it in would make the invariant say
+    // nothing.
+    expect(kindSql).toMatch(/ALTER TABLE notice_rounds ADD COLUMN digests_sent integer NOT NULL DEFAULT 0/);
+    expect(kindSql).toMatch(/ALTER TABLE notice_rounds ALTER COLUMN digests_sent DROP DEFAULT;/);
+    expect(kindSql).toMatch(/ALTER TABLE notice_rounds ALTER COLUMN digests_failed DROP DEFAULT;/);
+    expect(kindSql).not.toMatch(/notice_rounds_counts_add_up/);
   });
 });
 
