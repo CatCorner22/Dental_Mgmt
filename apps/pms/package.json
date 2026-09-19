@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "test": "vitest run && node scripts/check-route-guards.mjs",
-    "e2e": "PMS_E2E=1 vitest run src/e2e",
+    "e2e": "PMS_E2E=1 vitest run src/e2e --no-file-parallelism",
     "test:live": "PMS_TEST_POSTGRES_REQUIRED=1 vitest run src/lib/auth/postgresStore.live.test.ts",
     "typecheck": "tsc --noEmit",
     "check:routes": "node scripts/check-route-guards.mjs",
