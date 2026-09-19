@@ -46,6 +46,7 @@ const reasonThresholdSql = readFileSync(join(here, "../migrations/0035_reason_th
 const reasonDecisionSql = readFileSync(join(here, "../migrations/0036_decision_on_reason_code.sql"), "utf8");
 const cpaQuestionsSql = readFileSync(join(here, "../migrations/0037_cpa_questions.sql"), "utf8");
 const attestationsSql = readFileSync(join(here, "../migrations/0038_channel_attestations.sql"), "utf8");
+const threadReadsSql = readFileSync(join(here, "../migrations/0039_cpa_thread_reads.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -370,6 +371,36 @@ describe("Increment 1.51 attesting a channel the product cannot enforce", () => 
     expect(attestationsSql).toMatch(/GRANT SELECT, INSERT ON channel_attestations TO app_rw;/);
     expect(attestationsSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON channel_attestations/);
     expect(attestationsSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON channel_attestations/);
+  });
+});
+
+describe("Increment 1.55 the accountant reads the answer", () => {
+  it("records one read per act, with the message the reader had in front of them", () => {
+    expect(threadReadsSql).toMatch(/CREATE TABLE cpa_thread_reads/);
+    expect(threadReadsSql).toMatch(/seat text NOT NULL CHECK \(seat IN \('accountant', 'practice'\)\)/);
+    expect(threadReadsSql).toMatch(/up_to_message_id uuid NOT NULL REFERENCES cpa_thread_messages\(id\)/);
+    // Deliberately NOT unique per thread and seat: a thread is read again
+    // whenever it grows, and the latest row wins. A unique key here would force
+    // the row to be rewritten, which is exactly what the append-only rule forbids.
+    expect(threadReadsSql).not.toMatch(/UNIQUE[\s\S]*cpa_thread_reads/);
+    expect(threadReadsSql).not.toMatch(/CREATE UNIQUE INDEX[^;]*cpa_thread_reads/);
+  });
+
+  it("refuses a read that names a message of another thread, so a signal clears only for what was seen", () => {
+    expect(threadReadsSql).toMatch(/TRIGGER cpa_thread_reads_match_their_thread[\s\S]*BEFORE INSERT/);
+    expect(threadReadsSql).toMatch(/is not this practice/);
+    expect(threadReadsSql).toMatch(/belongs to thread/);
+  });
+
+  it("is append-only, tenant-isolated under FORCE RLS, and never granted an update or a delete", () => {
+    expect(threadReadsSql).toMatch(/cpa_thread_reads is append-only/);
+    expect(threadReadsSql).toMatch(/TRIGGER cpa_thread_reads_no_update[\s\S]*BEFORE UPDATE/);
+    expect(threadReadsSql).toMatch(/TRIGGER cpa_thread_reads_no_delete[\s\S]*BEFORE DELETE/);
+    expect(threadReadsSql).toMatch(/ALTER TABLE cpa_thread_reads FORCE ROW LEVEL SECURITY/);
+    expect(threadReadsSql).toMatch(/CREATE POLICY cpa_thread_reads_isolation/);
+    expect(threadReadsSql).toMatch(/GRANT SELECT, INSERT ON cpa_thread_reads TO app_rw;/);
+    expect(threadReadsSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON cpa_thread_reads/);
+    expect(threadReadsSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON cpa_thread_reads/);
   });
 });
 

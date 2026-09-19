@@ -869,6 +869,22 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await expect
       .poll(async () => answered.innerText(), { timeout: 30_000 })
       .toMatch(/Practice · Riley Owner[\s\S]*Two deposits landed[\s\S]*Waiting on nobody/);
+
+    // The answer landed on a screen nobody was watching, so the accountant is
+    // told (Increment 1.55). It is a count rather than a badge that never
+    // clears: marking it read is an act, and a later message re-opens it.
+    expect(await answered.innerText()).toContain("1 thread the practice has spoken in since you last marked it read.");
+    expect(await answered.innerText()).toContain("You have not marked this read.");
+    await b.audit("month-end package (an answer the accountant has not read)");
+
+    await answered.getByRole("button", { name: "Mark as read" }).click();
+    await page().getByText(/^Marked as read\.$/).waitFor({ timeout: 30_000 });
+    await expect
+      .poll(async () => answered.innerText(), { timeout: 30_000 })
+      .toMatch(/Marked read by Casey Prentice on \d{4}-\d{2}-\d{2}\./);
+    // The count is gone, and so is the control: there is nothing left to mark.
+    expect(await answered.innerText()).not.toContain("since you last marked");
+    expect(await answered.getByRole("button", { name: "Mark as read" }).count()).toBe(0);
     await b.audit("month-end package (the question answered)");
   }, 150_000);
 

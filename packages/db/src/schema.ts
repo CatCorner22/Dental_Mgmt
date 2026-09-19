@@ -861,6 +861,25 @@ export const channelAttestations = pgTable(
   (t) => [uniqueIndex("channel_attestations_month_channel_uidx").on(t.tenantId, t.month, t.channel)]
 );
 
+/**
+ * One append-only record that a seat read a thread up to a given message
+ * (Increment 1.55). Deliberately not unique: a thread is read again whenever it
+ * grows, so a seat has many rows over a thread's life and the latest one wins.
+ * A later message therefore re-opens the signal without any row being rewritten.
+ */
+export const cpaThreadReads = pgTable("cpa_thread_reads", {
+  id: uuid("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull(),
+  threadId: uuid("thread_id").notNull(),
+  /** Which side read it; not a rank. */
+  seat: text("seat").notNull(),
+  /** The last message the reader had in front of them. */
+  upToMessageId: uuid("up_to_message_id").notNull(),
+  readerId: uuid("reader_id").notNull(),
+  readerName: text("reader_name").notNull(),
+  readAt: timestamp("read_at", { withTimezone: true }).notNull(),
+});
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "reason_codes",
@@ -900,4 +919,5 @@ export const TENANT_SCOPED_TABLES = [
   "month_closes",
   "cpa_thread_messages",
   "channel_attestations",
+  "cpa_thread_reads",
 ] as const;
