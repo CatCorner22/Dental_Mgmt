@@ -76,6 +76,8 @@ type AddressResponse = {
   proof: { addressId: string; provedAt: string } | null;
   /** The last attempt and how it went (Increment 1.59); null where nobody has tried. */
   lastSend: SendRecord | null;
+  /** When the scheduled sender last ran, whatever it found (Increment 1.62); null where it never has. */
+  lastRound: { ranAt: string; considered: number; sent: number; unchanged: number; unreachable: number; failed: number } | null;
   message: Message | null;
 };
 
@@ -1351,12 +1353,24 @@ function RiskBody({
             : sendSentence(delivery.lastSend)}
         </p>
 
+        {/* When the sender itself last ran (Increment 1.62). Every round leaves
+            a row, including the quiet ones, so a scheduler that stopped is
+            visible here rather than looking like a practice that owes nothing
+            — which is the difference this whole arc exists to keep. */}
+        <p className="mb-1 max-w-prose text-sm text-[var(--ink-2)]">
+          {delivery.lastRound === null
+            ? "Nothing sends these on a schedule yet, so they go out only when somebody asks."
+            : `The sender last ran on ${delivery.lastRound.ranAt.slice(0, 10)} and looked at ${delivery.lastRound.considered} ${delivery.lastRound.considered === 1 ? "person" : "people"}.`}
+        </p>
+
         {/* The standing rule, beside the outcome it governs (Increment 1.60).
             It is on the screen because a reader deciding whether to press the
             button again deserves to know what pressing it already did. */}
         <p className="mb-3 max-w-prose text-sm text-[var(--ink-3)]">
           A refusal that can pass is tried up to three times in one send; a refusal that cannot is tried once. Every
-          attempt is kept, so the count is the attempts themselves rather than a number beside them.
+          attempt is kept, so the count is the attempts themselves rather than a number beside them. A scheduled round
+          sends only what would read differently from the last message that reached you, or the same message once a week
+          if it still stands.
         </p>
 
         {delivery.message === null ? (
