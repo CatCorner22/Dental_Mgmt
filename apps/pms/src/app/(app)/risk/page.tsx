@@ -62,10 +62,13 @@ type ExceptionsResponse = {
 type ReasonCodesResponse = { items: ReasonCodeRow[] };
 
 import type { Notice, NoticeSeat } from "@/lib/notices/outstanding";
+import type { Message } from "@/lib/notices/message";
 
 type AttestationsResponse = { month: string; items: AttestationRow[] };
 
 type OutstandingResponse = { notices: Notice[]; counts: Record<NoticeSeat, number>; computedAt: string };
+/** Where this viewer's notices would go, and what would go there. Nothing is sent (Increment 1.58). */
+type AddressResponse = { seat: NoticeSeat; address: { address: string | null; setAt: string } | null; message: Message | null };
 
 type Me = { ok: boolean; role?: string; displayName?: string };
 
@@ -111,6 +114,7 @@ type Loaded = {
   reasonCodes: ReasonCodesResponse;
   attestations: AttestationsResponse;
   outstanding: OutstandingResponse;
+  delivery: AddressResponse;
 };
 
 type LoadState =
@@ -145,6 +149,9 @@ export default function PracticeRiskPage() {
   // The tightening exception being switched off; the decision form is open for it.
   const [switchingId, setSwitchingId] = useState<string | null>(null);
 
+  // Where my own notices would go (Increment 1.58). Nothing is sent.
+  const [addressDraft, setAddressDraft] = useState<string | null>(null);
+
   // Grant form
   const [grantPerson, setGrantPerson] = useState("");
   const [grantEntitlement, setGrantEntitlement] = useState<string>(ENTITLEMENTS[0]?.id ?? "");
@@ -152,7 +159,7 @@ export default function PracticeRiskPage() {
   const [grantRefused, setGrantRefused] = useState<(RefusalContent & { canLicense: boolean }) | null>(null);
 
   const load = useCallback(async (fresh = false) => {
-    const [risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding] = await Promise.all([
+    const [risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding, delivery] = await Promise.all([
       getJson<RiskResponse>(`/api/controls/risk${fresh ? "?fresh=1" : ""}`),
       getJson<SodResponse>("/api/controls/sod"),
       getJson<DecisionsResponse>("/api/controls/decisions"),
@@ -168,8 +175,11 @@ export default function PracticeRiskPage() {
       // the snapshot above may be the frozen one and this is always the
       // practice's position now.
       getJson<OutstandingResponse>("/api/controls/outstanding"),
+      // Where this viewer's own notices would go, and the message that would go
+      // there (Increment 1.58). Nothing is sent.
+      getJson<AddressResponse>("/api/notices/address"),
     ]);
-    return { risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding };
+    return { risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding, delivery };
   }, []);
 
   useEffect(() => {
@@ -221,6 +231,30 @@ export default function PracticeRiskPage() {
     } finally {
       setBusy(null);
     }
+  }
+
+  /**
+   * Records where this person's notices would go, or that they would go
+   * nowhere (Increment 1.58). It sends nothing and never names a user: the
+   * route takes the caller's own id, and the database refuses a row naming
+   * anybody else.
+   */
+  async function saveAddress(address: string) {
+    await run(
+      address === "" ? "Stop sending to me" : "Save address",
+      async () => {
+        const res = await fetch("/api/notices/address", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ address }),
+        });
+        const body = (await res.json().catch(() => ({}))) as { why?: string; error?: string };
+        if (!res.ok) throw new Error(body.why ?? body.error ?? "Could not record that.");
+        setAddressDraft(null);
+        return address === "" ? "You will receive no messages." : `Messages would go to ${address}.`;
+      },
+      false
+    );
   }
 
   async function freezeSnapshot() {
@@ -409,6 +443,11 @@ export default function PracticeRiskPage() {
           onFreeze={() => void freezeSnapshot()}
           onDecide={(c, d) => void recordDecision(c, d)}
           onDecideFinding={(f, d) => void recordFindingDecision(f, d)}
+          addressForm={{
+            draft: addressDraft,
+            setDraft: setAddressDraft,
+            save: (address) => void saveAddress(address),
+          }}
           grantForm={{
             person: grantPerson,
             setPerson: setGrantPerson,
@@ -454,6 +493,13 @@ type GrantFormState = {
   submit: (decision?: DecisionDraft) => void;
 };
 
+/** The one address this viewer may set: their own (Increment 1.58). */
+type AddressFormState = {
+  draft: string | null;
+  setDraft: (v: string | null) => void;
+  save: (address: string) => void;
+};
+
 function RiskBody({
   data,
   isAdmin,
@@ -467,6 +513,7 @@ function RiskBody({
   onDecide,
   onDecideFinding,
   grantForm,
+  addressForm,
   onRevoke,
   exceptionControls,
 }: {
@@ -482,10 +529,11 @@ function RiskBody({
   onDecide: (conflict: DetectedConflict, draft: DecisionDraft) => void;
   onDecideFinding: (finding: FindingItem, draft: DecisionDraft) => void;
   grantForm: GrantFormState;
+  addressForm: AddressFormState;
   onRevoke: (person: RoleAssignment, entitlement: string) => void;
   exceptionControls: ExceptionControls;
 }) {
-  const { risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding } = data;
+  const { risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding, delivery } = data;
   const s = risk.snapshot;
   const conflicts = [...sod.conflicts]
     .filter((c) => showFamily || c.severity !== "family")
@@ -1080,6 +1128,79 @@ function RiskBody({
               ))}
             </ul>
           </>
+        )}
+      </section>
+
+      {/* Where this viewer's own notices would go, and what would go there
+          (Increment 1.58). Nothing is sent. The message is shown beside the
+          address because a person deciding whether to receive these is
+          entitled to read, first, what receiving them would mean — and because
+          it is the only way the rule about what a message may carry is visible
+          to the person it protects. */}
+      <section aria-labelledby="delivery" className="mb-10">
+        <h2 id="delivery" className="mb-1 text-lg font-semibold">
+          What would be sent to you
+        </h2>
+        <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
+          Nothing is sent yet. This is the message that would go to you, and the address it would go to. A message carries
+          only sentences the product wrote: never a question or an answer somebody typed, because those leave the product
+          and nothing constrains what they say.
+        </p>
+
+        <form
+          className="mb-4 flex flex-wrap items-end gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            addressForm.save(addressForm.draft ?? delivery.address?.address ?? "");
+          }}
+        >
+          <label className="flex flex-col text-sm">
+            <span className="mb-1 font-medium">Your address</span>
+            <input
+              type="email"
+              className="w-72 rounded-md border border-[var(--line)] bg-[var(--surface)] px-2 py-1"
+              placeholder="name@example.com"
+              value={addressForm.draft ?? delivery.address?.address ?? ""}
+              onChange={(e) => addressForm.setDraft(e.target.value)}
+            />
+          </label>
+          <button type="submit" className="rounded-md border border-[var(--line)] px-3 py-1 text-sm" disabled={busy !== null}>
+            Save address
+          </button>
+          {delivery.address?.address ? (
+            <button
+              type="button"
+              className="rounded-md border border-[var(--line)] px-3 py-1 text-sm"
+              disabled={busy !== null}
+              onClick={() => addressForm.save("")}
+            >
+              Stop sending to me
+            </button>
+          ) : null}
+        </form>
+
+        <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
+          {delivery.address === null
+            ? "You have never said where to send these, so nothing would go anywhere."
+            : delivery.address.address === null
+              ? `You asked on ${delivery.address.setAt.slice(0, 10)} not to receive these, so nothing would go anywhere.`
+              : `Recorded on ${delivery.address.setAt.slice(0, 10)}. Only you can change this: the database refuses an address set by anybody else.`}
+        </p>
+
+        {delivery.message === null ? (
+          <p className="max-w-prose text-[var(--ink-2)]">
+            No message would go out, because {delivery.seat === "owner" ? "the practice" : "you"} owe nothing. A message that
+            arrived whether or not anything happened would not be a signal.
+          </p>
+        ) : (
+          <div className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">Subject</p>
+            <p className="mt-1 text-sm font-semibold">{delivery.message.subject}</p>
+            <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">Body</p>
+            <pre className="mt-1 max-w-prose overflow-x-auto whitespace-pre-wrap font-sans text-sm text-[var(--ink-2)]">
+              {delivery.message.body}
+            </pre>
+          </div>
         )}
       </section>
 

@@ -838,6 +838,27 @@ export const monthCloseRehashes = pgTable(
 );
 
 /**
+ * Where one person's notices would go (Increment 1.58). Append-only, newest
+ * row in force: after a message goes out, "what address was on file that day"
+ * is the question an audit asks, and an update would destroy the answer. A
+ * null address is a withdrawal, recorded rather than deleted. The database
+ * refuses a row whose acting user is not the user it names, so nobody
+ * redirects anybody else's notices.
+ */
+export const noticeAddresses = pgTable(
+  "notice_addresses",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    /** Null means "nowhere, and that was a decision". */
+    address: text("address"),
+    setAt: timestamp("set_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("notice_addresses_user_idx").on(t.tenantId, t.userId, t.setAt)]
+);
+
+/**
  * One append-only message in a thread the accountant and the practice hold
  * about one month-end package line (Increment 1.50). The message that opened a
  * thread carries its own id in `threadId`; a reply carries the opener's, and
@@ -948,4 +969,5 @@ export const TENANT_SCOPED_TABLES = [
   "channel_attestations",
   "cpa_thread_reads",
   "month_close_rehashes",
+  "notice_addresses",
 ] as const;

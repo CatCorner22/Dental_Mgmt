@@ -325,6 +325,46 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await b.audit("practice risk, what people owe");
   });
 
+  it("shows the message that would be sent and where, sends nothing, and quotes nobody", async () => {
+    // Increment 1.58. The screen and the message are not the same surface: the
+    // screen sits behind a guard, the message does not.
+    await b.signIn("ridgeview-owner", "/risk");
+    await page().getByRole("heading", { name: "Headline" }).waitFor({ timeout: 60_000 });
+    const delivery = page().locator("section[aria-labelledby=delivery]");
+    await delivery.waitFor({ timeout: 30_000 });
+
+    // Nobody has said where to send anything, so nothing would go anywhere.
+    expect(await delivery.innerText()).toContain("You have never said where to send these");
+    await b.audit("practice risk, nowhere to send yet");
+
+    await delivery.getByLabel("Your address").fill("riley@ridgeview.example");
+    await delivery.getByRole("button", { name: "Save address" }).click();
+    await flash(/Messages would go to riley@ridgeview\.example\./).waitFor({ timeout: 30_000 });
+    await expect
+      .poll(async () => await delivery.innerText(), { timeout: 30_000 })
+      .toContain("Only you can change this");
+
+    // The message itself: the subject names the practice and a count, the body
+    // names what is owed in the product's own words, and neither carries a
+    // sentence anybody typed.
+    const body = await delivery.innerText();
+    expect(body).toMatch(/Ridgeview [A-Za-z ]*: \d+ things? (is|are) waiting/);
+    expect(body).toMatch(/Channels nobody reviewed for \d{4}-\d{2}/);
+    expect(body).toContain("This message names no patient and quotes nobody's words.");
+    // The subject line carries no content: it is what a lock screen shows.
+    const subject = await delivery.locator("p", { hasText: /: \d+ things? (is|are) waiting/ }).first().innerText();
+    expect(subject).not.toContain("Channels");
+    await b.audit("practice risk, the message that would be sent");
+
+    // Withdrawing is an act, and reads as one rather than as never having said.
+    await delivery.getByRole("button", { name: "Stop sending to me" }).click();
+    await flash(/You will receive no messages\./).waitFor({ timeout: 30_000 });
+    await expect
+      .poll(async () => await delivery.innerText(), { timeout: 30_000 })
+      .toMatch(/You asked on \d{4}-\d{2}-\d{2} not to receive these/);
+    await b.audit("practice risk, asked not to receive");
+  }, 120_000);
+
   it("shows a user-rank account the Refusal, not the page", async () => {
     await b.signIn("ridgeview-front", "/risk");
     await page().locator("main [role=alert]").waitFor({ timeout: 30_000 });
