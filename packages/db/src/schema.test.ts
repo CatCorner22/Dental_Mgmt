@@ -48,6 +48,7 @@ const cpaQuestionsSql = readFileSync(join(here, "../migrations/0037_cpa_question
 const attestationsSql = readFileSync(join(here, "../migrations/0038_channel_attestations.sql"), "utf8");
 const threadReadsSql = readFileSync(join(here, "../migrations/0039_cpa_thread_reads.sql"), "utf8");
 const rehashSql = readFileSync(join(here, "../migrations/0040_month_close_rehashes.sql"), "utf8");
+const addressesSql = readFileSync(join(here, "../migrations/0041_notice_addresses.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -372,6 +373,43 @@ describe("Increment 1.51 attesting a channel the product cannot enforce", () => 
     expect(attestationsSql).toMatch(/GRANT SELECT, INSERT ON channel_attestations TO app_rw;/);
     expect(attestationsSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON channel_attestations/);
     expect(attestationsSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON channel_attestations/);
+  });
+});
+
+describe("Increment 1.58 where a notice would go", () => {
+  it("holds an address per person, append-only, with a null address as a recorded withdrawal", () => {
+    expect(addressesSql).toMatch(/CREATE TABLE notice_addresses/);
+    // Nullable on purpose: withdrawing is an act, recorded rather than a row removed.
+    expect(addressesSql).toMatch(/address text CHECK \(address IS NULL OR address ~ /);
+    expect(addressesSql).toMatch(/notice_addresses is append-only/);
+    expect(addressesSql).toMatch(/TRIGGER notice_addresses_no_update[\s\S]*BEFORE UPDATE/);
+    expect(addressesSql).toMatch(/TRIGGER notice_addresses_no_delete[\s\S]*BEFORE DELETE/);
+  });
+
+  it("stores no seat, because a seat is derived from rank and grants", () => {
+    // A stored seat is a status column that can disagree with the rows under
+    // it: a person's rank or grant changes and the copy does not.
+    expect(addressesSql).not.toMatch(/seat text/);
+  });
+
+  it("refuses an address set by anybody but the person it belongs to", () => {
+    // The one act whose whole risk is being done on somebody else's behalf: an
+    // administrator who could write another person's address could redirect
+    // that person's notices, silently.
+    expect(addressesSql).toMatch(/TRIGGER notice_addresses_are_ones_own[\s\S]*BEFORE INSERT/);
+    expect(addressesSql).toMatch(/current_setting\('app\.user_id', true\)/);
+    expect(addressesSql).toMatch(/a person sets only their own/);
+    // And no acting user at all is a refusal rather than a row nobody owns.
+    expect(addressesSql).toMatch(/no acting user in this transaction/);
+  });
+
+  it("is tenant-isolated under FORCE RLS and never granted an update or a delete", () => {
+    expect(addressesSql).toMatch(/TRIGGER notice_addresses_match_their_tenant[\s\S]*BEFORE INSERT/);
+    expect(addressesSql).toMatch(/ALTER TABLE notice_addresses FORCE ROW LEVEL SECURITY/);
+    expect(addressesSql).toMatch(/CREATE POLICY notice_addresses_isolation/);
+    expect(addressesSql).toMatch(/GRANT SELECT, INSERT ON notice_addresses TO app_rw;/);
+    expect(addressesSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON notice_addresses/);
+    expect(addressesSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON notice_addresses/);
   });
 });
 

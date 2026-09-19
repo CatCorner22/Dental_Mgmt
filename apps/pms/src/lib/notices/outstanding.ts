@@ -35,6 +35,16 @@ import type { DecisionDue } from "../home/board";
  * **A notice names who owes the doing.** The owner cannot discharge the
  * accountant's reading and the accountant cannot answer the practice's
  * question, so a list that mixed them would be a list nobody could act on.
+ *
+ * Increment 1.58 added a fourth, which the first three made necessary rather
+ * than optional: **a notice says one thing on a screen and another outside the
+ * product.** Two of the four kinds here carry a person's typed words verbatim,
+ * because Increment 1.50 chose the question's own words over a resolved label.
+ * Behind a guard that is right. In a message that leaves the product it is not:
+ * nothing constrains what somebody types into a thread, and the whole reason
+ * the outside accountant's seat needs no BAA is that what it can reach names no
+ * patient. So every notice carries `outside` as well as `sentence`, and
+ * `outside` is always generated here from months, dates and codes.
  */
 
 export type NoticeSeat = "owner" | "accountant";
@@ -48,6 +58,15 @@ export type Notice = {
   subject: string;
   /** The sentence the thing's own surface already says, never a second wording. */
   sentence: string;
+  /**
+   * What this notice may say outside the product, where no guard follows it.
+   *
+   * Always generated here from months, dates and codes — never a person's typed
+   * words, which `sentence` may carry and which nothing in the product
+   * constrains. `renderMessage` is typed so that it cannot read `sentence` at
+   * all, which is what makes this a rule rather than a promise.
+   */
+  outside: string;
   /** Where the doing happens. */
   href: string;
   /** The day this became owed, where the rows know it; null where they do not. */
@@ -81,6 +100,9 @@ export function outstandingNotices(input: OutstandingInput): Notice[] {
       seat: "owner",
       subject: `Channels nobody reviewed for ${input.attestations.month}`,
       sentence: input.attestations.sentence,
+      // Increment 1.52 builds this from the channel list and the names of the
+      // people who vouched, so it names no patient and may leave the product.
+      outside: input.attestations.sentence,
       href: "/cpa",
       since: null,
     });
@@ -95,6 +117,9 @@ export function outstandingNotices(input: OutstandingInput): Notice[] {
       // The question's own words, which is what Increment 1.50 put on the board
       // rather than a resolved label: one label costs a whole month's package.
       sentence: asked?.body ?? "",
+      // Outside, the act and not the words: a question is typed by a person and
+      // may say anything at all, including a patient's name.
+      outside: `The accountant asked about ${t.month} on ${t.askedAt.slice(0, 10)}. The question itself is on the owner board.`,
       href: "/home",
       since: t.askedAt.slice(0, 10),
     });
@@ -107,6 +132,8 @@ export function outstandingNotices(input: OutstandingInput): Notice[] {
       seat: "accountant",
       subject: `An answer about ${t.month}`,
       sentence: last?.body ?? "",
+      // Typed by the practice, so outside it is the act and not the words.
+      outside: `The practice answered about ${t.month} on ${t.lastAt.slice(0, 10)}. The answer itself is on the month-end screen.`,
       href: "/cpa",
       since: t.lastAt.slice(0, 10),
     });
@@ -122,6 +149,9 @@ export function outstandingNotices(input: OutstandingInput): Notice[] {
       // is a first wording rather than a second, built from the row's own
       // fields: the kind, who decided it, and the date it was due.
       sentence: `${d.kindLabel}, recorded by ${d.decidedByName} on ${d.decidedAt.slice(0, 10)}, was due for review on ${d.reviewBy}.`,
+      // Built from the row's own fields rather than from anything typed, so the
+      // screen's sentence and the outside one are the same sentence.
+      outside: `${d.kindLabel}, recorded by ${d.decidedByName} on ${d.decidedAt.slice(0, 10)}, was due for review on ${d.reviewBy}.`,
       href: "/home",
       since: d.reviewBy,
     });
