@@ -30,6 +30,8 @@ import { appendControlEvent } from "../controls/events";
 const ADDRESS_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export type NoticeAddress = {
+  /** The row's own id. A proof points at this rather than at the person, so changing an address unproves it (Increment 1.61). */
+  id: string;
   userId: string;
   /** Null when the person has withdrawn, which is a decision rather than an absence. */
   address: string | null;
@@ -63,7 +65,7 @@ export async function currentAddress(db: AppDb, tenantId: string, userId: string
     .limit(1);
   const row = rows[0];
   if (!row) return null;
-  return { userId: row.userId, address: row.address, setAt: row.setAt.toISOString() };
+  return { id: row.id, userId: row.userId, address: row.address, setAt: row.setAt.toISOString() };
 }
 
 /**
@@ -112,7 +114,8 @@ export async function setAddress(
     };
   }
 
-  await db.insert(noticeAddresses).values({ id: uuidv7(), tenantId, userId, address: trimmed, setAt: at });
+  const id = uuidv7();
+  await db.insert(noticeAddresses).values({ id, tenantId, userId, address: trimmed, setAt: at });
   // The event names the act and never the address: the chain is read by people
   // who may govern this practice without being this person, and where somebody
   // is reachable is theirs.
@@ -124,5 +127,5 @@ export async function setAddress(
     { by: userName },
     at
   );
-  return { ok: true, address: { userId, address: trimmed, setAt: at.toISOString() } };
+  return { ok: true, address: { id, userId, address: trimmed, setAt: at.toISOString() } };
 }

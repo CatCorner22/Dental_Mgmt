@@ -51,6 +51,7 @@ const rehashSql = readFileSync(join(here, "../migrations/0040_month_close_rehash
 const addressesSql = readFileSync(join(here, "../migrations/0041_notice_addresses.sql"), "utf8");
 const sendsSql = readFileSync(join(here, "../migrations/0042_notice_sends.sql"), "utf8");
 const failureKindSql = readFileSync(join(here, "../migrations/0043_notice_send_failure_kind.sql"), "utf8");
+const proofsSql = readFileSync(join(here, "../migrations/0044_notice_address_proofs.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -441,6 +442,46 @@ describe("Increment 1.60 a refusal that can pass, and one that cannot", () => {
     // How many times the practice tried is answered by counting attempts. A
     // number stored next to them is a status the rows can contradict.
     expect(failureKindSql).not.toMatch(/attempt_count|retries|retry_count|tries/);
+  });
+});
+
+describe("Increment 1.61 proving an address reaches its person", () => {
+  it("keeps the code as a hash and never in the clear", () => {
+    expect(proofsSql).toMatch(/token_hash text NOT NULL CHECK \(token_hash ~ '\^\[0-9a-f\]\{64\}\$'\)/);
+    expect(proofsSql).not.toMatch(/token text|code text/);
+  });
+
+  it("ties a proof to one address row and to the code that answered it", () => {
+    // The proof points at the address row, not at the person: a changed
+    // address is a new row, which no proof names.
+    expect(proofsSql).toMatch(
+      /notice_address_proofs_address_is_theirs[\s\S]*FOREIGN KEY \(address_id, user_id\) REFERENCES notice_addresses \(id, user_id\)/
+    );
+    expect(proofsSql).toMatch(
+      /notice_address_proofs_answers_its_own_challenge[\s\S]*FOREIGN KEY \(challenge_id, address_id\) REFERENCES notice_address_challenges \(id, address_id\)/
+    );
+  });
+
+  it("admits one proof per address, which is what makes a code single-use", () => {
+    expect(proofsSql).toMatch(/CREATE UNIQUE INDEX notice_address_proofs_one_per_address ON notice_address_proofs \(address_id\)/);
+  });
+
+  it("refuses a proof stamped after its code expired, reading the proof's own stamp", () => {
+    expect(proofsSql).toMatch(/NEW\.proved_at > window_ends/);
+    expect(proofsSql).toMatch(/notice_address_challenges_expires_after_issue CHECK \(expires_at > issued_at\)/);
+  });
+
+  it("lets a person act only for themselves, and holds both tables append-only", () => {
+    expect(proofsSql).toMatch(/a person proves only their own address/);
+    for (const t of ["notice_address_challenges", "notice_address_proofs"]) {
+      expect(proofsSql).toMatch(new RegExp(`TRIGGER ${t}_no_update[\\s\\S]*BEFORE UPDATE`));
+      expect(proofsSql).toMatch(new RegExp(`TRIGGER ${t}_no_delete[\\s\\S]*BEFORE DELETE`));
+      expect(proofsSql).toMatch(new RegExp(`ALTER TABLE ${t} FORCE ROW LEVEL SECURITY`));
+      expect(proofsSql).toMatch(new RegExp(`CREATE POLICY ${t}_isolation`));
+      expect(proofsSql).toMatch(new RegExp(`GRANT SELECT, INSERT ON ${t} TO app_rw;`));
+      expect(proofsSql).not.toMatch(new RegExp(`GRANT[^;]*UPDATE[^;]*ON ${t}`));
+      expect(proofsSql).not.toMatch(new RegExp(`GRANT[^;]*DELETE[^;]*ON ${t}`));
+    }
   });
 });
 

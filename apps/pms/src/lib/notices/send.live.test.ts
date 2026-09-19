@@ -4,6 +4,7 @@ import { seedDatabase } from "@pms/db/seed";
 import { DEV_TENANTS, DEV_USERS } from "@pms/db/seed-data";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { setAddress } from "./addresses";
+import { proveAddress, sendProofCode } from "./proof";
 import { collectOutstanding } from "./outstanding";
 import { lastSend, sendNotices } from "./send";
 import { flakyTransport, memoryTransport, refusingTransport, unconfiguredTransport } from "./transport";
@@ -52,13 +53,48 @@ describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
     pause: async () => {},
   });
 
+  /**
+   * The sends that carried notices.
+   *
+   * A notice_count of zero is the code that proves an address (Increment
+   * 1.61), which reaches this person through the same table and the same
+   * retry rule. This suite is about sending what a seat owes, so it reads the
+   * rows that carried something owed.
+   */
   const rows = async () =>
     (
       await db.admin.query(
-        "SELECT outcome, address, detail, failure_kind, subject, body, notice_count FROM notice_sends WHERE tenant_id = $1 ORDER BY attempted_at, id",
+        "SELECT outcome, address, detail, failure_kind, subject, body, notice_count FROM notice_sends WHERE tenant_id = $1 AND notice_count > 0 ORDER BY attempted_at, id",
         [tenantId]
       )
     ).rows;
+
+  /**
+   * Proves the address on file, the way a person does.
+   *
+   * Since Increment 1.61 an address nobody has proved is not a destination, so
+   * every case below that expects a message to leave needs this first. It runs
+   * the real path rather than writing a proof row, because a fixture that
+   * skipped the path would let the path break without this suite noticing.
+   */
+  const proveTheAddress = async () => {
+    const transport = memoryTransport();
+    const asked = await tx((d) =>
+      sendProofCode(d, {
+        tenantId,
+        userId: owner.id,
+        userName: owner.displayName,
+        seat: "owner",
+        practiceName: "Ridgeview Dental",
+        appUrl: "https://app.example",
+        transport,
+        pause: async () => {},
+      })
+    );
+    expect(asked.ok).toBe(true);
+    const code = /Your code is ([A-HJKMNP-Z2-9]{10})/.exec(transport.sent[0].message.body)?.[1] ?? "";
+    expect(await tx((d) => proveAddress(d, tenantId, owner.id, owner.displayName, code))).toMatchObject({ ok: true });
+  };
 
   beforeAll(async () => {
     db = await createLiveDatabase(adminUrl!);
@@ -89,6 +125,7 @@ describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
 
   it("records a failure with the transport's own words, and says nothing arrived", async () => {
     await tx((d) => setAddress(d, tenantId, owner.id, owner.displayName, "riley@ridgeview.example"));
+    await proveTheAddress();
     const transport = unconfiguredTransport("This practice has no way to send messages yet.");
     const result = await tx(async (d) => sendNotices(d, await base(transport)));
     expect(result.outcome).toBe("failed");

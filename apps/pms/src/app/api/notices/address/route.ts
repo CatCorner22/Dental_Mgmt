@@ -6,6 +6,7 @@ import { withGuard } from "@/lib/auth/withGuard";
 import { withTenantTransaction } from "@/lib/db/client";
 import { currentAddress, setAddress } from "@/lib/notices/addresses";
 import { renderMessage } from "@/lib/notices/message";
+import { currentProof } from "@/lib/notices/proof";
 import { lastSend } from "@/lib/notices/send";
 import { collectOutstanding, type NoticeSeat } from "@/lib/notices/outstanding";
 
@@ -34,20 +35,28 @@ export const GET = withGuard(
   async (req, ctx) => {
     const user = ctx.access.user;
     const seat = seatOf(user);
-    const { address, notices, practiceName, sent } = await withTenantTransaction(user.tenantId, user.id, async (db) => ({
-      address: await currentAddress(db, user.tenantId, user.id),
+    const { address, notices, practiceName, sent, proof } = await withTenantTransaction(user.tenantId, user.id, async (db) => {
+      const address = await currentAddress(db, user.tenantId, user.id);
+      return {
+      address,
+      // Whether this exact address row has been proved to reach this person
+      // (Increment 1.61). It is read per row rather than per person, so a
+      // changed address is unproved without anything having to clear a flag.
+      proof: address === null ? null : await currentProof(db, user.tenantId, address.id),
       // The last attempt and how it went (Increment 1.59), so a failure is read
       // on the screen rather than swallowed.
       sent: await lastSend(db, user.tenantId, user.id),
       notices: await collectOutstanding(db, user.tenantId),
       practiceName: (await db.select().from(tenants).where(eq(tenants.id, user.tenantId)).limit(1))[0]?.name ?? "This practice",
-    }));
+      };
+    });
     // The origin the caller is already looking at, rather than a configured
     // base that can drift from where the product actually runs.
     const appUrl = new URL(req.url).origin;
     return Response.json({
       seat,
       address,
+      proof,
       lastSend: sent,
       // Null when this seat owes nothing: there is no message, because a
       // message that arrives whether or not anything happened is not a signal.
