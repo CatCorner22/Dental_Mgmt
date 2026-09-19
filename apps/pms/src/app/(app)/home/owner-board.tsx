@@ -313,6 +313,10 @@ export function OwnerBoard() {
                     {t.month} · {t.subjectKey} · asked {t.askedAt.slice(0, 10)} by {asked?.authorName}
                   </p>
                   <p className="mt-1 text-sm text-[var(--ink-2)]">{asked?.body}</p>
+                  {/* The owner needs this before they answer, not after
+                      (Increment 1.54): a month they have closed cannot simply
+                      be corrected, and an answer promising otherwise is wrong. */}
+                  {t.closedMonth && <p className="mt-1 max-w-prose text-xs text-[var(--ink-3)]">{t.closedMonth.sentence}</p>}
                   {answering === t.id ? (
                     <span className="mt-2 flex flex-wrap items-end gap-2">
                       <label className="flex flex-col text-sm">

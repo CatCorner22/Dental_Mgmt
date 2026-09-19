@@ -995,4 +995,52 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await standing.innerText()).toMatch(/Standing, not this week/i);
     await b.audit("digest, the week's attestations and what still stands");
   }, 90_000);
+
+  // Truly last: this one closes a month for good, which no earlier case may see.
+  it("marks a question about a month the practice has since closed, on both screens", async () => {
+    // Increment 1.54. A thread about a closed month read exactly like a thread
+    // about an open one, and the two call for different answers: "I will fix
+    // that figure" is true of an open month and false of a closed one, where
+    // the fix posts today under prior_period and the accountant's copy still
+    // reads what they received.
+    const ended = lastCompleteMonth();
+
+    // The owner closes the month that has ended, this time for good.
+    await b.signIn("ridgeview-owner", "/cpa");
+    await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
+    await page().locator("input[type=month]").fill(ended);
+    await page().getByRole("button", { name: "Close month" }).waitFor({ timeout: 30_000 });
+    await page().getByRole("button", { name: "Close month" }).click();
+    await page().getByRole("button", { name: "Close it for good" }).click();
+    await page().getByText(new RegExp(`^Closed ${ended}\\.`)).waitFor({ timeout: 30_000 });
+
+    // The accountant asks about a line of that now-frozen month.
+    await b.signIn("ridgeview-cpa", "/cpa");
+    await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
+    await page().locator("input[type=month]").fill(ended);
+    const questions = page().locator("section[aria-labelledby=package-questions]");
+    await questions.waitFor({ timeout: 30_000 });
+    await expect.poll(async () => questions.getByRole("combobox").count(), { timeout: 30_000 }).toBe(1);
+    await questions.getByRole("combobox").selectOption("journal|total");
+    await questions.getByLabel("Question", { exact: true }).fill("This total is lower than the one I had from your prior file. Which entries moved?");
+    await questions.getByRole("button", { name: "Ask", exact: true }).click();
+    await page().getByText(/^Asked\. The practice sees it on the home board\.$/).waitFor({ timeout: 30_000 });
+
+    // The thread says the month is closed, and what a fix now actually does.
+    const closedNote = new RegExp(
+      `${ended} was closed by Riley Owner on \\d{4}-\\d{2}-\\d{2}, so its figures are frozen and the accountant already has them\\. ` +
+        `A correction to this line now posts today with reason prior_period and is reported in the month it posts, not in this one\\.`
+    );
+    await expect.poll(async () => questions.innerText(), { timeout: 30_000 }).toMatch(closedNote);
+    await b.audit("month-end package, a question about a closed month");
+
+    // And the owner reads the same sentence on the board, before answering
+    // rather than after: this is what decides whether the answer is true.
+    await b.signIn("ridgeview-owner", "/home");
+    await page().getByRole("heading", { name: "Today's board" }).waitFor({ timeout: 60_000 });
+    const asked = page().locator("section[aria-labelledby=accountant-asked]");
+    await asked.waitFor({ timeout: 30_000 });
+    expect(await asked.innerText()).toMatch(closedNote);
+    await b.audit("home board, a question about a closed month");
+  }, 150_000);
 });

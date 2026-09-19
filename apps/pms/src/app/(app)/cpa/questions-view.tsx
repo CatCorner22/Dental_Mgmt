@@ -96,6 +96,10 @@ export function QuestionsView({ month }: { month: string }) {
           {data.items.map((t) => (
             <li key={t.id} className="rounded-md border border-[var(--line)] p-3">
               <p className="mb-1 text-sm font-semibold">{t.subjectLabel ?? t.subjectKey}</p>
+              {/* A thread about a month the practice has since closed (Increment
+                  1.54). It sits above the messages rather than under them,
+                  because it changes how the next message should be written. */}
+              {t.closedMonth && <p className="mb-2 max-w-prose text-xs text-[var(--ink-3)]">{t.closedMonth.sentence}</p>}
               <ol className="mb-2 space-y-1">
                 {t.messages.map((m) => (
                   <li key={m.id} className="text-sm">
