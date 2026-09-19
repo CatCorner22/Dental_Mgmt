@@ -47,6 +47,7 @@ const reasonDecisionSql = readFileSync(join(here, "../migrations/0036_decision_o
 const cpaQuestionsSql = readFileSync(join(here, "../migrations/0037_cpa_questions.sql"), "utf8");
 const attestationsSql = readFileSync(join(here, "../migrations/0038_channel_attestations.sql"), "utf8");
 const threadReadsSql = readFileSync(join(here, "../migrations/0039_cpa_thread_reads.sql"), "utf8");
+const rehashSql = readFileSync(join(here, "../migrations/0040_month_close_rehashes.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -371,6 +372,39 @@ describe("Increment 1.51 attesting a channel the product cannot enforce", () => 
     expect(attestationsSql).toMatch(/GRANT SELECT, INSERT ON channel_attestations TO app_rw;/);
     expect(attestationsSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON channel_attestations/);
     expect(attestationsSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON channel_attestations/);
+  });
+});
+
+describe("Increment 1.56 a baseline for a month closed under an older shape", () => {
+  it("adds a baseline rather than rewriting the close, and only for a month that was closed", () => {
+    expect(rehashSql).toMatch(/CREATE TABLE month_close_rehashes/);
+    // The frozen hash records what the accountant received; month_closes refuses
+    // every update, and this migration must not reach for one either.
+    expect(rehashSql).not.toMatch(/UPDATE month_closes/);
+    expect(rehashSql).not.toMatch(/ALTER TABLE month_closes/);
+    expect(rehashSql).toMatch(/FOREIGN KEY \(tenant_id, month\) REFERENCES month_closes \(tenant_id, month\)/);
+    expect(rehashSql).toMatch(/package_hash text NOT NULL CHECK \(package_hash ~ '\^\[0-9a-f\]\{64\}\$'\)/);
+  });
+
+  it("takes one baseline per shape, and never under the shape the close already froze", () => {
+    // The first reading under a shape is the baseline; a second would move the
+    // line a later comparison is drawn from and hide a move in between.
+    expect(rehashSql).toMatch(
+      /CREATE UNIQUE INDEX month_close_rehashes_month_schema_uidx[\s\S]*\(tenant_id, month, package_schema\)/
+    );
+    expect(rehashSql).toMatch(/TRIGGER month_close_rehashes_is_a_later_shape[\s\S]*BEFORE INSERT/);
+    expect(rehashSql).toMatch(/which is already its baseline/);
+  });
+
+  it("is append-only, tenant-isolated under FORCE RLS, and never granted an update or a delete", () => {
+    expect(rehashSql).toMatch(/month_close_rehashes is append-only/);
+    expect(rehashSql).toMatch(/TRIGGER month_close_rehashes_no_update[\s\S]*BEFORE UPDATE/);
+    expect(rehashSql).toMatch(/TRIGGER month_close_rehashes_no_delete[\s\S]*BEFORE DELETE/);
+    expect(rehashSql).toMatch(/ALTER TABLE month_close_rehashes FORCE ROW LEVEL SECURITY/);
+    expect(rehashSql).toMatch(/CREATE POLICY month_close_rehashes_isolation/);
+    expect(rehashSql).toMatch(/GRANT SELECT, INSERT ON month_close_rehashes TO app_rw;/);
+    expect(rehashSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON month_close_rehashes/);
+    expect(rehashSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON month_close_rehashes/);
   });
 });
 

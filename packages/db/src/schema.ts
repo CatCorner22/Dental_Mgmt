@@ -811,6 +811,33 @@ export const monthCloses = pgTable(
 );
 
 /**
+ * One baseline per practice, month and package shape (Increment 1.56): under
+ * this shape, as of this moment, this closed month hashed to this.
+ *
+ * It never replaces the close's own frozen hash, which records what the
+ * accountant received and which `month_closes` refuses to change. It gives
+ * "has a figure moved since?" something to compare against again for a month
+ * closed under an older shape, and names the date that claim runs from.
+ */
+export const monthCloseRehashes = pgTable(
+  "month_close_rehashes",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    month: text("month").notNull(),
+    /** The shape this baseline was computed under; never the close's own. */
+    packageSchema: text("package_schema").notNull(),
+    packageHash: text("package_hash").notNull(),
+    entryCount: integer("entry_count").notNull(),
+    totalCents: bigint("total_cents", { mode: "number" }).notNull(),
+    computedById: uuid("computed_by_id").notNull(),
+    computedByName: text("computed_by_name").notNull(),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [uniqueIndex("month_close_rehashes_month_schema_uidx").on(t.tenantId, t.month, t.packageSchema)]
+);
+
+/**
  * One append-only message in a thread the accountant and the practice hold
  * about one month-end package line (Increment 1.50). The message that opened a
  * thread carries its own id in `threadId`; a reply carries the opener's, and
@@ -920,4 +947,5 @@ export const TENANT_SCOPED_TABLES = [
   "cpa_thread_messages",
   "channel_attestations",
   "cpa_thread_reads",
+  "month_close_rehashes",
 ] as const;

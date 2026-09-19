@@ -3,6 +3,7 @@ import { withGuard } from "@/lib/auth/withGuard";
 import { withTenantTransaction } from "@/lib/db/client";
 import { computeMonthPackage, isMonth, listPackageExports, packageHash, PACKAGE_SCHEMA_VERSION } from "@/lib/cpa/package";
 import { loadMonthClose } from "@/lib/cpa/close";
+import { compareClose, loadRehashBaseline } from "@/lib/cpa/rehash";
 
 /**
  * The CPA month-end package for `month` (YYYY-MM, default the current
@@ -16,10 +17,12 @@ export const GET = withGuard(
     const month = new URL(req.url).searchParams.get("month") ?? thisMonth;
     if (!isMonth(month)) return Response.json({ error: "The month must be a calendar month (YYYY-MM)." }, { status: 400 });
     if (month > thisMonth) return Response.json({ error: "The package reads rows that exist; a month that has not started has none yet." }, { status: 400 });
-    const { pkg, exports, close } = await withTenantTransaction(user.tenantId, user.id, async (db) => ({
+    const { pkg, exports, close, baseline } = await withTenantTransaction(user.tenantId, user.id, async (db) => ({
       pkg: await computeMonthPackage(db, user.tenantId, month),
       exports: await listPackageExports(db, user.tenantId, month),
       close: await loadMonthClose(db, user.tenantId, month),
+      // The baseline under the shape in force now, if the practice took one (Increment 1.56).
+      baseline: await loadRehashBaseline(db, user.tenantId, month),
     }));
     const hash = packageHash(pkg);
     // A frozen hash compares only against a package of the same shape. Where the
@@ -43,6 +46,15 @@ export const GET = withGuard(
       frozenFiguresHold: close
         ? pkg.journal.entryCount === close.entryCount && pkg.journal.totalCents === close.totalCents
         : true,
+      /** What a reader may conclude about this close right now, and from which date (Increment 1.56). */
+      comparison: compareClose({
+        closedUnder: close?.packageSchema ?? null,
+        closeHash: close?.packageHash ?? null,
+        currentSchema: PACKAGE_SCHEMA_VERSION,
+        currentHash: hash,
+        baseline,
+      }),
+      baseline,
       package: pkg,
       packageHash: hash,
       exports,
