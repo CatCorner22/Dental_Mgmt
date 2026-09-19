@@ -61,7 +61,11 @@ type ExceptionsResponse = {
 
 type ReasonCodesResponse = { items: ReasonCodeRow[] };
 
+import type { Notice, NoticeSeat } from "@/lib/notices/outstanding";
+
 type AttestationsResponse = { month: string; items: AttestationRow[] };
+
+type OutstandingResponse = { notices: Notice[]; counts: Record<NoticeSeat, number>; computedAt: string };
 
 type Me = { ok: boolean; role?: string; displayName?: string };
 
@@ -106,6 +110,7 @@ type Loaded = {
   findings: FindingsResponse;
   reasonCodes: ReasonCodesResponse;
   attestations: AttestationsResponse;
+  outstanding: OutstandingResponse;
 };
 
 type LoadState =
@@ -147,7 +152,7 @@ export default function PracticeRiskPage() {
   const [grantRefused, setGrantRefused] = useState<(RefusalContent & { canLicense: boolean }) | null>(null);
 
   const load = useCallback(async (fresh = false) => {
-    const [risk, sod, decisions, exceptions, findings, reasonCodes, attestations] = await Promise.all([
+    const [risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding] = await Promise.all([
       getJson<RiskResponse>(`/api/controls/risk${fresh ? "?fresh=1" : ""}`),
       getJson<SodResponse>("/api/controls/sod"),
       getJson<DecisionsResponse>("/api/controls/decisions"),
@@ -159,8 +164,12 @@ export default function PracticeRiskPage() {
       getJson<AttestationsResponse>(
         `/api/controls/attestations?month=${lastCompleteMonth(new Date().toISOString().slice(0, 10))}`
       ),
+      // What each seat owes right now (Increment 1.57): its own route, because
+      // the snapshot above may be the frozen one and this is always the
+      // practice's position now.
+      getJson<OutstandingResponse>("/api/controls/outstanding"),
     ]);
-    return { risk, sod, decisions, exceptions, findings, reasonCodes, attestations };
+    return { risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding };
   }, []);
 
   useEffect(() => {
@@ -476,7 +485,7 @@ function RiskBody({
   onRevoke: (person: RoleAssignment, entitlement: string) => void;
   exceptionControls: ExceptionControls;
 }) {
-  const { risk, sod, decisions, exceptions, findings, reasonCodes, attestations } = data;
+  const { risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding } = data;
   const s = risk.snapshot;
   const conflicts = [...sod.conflicts]
     .filter((c) => showFamily || c.severity !== "family")
@@ -1036,6 +1045,42 @@ function RiskBody({
               </div>
             );
           })()}
+      </section>
+
+      {/* What each seat owes right now (Increment 1.57), folded from the same
+          readings the other screens use and stored nowhere: a notices table
+          would be a status column that can disagree with the rows under it.
+          Each entry carries the sentence its own surface already writes. */}
+      <section aria-labelledby="outstanding" className="mb-10">
+        <h2 id="outstanding" className="mb-3 text-lg font-semibold">
+          What people owe
+        </h2>
+        {outstanding.notices.length === 0 ? (
+          <p className="max-w-prose text-[var(--ink-2)]">
+            Nobody owes anything the product can see: every channel the practice cannot enforce carries an attestation for
+            the month that has ended, no question is waiting on an answer, no answer is waiting to be read, and no decision
+            is past its review date.
+          </p>
+        ) : (
+          <>
+            <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
+              {outstanding.counts.owner} on the practice, {outstanding.counts.accountant} on the accountant. Read from rows
+              on every load and recorded nowhere, so nothing here can outlive the thing it reports. Oldest first.
+            </p>
+            <ul className="space-y-3">
+              {outstanding.notices.map((n) => (
+                <li key={n.key} className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">
+                    {n.seat === "owner" ? "The practice" : "The accountant"}
+                    {n.since ? ` \u00b7 since ${n.since}` : ""}
+                  </p>
+                  <p className="mt-1 text-sm font-semibold">{n.subject}</p>
+                  <p className="mt-1 max-w-prose text-sm text-[var(--ink-2)]">{n.sentence}</p>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </section>
 
       <section aria-labelledby="assumptions" className="mb-6">

@@ -653,7 +653,9 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await ledger.locator("tbody tr").count()).toBe(before);
     // Pinned at the state CI caught: this screen carries its own title, and the
     // violation reported against it was a document sampled between renders.
-    expect(await page().title()).toBe("Account ledger");
+    // Read at rest, because a raw read can land in the sub-millisecond span in
+    // which React has removed the old <title> and not yet inserted the new one.
+    expect(await b.titleAtRest()).toBe("Account ledger");
     await b.audit("account explanation (correction held for a second person)");
 
     // The owner's inbox reads it as a correction, not a bare reversal, and names both figures.
@@ -682,10 +684,12 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await ledger.locator("tr", { hasText: "Reverses the" }).getByRole("button", { name: "Correct" }).count()).toBe(0);
     expect(await ledger.locator("tr", { hasText: "Reposts the" }).getByRole("button", { name: "Correct" }).count()).toBe(0);
     // The screen carries a title of its own. It had none until now and inherited
-    // the root layout's "Practice home", which CI caught here as no title at all
-    // while a client navigation swapped it — a WCAG 2.4.2 failure on a page
-    // reached by a link rather than by a fresh load.
-    expect(await page().title()).toBe("Account ledger");
+    // the root layout's "Practice home", which is what this asserts. The raw read
+    // that stood here failed CI with '' instead: the link navigation swaps the
+    // head, and a sample can land between the removal of the old <title> and the
+    // insertion of the new one. Reading at rest asserts the screen; the earlier
+    // read asserted the frame it was sampled in.
+    expect(await b.titleAtRest()).toBe("Account ledger");
     await b.audit("account explanation (corrected)");
   }, 120_000);
 

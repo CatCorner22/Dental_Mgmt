@@ -145,6 +145,13 @@ export type E2eBrowser = {
    */
   audits: { state: string; title: string; passes: number; violations: number; incomplete: number }[];
   signIn(username: string, callbackPath: string): Promise<void>;
+  /**
+   * The document title once the head has settled, which is the only moment a
+   * title assertion can be about the screen rather than about the frame. Reading
+   * `page.title()` raw samples an instant that may fall inside a head swap; see
+   * the comment on the implementation for what was measured there.
+   */
+  titleAtRest(): Promise<string>;
   /** Runs axe on the page as it stands and records the violations under `state`. Returns the serious and critical ones. */
   audit(state: string): Promise<AxeViolation[]>;
   close(): Promise<void>;
@@ -186,25 +193,43 @@ export async function openBrowser(app: E2eApp): Promise<E2eBrowser> {
   const audits: E2eBrowser["audits"] = [];
   const axeSource = readFileSync(AXE_PATH, "utf8");
 
+  /** See the E2eBrowser declaration. */
+  const titleAtRest = async (): Promise<string> => {
+    // Read the title at rest, never mid-update. Every route here declares
+    // metadata, so an empty document.title is always a document caught between
+    // renders -- the head swapped by a client navigation or a refresh -- and
+    // never a screen a person can be on.
+    //
+    // The window is real and was measured, not assumed. Patching the four
+    // mutators on document.head and recording document.title synchronously
+    // after each call, a link navigation from /ledger to an account shows the
+    // old <title> removed, two unrelated nodes inserted, and the new <title>
+    // inserted about 0.1 ms later: for that span the head holds no title
+    // element at all and document.title reads "". React reconciles the head
+    // that way, so no route or layout here can close the window. It is also
+    // narrower than a frame, which is why sampling every animation frame --
+    // 25 frames at full speed and 58 under 20x CPU throttling -- never caught
+    // it, while CI, which samples on its own clock, caught it twice.
+    //
+    // This settles the sample; it excuses nothing. A screen that genuinely
+    // carries no title never settles, so this wait times out and the suite
+    // fails, which is how the missing titles of Increment 1.49 were found.
+    // The value comes back from the predicate that passed, so the title
+    // asserted on is the title that was seen, not a second read of a document
+    // that may have moved on.
+    const settled = await page.waitForFunction(() => document.title || false, undefined, { timeout: 30_000 });
+    return (await settled.jsonValue()) as string;
+  };
+
   return {
     browser,
     page,
     problems,
     a11y,
     audits,
+    titleAtRest,
     async audit(state) {
-      // Audit the screen at rest, never mid-update. Every route here declares
-      // metadata, so an empty document.title is always a document caught between
-      // renders -- the head swapped by a client navigation or a refresh -- and
-      // never a screen a person can be on. CI hit exactly that window on a state
-      // whose title reads "Account ledger" before and after it, and reported a
-      // WCAG 2.4.2 failure against a page that has a title.
-      //
-      // This settles the sample; it excuses nothing. A screen that genuinely
-      // carries no title never settles, so this wait times out and the suite
-      // fails, which is how the missing titles of Increment 1.49 were found.
-      await page.waitForFunction(() => document.title.length > 0, undefined, { timeout: 30_000 });
-      const title = await page.title();
+      const title = await titleAtRest();
       const loaded = await page.evaluate(() => typeof (window as unknown as { axe?: unknown }).axe !== "undefined");
       if (!loaded) await page.addScriptTag({ content: axeSource });
       const raw = (await page.evaluate(async (tags) => {

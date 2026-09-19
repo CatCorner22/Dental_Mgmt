@@ -304,6 +304,27 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await b.audit("practice risk, a loosened reason naming its decision");
   }, 150_000);
 
+  it("folds what each seat owes into one list, derived from rows rather than stored", async () => {
+    // Increment 1.57. Everything this arc built is read on its own screen; this
+    // is the one place that answers "what does the practice owe, and who owes
+    // it" without visiting all of them.
+    await b.signIn("ridgeview-owner", "/risk");
+    await page().getByRole("heading", { name: "Headline" }).waitFor({ timeout: 60_000 });
+    const owed = page().locator("section[aria-labelledby=outstanding]");
+    await owed.waitFor({ timeout: 30_000 });
+
+    // The seeded practice has never attested the month that ended, so the
+    // practice owes that, in the same sentence the owner board carries.
+    const text = await owed.innerText();
+    expect(text).toContain("What people owe");
+    expect(text).toMatch(/Channels nobody reviewed for \d{4}-\d{2}/);
+    expect(text).toMatch(/Nobody has reviewed new vendors and payroll for \d{4}-\d{2}/);
+    expect(text).toContain("recorded nowhere, so nothing here can outlive the thing it reports");
+    // Addressed to a seat, never merely to a reader.
+    expect(text).toContain("THE PRACTICE");
+    await b.audit("practice risk, what people owe");
+  });
+
   it("shows a user-rank account the Refusal, not the page", async () => {
     await b.signIn("ridgeview-front", "/risk");
     await page().locator("main [role=alert]").waitFor({ timeout: 30_000 });
