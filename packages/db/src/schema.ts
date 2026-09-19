@@ -859,6 +859,35 @@ export const noticeAddresses = pgTable(
 );
 
 /**
+ * One attempt to send a person their notices (Increment 1.59). Append-only: an
+ * attempt is never rewritten, and a later attempt is another row. A failure is
+ * a row like any other, because a send that failed silently is worse than one
+ * that never happened — the reader would believe they had been told. Nothing
+ * owed writes no row at all, since that is not an act.
+ */
+export const noticeSends = pgTable(
+  "notice_sends",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    seat: text("seat").notNull(),
+    recipientId: uuid("recipient_id").notNull(),
+    recipientName: text("recipient_name").notNull(),
+    /** Where it went, as of this attempt. Null exactly when the outcome is unreachable. */
+    address: text("address"),
+    /** 'sent' | 'failed' | 'unreachable'. */
+    outcome: text("outcome").notNull(),
+    /** The transport's own words on a failure, or why there was nowhere to send. */
+    detail: text("detail"),
+    subject: text("subject"),
+    body: text("body"),
+    noticeCount: integer("notice_count").notNull(),
+    attemptedAt: timestamp("attempted_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("notice_sends_recipient_idx").on(t.tenantId, t.recipientId, t.attemptedAt)]
+);
+
+/**
  * One append-only message in a thread the accountant and the practice hold
  * about one month-end package line (Increment 1.50). The message that opened a
  * thread carries its own id in `threadId`; a reply carries the opener's, and
@@ -970,4 +999,5 @@ export const TENANT_SCOPED_TABLES = [
   "cpa_thread_reads",
   "month_close_rehashes",
   "notice_addresses",
+  "notice_sends",
 ] as const;

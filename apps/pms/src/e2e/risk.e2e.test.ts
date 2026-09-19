@@ -365,6 +365,44 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await b.audit("practice risk, asked not to receive");
   }, 120_000);
 
+  it("sends, says where it went, and says plainly when there was nowhere to send", async () => {
+    // Increment 1.59. The half that matters is the failure: a delivery that
+    // went nowhere and said nothing would leave its reader believing they had
+    // been told.
+    await b.signIn("ridgeview-owner", "/risk");
+    await page().getByRole("heading", { name: "Headline" }).waitFor({ timeout: 60_000 });
+    const delivery = page().locator("section[aria-labelledby=delivery]");
+    await delivery.waitFor({ timeout: 30_000 });
+
+    // The previous case withdrew, so this practice owes something and has
+    // nowhere to send it — which is a state, not an error.
+    // The banner, read on its own element: the outcome sentence deliberately
+    // reads the same in the banner and in the section, so a locator by text
+    // would match both and Playwright would refuse the ambiguity.
+    const banner = page().locator("p[aria-live=polite]");
+    await delivery.getByRole("button", { name: "Send this to me now" }).click();
+    await expect
+      .poll(async () => await banner.innerText(), { timeout: 30_000 })
+      .toMatch(/Nothing was sent on \d{4}-\d{2}-\d{2}: You asked on \d{4}-\d{2}-\d{2} not to receive these/);
+    await expect
+      .poll(async () => await delivery.innerText(), { timeout: 30_000 })
+      .toMatch(/Nothing was sent on \d{4}-\d{2}-\d{2}/);
+    await b.audit("practice risk, nowhere to send it");
+
+    // With an address, the same act delivers and says where.
+    await delivery.getByLabel("Your address").fill("riley@ridgeview.example");
+    await delivery.getByRole("button", { name: "Save address" }).click();
+    await flash(/Messages would go to riley@ridgeview\.example\./).waitFor({ timeout: 30_000 });
+    await delivery.getByRole("button", { name: "Send this to me now" }).click();
+    await expect
+      .poll(async () => await banner.innerText(), { timeout: 30_000 })
+      .toMatch(/Sent to riley@ridgeview\.example on \d{4}-\d{2}-\d{2}\./);
+    await expect
+      .poll(async () => await delivery.innerText(), { timeout: 30_000 })
+      .toMatch(/Sent to riley@ridgeview\.example on \d{4}-\d{2}-\d{2}\./);
+    await b.audit("practice risk, sent");
+  }, 120_000);
+
   it("shows a user-rank account the Refusal, not the page", async () => {
     await b.signIn("ridgeview-front", "/risk");
     await page().locator("main [role=alert]").waitFor({ timeout: 30_000 });
