@@ -5,7 +5,7 @@ import { DEV_TENANTS, DEV_USERS } from "@pms/db/seed-data";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { currentAddress, setAddress } from "./addresses";
 import { collectOutstanding } from "./outstanding";
-import { currentProof, proveAddress, sendProofCode } from "./proof";
+import { ASKS_PER_WINDOW, currentProof, nextAskAllowedAt, proveAddress, sendProofCode } from "./proof";
 import { sendNotices } from "./send";
 import { memoryTransport } from "./transport";
 
@@ -206,6 +206,79 @@ describe.skipIf(!adminUrl)("proving an address (live)", () => {
     const text = JSON.stringify(rows.map((r) => r.payload));
     expect(text).not.toContain("ridgeview.example");
     expect(text).not.toMatch(/[A-HJKMNP-Z2-9]{10}/);
+  });
+
+  describe("how often the product can be made to send", () => {
+    // Increment 1.63. The abuse worth limiting is not guessing a code — a
+    // person can only prove their own address, which they could prove by
+    // asking — but asking: a signed-in person can point this product's mail at
+    // somebody else's address by typing it, and press the button again.
+    //
+    // A fresh hour, well clear of every ask the cases above made, so the
+    // arithmetic here is exact rather than inherited.
+    const base = new Date("2026-10-01T09:00:00.000Z");
+    const minutesIn = (n: number) => new Date(base.getTime() + n * 60_000);
+
+    const ask = (at: Date) =>
+      tx((d) =>
+        sendProofCode(d, {
+          tenantId,
+          userId: owner.id,
+          userName: owner.displayName,
+          seat: "owner",
+          practiceName: "Ridgeview Dental",
+          appUrl: "https://app.example",
+          transport: memoryTransport(),
+          at,
+          pause: async () => {},
+        })
+      );
+
+    beforeAll(async () => {
+      // The cases above leave a proved address, and an already-proved address
+      // refuses an ask before the limit is ever consulted — so these cases
+      // would pass for a reason that has nothing to do with the rule they
+      // name. A fresh, unproved address puts the limit back in the path.
+      await tx((d) => setAddress(d, tenantId, owner.id, owner.displayName, "riley@ridgeview-ask.example"));
+    });
+
+    const challengeCount = async () =>
+      (await db.admin.query("SELECT count(*)::int AS n FROM notice_address_challenges WHERE tenant_id = $1", [tenantId]))
+        .rows[0].n as number;
+
+    it("sends the first five within the hour", async () => {
+      for (let i = 0; i < ASKS_PER_WINDOW; i += 1) {
+        expect(await ask(minutesIn(i))).toMatchObject({ ok: true });
+      }
+    });
+
+    it("refuses the sixth, says when they may ask again, and writes nothing", async () => {
+      const before = await challengeCount();
+      const refused = await ask(minutesIn(5));
+      expect(refused).toMatchObject({ ok: false, status: 409, code: "asked_too_often" });
+      if (refused.ok) throw new Error("unreachable");
+      // The window frees up when the oldest of the five leaves it, which is an
+      // hour after the first — so the message names a time rather than telling
+      // somebody to try again later and leaving them to guess.
+      expect(refused.why).toContain("10:00 UTC");
+      // A refused ask must leave no trace, or the refusal would itself spend
+      // part of the next window.
+      expect(await challengeCount()).toBe(before);
+    });
+
+    it("does not hand out a fresh allowance for changing one character", async () => {
+      // The limit is per person rather than per address row, because a per-row
+      // limit is escaped by typing a slightly different stranger's address —
+      // which is exactly the thing being limited.
+      await tx((d) => setAddress(d, tenantId, owner.id, owner.displayName, "riley@ridgeview-four.example"));
+      expect(await ask(minutesIn(6))).toMatchObject({ ok: false, code: "asked_too_often" });
+    });
+
+    it("lets them ask again once the oldest ask has left the window", async () => {
+      expect(await tx((d) => nextAskAllowedAt(d, tenantId, owner.id, minutesIn(59)))).not.toBeNull();
+      expect(await tx((d) => nextAskAllowedAt(d, tenantId, owner.id, minutesIn(61)))).toBeNull();
+      expect(await ask(minutesIn(61))).toMatchObject({ ok: true });
+    });
   });
 
   describe("what the database holds past the service", () => {

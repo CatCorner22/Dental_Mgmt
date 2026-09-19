@@ -555,6 +555,25 @@ The CPA month-end package, `docs/13` item 22, has sat in every "not in" list sin
 
 **Not in Increment 1.35.** QuickBooks Online and Xero export shapes (the mapping is theirs to feed, but the formats are not written); a starter chart of accounts; reason-code-level mappings in the page's form (the service and the resolver take them; the form proposes the wildcard); the CPA seat; month close.
 
+## Increment 1.63
+
+Increment 1.61 left "a throttle on guessing a proof code" as work to come. Building it was the obvious next step, and it is the wrong one.
+
+**A guessing throttle here protects nothing.** The lookup is scoped to the caller's own rows, so a code issued to somebody else does not match. The only address anybody can prove is their own. And a person who wants their own address proved does not need to guess — they can press the button and be sent a code. Guessing buys nobody anything they cannot have for the asking, and a limit on it would be a thing that looks like protection, which this product has refused to ship since the transport with no default.
+
+**The real abuse is the other half.** A signed-in person can point this product's mail at **somebody else's address** by typing it, and press the button again and again. The thing worth limiting is not how often somebody can answer, but how often the product can be made to send.
+
+- **Five asks an hour, per person.** Not per address row: a per-row limit is escaped by changing one character, which writes a new row and hands the asker a fresh allowance — and typing a slightly different stranger's address is exactly the move being limited.
+- **The rows are the count.** Every ask is already an append-only challenge with its own `issued_at`, so the limit is a `count` over those rows. No counter, nothing to reset, nothing that can drift from what actually happened. This is why the increment does **not** reuse `auth_throttle`: its mutable `fail_count` earns its keep against unauthenticated sign-in traffic, which must not be allowed to write a row per attempt, but here it would be precisely the status column the rest of this codebase refuses.
+- **The refusal names a time.** "You may ask again after 10:00 UTC", computed from when the oldest of the five leaves the window — rather than "try again later", which leaves a person to guess and to keep pressing.
+- **A refused ask writes nothing.** The limit is checked before a code is minted or a row written, so a refusal does not itself spend part of the next window. A throttle that charged for being throttled would tighten under exactly the pressure it exists to absorb.
+- **409, like every other state refusal here.** Nothing is missing and nothing is malformed; what refuses is the practice's state. It also keeps a 404 from an API route meaning the one thing it should mean, which the browser harness depends on.
+- **The screen says it.** One clause in the proof form, where a person about to press the button reads it, rather than in a document they will not open.
+- **A defect in the first draft of the tests.** The new cases sat after a case that leaves a **proved** address — and an already-proved address refuses an ask before the limit is ever consulted, so all four passed on a refusal that had nothing to do with the rule they named. They now set a fresh unproved address first, which puts the limit back in the path. This is the third time in this arc a case has been caught proving something other than its own name; it is worth saying that the tell each time was a refusal arriving for a plausible but different reason.
+- **Tests.** Live: the first five within the hour all send; the sixth refuses, names the hour it frees up, and writes no challenge row; a changed address does not hand out a fresh allowance; and the window opens again once the oldest ask has left it, checked both through `nextAskAllowedAt` at a minute either side of the boundary and through a real ask that then succeeds. Browser: the limit is on the screen beside the button it governs.
+
+**Not in Increment 1.63.** A way for the stranger to stop it, which needs an address belonging to somebody who is not a user — five messages an hour is bounded and the message tells an unexpecting reader to ignore it, but bounded is not zero. A limit on how often one *address* may be written to across different people, which would need reading other people's address rows and is a worse trade than it sounds. A practice-wide ceiling. And a digest across several notices, re-proving an address on a schedule, and an address for somebody who is not a user, all still.
+
 ## Increment 1.62
 
 Everything the notices arc has built so far waits to be asked. That is backwards. A notice exists to reach a person who is **not** looking, and a product that tells you things only when you open it has told you nothing you could not have found yourself.

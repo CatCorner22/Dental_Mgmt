@@ -1,5 +1,5 @@
 import { createHash, randomInt } from "node:crypto";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import { noticeAddressChallenges, noticeAddressProofs, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { appendControlEvent } from "../controls/events";
@@ -38,6 +38,27 @@ import type { Transport } from "./transport";
  * row with a new id, which no proof points at, so a changed address is unproved
  * by the shape rather than by anything remembering to clear a flag. A signal
  * that never clears is not a signal; this one cannot fail to clear.
+ *
+ * **A limit on asking, and deliberately none on guessing** (Increment 1.63).
+ * Increment 1.61 left a throttle on guessing codes as work to come. It is not
+ * built, because on inspection it protects nothing: the lookup is scoped to
+ * the caller's own rows, the only address anybody can prove is their own, and
+ * a person who wants that outcome can simply press the button and be sent a
+ * code. Guessing buys nobody anything they cannot have for the asking, and a
+ * throttle there would be a thing that looks like protection.
+ *
+ * The real abuse is the other half. A signed-in person can point this
+ * product's mail at **somebody else's address** by typing it, and ask again
+ * and again — so the thing worth limiting is how often the product can be made
+ * to send. Five asks an hour, per person rather than per address row, because
+ * a per-row limit is escaped by changing one character and starting a fresh
+ * allowance.
+ *
+ * The count comes from the challenges themselves, which are append-only and
+ * already record every ask. No counter, nothing to reset, and nothing that can
+ * disagree with the rows — which is why this does not reuse `auth_throttle`,
+ * whose mutable `fail_count` earns its keep against unauthenticated traffic
+ * that must not be allowed to write a row per attempt.
  */
 
 /**
@@ -47,6 +68,10 @@ import type { Transport } from "./transport";
  */
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const CODE_LENGTH = 10;
+
+/** How many codes one person may have sent in `ASK_WINDOW_MS`, whatever address they aim at. */
+export const ASKS_PER_WINDOW = 5;
+export const ASK_WINDOW_MS = 60 * 60 * 1000;
 
 export type ProofState = {
   /** Which address row was proved. */
@@ -58,7 +83,7 @@ export type ProofState = {
 export type ProofRefusal = {
   ok: false;
   status: 400 | 409;
-  code: "malformed" | "unknown" | "expired" | "already_proved" | "no_address";
+  code: "malformed" | "unknown" | "expired" | "already_proved" | "no_address" | "asked_too_often";
   verb: string;
   why: string;
 };
@@ -100,6 +125,44 @@ export async function currentProof(db: AppDb, tenantId: string, addressId: strin
     .limit(1);
   const row = rows[0];
   return row ? { addressId: row.addressId, provedAt: row.provedAt.toISOString() } : null;
+}
+
+/**
+ * When this person may next ask for a code, or null where they may ask now.
+ *
+ * Counted from the challenges themselves rather than from a tally kept beside
+ * them: every ask is already an append-only row, so the rows are the count and
+ * there is nothing to reset, nothing to drift, and nothing a reader must trust
+ * over what actually happened.
+ *
+ * Per person, not per address row. A limit tied to the row would be escaped by
+ * changing one character of the address, which writes a new row and hands the
+ * asker a fresh allowance — and typing a slightly different stranger's address
+ * is exactly the thing being limited.
+ */
+export async function nextAskAllowedAt(
+  db: AppDb,
+  tenantId: string,
+  userId: string,
+  at: Date = new Date()
+): Promise<Date | null> {
+  const since = new Date(at.getTime() - ASK_WINDOW_MS);
+  const recent = await db
+    .select({ issuedAt: noticeAddressChallenges.issuedAt })
+    .from(noticeAddressChallenges)
+    .where(
+      and(
+        eq(noticeAddressChallenges.tenantId, tenantId),
+        eq(noticeAddressChallenges.userId, userId),
+        gt(noticeAddressChallenges.issuedAt, since)
+      )
+    )
+    .orderBy(desc(noticeAddressChallenges.issuedAt))
+    .limit(ASKS_PER_WINDOW);
+  if (recent.length < ASKS_PER_WINDOW) return null;
+  // The window frees up when the oldest of these leaves it.
+  const oldest = recent[recent.length - 1]!.issuedAt;
+  return new Date(oldest.getTime() + ASK_WINDOW_MS);
 }
 
 /**
@@ -151,6 +214,20 @@ export async function sendProofCode(
       code: "already_proved",
       verb: "send a code",
       why: `${held.address} was proved on ${already.provedAt.slice(0, 10)}. Change the address if it is wrong; a new one is proved again.`,
+    };
+  }
+
+  // A limit on asking (Increment 1.63), checked before anything is minted or
+  // written: a refused ask must leave no trace, or the refusal would itself
+  // spend part of the next window.
+  const waitUntil = await nextAskAllowedAt(db, input.tenantId, input.userId, at);
+  if (waitUntil !== null) {
+    return {
+      ok: false,
+      status: 409,
+      code: "asked_too_often",
+      verb: "send a code",
+      why: `That is ${ASKS_PER_WINDOW} codes in an hour, which is as many as this practice will send. You may ask again after ${waitUntil.toISOString().slice(11, 16)} UTC.`,
     };
   }
 
