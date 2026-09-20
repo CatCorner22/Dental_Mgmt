@@ -365,7 +365,22 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     const whole = await page().locator("main").innerText();
     expect(whole).toMatch(/Chain · \d+ events, sequence \d+ to \d+/);
     expect(whole).toMatch(/no row here names anyone/);
-    expect(whole).not.toMatch(/Riley|Finn|John Smith/);
+    // The digest's own figures name nobody, which is what makes the message
+    // safe to send: `DigestFacts` is numbers and dates, so the message cannot
+    // carry a name whatever this screen shows. The two standing sections beside
+    // those figures do name people on purpose — Increments 1.69 and 1.70 put
+    // them there, behind this guard and outside what the acknowledgment stamps
+    // — so they are cut out of the text rather than the match being loosened.
+    // Before Increment 1.70 this read the whole of `main` and passed only
+    // because nobody in this suite was unreachable.
+    const standingSections = await Promise.all(
+      ["digest-reach", "digest-setup"].map((id) => page().locator(`section[aria-labelledby=${id}]`).innerText())
+    );
+    const stamped = standingSections.reduce((text, said) => text.replace(said, ""), whole);
+    expect(stamped).not.toMatch(/Riley|Finn|John Smith/);
+    // And the sections that were cut are the ones that name somebody, rather
+    // than two empty boxes making the assertion above true by removing nothing.
+    expect(standingSections.join("\n")).toMatch(/Riley Owner|Casey Prentice/);
     await b.audit("digest (owner, unacknowledged)");
 
     // The owner stamps the week; the stamp shows who and when, and the button is gone for good.

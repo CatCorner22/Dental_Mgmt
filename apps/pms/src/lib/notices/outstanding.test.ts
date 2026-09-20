@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { attestationCoverage } from "../controls/attestationCoverage";
 import type { Thread, ThreadMessage } from "../cpa/questions";
 import type { DecisionDue } from "../home/board";
-import { countBySeat, outstandingNotices, type OutstandingInput } from "./outstanding";
+import { NOTICE_PLACES, countBySeat, outstandingNotices, type OutstandingInput } from "./outstanding";
 
 function message(over: Partial<ThreadMessage> = {}): ThreadMessage {
   return {
@@ -102,6 +102,25 @@ describe("outstandingNotices", () => {
     const [only] = outstandingNotices(input({ decisionsDue: [decision()] }));
     expect(only!.key).toBe("decision:d1");
     expect(only!.sentence).toBe("Accept the residual, recorded by Riley Owner on 2026-05-15, was due for review on 2026-08-15.");
+  });
+
+  it("sends every notice to a screen NOTICE_PLACES already names for that seat", () => {
+    // Increment 1.70 decides who needs an address from what opens these
+    // screens, so a notice pointing somewhere the constant does not list would
+    // make that reading quietly wrong rather than loudly broken. Asserted over
+    // every kind this function can produce rather than over one fixture.
+    const answered = [message(), message({ id: "m2", authorSeat: "practice", authorName: "Riley Owner", createdAt: "2026-09-03T10:00:00.000Z" })];
+    const notices = outstandingNotices(
+      input({
+        attestations: uncovered,
+        awaitingPractice: [thread()],
+        unreadByAccountant: [thread({ id: "t2" }, answered)],
+        decisionsDue: [decision()],
+      })
+    );
+    // Every kind: attestation, question, unread answer, overdue decision.
+    expect(notices.map((n) => n.key.split(":")[0]).sort()).toEqual(["attestation", "decision", "question", "unread"]);
+    for (const notice of notices) expect(NOTICE_PLACES[notice.seat]).toContain(notice.href);
   });
 
   it("puts the owner's debts first and, within a seat, the oldest first", () => {

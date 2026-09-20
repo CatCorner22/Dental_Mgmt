@@ -598,6 +598,31 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await b.audit("owner board, who the practice cannot reach");
   }, 120_000);
 
+  it("tells the practice who it was never set up to reach, and leaves the rest of the roster out", async () => {
+    // Increment 1.70. The card above reports an address that does not work;
+    // this one reports a person who never gave one. The outside accountant has
+    // said nothing in this whole suite, so the month-end package — the one
+    // thing this product sends outside itself — reaches nobody.
+    await b.signIn("ridgeview-owner", "/home");
+    const card = page().locator("section[aria-labelledby=setup]");
+    await card.waitFor({ timeout: 60_000 });
+    await expect
+      .poll(async () => await card.innerText(), { timeout: 60_000 })
+      .toMatch(/cannot be told/);
+    const said = await card.innerText();
+    expect(said).toContain("Casey Prentice");
+    expect(said).toContain("outside accountant's seat");
+    expect(said).toContain("never said where");
+    // The scope, which is the whole argument: the front desk and the new hire
+    // have no address either and can act on nothing a notice says, so naming
+    // them would make this the roster rather than a card.
+    expect(said).not.toContain("Finn Front");
+    expect(said).not.toContain("Nora Newhire");
+    // Never the address, on this card as on the one above.
+    expect(said).not.toContain("@");
+    await b.audit("owner board, who the practice was never set up to reach");
+  }, 120_000);
+
   it("shows a user-rank account the Refusal, not the page", async () => {
     await b.signIn("ridgeview-front", "/risk");
     await page().locator("main [role=alert]").waitFor({ timeout: 30_000 });
