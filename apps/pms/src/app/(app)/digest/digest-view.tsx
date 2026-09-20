@@ -6,6 +6,7 @@ import { formatCents } from "@/lib/ledger/format";
 import type { CountRow, DigestAck, WeeklyDigest } from "@/lib/digest/digest";
 import type { AttestationCoverage } from "@/lib/controls/attestationCoverage";
 import type { ReachReading } from "@/lib/notices/reach";
+import type { SetupReading } from "@/lib/notices/setup";
 
 type Me = { ok: boolean; role?: string };
 
@@ -16,6 +17,7 @@ type DigestResponse = {
   attestations: AttestationCoverage;
   /** Who the practice believes it is notifying and is not (Increment 1.69). */
   reach: ReachReading;
+  setup: SetupReading;
   changedSinceAck: boolean;
   computedAt: string;
 };
@@ -321,6 +323,34 @@ export function DigestView() {
                 {state.data.reach.unreachable.map((u) => (
                   <li key={u.userId} className="max-w-prose text-sm text-[var(--ink-2)]">
                     {u.sentence}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* Who the practice was never set up to reach (Increment 1.70). The
+              other half of the section above, on the same terms: a position
+              rather than a figure of these seven days, and a reading that names
+              people, which the message this digest becomes never does. */}
+          <section aria-labelledby="digest-setup" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+            <h2 id="digest-setup" className="mb-1 text-base font-semibold">
+              Standing, not this week &middot; who was never set up
+            </h2>
+            <p className="mb-2 text-xs text-[var(--ink-3)]">
+              The people who could act on what a notice says, and whether the practice can say it to them.
+            </p>
+            {state.data.setup.missing.length + state.data.setup.withdrawn.length === 0 ? (
+              <p className="max-w-prose text-sm text-[var(--ink-2)]">
+                {state.data.setup.expected === 0
+                  ? "No seat here opens the screens a notice points at, so there is nobody the practice needs an address for."
+                  : `All ${state.data.setup.expected} of the people who could act on a notice have said where to send it.`}
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {[...state.data.setup.missing, ...state.data.setup.withdrawn].map((p) => (
+                  <li key={p.userId} className="max-w-prose text-sm text-[var(--ink-2)]">
+                    {p.sentence}
                   </li>
                 ))}
               </ul>

@@ -13,6 +13,7 @@ import {
 } from "@pms/controls-engine";
 import type { AppDb } from "../db/client";
 import { readReach, type ReachReading } from "../notices/reach";
+import { readSetup, type SetupReading } from "../notices/setup";
 import { listInboxApprovals } from "../controls/approvals";
 import { listControlFindings, summarizeFindings } from "../controls/detectors";
 import { matchingSummary } from "../controls/matchingMeasure";
@@ -313,6 +314,16 @@ export type OwnerBoard = {
    * is theirs (Increment 1.58).
    */
   reach: ReachReading;
+  /**
+   * Who the practice was never set up to reach (Increment 1.70).
+   *
+   * Beside the card above because the two answer halves of one question, and
+   * neither is worth much alone: that one reports an address that does not
+   * work, and this one reports a person who never gave one. It is scoped to
+   * the people who could act on what a notice says, so it is a card and not a
+   * roster, and it names people and never addresses for the same reason.
+   */
+  setup: SetupReading;
 };
 
 /**
@@ -378,6 +389,7 @@ export async function buildOwnerBoard(db: AppDb, tenantId: string, viewerId: str
     afterClose: afterCloseCard(await countPostingsAfterClose(db, tenantId, asOf, yesterday)),
     accountantAsked: await threadsAwaitingPractice(db, tenantId),
     reach: await readReach(db, tenantId, now),
+    setup: await readSetup(db, tenantId, now),
     attestations: attestationCoverage({
       month: lastComplete,
       channels: ATTESTABLE_CHANNELS,

@@ -331,6 +331,43 @@ export function OwnerBoard() {
         )}
       </section>
 
+      {/* Who the practice was never set up to reach (Increment 1.70). Beside the
+          card above because the two are halves of one question: that one reports
+          an address that does not work, and this one a person who never gave
+          one. Scoped to the people who could act on what a notice says, so it is
+          a card rather than the roster. */}
+      <section aria-labelledby="setup" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">Who was never set up</p>
+        <p id="setup" className="mt-1 font-semibold text-[var(--ink)]">
+          {b.setup.expected === 0
+            ? "Nobody here can act on a notice"
+            : b.setup.missing.length + b.setup.withdrawn.length === 0
+              ? `All ${b.setup.expected} can be told`
+              : `${b.setup.missing.length + b.setup.withdrawn.length} of ${b.setup.expected} cannot be told`}
+        </p>
+        {b.setup.missing.length + b.setup.withdrawn.length === 0 ? (
+          <p className="mt-1 max-w-prose text-sm text-[var(--ink-2)]">
+            {b.setup.expected === 0
+              ? "No seat here opens the screens a notice points at, so there is nobody the practice needs an address for."
+              : "Everybody who could act on what this practice is told has said where to send it."}
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {[...b.setup.missing, ...b.setup.withdrawn].map((p) => (
+              <li key={p.userId} className="rounded-md border border-[var(--line)] p-3">
+                <p className="text-sm font-semibold text-[var(--ink)]">
+                  {p.name}
+                  <span className="ml-2 font-normal text-[var(--ink-3)]">
+                    {p.seat === "accountant" ? "the accountant" : "the practice"}
+                  </span>
+                </p>
+                <p className="mt-1 max-w-prose text-sm text-[var(--ink-2)]">{p.sentence}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       {/* What the outside accountant asked and the practice has not answered
           (Increment 1.50). Shown only when something waits: unlike the sealed-days
           card, silence here means nobody is owed anything, not that nothing was

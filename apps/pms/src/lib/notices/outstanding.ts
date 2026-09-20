@@ -65,6 +65,25 @@ export function seatOf(role: string, entitlements: string[]): NoticeSeat {
 
 export type NoticeSeat = "owner" | "accountant";
 
+/**
+ * Every screen a seat's notices send a person to.
+ *
+ * Here rather than beside the screens, because it is a fact about the notices:
+ * each one carries an `href` naming where the doing happens, and this is the
+ * set those hrefs are drawn from. `outstanding.test.ts` asserts that every
+ * notice `outstandingNotices` can produce points at one of these, so the
+ * constant cannot quietly fall behind the list it describes.
+ *
+ * Increment 1.70 reads it to answer a question the notices themselves imply:
+ * who could act on what one says? What opens these screens is what `seats.ts`
+ * opens, so the answer comes from the guards rather than from a rank written
+ * down twice.
+ */
+export const NOTICE_PLACES: Record<NoticeSeat, readonly string[]> = {
+  owner: ["/home", "/cpa"],
+  accountant: ["/cpa"],
+};
+
 export type Notice = {
   /** Stable within a practice, so two readings of one state are one notice. */
   key: string;

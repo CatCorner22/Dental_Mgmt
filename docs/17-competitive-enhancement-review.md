@@ -598,6 +598,44 @@ There is a second reason here that 1.53 did not need. **The digest is also a mes
 
 **Not in Increment 1.69.** People who never gave an address at all — a real gap, and the natural next one, but it is "who has not set this up" rather than "who is set up and broken", and folding them in would make the card mostly a roster. Anything that acts on the reading: no message, no finding, no decision, because the practice knowing is the whole of what was missing. A per-practice choice of any of the numbers behind it. An address for somebody who is not a user.
 
+
+## Increment 1.70
+
+Increment 1.69 reports who is set up and broken: an address on file that refuses, retires, lapses, or was never proved. It reads only people who have an address in force, and it said so — somebody who never gave one "is not a broken promise". That is true of the **address**, and it hides a plainer failure one step earlier: **a person the product would send to, who never told it where.**
+
+Nothing fails. Nothing is refused. Nobody learns anything. It is the same silent success this arc has been closing since Increment 1.59, at the last place it could still hide.
+
+## The hard half is who counts
+
+A card listing everybody on the roster without an address is a card nobody reads. Most of a practice's people are sent nothing, so a list that is mostly fine teaches a reader to skip it — and a skipped card is worse than no card, because it looks like coverage.
+
+So the reading answers a narrower question, **who could act on what a notice says?**, and it answers it from the guards rather than from a rank written down here:
+
+| Who | Opens | Counted |
+|---|---|---|
+| The owner, and any manager | `/home`, where three of the four notice kinds send a person | yes |
+| The outside accountant | `/cpa`, by the one grant that seat carries | yes |
+| The front desk | four screens, none of them a notice's | no |
+| A new hire holding nothing | none | no |
+
+Every notice names where the doing happens (Increment 1.57), and what opens that screen is what `navLinksFor` opens (Increment 1.49). `NOTICE_PLACES` names the screens the notices point at, and a unit case asserts that every notice `outstandingNotices` can produce points at one of them — so the constant cannot quietly fall behind the list it describes, and the scope cannot drift from the guards.
+
+## Three rules it keeps from earlier increments
+
+- **Having an address stays anybody's to choose.** Increment 1.58 settled that where somebody is reachable is theirs, and the round still sends to whoever saved one. This narrows nothing. It reports the converse and only the converse: somebody the practice *needs* to be able to reach and cannot.
+- **A withdrawal is a decision, not an absence.** Increment 1.69's rule holds, and it costs something to hold: a manager who withdrew is a manager the practice cannot tell anything. So the reading counts them, names them as withdrawn in their own list, and says what the decision costs — rather than either filing a decision as a fault or passing over it in silence.
+- **Somebody who has left is in neither list nor the denominator.** Increment 1.65 stopped sending to a deactivated account, and a person the product must not reach is not one it was never set up to reach.
+
+## Where the two readings divide
+
+At the moment somebody saves an address. Before it, this reading names them; after it, Increment 1.69's does — proved or not. A live case pins exactly that handover: the owner saves an address, leaves `missing`, and appears in the same breath under `unproved`.
+
+The denominator is the people who could act on a notice, and it does not move when the numerator does: a denominator that shrank as people were fixed would make the card say less the better the practice got. It appears on the owner's board and **beside** the weekly digest, never inside it, for both of Increment 1.69's reasons — a standing figure would unsettle a stamped week's hash, and this names people while a message that leaves the product names nobody.
+
+- **Tests.** Unit (8): an owner, a manager and the accountant each counted, and why; the front desk, a lead and a bare `readonly` left out; an unknown role reaching nothing rather than everything; the sentence saying what never happened and what would change it; the accountant's seat named as the accountant's; a withdrawal called a decision and still costed. Live (8): the two people named before anybody says anything, with the denominator; the rest of the roster left out; the accountant's seat sorted first; the handover to Increment 1.69 the moment an address is saved; the denominator still while the numerator moves; a withdrawal moved to its own list and still counted; no address anywhere in the payload; somebody who has left in neither list nor the denominator. Browser (1): the owner's board naming the accountant and the reason, leaving the front desk and the new hire out, and carrying no address.
+
+**Not in Increment 1.70.** Anything that acts on the reading: no message, no finding, no decision — the practice knowing is the whole of what was missing, which is the shape Increment 1.69 chose for the same reason. Asking somebody for an address, which would be a message to a person the product has no address for. An address for somebody who is not a user. Retiring an address nobody ever proved. A per-practice choice of who counts as able to act, which would be a setting where the guards are the answer.
+
 ## Increment 1.68
 
 Increment 1.65 gave a proof a life, and had the round ask for a new code inside its last thirty days so that nothing would stop in silence. It then left a trap nobody had walked into yet: **once the proof lapsed, the round stopped asking. Forever.**

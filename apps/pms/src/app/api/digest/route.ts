@@ -5,6 +5,7 @@ import { computeDigest, digestHash, loadDigestAck, periodEnding } from "@/lib/di
 import { ATTESTABLE_CHANNELS, listMonthAttestations } from "@/lib/controls/attestations";
 import { attestationCoverage, lastCompleteMonth } from "@/lib/controls/attestationCoverage";
 import { readReach } from "@/lib/notices/reach";
+import { readSetup } from "@/lib/notices/setup";
 
 /**
  * The weekly digest: seven days ending on `ending` (default today), computed
@@ -28,7 +29,7 @@ export const GET = withGuard(
     // the standing debt is the practice's position now, and a week the owner
     // reads in arrears does not change who has vouched for last month.
     const month = lastCompleteMonth(today);
-    const { digest, ack, attestations, reach } = await withTenantTransaction(user.tenantId, user.id, async (db) => ({
+    const { digest, ack, attestations, reach, setup } = await withTenantTransaction(user.tenantId, user.id, async (db) => ({
       digest: await computeDigest(db, user.tenantId, period),
       ack: await loadDigestAck(db, user.tenantId, period.end),
       // Who the practice cannot reach, as of now (Increment 1.69). Beside the
@@ -36,6 +37,10 @@ export const GET = withGuard(
       // today rather than as of the period: it is a position, not an event of
       // those seven days.
       reach: await readReach(db, user.tenantId),
+      // Who it was never set up to reach (Increment 1.70). Beside the digest
+      // on the same terms: a position rather than an event of those seven
+      // days, and a reading that names people, so it never enters the message.
+      setup: await readSetup(db, user.tenantId),
       attestations: attestationCoverage({
         month,
         channels: ATTESTABLE_CHANNELS,
@@ -69,6 +74,14 @@ export const GET = withGuard(
        * guard stands — on this screen and on the owner's board.
        */
       reach,
+      /**
+       * Who the practice was never set up to reach (Increment 1.70).
+       *
+       * The other half of the reading above, on the same terms: outside the
+       * stamped figures because it is a position, and behind the guard because
+       * it names people.
+       */
+      setup,
       /** True when the rows changed after the owner stamped this period. */
       changedSinceAck: ack ? ack.summaryHash !== summaryHash : false,
       computedAt: new Date().toISOString(),
