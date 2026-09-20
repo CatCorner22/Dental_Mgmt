@@ -521,6 +521,62 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await b.audit("practice risk, refusing a mailbox that said no");
   }, 180_000);
 
+  it("says a lapsed proof is still being chased, and when it stops chasing", async () => {
+    // Increment 1.68. Reaching this state honestly needs a proof older than a
+    // year, so one is written directly — a real proof with a real date, rather
+    // than a shortened life, which would drive a constant instead of the rule.
+    // A different mailbox first. The one the previous case left on file was
+    // refused by the stranger reading it, and a refusal outranks a lapse — so
+    // planting a lapsed proof on that row would drive the refusal branch and
+    // prove nothing about this one.
+    await b.signIn("ridgeview-owner", "/risk");
+    const panel = page().locator("section[aria-labelledby=delivery]");
+    await panel.waitFor({ timeout: 60_000 });
+    await panel.getByLabel("Your address").fill("riley.owner@ridgeview.example");
+    await panel.getByRole("button", { name: "Save address" }).click();
+    await expect
+      .poll(async () => await page().locator("p[aria-live=polite]").innerText(), { timeout: 30_000 })
+      .toMatch(/Messages would go to riley\.owner@ridgeview\.example\./);
+
+    const address = (
+      await app.db.admin.query(
+        "SELECT id, user_id FROM notice_addresses WHERE address = $1 ORDER BY set_at DESC LIMIT 1",
+        ["riley.owner@ridgeview.example"]
+      )
+    ).rows[0];
+    const provedAt = new Date(Date.now() - 500 * 24 * 60 * 60 * 1000);
+    // `notice_addresses` and its proofs refuse a transaction with no acting
+    // user, so the session value is set first; `db.admin` is one client, so
+    // this and the inserts land on the same connection.
+    await app.db.admin.query("SELECT set_config('app.user_id', $1, false)", [address.user_id]);
+    await app.db.admin.query(
+      `INSERT INTO notice_address_challenges (id, tenant_id, user_id, address_id, token_hash, issued_at, expires_at)
+         SELECT gen_random_uuid(), tenant_id, user_id, id, repeat('a', 64), $2::timestamptz - interval '1 minute', $2::timestamptz + interval '1 minute'
+           FROM notice_addresses WHERE id = $1`,
+      [address.id, provedAt.toISOString()]
+    );
+    await app.db.admin.query(
+      `INSERT INTO notice_address_proofs (id, tenant_id, user_id, address_id, challenge_id, proved_at)
+         SELECT gen_random_uuid(), c.tenant_id, c.user_id, c.address_id, c.id, $2::timestamptz
+           FROM notice_address_challenges c
+          WHERE c.address_id = $1 AND c.token_hash = repeat('a', 64) LIMIT 1`,
+      [address.id, provedAt.toISOString()]
+    );
+    await app.db.admin.query("SELECT set_config('app.user_id', '', false)");
+
+    await b.signIn("ridgeview-owner", "/risk");
+    const delivery = page().locator("section[aria-labelledby=delivery]");
+    await delivery.waitFor({ timeout: 60_000 });
+    // The count is not pinned: earlier cases in this suite send codes of their
+    // own, so what is asserted is that the branch renders and says what it
+    // means, not how many times this suite happened to ask.
+    await expect
+      .poll(async () => await delivery.innerText(), { timeout: 60_000 })
+      .toMatch(/gone out since the proof lapsed\. The practice keeps asking once a month, and stops on \d{4}-\d{2}-\d{2}/);
+    expect(await delivery.innerText()).not.toContain("stopped being a destination");
+    await b.audit("practice risk, a lapse still being chased");
+  }, 120_000);
+
   it("shows a user-rank account the Refusal, not the page", async () => {
     await b.signIn("ridgeview-front", "/risk");
     await page().locator("main [role=alert]").waitFor({ timeout: 30_000 });

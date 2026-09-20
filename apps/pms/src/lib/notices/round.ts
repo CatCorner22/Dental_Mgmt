@@ -6,6 +6,7 @@ import { isRole } from "../auth/roles";
 import { CPA_SEAT_ENTITLEMENT, isCpaSeat } from "../auth/seats";
 import { currentAddress } from "./addresses";
 import { REPROVE_WINDOW_MS, currentProof, proofLapsesAt, proofStanding, sendProofCode } from "./proof";
+import { afterLapse, readCodesFrom } from "./retirement";
 import { renderMessage } from "./message";
 import { collectOutstanding, type NoticeSeat } from "./outstanding";
 import { computeDigest, loadDigestAck, periodEnding } from "../digest/digest";
@@ -13,7 +14,7 @@ import { listMonthCloses } from "../cpa/close";
 import { computeMonthPackage } from "../cpa/package";
 import { renderPackageMessage } from "./packageMessage";
 import { renderDigestMessage } from "./digestMessage";
-import { deliverMessage, lastDelivered, sendNotices } from "./send";
+import { codesSentSince, deliverMessage, lastDelivered, sendNotices } from "./send";
 import type { Transport } from "./transport";
 
 /**
@@ -321,10 +322,27 @@ export async function runNoticeRound(db: AppDb, input: RoundInput): Promise<Roun
     seat: NoticeSeat,
     proof: { provedAt: string } | null
   ): Promise<void> => {
-    if (proof === null || proofStanding(proof, at) !== "expiring") return;
-    const windowOpened = new Date(new Date(proofLapsesAt(proof)).getTime() - REPROVE_WINDOW_MS);
-    const lastCode = await lastDelivered(db, input.tenantId, userId, "proof_code");
-    if (lastCode !== null && lastCode.at >= windowOpened) return;
+    if (proof === null) return;
+    const standing = proofStanding(proof, at);
+    if (standing === "expiring") {
+      const windowOpened = new Date(new Date(proofLapsesAt(proof)).getTime() - REPROVE_WINDOW_MS);
+      const lastCode = await lastDelivered(db, input.tenantId, userId, "proof_code");
+      if (lastCode !== null && lastCode.at >= windowOpened) return;
+    } else if (standing === "lapsed") {
+      // The round used to stop here, which left the person who missed one
+      // message with no way back: the notices that would have told them to
+      // fetch a code are the notices being withheld (Increment 1.68). So it
+      // keeps asking, monthly and three times, and then lets the address go.
+      const lapsedAt = proofLapsesAt(proof);
+      const after = afterLapse(
+        lapsedAt,
+        await codesSentSince(db, input.tenantId, userId, readCodesFrom(lapsedAt)),
+        at
+      );
+      if (after.retired || after.askDue === null || new Date(after.askDue) > at) return;
+    } else {
+      return;
+    }
     await sendProofCode(db, {
       tenantId: input.tenantId,
       userId,
