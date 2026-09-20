@@ -104,7 +104,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 
 /** What one message needs to reach one person, or to be recorded as having reached nobody. */
 /** What a message is, said on its row rather than inferred from its shape (Increment 1.64). */
-export type MessageKind = "notices" | "proof_code" | "digest";
+export type MessageKind = "notices" | "proof_code" | "digest" | "package";
 
 export type DeliveryInput = {
   tenantId: string;

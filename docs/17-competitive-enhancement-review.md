@@ -555,6 +555,39 @@ The CPA month-end package, `docs/13` item 22, has sat in every "not in" list sin
 
 **Not in Increment 1.35.** QuickBooks Online and Xero export shapes (the mapping is theirs to feed, but the formats are not written); a starter chart of accounts; reason-code-level mappings in the page's form (the service and the resolver take them; the form proposes the wildcard); the CPA seat; month close.
 
+## Increment 1.66
+
+The outside accountant's seat reaches the month-end package and nothing else (Increment 1.49). Until now it learned that a month had closed only by signing in to look.
+
+The practice closes a month. The person whose whole work begins at that moment is not told. That is the same gap the notices arc has been closing since Increment 1.57, met at the one place where the reader is not a member of the practice at all.
+
+## What the message carries, and the line it draws
+
+The month, the package **fingerprint** and the shape it was taken under, how many entries the month held, and whether each tie-out holds. **No money.**
+
+That line is not the digest's line repeated for its own sake, and it needed arguing rather than assuming. The package **is** money: it exists to carry the practice's figures to their accountant, and that accountant may already export the whole thing as CSV or JSON. So why withhold the figures from a message to exactly the person entitled to them?
+
+Because an export is **the accountant taking the figures while signed in**, and a message is **the product pushing them into a mailbox** it has only proved reaches somebody. Those are different acts with different blast radii. A month of revenue is the single most commercially sensitive number this product holds, and a link costs nothing.
+
+- **The fingerprint is the reason to send anything at all.** A hash travelling by a different channel from the artefact it describes is the oldest integrity check there is: the accountant can compare what they later download against what was closed, and catch a package that moved in between without having to trust the channel it arrived on. Sending it is strictly more useful than not, and it reveals nothing — a hash of figures is not the figures.
+- **It names nobody**, not even who closed the month. The close row carries that and the screen shows it; a message that leaves the product says the practice did it, for the same reason the digest counts without naming.
+- **A failing tie-out is named; its detail is not.** The label says which check did not hold, which is what a reader needs in order to expect trouble. The detail carries figures, so it stays behind the guard.
+- **Once per close**, answered by the message itself as the digest's is: the last package message that reached this person is older than the close now being reported, or there has not been one. No column records which month was told, because a close has a time and a message has a time.
+- **The accountant's seat only.** The practice's own people read a close on the screen they already open.
+- Migration 0049 widens `notice_sends.kind` to four and gives `notice_rounds` a third axis beside the sum that must add up — the same treatment, and the same reason, the digest got in Increment 1.64.
+
+## A defect this increment found in the round
+
+Building the package branch surfaced a real bug in code shipped two increments ago.
+
+The round's loop **left outright** when a seat owed nothing — and that `continue` silently took the digest and the package with it. Owing nothing is the **ordinary** case for both: an accountant owes nothing most of the time, and so does a practice that is keeping up. So an owner who owed nothing had been getting no weekly digest since Increment 1.64, which is precisely the state in which a digest is most reassuring and least likely to be missed.
+
+A decision about the notices now ends only the notices. The accountant case is the regression: that seat owes nothing, and the round must still reach it.
+
+- **Tests.** Unit: the subject names the month and nothing else; the body carries the fingerprint and the schema and tells the reader to compare them; no money and no figure anywhere in it; how many tie-outs hold, with only the failing ones named and their detail withheld; nobody named, not even who closed. Live: the accountant told once with the fingerprint and no money, on a round where they owe nothing — which is the regression above; nobody else told; two further rounds telling them nothing; the next month's close telling them again.
+
+**Not in Increment 1.66.** The package attached rather than linked, which is the whole question this increment answered "no" to and would need a different answer about what may leave. A per-practice choice of whether the accountant is told. The figures in the message for a practice that asks for them, which is a decision worth having a governed act for rather than a setting. A way for a stranger to stop a code they did not ask for, retiring an address nobody re-proves, and an address for somebody who is not a user, all still.
+
 ## Increment 1.65
 
 Increment 1.61 stopped a message going to a mailbox nobody had confirmed. It did not stop one going to a mailbox that **used to be** confirmed, because a proof was forever.

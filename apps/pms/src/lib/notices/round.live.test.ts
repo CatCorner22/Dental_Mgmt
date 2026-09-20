@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createLiveDatabase, liveAdminUrl, type LiveDatabase } from "@pms/db/testing";
 import { seedDatabase } from "@pms/db/seed";
 import { DEV_TENANTS, DEV_USERS } from "@pms/db/seed-data";
+import { PACKAGE_SCHEMA_VERSION } from "../cpa/package";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { setAddress } from "./addresses";
 import { proveAddress, sendProofCode } from "./proof";
@@ -368,6 +369,113 @@ describe.skipIf(!adminUrl)("a notice round (live)", () => {
     });
   });
 
+  describe("telling the accountant that a month closed", () => {
+    // Increment 1.66. The outside accountant's seat reaches the month-end
+    // package and nothing else, and learned that a month had closed only by
+    // signing in to look.
+    const cpa = DEV_USERS.find((u) => u.username === "ridgeview-cpa")!;
+
+    function asCpa<T>(fn: Parameters<typeof withTenantTransaction<T>>[2]) {
+      return withTenantTransaction(tenantId, cpa.id, fn, env);
+    }
+
+    const packageRows = async () =>
+      (
+        await db.admin.query(
+          "SELECT recipient_id, subject, body FROM notice_sends WHERE tenant_id = $1 AND kind = 'package' ORDER BY attempted_at, id",
+          [tenantId]
+        )
+      ).rows;
+
+    /**
+     * A close row, written directly.
+     *
+     * What is under test here is the round's sending rule, not the closing of
+     * a month — that path has its own suite, which posts a real entry, maps it
+     * through maker-checker and watches the hash freeze. The fields this
+     * message reads are plain scalars, and the tie-outs it reports come from
+     * the real `computeMonthPackage`, so the fixture stands in for one act and
+     * nothing else.
+     */
+    const closeAMonth = async (month: string, closedAt: string, hash: string) => {
+      await db.admin.query(
+        `INSERT INTO month_closes (id, tenant_id, month, period_start, period_end, package_hash, package_schema,
+                                   entry_count, total_cents, closed_by_id, closed_by_name, closed_at)
+         VALUES (gen_random_uuid(), $1, $2, ($2 || '-01')::date, (($2 || '-01')::date + interval '1 month - 1 day')::date,
+                 $3, $4, 412, 1234500, $5, 'Riley Owner', $6::timestamptz)`,
+        [tenantId, month, hash, PACKAGE_SCHEMA_VERSION, owner.id, closedAt]
+      );
+    };
+
+    beforeAll(async () => {
+      // The accountant says where to send, and proves it, exactly as anybody
+      // does: nothing about this seat is exempt from Increment 1.61.
+      await asCpa((d) => setAddress(d, tenantId, cpa.id, cpa.displayName, "pat@cpa.example"));
+      const codes = memoryTransport();
+      await asCpa((d) =>
+        sendProofCode(d, {
+          tenantId,
+          userId: cpa.id,
+          userName: cpa.displayName,
+          seat: "accountant",
+          practiceName: "Ridgeview Dental",
+          appUrl: "https://app.example",
+          transport: codes,
+          pause: async () => {},
+        })
+      );
+      const code = /Your code is ([A-HJKMNP-Z2-9]{10})/.exec(codes.sent[0].message.body)?.[1] ?? "";
+      expect(await asCpa((d) => proveAddress(d, tenantId, cpa.id, cpa.displayName, code))).toMatchObject({ ok: true });
+      await closeAMonth("2026-07", "2026-08-02T10:00:00.000Z", "a".repeat(64));
+    });
+
+    it("tells the accountant, with the fingerprint and no money", async () => {
+      const before = (await packageRows()).length;
+      const report = await round(new Date("2026-08-03T09:00:00.000Z"));
+      // This is also the regression for a defect this increment found: the
+      // accountant's seat owes nothing, and until now a seat that owed nothing
+      // left the round's loop outright — taking the digest and the package with
+      // it. Owing nothing is the ordinary case for both.
+      expect(report.nothingOwed).toBeGreaterThan(0);
+      expect(report.packagesSent).toBe(1);
+      const sent = await packageRows();
+      expect(sent).toHaveLength(before + 1);
+      const latest = sent[sent.length - 1];
+      expect(latest.recipient_id).toBe(cpa.id);
+      expect(latest.subject).toBe("Ridgeview Dental: 2026-07 is closed");
+      // The fingerprint travels by a different channel from the artefact, which
+      // is the point of sending anything at all.
+      expect(latest.body).toContain("a".repeat(64));
+      // And the figures do not travel at all: an export is the accountant
+      // taking them while signed in; a message is the product pushing them into
+      // a mailbox.
+      expect(latest.body).not.toMatch(/\$|1234500|12,345/);
+      expect(latest.body).toContain("No figure from the month is in this message");
+    });
+
+    it("tells nobody else", async () => {
+      const sent = await packageRows();
+      expect(sent.every((r) => r.recipient_id === cpa.id)).toBe(true);
+    });
+
+    it("does not tell them twice about the same close", async () => {
+      const before = (await packageRows()).length;
+      expect((await round(new Date("2026-08-04T09:00:00.000Z"))).packagesSent).toBe(0);
+      expect((await round(new Date("2026-08-20T09:00:00.000Z"))).packagesSent).toBe(0);
+      expect((await packageRows()).length).toBe(before);
+    });
+
+    it("tells them again when the next month closes", async () => {
+      const before = (await packageRows()).length;
+      await closeAMonth("2026-08", "2026-09-02T10:00:00.000Z", "b".repeat(64));
+      const report = await round(new Date("2026-09-03T09:00:00.000Z"));
+      expect(report.packagesSent).toBe(1);
+      const sent = await packageRows();
+      expect(sent).toHaveLength(before + 1);
+      expect(sent[sent.length - 1].subject).toBe("Ridgeview Dental: 2026-08 is closed");
+    });
+  });
+
   describe("what the database holds past the service", () => {
     async function refusalFrom(fn: () => Promise<unknown>): Promise<string> {
       try {
@@ -382,8 +490,8 @@ describe.skipIf(!adminUrl)("a notice round (live)", () => {
     it("refuses counts that do not account for everybody considered", async () => {
       const why = await refusalFrom(() =>
         db.admin.query(
-          `INSERT INTO notice_rounds (id, tenant_id, ran_at, considered, sent, failed, unchanged, nothing_owed, unreachable, digests_sent, digests_failed)
-           VALUES (gen_random_uuid(), $1, now(), 5, 1, 0, 0, 0, 0, 0, 0)`,
+          `INSERT INTO notice_rounds (id, tenant_id, ran_at, considered, sent, failed, unchanged, nothing_owed, unreachable, digests_sent, digests_failed, packages_sent, packages_failed)
+           VALUES (gen_random_uuid(), $1, now(), 5, 1, 0, 0, 0, 0, 0, 0, 0, 0)`,
           [tenantId]
         )
       );

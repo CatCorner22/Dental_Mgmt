@@ -56,6 +56,7 @@ const roundsSql = readFileSync(join(here, "../migrations/0045_notice_rounds.sql"
 const kindSql = readFileSync(join(here, "../migrations/0046_notice_send_kind.sql"), "utf8");
 const perCodeSql = readFileSync(join(here, "../migrations/0047_proof_is_per_code.sql"), "utf8");
 const roundCodeSql = readFileSync(join(here, "../migrations/0048_round_may_send_a_code.sql"), "utf8");
+const packageKindSql = readFileSync(join(here, "../migrations/0049_notice_package_kind.sql"), "utf8");
 const increment01TenantTables = [
   "locations",
   "users",
@@ -446,6 +447,22 @@ describe("Increment 1.60 a refusal that can pass, and one that cannot", () => {
     // How many times the practice tried is answered by counting attempts. A
     // number stored next to them is a status the rows can contradict.
     expect(failureKindSql).not.toMatch(/attempt_count|retries|retry_count|tries/);
+  });
+});
+
+describe("Increment 1.66 a fourth kind of message", () => {
+  it("admits four kinds and still refuses a fifth", () => {
+    expect(packageKindSql).toMatch(/ALTER TABLE notice_sends DROP CONSTRAINT notice_sends_kind_is_one_of;/);
+    expect(packageKindSql).toMatch(
+      /notice_sends_kind_is_one_of[\s\S]*kind IN \('notices', 'proof_code', 'digest', 'package'\)/
+    );
+  });
+
+  it("counts the package beside the sum that must add up, as the digest is", () => {
+    expect(packageKindSql).toMatch(/ALTER TABLE notice_rounds ADD COLUMN packages_sent integer NOT NULL DEFAULT 0/);
+    expect(packageKindSql).toMatch(/ALTER TABLE notice_rounds ALTER COLUMN packages_sent DROP DEFAULT;/);
+    expect(packageKindSql).toMatch(/ALTER TABLE notice_rounds ALTER COLUMN packages_failed DROP DEFAULT;/);
+    expect(packageKindSql).not.toMatch(/notice_rounds_counts_add_up/);
   });
 });
 
