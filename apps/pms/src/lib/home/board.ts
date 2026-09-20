@@ -12,6 +12,7 @@ import {
   type ThresholdException,
 } from "@pms/controls-engine";
 import type { AppDb } from "../db/client";
+import { readReach, type ReachReading } from "../notices/reach";
 import { listInboxApprovals } from "../controls/approvals";
 import { listControlFindings, summarizeFindings } from "../controls/detectors";
 import { matchingSummary } from "../controls/matchingMeasure";
@@ -303,6 +304,15 @@ export type OwnerBoard = {
    * could have reviewed.
    */
   attestations: AttestationCoverage;
+  /**
+   * Who the practice believes it is notifying and is not (Increment 1.69).
+   *
+   * Read here because the board is where the practice looks to see what needs
+   * it, and because the only telling before this went to the mailbox that was
+   * failing. It names people and never addresses: where somebody is reachable
+   * is theirs (Increment 1.58).
+   */
+  reach: ReachReading;
 };
 
 /**
@@ -367,6 +377,7 @@ export async function buildOwnerBoard(db: AppDb, tenantId: string, viewerId: str
     matching: matchingSummary(ctx.matching),
     afterClose: afterCloseCard(await countPostingsAfterClose(db, tenantId, asOf, yesterday)),
     accountantAsked: await threadsAwaitingPractice(db, tenantId),
+    reach: await readReach(db, tenantId, now),
     attestations: attestationCoverage({
       month: lastComplete,
       channels: ATTESTABLE_CHANNELS,

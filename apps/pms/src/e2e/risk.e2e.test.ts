@@ -577,6 +577,27 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await b.audit("practice risk, a lapse still being chased");
   }, 120_000);
 
+  it("tells the practice, on the owner's board, who it cannot reach", async () => {
+    // Increment 1.69. The previous case left this owner with a lapsed proof the
+    // practice is still chasing — which until now only they could see, on a
+    // screen they had no reason to open, because the notices that would have
+    // sent them there are the notices being withheld.
+    await b.signIn("ridgeview-owner", "/home");
+    const card = page().locator("section[aria-labelledby=reach]");
+    await card.waitFor({ timeout: 60_000 });
+    await expect
+      .poll(async () => await card.innerText(), { timeout: 60_000 })
+      .toMatch(/cannot be reached/);
+    const said = await card.innerText();
+    // The person, and the reason, in the same words the digest would use.
+    expect(said).toContain("Riley Owner");
+    expect(said).toMatch(/lapsed on \d{4}-\d{2}-\d{2}/);
+    expect(said).toContain("still asking");
+    // Never the address: where somebody is reachable is theirs (Increment 1.58).
+    expect(said).not.toContain("@");
+    await b.audit("owner board, who the practice cannot reach");
+  }, 120_000);
+
   it("shows a user-rank account the Refusal, not the page", async () => {
     await b.signIn("ridgeview-front", "/risk");
     await page().locator("main [role=alert]").waitFor({ timeout: 30_000 });

@@ -294,6 +294,43 @@ export function OwnerBoard() {
         )}
       </section>
 
+      {/* Who the practice believes it is notifying and is not (Increment 1.69).
+          Shown in every state, the quiet one included, for the same reason as
+          the card above: an owner who sees this only when something is wrong
+          cannot tell "everybody is reachable" from "this card broke". It names
+          people and never addresses — where somebody is reachable is theirs. */}
+      <section aria-labelledby="reach" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">Who the practice can reach</p>
+        <p id="reach" className="mt-1 font-semibold text-[var(--ink)]">
+          {b.reach.considered === 0
+            ? "Nobody has said where to send their notices"
+            : b.reach.unreachable.length === 0
+              ? `All ${b.reach.considered} reachable`
+              : `${b.reach.unreachable.length} of ${b.reach.considered} cannot be reached`}
+        </p>
+        {b.reach.unreachable.length === 0 ? (
+          <p className="mt-1 max-w-prose text-sm text-[var(--ink-2)]">
+            {b.reach.considered === 0
+              ? "Nothing is sent to anybody, so nothing here has failed. A person sets their own address on Practice Risk."
+              : "Every address on file has been proved to reach the person who saved it, so the notices go where the practice thinks they go."}
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {b.reach.unreachable.map((u) => (
+              <li key={u.userId} className="rounded-md border border-[var(--line)] p-3">
+                <p className="text-sm font-semibold text-[var(--ink)]">
+                  {u.name}
+                  <span className="ml-2 font-normal text-[var(--ink-3)]">
+                    {u.seat === "accountant" ? "the accountant" : "the practice"} · since {u.since.slice(0, 10)}
+                  </span>
+                </p>
+                <p className="mt-1 max-w-prose text-sm text-[var(--ink-2)]">{u.sentence}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       {/* What the outside accountant asked and the practice has not answered
           (Increment 1.50). Shown only when something waits: unlike the sealed-days
           card, silence here means nobody is owed anything, not that nothing was
