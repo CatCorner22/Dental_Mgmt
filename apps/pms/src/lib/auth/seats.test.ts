@@ -30,6 +30,24 @@ describe("the outside accountant's seat", () => {
   it("reaches the month-end package and no other screen", () => {
     expect(navLinksFor(cpa).map((l) => l.href)).toEqual(["/cpa"]);
   });
+
+  it("can set up its own second factor, because an account that cannot enrol cannot sign in", () => {
+    // Increment 1.72. The seat is `readonly` by construction — `isCpaSeat` is
+    // exactly "holds the reporting grant and does not meet `user`" — so any
+    // rank on the enrolment route above `readonly` excludes the one seat a
+    // practice invites. The middleware sends every unenrolled session to
+    // `/enroll-mfa`, so such a rank does not merely withhold a screen; it
+    // makes a first sign-in impossible, which is what a browser case found.
+    //
+    // Read from the route file rather than asserted about it, for the reason
+    // the nav gates are: a claim about a guard that does not read the guard is
+    // a claim that goes stale silently.
+    const guard = readFileSync(`${appDir}api/enroll-mfa/route.ts`, "utf8");
+    const ranks = [...guard.matchAll(/minRank: "([a-z]+)"/g)].map((m) => m[1]);
+    // Both handlers, and each at the lowest rank the product has.
+    expect(ranks).toEqual(["readonly", "readonly"]);
+    expect(guard).toMatch(/requireMfa: false/);
+  });
 });
 
 describe("the links a viewer is offered", () => {

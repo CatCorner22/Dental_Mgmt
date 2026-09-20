@@ -82,7 +82,16 @@ export function EnrollMfaForm() {
             Add this account to your authenticator app. In most apps you can paste the setup URI
             below if scanning is not available.
           </p>
-          <code className="block overflow-x-auto rounded-[var(--radius)] bg-[var(--surface)] p-3 text-xs">
+          {/* Focusable and named, because it scrolls sideways: a keyboard user
+              who cannot reach it cannot read the one string this screen exists
+              to hand over, and their enrolment stops there. Increment 1.72 —
+              found by an axe audit that only ran once a seat reached this
+              screen for the first time. */}
+          <code
+            tabIndex={0}
+            aria-label="Authenticator setup URI"
+            className="block overflow-x-auto rounded-[var(--radius)] bg-[var(--surface)] p-3 text-xs"
+          >
             {otpauthUri}
           </code>
           <label className="grid gap-1 text-sm">

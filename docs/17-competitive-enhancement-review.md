@@ -671,6 +671,35 @@ Two triggers carry the rules the code must not be trusted with. An invitation mu
 
 **Not in Increment 1.71.** Inviting any other seat, which needs `evaluateGrant` rather than a second path around it. Re-sending an invitation, which would be a new one rather than a repeat of a secret the rows do not hold. Deactivating or removing a seat. A destination with no person behind it, which this increment argues should not exist. Anything about what the new seat receives: it is a seat like any other, so Increments 1.58 through 1.70 already decide that, starting with its own act of saying where.
 
+
+## Increment 1.72
+
+Increment 1.71 created the first account this product ever made for itself. This increment walked that account's first sign-in the way the person on the other end meets it — and found that **they could not finish it**.
+
+## A rank on the one route rank must not gate
+
+The enrolment route opened at `user` rank. The outside accountant's seat is `readonly` **by construction**: `isCpaSeat` is exactly "holds the reporting grant and does *not* meet `user`" (Increment 1.49), which is what makes it a seat rather than a member of the practice holding a grant. So the one seat a practice can invite was the one seat that route excluded.
+
+That is not a withheld screen. The middleware sends every unenrolled session to `/enroll-mfa`, so the seat arrived at the only screen it was allowed to reach, whose only control answered **"You do not have access to this action"** — with no way forward, and nothing naming what was wrong. A seat that cannot enrol can never finish a first sign-in, and a seat that cannot sign in is one the practice believes it has.
+
+> Nothing hid this before 1.71 because the only `readonly` account in the fixtures was seeded already enrolled. The first seat a practice created for itself was also the first that had to enrol. A defect can sit in a guard for ten increments while every fixture routes around it.
+
+The rank comes off deliberately rather than by omission. Enrolling one's own second factor is not an action rank should weigh: it is how an account becomes usable at all, it acts on nobody else, and a rank that gates it gates signing in. `readonly` is the lowest rank the product has, so the route now admits every signed-in account and no more; `requireMfa: false` is what lets an unenrolled session through at all, and the session is still the thing being trusted.
+
+`seats.test.ts` reads the route file and asserts both handlers sit at `readonly` — in the place where seat-and-route agreement already lives, and by reading the guard rather than asserting about it, because a claim about a guard that does not read the guard goes stale silently.
+
+## And a scrollable region no keyboard could reach
+
+The same walk put an axe audit on the enrolment screen for the first time. It found a **serious** violation that had been there all along: the setup URI sits in a horizontally scrolling block that was neither focusable nor named, so a keyboard user could not scroll it — and that string is the one thing the screen exists to hand over. It is now focusable and labelled.
+
+## What this increment deliberately did not change
+
+The seat signs in and lands on the practice home, where the board tells it in words that the board is for the manager and owner seats, and the header offers the one screen that is theirs. A redirect was written and then **reverted**: it would have replaced a plain refusal with a silent bounce, and a person who types `/home` deliberately is owed the explanation rather than being moved without one. An existing browser case already pinned that refusal, which is how the change was caught. Landing everybody on the practice home is what sign-in does; the seat is not stuck there, and being told why is this product's answer everywhere else.
+
+- **Tests.** Unit (1): both enrolment handlers read from the route file and asserted at the lowest rank, beside the seat's other rules. Browser (1): the invited seat signs in with **no authenticator at all**, is taken to enrolment, is *not* told it lacks access, reads the setup URI the way an authenticator would, enrols, is signed out, signs in again with a real code, is told in words that the board is not theirs, and follows the one link it is offered to the month-end package.
+
+**Not in Increment 1.72.** A seat-aware landing after sign-in, argued above and reverted. Anything about the address that seat has not yet given — that is the seat's own act (Increment 1.58), and Increments 1.69 and 1.70 already report it until it happens. Re-inviting a seat whose link expired. Inviting any other seat.
+
 ## Increment 1.68
 
 Increment 1.65 gave a proof a life, and had the round ask for a new code inside its last thirty days so that nothing would stop in silence. It then left a trap nobody had walked into yet: **once the proof lapsed, the round stopped asking. Forever.**
