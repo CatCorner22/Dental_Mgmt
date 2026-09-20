@@ -7,9 +7,10 @@ import { withTenantTransaction } from "@/lib/db/client";
 import { currentAddress, setAddress } from "@/lib/notices/addresses";
 import { renderMessage } from "@/lib/notices/message";
 import { currentProof, proofLapsesAt, proofStanding } from "@/lib/notices/proof";
+import { afterLapse, readCodesFrom } from "@/lib/notices/retirement";
+import { codesSentSince, lastSend } from "@/lib/notices/send";
 import { addressRefusal } from "@/lib/notices/stop";
 import { lastRound } from "@/lib/notices/round";
-import { lastSend } from "@/lib/notices/send";
 import { collectOutstanding, type NoticeSeat } from "@/lib/notices/outstanding";
 
 /**
@@ -37,7 +38,7 @@ export const GET = withGuard(
   async (req, ctx) => {
     const user = ctx.access.user;
     const seat = seatOf(user);
-    const { address, notices, practiceName, sent, proof, round, standing, refused } = await withTenantTransaction(user.tenantId, user.id, async (db) => {
+    const { address, notices, practiceName, sent, proof, round, standing, refused, lapse } = await withTenantTransaction(user.tenantId, user.id, async (db) => {
       const address = await currentAddress(db, user.tenantId, user.id);
       return {
       address,
@@ -53,6 +54,22 @@ export const GET = withGuard(
       // A proof stands for a year (Increment 1.65), so the screen says where
       // this one stands rather than only that one exists.
       standing: address === null ? "none" : proofStanding(await currentProof(db, user.tenantId, address.id), new Date()),
+      // What became of a proof that lapsed (Increment 1.68): whether the round
+      // is still asking, and when this address stops being a destination if
+      // nobody answers. Read only where it applies, because it is a question
+      // about a lapse and there is no lapse to ask about otherwise.
+      lapse: await (async () => {
+        if (address === null) return null;
+        const held = await currentProof(db, user.tenantId, address.id);
+        const now = new Date();
+        if (held === null || proofStanding(held, now) !== "lapsed") return null;
+        const lapsedAt = proofLapsesAt(held);
+        return afterLapse(
+          lapsedAt,
+          await codesSentSince(db, user.tenantId, user.id, readCodesFrom(lapsedAt)),
+          now
+        );
+      })(),
       // The last attempt and how it went (Increment 1.59), so a failure is read
       // on the screen rather than swallowed.
       sent: await lastSend(db, user.tenantId, user.id),
@@ -73,6 +90,7 @@ export const GET = withGuard(
       proof,
       standing,
       refused,
+      lapse,
       lapsesAt: proof === null ? null : proofLapsesAt(proof),
       lastSend: sent,
       lastRound: round,

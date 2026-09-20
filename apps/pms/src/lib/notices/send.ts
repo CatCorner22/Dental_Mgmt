@@ -1,9 +1,10 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, gte } from "drizzle-orm";
 import { noticeSends, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { appendControlEvent } from "../controls/events";
 import { currentAddress } from "./addresses";
 import { currentProof, proofLapsesAt, proofStanding } from "./proof";
+import { afterLapse, readCodesFrom } from "./retirement";
 import { addressRefusal } from "./stop";
 import { renderMessage, type Message } from "./message";
 import type { Notice, NoticeSeat } from "./outstanding";
@@ -211,6 +212,40 @@ export async function lastDelivered(
  * disagrees with the screen it came from is worse than no message.
  */
 /**
+ * When each code actually reached this person since a moment, oldest first
+ * (Increment 1.68).
+ *
+ * **Sent, not attempted.** A code the transport refused never reached anybody,
+ * and counting it against a person's allowance would spend their chances on
+ * the practice's own outage — retiring an address because the product could
+ * not send, which is the opposite of what the rule is for.
+ *
+ * Timestamps and nothing else: the caller is counting and spacing, and a body
+ * it does not need is a bearer secret it should not hold.
+ */
+export async function codesSentSince(
+  db: AppDb,
+  tenantId: string,
+  recipientId: string,
+  since: Date
+): Promise<Date[]> {
+  const rows = await db
+    .select({ attemptedAt: noticeSends.attemptedAt })
+    .from(noticeSends)
+    .where(
+      and(
+        eq(noticeSends.tenantId, tenantId),
+        eq(noticeSends.recipientId, recipientId),
+        eq(noticeSends.outcome, "sent"),
+        eq(noticeSends.kind, "proof_code"),
+        gte(noticeSends.attemptedAt, since)
+      )
+    )
+    .orderBy(asc(noticeSends.attemptedAt), asc(noticeSends.id));
+  return rows.map((r) => r.attemptedAt);
+}
+
+/**
  * The attempt loop, and the only copy of it.
  *
  * Both the notices a seat owes and the code that proves an address reach a
@@ -337,9 +372,21 @@ export async function sendNotices(db: AppDb, input: SendInput): Promise<SendResu
         "Nobody has proved that this address reaches you, so nothing was sent to it. " +
         "Ask for a code and bring it back, and these will go out.";
     } else if (standing === "lapsed") {
-      why =
-        `The proof that this address reaches you lapsed on ${proofLapsesAt(proof!).slice(0, 10)}, so nothing was sent to it. ` +
-        "Ask for a code and bring it back, and these will go out.";
+      // Two states wear one word (Increment 1.68). A lapse the product is still
+      // working on and one it has given up on call for different things from
+      // the reader, and a single sentence for both would tell somebody a code
+      // is coming when none is.
+      const lapsedAt = proofLapsesAt(proof!);
+      const after = afterLapse(
+        lapsedAt,
+        await codesSentSince(db, input.tenantId, input.recipientId, readCodesFrom(lapsedAt)),
+        at
+      );
+      why = after.retired
+        ? `This address stopped being a destination on ${after.retiredAt.slice(0, 10)}: the proof that it reaches you lapsed on ${lapsedAt.slice(0, 10)}, and ${after.asked} codes since then went unanswered. ` +
+          "Save an address again, prove it, and these will go out."
+        : `The proof that this address reaches you lapsed on ${lapsedAt.slice(0, 10)}, so nothing was sent to it. ` +
+          "Ask for a code and bring it back, and these will go out.";
     } else {
       address = held.address;
     }

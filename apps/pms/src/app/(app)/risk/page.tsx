@@ -78,6 +78,11 @@ type AddressResponse = {
   standing: "none" | "good" | "expiring" | "lapsed";
   /** Set when somebody reading that mailbox said they did not ask for these (Increment 1.67). */
   refused: { refusedAt: string } | null;
+  /** What became of a proof that lapsed (Increment 1.68); null unless one has. */
+  lapse:
+    | { retired: false; asked: number; askDue: string | null; retiresAt: string }
+    | { retired: true; asked: number; retiredAt: string }
+    | null;
   lapsesAt: string | null;
   /** The last attempt and how it went (Increment 1.59); null where nobody has tried. */
   lastSend: SendRecord | null;
@@ -1336,11 +1341,21 @@ function RiskBody({
             >
               <p className="mb-2 text-sm">
                 <strong>
-                  {delivery.standing === "lapsed"
-                    ? `The proof that this address reaches you lapsed on ${delivery.lapsesAt?.slice(0, 10)}`
-                    : "Nobody has proved this address reaches you"}
+                  {delivery.lapse?.retired
+                    ? `This address stopped being a destination on ${delivery.lapse.retiredAt.slice(0, 10)}`
+                    : delivery.standing === "lapsed"
+                      ? `The proof that this address reaches you lapsed on ${delivery.lapsesAt?.slice(0, 10)}`
+                      : "Nobody has proved this address reaches you"}
                 </strong>
-                , so nothing is sent to it. A mistyped address
+                , so nothing is sent to it.{" "}
+                {/* A lapse the product is still working on reads differently
+                    from one it has given up on (Increment 1.68). */}
+                {delivery.lapse
+                  ? delivery.lapse.retired
+                    ? `${delivery.lapse.asked} codes went to it after the proof lapsed and none came back, so the practice stopped asking. Save an address again and prove it, and your notices resume.`
+                    : `${delivery.lapse.asked === 0 ? "No code has" : `${delivery.lapse.asked} code${delivery.lapse.asked === 1 ? " has" : "s have"}`} gone out since the proof lapsed. The practice keeps asking once a month, and stops on ${delivery.lapse.retiresAt.slice(0, 10)} if none comes back.`
+                  : null}{" "}
+                A mistyped address
                 does not bounce — it is accepted by whoever does own that mailbox — so the practice asks you to fetch a
                 code from it instead. This practice will send at most five codes an hour, because an address you type is
                 somebody else&apos;s inbox until it is proved.

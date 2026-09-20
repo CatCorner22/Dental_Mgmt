@@ -555,6 +555,47 @@ The CPA month-end package, `docs/13` item 22, has sat in every "not in" list sin
 
 **Not in Increment 1.35.** QuickBooks Online and Xero export shapes (the mapping is theirs to feed, but the formats are not written); a starter chart of accounts; reason-code-level mappings in the page's form (the service and the resolver take them; the form proposes the wildcard); the CPA seat; month close.
 
+## Increment 1.68
+
+Increment 1.65 gave a proof a life, and had the round ask for a new code inside its last thirty days so that nothing would stop in silence. It then left a trap nobody had walked into yet: **once the proof lapsed, the round stopped asking. Forever.**
+
+Read that from the person's side. They missed one message — leave, a busy month, a mailbox they read on a phone they replaced. The notices stop. The product never asks again. And the one thing that would tell them to open the screen and fetch a code is the notices, which is precisely what is being withheld.
+
+The signal that would break the silence is the one the silence suppresses. Nothing in the product ever gets them out of it, and nothing ever told anybody it had happened.
+
+## So the round keeps asking, and then stops
+
+- **Monthly, not weekly.** A person who has not answered in a month will not answer faster for being asked more often; past that, asking again is the product talking to itself. The spacing counts from the last code that actually reached the transport, whether it went before the lapse or after — so Increment 1.65's ask inside the window and the asks after it are one unbroken cadence rather than two rules meeting at a cliff.
+- **Three times, and the count is the rows.** Sent codes are already append-only, so the allowance is read from them exactly as Increment 1.63 reads its hourly limit. Nothing to reset, nothing to drift, nothing a reader must trust over what happened.
+- **Sent, not attempted.** A code the transport refused never reached anybody. Counting it would spend a person's chances on the practice's own outage — retiring an address because the product could not send, which is the reverse of what the rule is for.
+- **The last code keeps its month.** The address is let go when the third code's month runs out, not when it leaves: a code answered on its twenty-ninth day is answered.
+- **Answering at any point takes it all back.** Nothing here is a punishment. A code brought back is a fresh proof and the notices resume, which is the whole reason for asking again.
+
+## Retirement is derived, and this increment adds no migration
+
+When an address stops being a destination is arithmetic over rows that cannot change — the proof that lapsed and the codes that went unanswered. A column would be a status the rows under it could contradict, and a job that had to remember to run. That is the argument Increment 1.65 made for a proof's life, held again one step further along, and it is why the schema is untouched.
+
+It also means the date does not move. A reader told on day one that the address stops on a given day is told the same day on day eighty-nine, because the projection from the first ask and the answer from the last are the same arithmetic — which the unit cases check against each other rather than against a literal.
+
+## Two states wore one word
+
+"Lapsed" covered both a lapse the product is still working on and one it has given up on. They call for different things from the reader, and one sentence for both tells somebody a code is coming when none is. So `sendNotices` and the screen now say which:
+
+| State | What the reader is told |
+|---|---|
+| Lapsed, still being chased | when the proof lapsed, how many codes have gone since, that the practice keeps asking monthly, and the day it stops |
+| Retired | the day it stopped being a destination, how many codes went unanswered, and that saving an address again resumes everything |
+
+## Why asking again is safe now, and was not before
+
+The worry about mailing an address that has quietly changed hands is that a stranger receives it. Every one of these codes now carries that stranger a one-click way to stop it (Increment 1.67) — which also stops the asking here, because a refused address is refused before a code is minted, and a refusal outranks a lapse on the screen for the same reason.
+
+The increment that gave strangers a way out is what licenses the product to keep trying. Had this been built first, it would have been three more unwanted messages a year to somebody who never asked for the first one.
+
+- **Tests.** Unit (9): an ask owed at once when not one code has gone; the cadence counting from the last code sent, so the window's ask and the ones after it are one rhythm; the asks a month apart with the allowance spent one at a time; the asking stopping when the allowance is spent while the last code keeps its month; the address let go when that month runs out; the end date not moving while the practice keeps asking; the date projected from the first ask matching the one the last ask produces; the rule indifferent to the order the sends are read in; the lookback starting at the reprove window rather than at the lapse. Live (8): the round asking again after a lapse — the regression itself; not asking twice inside a month; asking three times in all; stopping once the allowance is spent and leaving the last code its month; the send saying "lapsed" while it is still asking and naming no end that has not come; the send saying "stopped being a destination" once it is let go, with the count and the date; nothing further sent however many rounds run; and the address taken back the moment somebody answers. Browser: a lapse still being chased, on a mailbox saved fresh because the refused one from Increment 1.67 outranks it.
+
+**Not in Increment 1.68.** Anybody but the person themselves learning that their address retired — the asking is the telling, and it goes to the mailbox, but a practice-wide reading of who has become unreachable would ride beside the weekly digest rather than inside it, for the reason Increment 1.53 established about standing figures and the digest's hash. A per-practice choice of how many times to ask or how long to wait. Retiring an address **nobody ever proved**, which is the practice's own unfinished business and visible on the screen, rather than a proof that decayed. An address for somebody who is not a user. Nor does the product write anything on the person's behalf: `notice_addresses` still refuses a row acted for anybody but its owner, and retirement deliberately avoids needing that rule relaxed — a product that could write a null address for somebody could silence their notices, which is the attack Increment 1.58 exists to prevent.
+
 ## Increment 1.67
 
 Increment 1.61 built the proof because a signed-in person can point this product's mail at an address that is not theirs. Increment 1.63 limited how often they may do it, and argued carefully about where the limit belongs. Neither gave the person on the other end anything to do.
