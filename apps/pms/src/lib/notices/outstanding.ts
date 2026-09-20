@@ -1,12 +1,28 @@
 import { attestationCoverage, lastCompleteMonth, type AttestationCoverage } from "../controls/attestationCoverage";
 import { ATTESTABLE_CHANNELS, listMonthAttestations } from "../controls/attestations";
 import { listDecisions } from "../controls/decisions";
+import { isRole } from "../auth/roles";
+import { isCpaSeat } from "../auth/seats";
 import type { AppDb } from "../db/client";
 import { allThreadsUnlabelled } from "../cpa/questions";
 import { latestReads, unreadFor } from "../cpa/threadReads";
 import { decisionsDue } from "../home/board";
 import type { Thread } from "../cpa/questions";
 import type { DecisionDue } from "../home/board";
+
+/**
+ * Whose debts this person would be sent: the accountant's seat, or the
+ * practice's.
+ *
+ * Here rather than in the round, because it answers a question about a seat
+ * and this module is where a seat is defined. Two callers now read it — the
+ * round choosing what to send, and Increment 1.69 reading who cannot be
+ * reached — and a second copy would have been a second answer.
+ */
+export function seatOf(role: string, entitlements: string[]): NoticeSeat {
+  const known = isRole(role) ? role : undefined;
+  return known && isCpaSeat({ role: known, entitlements }) ? "accountant" : "owner";
+}
 
 /**
  * One list of what each seat is owed (Increment 1.57).

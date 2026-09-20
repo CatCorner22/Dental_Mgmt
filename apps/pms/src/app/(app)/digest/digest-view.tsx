@@ -5,6 +5,7 @@ import { isRole, meetsRole } from "@/lib/auth/roles";
 import { formatCents } from "@/lib/ledger/format";
 import type { CountRow, DigestAck, WeeklyDigest } from "@/lib/digest/digest";
 import type { AttestationCoverage } from "@/lib/controls/attestationCoverage";
+import type { ReachReading } from "@/lib/notices/reach";
 
 type Me = { ok: boolean; role?: string };
 
@@ -13,6 +14,8 @@ type DigestResponse = {
   summaryHash: string;
   ack: DigestAck | null;
   attestations: AttestationCoverage;
+  /** Who the practice believes it is notifying and is not (Increment 1.69). */
+  reach: ReachReading;
   changedSinceAck: boolean;
   computedAt: string;
 };
@@ -293,6 +296,35 @@ export function DigestView() {
               so it is outside the figures the acknowledgment stamps.
             </p>
             <p className="max-w-prose text-sm text-[var(--ink-2)]">{state.data.attestations.sentence}</p>
+          </section>
+
+          {/* Who the practice cannot reach (Increment 1.69). Beside the counts
+              for the same reason as the section above: the week's figures are
+              stamped, and this is where the practice stands today. Names appear
+              here and never in the digest message, which leaves the product. */}
+          <section aria-labelledby="digest-reach" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+            <h2 id="digest-reach" className="mb-1 text-base font-semibold">
+              Standing, not this week &middot; who the practice can reach
+            </h2>
+            <p className="mb-2 text-xs text-[var(--ink-3)]">
+              Where the practice stands today, so it is outside the figures the acknowledgment stamps. The message this
+              digest becomes names nobody; this screen does.
+            </p>
+            {state.data.reach.unreachable.length === 0 ? (
+              <p className="max-w-prose text-sm text-[var(--ink-2)]">
+                {state.data.reach.considered === 0
+                  ? "Nobody has said where to send their notices, so nothing is sent to anybody."
+                  : `Every one of the ${state.data.reach.considered} addresses on file has been proved to reach the person who saved it.`}
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {state.data.reach.unreachable.map((u) => (
+                  <li key={u.userId} className="max-w-prose text-sm text-[var(--ink-2)]">
+                    {u.sentence}
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           <Rows

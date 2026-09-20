@@ -555,6 +555,49 @@ The CPA month-end package, `docs/13` item 22, has sat in every "not in" list sin
 
 **Not in Increment 1.35.** QuickBooks Online and Xero export shapes (the mapping is theirs to feed, but the formats are not written); a starter chart of accounts; reason-code-level mappings in the page's form (the service and the resolver take them; the form proposes the wildcard); the CPA seat; month close.
 
+## Increment 1.69
+
+Increment 1.68 had the round keep asking after a proof lapses, and then let the address go. But **the asking is the only telling, and it goes to the mailbox that is failing.**
+
+The person sees it on their own Practice Risk panel if they sign in. Nobody else learns anything at all. So a practice can run for months believing all of its people are being told, while one of them is not — which is the same silent success this arc has been closing since Increment 1.59, met one level up: not a message that failed, but a person the product quietly stopped reaching.
+
+## A standing reading, not a change feed
+
+"Who became unreachable last week" would name somebody once and then go quiet, so the longer a person had been unreachable the less the practice would hear about it. That is the decay this arc refuses everywhere else, and it would be worst here, where the silence is the symptom.
+
+What the owner needs is who cannot be reached **now**. Four ways an address on file can fail to reach the person who saved it, and the reading says which:
+
+| State | Since | What it means |
+|---|---|---|
+| **Refused** | the day somebody reading it said no | Increment 1.67; the mailbox's own word, and the address cannot be saved again |
+| **Retired** | the day it stopped being a destination | Increment 1.68; the codes ran out |
+| **Lapsed** | the day the proof lapsed | the practice is still asking, and the sentence says when it stops |
+| **Unproved** | the day the address was saved | nobody ever brought a code back |
+
+The states **rank**, and the strongest is the one reported: a refusal outranks anything the practice believes about the address, a retirement outranks the lapse it grew out of, and a lapse outranks the absence of a proof that used to exist. A live case pins that by refusing an address whose proof has not lapsed and is not going to, and checking the reading still reports the refusal rather than calling that person reachable.
+
+## What it deliberately does not report
+
+- **Somebody who withdrew.** That is a decision, not a fault (Increment 1.58). They leave the denominator too, because a person who receives nothing by choice is not a person the practice is trying to reach.
+- **Somebody who has left.** Increment 1.65 stopped sending to a deactivated account. Filing that as a failure to reach them would report a rule working as a fault.
+- **Somebody who never gave an address at all.** No message was ever expected, their own screen says so, and nothing is broken. That is a different question — who has not set this up — and it is named below rather than folded in here.
+
+## Where it appears, and where it must not
+
+On the owner's board, which is where the practice looks to see what needs it, and **beside** the weekly digest — never inside it. Increment 1.53 established the reason: the digest states facts about its seven days, the owner stamps a hash of exactly those facts, and the month-end package folds the whole digest into its own hash, so a standing figure in there would move every closed month's hash the moment anybody's address lapsed.
+
+There is a second reason here that 1.53 did not need. **The digest is also a message that leaves the product** (Increment 1.64), and it names nobody. This names people. So it lives only where a guard stands, and the route adds it beside `computeDigest` rather than inside it — which keeps it out of the message by construction rather than by care.
+
+- **It names the person and never the address.** The practice needs to know that Riley cannot be reached, not what Riley typed; a live case and a browser case both check that no address appears anywhere in the reading.
+- **It shows in every state, the quiet one included.** A card that says nothing when it has nothing to say is indistinguishable from a card that broke — Increment 1.52's rule — so the reading carries how many addresses are on file at all, and a zero reads as measured rather than as missing.
+- **One sentence, written once.** The board and the digest quote the same pure function, because a reading shown in two places drifts the moment it is written twice.
+
+`seatOf` moved from the round to `outstanding.ts`, which is where a seat is defined. Two callers now read it — the round choosing what to send and this reading naming who cannot be reached — and a second copy would have been a second answer.
+
+- **Tests.** Unit (6): who said no and that the address cannot come back; how many codes went unanswered; the practice still asking and when it stops; no end date invented where there is none; when an unproved address was saved; a person named and no address in any of the four. Live (9): an empty reading that is measured rather than missing; an unproved address named with its date; the person dropped the moment it is proved; a lapse still being chased, with the day it stops; a retirement with the count, and the same person still reading as lapsed five days earlier; a refusal outranking a proof that has not lapsed; no address anywhere in the payload; a withdrawal counted neither as unreachable nor in the denominator; a person who has left counted in neither. Browser (1): the owner's board naming the person, the reason and the date, and no address.
+
+**Not in Increment 1.69.** People who never gave an address at all — a real gap, and the natural next one, but it is "who has not set this up" rather than "who is set up and broken", and folding them in would make the card mostly a roster. Anything that acts on the reading: no message, no finding, no decision, because the practice knowing is the whole of what was missing. A per-practice choice of any of the numbers behind it. An address for somebody who is not a user.
+
 ## Increment 1.68
 
 Increment 1.65 gave a proof a life, and had the round ask for a new code inside its last thirty days so that nothing would stop in silence. It then left a trap nobody had walked into yet: **once the proof lapsed, the round stopped asking. Forever.**

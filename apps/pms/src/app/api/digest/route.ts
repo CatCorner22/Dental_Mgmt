@@ -4,6 +4,7 @@ import { withTenantTransaction } from "@/lib/db/client";
 import { computeDigest, digestHash, loadDigestAck, periodEnding } from "@/lib/digest/digest";
 import { ATTESTABLE_CHANNELS, listMonthAttestations } from "@/lib/controls/attestations";
 import { attestationCoverage, lastCompleteMonth } from "@/lib/controls/attestationCoverage";
+import { readReach } from "@/lib/notices/reach";
 
 /**
  * The weekly digest: seven days ending on `ending` (default today), computed
@@ -27,9 +28,14 @@ export const GET = withGuard(
     // the standing debt is the practice's position now, and a week the owner
     // reads in arrears does not change who has vouched for last month.
     const month = lastCompleteMonth(today);
-    const { digest, ack, attestations } = await withTenantTransaction(user.tenantId, user.id, async (db) => ({
+    const { digest, ack, attestations, reach } = await withTenantTransaction(user.tenantId, user.id, async (db) => ({
       digest: await computeDigest(db, user.tenantId, period),
       ack: await loadDigestAck(db, user.tenantId, period.end),
+      // Who the practice cannot reach, as of now (Increment 1.69). Beside the
+      // digest for the same reason the attestation figure is, and read as of
+      // today rather than as of the period: it is a position, not an event of
+      // those seven days.
+      reach: await readReach(db, user.tenantId),
       attestations: attestationCoverage({
         month,
         channels: ATTESTABLE_CHANNELS,
@@ -54,6 +60,15 @@ export const GET = withGuard(
        * been given -- the false positive Increment 1.36 removed.
        */
       attestations,
+      /**
+       * Who the practice believes it is notifying and is not (Increment 1.69).
+       *
+       * Beside the digest, never inside it, for the reason above and one more:
+       * the digest is also a message that leaves the product (Increment 1.64),
+       * and it names nobody. This names people, so it belongs only where a
+       * guard stands — on this screen and on the owner's board.
+       */
+      reach,
       /** True when the rows changed after the owner stamped this period. */
       changedSinceAck: ack ? ack.summaryHash !== summaryHash : false,
       computedAt: new Date().toISOString(),

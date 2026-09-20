@@ -2,13 +2,12 @@ import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { noticeRounds, users, userEntitlements, noticeAddresses, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { appendControlEvent } from "../controls/events";
-import { isRole } from "../auth/roles";
-import { CPA_SEAT_ENTITLEMENT, isCpaSeat } from "../auth/seats";
+import { CPA_SEAT_ENTITLEMENT } from "../auth/seats";
 import { currentAddress } from "./addresses";
 import { REPROVE_WINDOW_MS, currentProof, proofLapsesAt, proofStanding, sendProofCode } from "./proof";
 import { afterLapse, readCodesFrom } from "./retirement";
 import { renderMessage } from "./message";
-import { collectOutstanding, type NoticeSeat } from "./outstanding";
+import { collectOutstanding, seatOf, type NoticeSeat } from "./outstanding";
 import { computeDigest, loadDigestAck, periodEnding } from "../digest/digest";
 import { listMonthCloses } from "../cpa/close";
 import { computeMonthPackage } from "../cpa/package";
@@ -123,12 +122,6 @@ export function worthSending(
   // It says the same thing, and saying it once a week is what stops an ignored
   // debt going quiet.
   return at.getTime() - last.at.getTime() >= resendAfterMs;
-}
-
-/** Whose debts this person would be sent: the accountant's seat, or the practice's. */
-function seatOf(role: string, entitlements: string[]): NoticeSeat {
-  const known = isRole(role) ? role : undefined;
-  return known && isCpaSeat({ role: known, entitlements }) ? "accountant" : "owner";
 }
 
 export type RoundInput = {
