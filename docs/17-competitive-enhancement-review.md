@@ -636,6 +636,41 @@ The denominator is the people who could act on a notice, and it does not move wh
 
 **Not in Increment 1.70.** Anything that acts on the reading: no message, no finding, no decision — the practice knowing is the whole of what was missing, which is the shape Increment 1.69 chose for the same reason. Asking somebody for an address, which would be a message to a person the product has no address for. An address for somebody who is not a user. Retiring an address nobody ever proved. A per-practice choice of who counts as able to act, which would be a setting where the guards are the answer.
 
+
+## Increment 1.71
+
+The question this answers was put as **an address for somebody who is not a user**, because `notice_addresses.user_id` is a foreign key into `users`, the own-user trigger is enforced against `app.user_id`, and a firm's shared mailbox is not a person. The answer is no — and the foreign key is not the reason.
+
+A destination with no person behind it would be a **second kind of recipient** standing beside the seat. It would need its own proof that the mailbox consents (Increment 1.61), its own way for a stranger to refuse (1.67), its own place in the reading of who cannot be reached (1.69) and its own place in the reading of who was never set up (1.70). That is four second answers to questions the seat already answers, and this schema refuses second answers everywhere else. Two notions of "recipient" would eventually disagree about who was told what.
+
+## What a shared mailbox actually wants
+
+To **be** the recipient. This product's word for a recipient is a seat (Increment 1.49), and nothing stopped `accounting@firm.example` holding the outside accountant's one — proving its own address, being told when a month closes, refusing, appearing in both readings — except one thing:
+
+> **`users` was written by the seed and by nothing else.** No screen, no route and no service in the product created a person. A practice that wanted an outside accountant could not have one, and Increment 1.70's card could name an accountant who never said where to send their messages while offering no way to add one.
+
+So the gap was never an address for a non-user. It was the act of adding the person.
+
+## The practice names the seat; the person supplies the secret
+
+That is Increment 1.58's rule read the other way round, and it is the same rule. An address is set by the person it belongs to; so is a password. The row the invitation creates carries a hash of thirty-two random bytes nobody kept, so the account exists and **no password opens it** until its holder chooses one — a property of the rows rather than a promise about the code, and a live case proves it by checking that neither the invitation secret nor the username opens the account.
+
+| Decision | Why |
+|---|---|
+| **Only the outside accountant's seat** | 1.49 settled that it pairs with no duty in the SoD rulebook, so inviting it creates no conflict, and it reaches the month-end package and no other screen. A general "invite anybody to any role" would be a grant path around `evaluateGrant`, the check every other new duty goes through |
+| **Owner rank to invite** | The act adds somebody who will read the practice's month-end figures |
+| **The ask and the answer are two tables** | A `claimed_at` column would be a status the rows under it could contradict, and an UPDATE on an otherwise append-only row. A claim row is a fact that cannot be unwritten — the shape a proof already has beside a challenge |
+| **Seven days, against a stop link's thirty** | The two secrets point in opposite directions. A stop link can only withhold; this one **opens an account**, and it is the only token in this product whose leak hands somebody a seat rather than taking one away |
+| **The link is shown once** | The rows keep a hash. A practice that mislays it invites again rather than asking this product to repeat a secret it does not hold |
+
+The invitation page borrows the stop page's shape exactly (1.67): the second page in this product outside a session, it reads and does not act, it answers an unknown link and another practice's link in the same words, and it offers nothing else. It names the practice and the username, because the person holding it needs to know what to type at a sign-in box. It names no address — this seat has none yet, and saying where to send its messages is the seat's own act.
+
+Two triggers carry the rules the code must not be trusted with. An invitation must name the acting user as its inviter, which is 1.58's rule read the other way: there nobody may act for another person, here nobody may record another person as having acted. A claim asks nothing at all about the session, because the person claiming has no account yet — the same deliberate absence 1.67's refusal has.
+
+- **Tests.** Unit (7): a reference read back, and every malformed one refused before the practice id in it reaches a cast; the whole reference in one path segment; the week, and that it is far shorter than a stop link's life; a username somebody can be told over the phone, and every shape that would make "the same username" a question with two answers. Live (13): the seat created at the lowest rank with the one grant, and no second factor; an account no secret the practice holds opens; the seat handed straight to 1.70's reading; a username already in use refused in words; an unknown secret and another practice's secret answered identically; a weak password refused **without spending the link**; the password set and the link spent once; the claimed seat dropped from the open list; both acts in the chain, named to the practice's actor and then to the seat's own; an inviter who is not the acting user refused; an update refused; a week that has run out refused. Browser (1): the owner invites, the link appears once, the seat lands on the board's "never set up" card, the invited person opens the link with no session and sets a password, and the same link then says it has already been used.
+
+**Not in Increment 1.71.** Inviting any other seat, which needs `evaluateGrant` rather than a second path around it. Re-sending an invitation, which would be a new one rather than a repeat of a secret the rows do not hold. Deactivating or removing a seat. A destination with no person behind it, which this increment argues should not exist. Anything about what the new seat receives: it is a seat like any other, so Increments 1.58 through 1.70 already decide that, starting with its own act of saying where.
+
 ## Increment 1.68
 
 Increment 1.65 gave a proof a life, and had the round ask for a new code inside its last thirty days so that nothing would stop in silence. It then left a trap nobody had walked into yet: **once the proof lapsed, the round stopped asking. Forever.**

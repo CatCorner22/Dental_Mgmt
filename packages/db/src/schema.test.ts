@@ -58,6 +58,7 @@ const perCodeSql = readFileSync(join(here, "../migrations/0047_proof_is_per_code
 const roundCodeSql = readFileSync(join(here, "../migrations/0048_round_may_send_a_code.sql"), "utf8");
 const packageKindSql = readFileSync(join(here, "../migrations/0049_notice_package_kind.sql"), "utf8");
 const refusalsSql = readFileSync(join(here, "../migrations/0050_notice_address_refusals.sql"), "utf8");
+const invitationsSql = readFileSync(join(here, "../migrations/0051_seat_invitations.sql"), "utf8");
 /**
  * The statements of a migration, without its prose.
  *
@@ -1112,5 +1113,60 @@ describe("Increment 0.2 auth lookup", () => {
     expect(authSql).toMatch(/CREATE OR REPLACE FUNCTION auth_lookup_session\(/);
     expect(authSql).toMatch(/SECURITY DEFINER/);
     expect(authSql).toMatch(/users_username_lower_uidx/);
+  });
+});
+
+/**
+ * The practice invites the seat it cannot otherwise create (Increment 1.71).
+ *
+ * The rules worth pinning are the three that make the act safe: the ask and
+ * the answer are two tables so nothing is a status column, the inviter must be
+ * the acting user, and the claim deliberately has no such rule because the
+ * person claiming has no account yet.
+ */
+describe("migration 0051: seat invitations", () => {
+  it("keeps the ask and the answer in two tables rather than a status column", () => {
+    expect(invitationsSql).toMatch(/CREATE TABLE seat_invitations \(/);
+    expect(invitationsSql).toMatch(/CREATE TABLE seat_invitation_claims \(/);
+    // A `claimed_at` on the ask would be an UPDATE on an append-only row and a
+    // fact that could be rewritten, which is why a proof is a table and not a
+    // column on a challenge (Increment 1.61).
+    expect(columnsOf(invitationsSql, "seat_invitations")).not.toMatch(/claimed/);
+    expect(invitationsSql).toMatch(
+      /CREATE UNIQUE INDEX seat_invitation_claims_one_per_invitation ON seat_invitation_claims \(invitation_id\);/
+    );
+  });
+
+  it("keeps the secret out of the rows and bounds how long it works", () => {
+    expect(invitationsSql).toMatch(/token_hash text NOT NULL/);
+    expect(invitationsSql).toMatch(/CHECK \(token_hash ~ '\^\[0-9a-f\]\{64\}\$'\)/);
+    expect(invitationsSql).toMatch(/expires_at timestamptz NOT NULL/);
+    expect(invitationsSql).toMatch(/CHECK \(expires_at > invited_at\)/);
+    // Nothing here stores what the link carried.
+    expect(columnsOf(invitationsSql, "seat_invitations")).not.toMatch(/secret|password/);
+  });
+
+  it("makes an invitation somebody's act, and the acting user the one it names", () => {
+    expect(invitationsSql).toMatch(/FUNCTION seat_invitations_name_their_actor/);
+    expect(invitationsSql).toMatch(/may not record % as the inviter/);
+    expect(invitationsSql).toMatch(/CREATE TRIGGER seat_invitations_name_their_actor\s*\n\s*BEFORE INSERT ON seat_invitations/);
+  });
+
+  it("asks nothing about the session when a seat is claimed, because there is not one yet", () => {
+    // The same deliberate absence as Increment 1.67's refusal: what authorises
+    // the row is the secret the link carried, which the database cannot see.
+    const claimBody = statementsOf(invitationsSql).slice(statementsOf(invitationsSql).indexOf("seat_invitation_claims_match_their_tenant"));
+    expect(claimBody).not.toMatch(/current_setting\('app\.user_id'/);
+  });
+
+  it("is append-only, isolated per practice, and grants no way to change a row", () => {
+    expect(invitationsSql).toMatch(/seat_invitations_no_update/);
+    expect(invitationsSql).toMatch(/seat_invitations_no_delete/);
+    expect(invitationsSql).toMatch(/seat_invitation_claims_no_update/);
+    expect(invitationsSql).toMatch(/seat_invitation_claims_no_delete/);
+    expect(invitationsSql).toMatch(/ALTER TABLE seat_invitations FORCE ROW LEVEL SECURITY;/);
+    expect(invitationsSql).toMatch(/ALTER TABLE seat_invitation_claims FORCE ROW LEVEL SECURITY;/);
+    expect(invitationsSql).toMatch(/GRANT SELECT, INSERT ON seat_invitations TO app_rw;/);
+    expect(invitationsSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*seat_invitation/);
   });
 });
