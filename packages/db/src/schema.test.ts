@@ -59,6 +59,7 @@ const roundCodeSql = readFileSync(join(here, "../migrations/0048_round_may_send_
 const packageKindSql = readFileSync(join(here, "../migrations/0049_notice_package_kind.sql"), "utf8");
 const refusalsSql = readFileSync(join(here, "../migrations/0050_notice_address_refusals.sql"), "utf8");
 const invitationsSql = readFileSync(join(here, "../migrations/0051_seat_invitations.sql"), "utf8");
+const newestWinsSql = readFileSync(join(here, "../migrations/0052_seat_invitations_newest_wins.sql"), "utf8");
 /**
  * The statements of a migration, without its prose.
  *
@@ -1135,6 +1136,8 @@ describe("migration 0051: seat invitations", () => {
     expect(invitationsSql).toMatch(
       /CREATE UNIQUE INDEX seat_invitation_claims_one_per_invitation ON seat_invitation_claims \(invitation_id\);/
     );
+    // One claim per invitation survives Increment 1.73: a seat may accumulate
+    // invitations, but a single secret still opens the account once.
   });
 
   it("keeps the secret out of the rows and bounds how long it works", () => {
@@ -1168,5 +1171,42 @@ describe("migration 0051: seat invitations", () => {
     expect(invitationsSql).toMatch(/ALTER TABLE seat_invitation_claims FORCE ROW LEVEL SECURITY;/);
     expect(invitationsSql).toMatch(/GRANT SELECT, INSERT ON seat_invitations TO app_rw;/);
     expect(invitationsSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*seat_invitation/);
+  });
+});
+
+/**
+ * A seat whose link was lost gets another (Increment 1.73).
+ *
+ * The rule worth pinning is that "live" stays DERIVED. The unique index that
+ * forbade a second invitation goes, and nothing replaces it with a column: a
+ * superseded link is refused by the read that finds it, so there is no flag to
+ * set correctly and none to get wrong.
+ */
+describe("migration 0052: an invitation may be replaced", () => {
+  it("drops the index that forbade a second invitation for one seat", () => {
+    expect(newestWinsSql).toMatch(/DROP INDEX seat_invitations_one_per_seat;/);
+  });
+
+  it("indexes the read it now has, the newest invitation for a seat", () => {
+    expect(newestWinsSql).toMatch(
+      /CREATE INDEX seat_invitations_newest_idx\s*\n\s*ON seat_invitations \(tenant_id, user_id, invited_at DESC\);/
+    );
+  });
+
+  it("adds no column that could disagree with the rows under it", () => {
+    // No `superseded`, no `live`, no `revoked_at`: the newest row is in force
+    // and the rest are history, which is the shape `notice_addresses` has held
+    // since Increment 1.58.
+    const statements = statementsOf(newestWinsSql);
+    expect(statements).not.toMatch(/ADD COLUMN/);
+    expect(statements).not.toMatch(/superseded|revoked|is_live/);
+    expect(statements).not.toMatch(/UPDATE seat_invitations/);
+    expect(statements).not.toMatch(/DELETE FROM seat_invitations/);
+  });
+
+  it("leaves one secret naming at most one invitation", () => {
+    // `seat_invitations_token_uidx` is what makes a lookup by secret
+    // unambiguous; only how many invitations a seat may accumulate changed.
+    expect(statementsOf(newestWinsSql)).not.toMatch(/DROP INDEX seat_invitations_token_uidx/);
   });
 });

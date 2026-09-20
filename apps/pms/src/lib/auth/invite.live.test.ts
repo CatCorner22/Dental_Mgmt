@@ -6,7 +6,7 @@ import { domainEvent, users } from "@pms/db";
 import { and, eq } from "drizzle-orm";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { readSetup } from "../notices/setup";
-import { claimSeat, inviteAccountant, lookUpInvite, unclaimedInvitations } from "./invite";
+import { claimSeat, inviteAccountant, lookUpInvite, reinviteSeat, unclaimedInvitations } from "./invite";
 import { verifyPassword } from "./password";
 
 /**
@@ -199,6 +199,114 @@ describe.skipIf(!adminUrl)("inviting the outside accountant's seat (live)", () =
     await expect(
       db.admin.query("UPDATE seat_invitations SET token_hash = repeat('c', 64)")
     ).rejects.toThrow(/append-only/);
+  });
+
+  it("hands a seat whose link went astray another one, keeping the seat itself untouched", async () => {
+    // Increment 1.73. Until now `inviteAccountant` had one exit that created
+    // anything and it always created a NEW user, so a lost link stranded the
+    // account: active, holding the grant, openable by nobody, and named on
+    // Increment 1.70's card forever.
+    const first = await asUser(owner.id, (d) =>
+      inviteAccountant(d, tenantId, { id: owner.id, name: owner.displayName }, { username: "firm-lost", displayName: "Lost & Co" }, at)
+    );
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    const again = await asUser(owner.id, (d) =>
+      reinviteSeat(d, tenantId, { id: owner.id, name: owner.displayName }, first.seat.userId, later(1))
+    );
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    // The same person, the same username: the practice already decided all of
+    // that and none of it went wrong.
+    expect(again.seat.userId).toBe(first.seat.userId);
+    expect(again.seat.username).toBe("firm-lost");
+    expect(again.seat.secret).not.toBe(first.seat.secret);
+
+    const fresh = await asNobody((d) => lookUpInvite(d, tenantId, again.seat.secret, later(1)));
+    expect(fresh.ok).toBe(true);
+  });
+
+  it("stops the older link working, by the read rather than by a flag", async () => {
+    const seat = await asUser(owner.id, (d) =>
+      inviteAccountant(d, tenantId, { id: owner.id, name: owner.displayName }, { username: "firm-stale", displayName: "Stale & Co" }, at)
+    );
+    expect(seat.ok).toBe(true);
+    if (!seat.ok) return;
+    // It works before the replacement, which is what makes the refusal after
+    // it mean something.
+    expect((await asNobody((d) => lookUpInvite(d, tenantId, seat.seat.secret, later(1)))).ok).toBe(true);
+
+    await asUser(owner.id, (d) =>
+      reinviteSeat(d, tenantId, { id: owner.id, name: owner.displayName }, seat.seat.userId, later(1))
+    );
+
+    const stale = await asNobody((d) => lookUpInvite(d, tenantId, seat.seat.secret, later(1)));
+    expect(stale.ok).toBe(false);
+    if (stale.ok) return;
+    expect(stale.code).toBe("superseded");
+    // And it cannot open the account either: the claim re-looks-up rather than
+    // trusting what a page was rendered with.
+    const opened = await asNobody((d) => claimSeat(d, tenantId, seat.seat.secret, "a-long-enough-password", later(1)));
+    expect(opened.ok).toBe(false);
+    if (opened.ok) return;
+    expect(opened.code).toBe("superseded");
+  });
+
+  it("offers the practice one live link per seat, however many it has sent", async () => {
+    const seat = await asUser(owner.id, (d) =>
+      inviteAccountant(d, tenantId, { id: owner.id, name: owner.displayName }, { username: "firm-thrice", displayName: "Thrice & Co" }, at)
+    );
+    expect(seat.ok).toBe(true);
+    if (!seat.ok) return;
+    await asUser(owner.id, (d) => reinviteSeat(d, tenantId, { id: owner.id, name: owner.displayName }, seat.seat.userId, later(1)));
+    await asUser(owner.id, (d) => reinviteSeat(d, tenantId, { id: owner.id, name: owner.displayName }, seat.seat.userId, later(2)));
+
+    const open = await asUser(owner.id, (d) => unclaimedInvitations(d, tenantId));
+    // Three unclaimed rows, one seat: listing all three would offer the
+    // practice three links of which two open nothing.
+    expect(open.filter((i) => i.userId === seat.seat.userId)).toHaveLength(1);
+  });
+
+  it("refuses to reissue for a seat that has already been opened", async () => {
+    const seat = await asUser(owner.id, (d) =>
+      inviteAccountant(d, tenantId, { id: owner.id, name: owner.displayName }, { username: "firm-opened", displayName: "Opened & Co" }, at)
+    );
+    expect(seat.ok).toBe(true);
+    if (!seat.ok) return;
+    const claimed = await asNobody((d) => claimSeat(d, tenantId, seat.seat.secret, "a-long-enough-password", later(1)));
+    expect(claimed.ok).toBe(true);
+
+    const refused = await asUser(owner.id, (d) =>
+      reinviteSeat(d, tenantId, { id: owner.id, name: owner.displayName }, seat.seat.userId, later(2))
+    );
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    // Somebody who cannot sign in needs their password recovered, not a link
+    // that would let whoever holds it set one.
+    expect(refused.code).toBe("claimed");
+    expect(refused.why).toContain("recovered");
+  });
+
+  it("refuses to reissue for somebody who was never an invited seat", async () => {
+    // The owner has a password of their own. A link that let its holder set
+    // one would be the practice handing out an account it does not own.
+    const refused = await asUser(owner.id, (d) =>
+      reinviteSeat(d, tenantId, { id: owner.id, name: owner.displayName }, front.id, later(1))
+    );
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.code).toBe("not_a_seat");
+    expect(refused.status).toBe(404);
+  });
+
+  it("records the reissue in the chain, naming what it replaced", async () => {
+    const events = await asUser(owner.id, (d) =>
+      d.select({ kind: domainEvent.kind, actor: domainEvent.actorUserId }).from(domainEvent).where(eq(domainEvent.tenantId, tenantId))
+    );
+    const reissued = events.filter((e) => e.kind === "seat.reinvited");
+    expect(reissued.length).toBeGreaterThan(0);
+    expect(reissued.every((e) => e.actor === owner.id)).toBe(true);
   });
 
   it("refuses a link whose week has run out", async () => {

@@ -126,6 +126,11 @@ type FindingsResponse = {
   summary: { open: number; closed: number; high: number; medium: number; low: number; decided: number; undecided: number };
 };
 
+/** Seats this practice invited that nobody has opened yet (Increments 1.71, 1.73). */
+type SeatsResponse = {
+  invitations: { userId: string; username: string; displayName: string; invitedAt: string; expiresAt: string }[];
+};
+
 type Loaded = {
   risk: RiskResponse;
   sod: SodResponse;
@@ -136,6 +141,7 @@ type Loaded = {
   attestations: AttestationsResponse;
   outstanding: OutstandingResponse;
   delivery: AddressResponse;
+  seats: SeatsResponse;
 };
 
 type LoadState =
@@ -188,7 +194,7 @@ export default function PracticeRiskPage() {
   const [seatRefusal, setSeatRefusal] = useState<string | null>(null);
 
   const load = useCallback(async (fresh = false) => {
-    const [risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding, delivery] = await Promise.all([
+    const [risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding, delivery, seats] = await Promise.all([
       getJson<RiskResponse>(`/api/controls/risk${fresh ? "?fresh=1" : ""}`),
       getJson<SodResponse>("/api/controls/sod"),
       getJson<DecisionsResponse>("/api/controls/decisions"),
@@ -207,8 +213,12 @@ export default function PracticeRiskPage() {
       // Where this viewer's own notices would go, and the message that would go
       // there (Increment 1.58). Nothing is sent.
       getJson<AddressResponse>("/api/notices/address"),
+      // Seats invited and not yet opened (Increment 1.73), so a practice whose
+      // accountant lost the link can send another rather than being stuck with
+      // an account nobody can ever sign into.
+      getJson<SeatsResponse>("/api/controls/seats"),
     ]);
-    return { risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding, delivery };
+    return { risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding, delivery, seats };
   }, []);
 
   useEffect(() => {
@@ -445,8 +455,42 @@ export default function PracticeRiskPage() {
       setSeatLink({ username: body.username ?? seatUsername, link: body.link ?? "", expiresAt: body.expiresAt ?? "" });
       setSeatUsername("");
       setSeatName("");
+      // Re-read, so the seat just invited appears among those waiting to be
+      // opened (Increment 1.73). Without this the panel showed the link once
+      // and then nothing, and a practice that mislaid it had no row to act on.
+      await refresh(false);
     } catch (err: unknown) {
       setSeatRefusal(err instanceof Error ? err.message : "The invitation failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * Sends another link to a seat whose first one went astray
+   * (Increment 1.73). The seat itself is untouched: same person, same
+   * username, same grant — only the secret is new, and the older link stops
+   * working because the read requires the invitation in force.
+   */
+  async function reinvite(userId: string, name: string) {
+    setBusy("Invite");
+    setMessage(null);
+    setSeatRefusal(null);
+    try {
+      const res = await fetch("/api/controls/seats", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; username?: string; link?: string; expiresAt?: string };
+      if (!res.ok) {
+        setSeatRefusal(body.error ?? "The new link could not be sent.");
+        return;
+      }
+      setSeatLink({ username: body.username ?? name, link: body.link ?? "", expiresAt: body.expiresAt ?? "" });
+      await refresh(false, `Sent a new link for ${name}. The old one no longer works.`);
+    } catch (err: unknown) {
+      setSeatRefusal(err instanceof Error ? err.message : "The new link could not be sent.");
     } finally {
       setBusy(null);
     }
@@ -611,6 +655,8 @@ export default function PracticeRiskPage() {
             link: seatLink,
             refusal: seatRefusal,
             submit: () => void inviteAccountantSeat(),
+            open: state.data.seats.invitations,
+            reinvite: (id, name) => void reinvite(id, name),
           }}
           onRevoke={(p, e) => void revoke(p, e)}
           exceptionControls={{
@@ -673,6 +719,9 @@ type SeatFormState = {
   link: { username: string; link: string; expiresAt: string } | null;
   refusal: string | null;
   submit: () => void;
+  /** Seats invited and not yet opened, one live link each (Increment 1.73). */
+  open: SeatsResponse["invitations"];
+  reinvite: (userId: string, name: string) => void;
 };
 
 function RiskBody({
@@ -1367,7 +1416,37 @@ function RiskBody({
                 {seatForm.refusal}
               </p>
             ) : null}
-            {seatForm.link ? (
+            {seatForm.open.length > 0 ? (
+              <div className="grid gap-2 rounded-md border border-[var(--line)] p-3">
+                <p className="text-sm font-semibold text-[var(--ink)]">Invited, not yet opened</p>
+                <p className="max-w-prose text-sm text-[var(--ink-2)]">
+                  A link works for a week and only once. If one went astray, send another — the seat keeps its
+                  username and its place, and the older link stops working.
+                </p>
+                <ul className="grid gap-2">
+                  {seatForm.open.map((seat) => (
+                    <li key={seat.userId} className="flex flex-wrap items-center justify-between gap-3">
+                      <span className="text-sm text-[var(--ink-2)]">
+                        {seat.displayName}{" "}
+                        <span className="text-[var(--ink-3)]">
+                          ({seat.username}) &middot; link works until {seat.expiresAt.slice(0, 10)}
+                        </span>
+                      </span>
+                      <button
+                        id={`reinvite-${seat.userId}`}
+                        type="button"
+                        disabled={busy !== null}
+                        onClick={() => seatForm.reinvite(seat.userId, seat.displayName)}
+                        className="rounded-[var(--radius)] border border-[var(--line-strong)] px-3 py-1 text-sm font-semibold text-[var(--link)] disabled:opacity-60"
+                      >
+                        Send a new link
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+                        {seatForm.link ? (
               <div aria-live="polite" className="grid gap-2 rounded-md border border-[var(--line)] p-3">
                 <p className="max-w-prose text-sm text-[var(--ink-2)]">
                   Send this link to {seatForm.link.username}. It works until {seatForm.link.expiresAt.slice(0, 10)}, once only, and

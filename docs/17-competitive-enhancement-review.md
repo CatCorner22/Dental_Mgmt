@@ -700,6 +700,46 @@ The seat signs in and lands on the practice home, where the board tells it in wo
 
 **Not in Increment 1.72.** A seat-aware landing after sign-in, argued above and reverted. Anything about the address that seat has not yet given — that is the seat's own act (Increment 1.58), and Increments 1.69 and 1.70 already report it until it happens. Re-inviting a seat whose link expired. Inviting any other seat.
 
+
+## Increment 1.73
+
+Increment 1.71 gave a practice the act of inviting the outside accountant's seat, and 1.72 proved the invited person can finish a first sign-in. Neither gave them a **second chance**.
+
+`inviteAccountant` has exactly one exit that creates anything, and it always creates a **new** user. A practice asking to invite the same seat again is refused earlier still, by the username check — so the `UNIQUE` index that supposedly forbade a replacement was never even reached. There was no re-invite path at all.
+
+## What a lost link actually cost
+
+The practice's only recourse was to invite a different username. That leaves the first account **orphaned**:
+
+| | |
+|---|---|
+| active, holding the reporting grant | so every reading counts it |
+| a password hash of bytes nobody kept | so nobody can ever sign in |
+| an invitation that expires and cannot be reissued | so nothing can open it |
+| named on Increment 1.70's "never set up" card | **forever** |
+
+That last row is the sharp end. The card I shipped three increments earlier would accumulate entries nobody could clear — the signal that never clears, which this product refuses everywhere else.
+
+## The seat is fine; only its secret is stale
+
+The person is the same person and the practice already decided to invite them, so the act mints a new secret and writes nothing else. The user row, the username, the grant and the seat's place in every reading are untouched, because none of that went wrong. A live case pins it: the reissued seat comes back with the same `userId` and the same username, and a different secret.
+
+**Newest row in force, and nothing marks the old one.** This is exactly the shape `notice_addresses` has held since Increment 1.58: append-only, last row wins. A `superseded` column would be a status the rows under it could contradict, written by whatever remembered to write it. Instead "live" is derived — an invitation is live when no newer one exists for its seat — so **the old link stops working on the same read that finds it**, rather than because a flag was set correctly. That is why migration 0052 drops `seat_invitations_one_per_seat`: it forbade the second row that makes the first one stale. What replaces it is not a weaker rule but a different one, enforced in the read, and a live case holds the old link and finds it refused with `superseded` — from both the lookup and the claim, because the claim re-looks-up rather than trusting what a page was rendered with.
+
+`seat_invitations_token_uidx` stays. One secret still names at most one invitation; only how many invitations one seat may accumulate changed.
+
+Two refusals bound the act. A seat that has already been opened cannot be reissued — somebody who cannot sign in needs their password recovered, not a link that would let whoever holds it set one. And somebody who was never an invited seat cannot be reissued at all, because handing out a link that sets a password for an account with a password of its own is the practice giving away an account it does not own.
+
+The panel now lists the seats waiting to be opened, one live link each. A seat reissued three times has three unclaimed rows, and offering all three would hand the practice three links of which two open nothing.
+
+## What the browser case caught
+
+Two things, both mine. The invite panel never re-read after inviting, so the seat it had just created did not appear among those waiting — the link showed once and then nothing, and a practice that mislaid it had no row to act on. And the case's own first wait matched text that was already true before the reissue, so it read the stale link and compared it with itself; it now waits on the link **changing**.
+
+- **Tests.** Live (6): a seat reissued with the same identity and a new secret; the older link refused as superseded, by both the lookup and the claim, having worked immediately before; one live link per seat however many were sent; a claimed seat refused with the sentence pointing at password recovery; somebody who was never a seat refused; the chain naming the reissue and what it replaced. Migration (4): the unique index dropped; the newest-row index added; **no column that could disagree with the rows under it** — no `superseded`, no `revoked_at`, no UPDATE, no DELETE; the token index left alone. Browser (1): invite, mislay, reissue from the waiting list, the old link opening nothing and saying why, the new one opening the seat.
+
+**Not in Increment 1.73.** Recovering a seat that has already been opened, which is password recovery and has its own ceremony. Withdrawing or deactivating a seat. Telling the invited person their link was replaced — the product has no address for them, which is the whole reason the link exists. Inviting any seat other than the outside accountant's.
+
 ## Increment 1.68
 
 Increment 1.65 gave a proof a life, and had the round ask for a new code inside its last thirty days so that nothing would stop in silence. It then left a trap nobody had walked into yet: **once the proof lapsed, the round stopped asking. Forever.**

@@ -1059,8 +1059,8 @@ export const cpaThreadReads = pgTable("cpa_thread_reads", {
 });
 
 /**
- * The practice's invitation to a seat, and the claim that spent it
- * (Increment 1.71).
+ * The practice's invitations to a seat, and the claims that spent them
+ * (Increment 1.71; newest-row-in-force since 1.73).
  *
  * Two tables rather than one with a `claimed_at`, for the reason a proof is a
  * table and not a column on a challenge: a status column would be an UPDATE on
@@ -1079,7 +1079,7 @@ export const seatInvitations = pgTable(
     invitedAt: timestamp("invited_at", { withTimezone: true }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   },
-  (t) => [uniqueIndex("seat_invitations_one_per_seat").on(t.tenantId, t.userId)]
+  (t) => [index("seat_invitations_newest_idx").on(t.tenantId, t.userId, t.invitedAt)]
 );
 
 export const seatInvitationClaims = pgTable("seat_invitation_claims", {

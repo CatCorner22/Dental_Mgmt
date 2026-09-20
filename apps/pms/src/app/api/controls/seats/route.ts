@@ -1,9 +1,9 @@
 import { withGuard } from "@/lib/auth/withGuard";
 import { withTenantTransaction } from "@/lib/db/client";
-import { inviteAccountant, unclaimedInvitations } from "@/lib/auth/invite";
+import { inviteAccountant, reinviteSeat, unclaimedInvitations } from "@/lib/auth/invite";
 import { inviteUrl } from "@/lib/auth/inviteLink";
 
-type Body = { username?: string; displayName?: string };
+type Body = { username?: string; displayName?: string; userId?: string };
 
 /**
  * Seats this practice has invited and nobody has claimed (Increment 1.71).
@@ -37,14 +37,24 @@ export const POST = withGuard(
   async (req, ctx) => {
     const body = (await req.json().catch(() => ({}))) as Body;
     const user = ctx.access.user;
-    const result = await withTenantTransaction(user.tenantId, user.id, (db) =>
-      inviteAccountant(
-        db,
-        user.tenantId,
-        { id: user.id, name: user.displayName },
-        { username: String(body.username ?? ""), displayName: String(body.displayName ?? "") }
-      )
-    );
+    /**
+     * A `userId` asks for another link for a seat that already exists
+     * (Increment 1.73); anything else invites a new one. One route because it
+     * is one act with one answer — a link to hand over — and splitting it
+     * would give the practice two screens for "get this person in".
+     */
+    const result = body.userId
+      ? await withTenantTransaction(user.tenantId, user.id, (db) =>
+          reinviteSeat(db, user.tenantId, { id: user.id, name: user.displayName }, String(body.userId))
+        )
+      : await withTenantTransaction(user.tenantId, user.id, (db) =>
+          inviteAccountant(
+            db,
+            user.tenantId,
+            { id: user.id, name: user.displayName },
+            { username: String(body.username ?? ""), displayName: String(body.displayName ?? "") }
+          )
+        );
     if (!result.ok) {
       return Response.json({ error: result.why, code: result.code }, { status: result.status });
     }
