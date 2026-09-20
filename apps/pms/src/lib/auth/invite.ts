@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import {
   seatInvitationClaims,
   seatInvitations,
@@ -62,7 +62,7 @@ export function hashInvite(secret: string): string {
 export type InviteRefusal = {
   ok: false;
   status: 400 | 404 | 409;
-  code: "malformed" | "taken" | "unknown" | "expired" | "claimed" | "weak";
+  code: "malformed" | "taken" | "unknown" | "expired" | "claimed" | "weak" | "superseded" | "not_a_seat";
   why: string;
 };
 
@@ -190,6 +190,29 @@ export async function inviteAccountant(
   };
 }
 
+/**
+ * The invitation in force for one seat, or null where the seat has none.
+ *
+ * Newest row wins, which is the whole read: the table is append-only and a
+ * seat accumulates invitations over time, so only the last one says which
+ * secret opens the account today. This is the shape `currentAddress` has held
+ * since Increment 1.58, and it is what makes a superseded link stop working on
+ * the same read that finds it rather than because a flag was set correctly.
+ */
+async function newestInvitation(
+  db: AppDb,
+  tenantId: string,
+  userId: string
+): Promise<{ id: string; invitedAt: Date; expiresAt: Date } | null> {
+  const rows = await db
+    .select({ id: seatInvitations.id, invitedAt: seatInvitations.invitedAt, expiresAt: seatInvitations.expiresAt })
+    .from(seatInvitations)
+    .where(and(eq(seatInvitations.tenantId, tenantId), eq(seatInvitations.userId, userId)))
+    .orderBy(desc(seatInvitations.invitedAt), desc(seatInvitations.id))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export type InviteTarget = {
   invitationId: string;
   userId: string;
@@ -239,6 +262,19 @@ export async function lookUpInvite(
   // as a seat that cannot be claimed: the practice withdrew it, and saying so
   // would tell a holder of the link something about a person.
   if (!row || !row.active) return unknown;
+
+  // A link the practice has since replaced opens nothing (Increment 1.73).
+  // Checked against the rows rather than against a column on this one, so a
+  // superseded link is refused by the same read that finds it.
+  const inForce = await newestInvitation(db, tenantId, row.userId);
+  if (inForce !== null && inForce.id !== row.invitationId) {
+    return {
+      ok: false,
+      status: 409,
+      code: "superseded",
+      why: "This invitation has been replaced by a newer one. Use the most recent link the practice sent you, or ask them for another.",
+    };
+  }
 
   const claimed = await db
     .select({ id: seatInvitationClaims.id })
@@ -335,6 +371,102 @@ export async function claimSeat(
   return { ok: true, practiceName: found.target.practiceName, username: found.target.username };
 }
 
+/**
+ * Mints a new secret for a seat whose link was lost or ran out
+ * (Increment 1.73).
+ *
+ * Increment 1.71 gave a practice no second chance: `inviteAccountant` always
+ * creates a new user, and asking for the same seat again was refused by the
+ * username check. A lost link therefore stranded the account — active, holding
+ * the reporting grant, openable by nobody, and named forever on Increment
+ * 1.70's card as a seat that never said where to send its messages.
+ *
+ * The seat is fine; only its secret is stale. So this writes another
+ * invitation for the same person, and writes nothing else: the user row, the
+ * username, the grant and the seat's place in every reading are untouched,
+ * because the practice already decided all of that and none of it went wrong.
+ *
+ * The older invitation is not marked, amended or deleted. It stops working
+ * because `lookUpInvite` requires the invitation it finds to be the one in
+ * force, and after this there is a newer one.
+ */
+export async function reinviteSeat(
+  db: AppDb,
+  tenantId: string,
+  actor: { id: string; name: string },
+  userId: string,
+  at: Date = new Date()
+): Promise<InviteResult> {
+  const person = (
+    await db
+      .select({ id: users.id, username: users.username, displayName: users.displayName, active: users.active })
+      .from(users)
+      .where(and(eq(users.tenantId, tenantId), eq(users.id, userId)))
+      .limit(1)
+  )[0];
+  const inForce = person ? await newestInvitation(db, tenantId, userId) : null;
+  // Only a seat this practice invited and nobody has claimed can be reissued.
+  // Somebody who never had an invitation has a password of their own, and
+  // handing out a link that would let a stranger set one is the act this
+  // refusal exists to prevent.
+  if (!person || !person.active || inForce === null) {
+    return {
+      ok: false,
+      status: 404,
+      code: "not_a_seat",
+      why: "This practice has no unclaimed invitation for that seat, so there is no link to replace.",
+    };
+  }
+
+  const claimed = await db
+    .select({ id: seatInvitationClaims.id })
+    .from(seatInvitationClaims)
+    .where(eq(seatInvitationClaims.invitationId, inForce.id))
+    .limit(1);
+  if (claimed.length > 0) {
+    return {
+      ok: false,
+      status: 409,
+      code: "claimed",
+      why: `${person.displayName} has already opened this seat and set a password. Somebody who cannot sign in needs their password recovered, not a new invitation.`,
+    };
+  }
+
+  const secret = mintInvite();
+  const invitationId = uuidv7();
+  const expiresAt = new Date(at.getTime() + INVITE_LIFE_MS);
+  await db.insert(seatInvitations).values({
+    id: invitationId,
+    tenantId,
+    userId,
+    tokenHash: hashInvite(secret),
+    invitedBy: actor.id,
+    invitedAt: at,
+    expiresAt,
+  });
+  await appendControlEvent(
+    db,
+    tenantId,
+    actor.id,
+    "seat.reinvited",
+    { seat: "accountant", user: userId, username: person.username, by: actor.name, replaced: inForce.id },
+    at
+  );
+
+  return {
+    ok: true,
+    seat: {
+      invitationId,
+      userId,
+      username: person.username,
+      displayName: person.displayName,
+      secret,
+      invitedAt: at.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+    },
+  };
+}
+
 /** Seats this practice has invited and nobody has claimed, newest last. */
 export async function unclaimedInvitations(
   db: AppDb,
@@ -342,6 +474,7 @@ export async function unclaimedInvitations(
 ): Promise<{ userId: string; username: string; displayName: string; invitedAt: string; expiresAt: string }[]> {
   const rows = await db
     .select({
+      invitationId: seatInvitations.id,
       userId: seatInvitations.userId,
       username: users.username,
       displayName: users.displayName,
@@ -352,13 +485,26 @@ export async function unclaimedInvitations(
     .from(seatInvitations)
     .innerJoin(users, eq(users.id, seatInvitations.userId))
     .leftJoin(seatInvitationClaims, eq(seatInvitationClaims.invitationId, seatInvitations.id))
-    .where(and(eq(seatInvitations.tenantId, tenantId), isNull(seatInvitationClaims.id)))
-    .orderBy(seatInvitations.invitedAt);
-  return rows.map((r) => ({
-    userId: r.userId,
-    username: r.username,
-    displayName: r.displayName,
-    invitedAt: r.invitedAt.toISOString(),
-    expiresAt: r.expiresAt.toISOString(),
-  }));
+    .where(and(eq(seatInvitations.tenantId, tenantId), isNull(seatInvitationClaims.id), eq(users.active, true)))
+    .orderBy(desc(seatInvitations.invitedAt), desc(seatInvitations.id));
+
+  // One row per seat, the one in force (Increment 1.73). A seat reissued three
+  // times has three unclaimed rows, and listing all of them would offer the
+  // practice three links of which two open nothing.
+  const seen = new Set();
+  const live = [];
+  for (const r of rows) {
+    if (seen.has(r.userId)) continue;
+    seen.add(r.userId);
+    live.push({
+      userId: r.userId,
+      username: r.username,
+      displayName: r.displayName,
+      invitedAt: r.invitedAt.toISOString(),
+      expiresAt: r.expiresAt.toISOString(),
+    });
+  }
+  // Oldest first, as before: the invitation waiting longest is the one most
+  // likely to have gone astray.
+  return live.reverse();
 }

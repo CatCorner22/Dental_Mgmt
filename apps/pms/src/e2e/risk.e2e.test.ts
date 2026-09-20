@@ -669,6 +669,50 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     expect(await page().locator("main").innerText()).toContain("already been used");
   }, 180_000);
 
+  it("sends another link to a seat whose first one went astray, and the old link then opens nothing", async () => {
+    // Increment 1.73. Until now a lost link stranded the account: `inviteAccountant`
+    // only ever created a NEW user, so the practice's only recourse was a second
+    // seat, leaving the first active, openable by nobody, and named on the board's
+    // "never set up" card forever.
+    await b.signIn("ridgeview-owner", "/risk");
+    const panel = page().locator("section[aria-labelledby=invite-seat]");
+    await panel.waitFor({ timeout: 60_000 });
+    await panel.locator("#seat-username").fill("firm-mislaid");
+    await panel.locator("#seat-name").fill("Mislaid and Co");
+    await panel.locator("#invite-seat-submit").click();
+    await expect.poll(async () => await panel.innerText(), { timeout: 60_000 }).toMatch(/Send this link to firm-mislaid/);
+    const stale = (await panel.locator("code").innerText()).trim();
+
+    // The practice mislays it. The seat is waiting, and the panel offers another.
+    await expect.poll(async () => await panel.innerText(), { timeout: 60_000 }).toMatch(/Invited, not yet opened/);
+    const waiting = panel.getByRole("listitem").filter({ hasText: "firm-mislaid" });
+    await waiting.getByRole("button", { name: "Send a new link" }).click();
+    // Waited on the link CHANGING rather than on the panel saying "Send this
+    // link", which was already true from the first invitation and would have
+    // matched the stale one instantly.
+    await expect
+      .poll(async () => (await panel.locator("code").innerText()).trim() !== stale, { timeout: 60_000 })
+      .toBe(true);
+    const fresh = (await panel.locator("code").innerText()).trim();
+    await b.audit("practice risk, a seat reissued");
+
+    // The old link opens nothing, and says why rather than failing blankly.
+    await page().context().clearCookies();
+    await page().goto(stale, { waitUntil: "networkidle" });
+    expect(await page().locator("main").innerText()).toMatch(/replaced by a newer one/);
+    expect(await page().locator("#invite-password").count()).toBe(0);
+    await b.audit("invitation, superseded");
+
+    // The new one opens the seat, which is the whole point of sending it.
+    await page().goto(fresh, { waitUntil: "networkidle" });
+    await page().locator("#invite-password").fill("another-long-password");
+    await page().locator("#invite-confirm").fill("another-long-password");
+    await page().locator("#invite-submit").click();
+    await expect
+      .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
+      .toMatch(/Sign in as firm-mislaid/);
+  }, 180_000);
+
   it("takes the invited seat through its first sign-in with no authenticator, and into the month-end screen", async () => {
     // Increment 1.72. The case above left `firm-accounting` with a password its
     // holder set and no second factor at all, which is the state every invited
