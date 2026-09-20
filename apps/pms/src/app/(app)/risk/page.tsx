@@ -179,6 +179,13 @@ export default function PracticeRiskPage() {
   const [grantEntitlement, setGrantEntitlement] = useState<string>(ENTITLEMENTS[0]?.id ?? "");
   const [grantReason, setGrantReason] = useState("");
   const [grantRefused, setGrantRefused] = useState<(RefusalContent & { canLicense: boolean }) | null>(null);
+  // Inviting the outside accountant's seat (Increment 1.71). The link comes
+  // back once and is held only in this render: the rows keep a hash, so a
+  // practice that loses it invites again rather than asking for a repeat.
+  const [seatUsername, setSeatUsername] = useState("");
+  const [seatName, setSeatName] = useState("");
+  const [seatLink, setSeatLink] = useState<{ username: string; link: string; expiresAt: string } | null>(null);
+  const [seatRefusal, setSeatRefusal] = useState<string | null>(null);
 
   const load = useCallback(async (fresh = false) => {
     const [risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding, delivery] = await Promise.all([
@@ -409,6 +416,42 @@ export default function PracticeRiskPage() {
     });
   }
 
+  /**
+   * Invites the outside accountant's seat (Increment 1.71).
+   *
+   * The practice names the seat and never its password: what comes back is a
+   * link to hand over, and the person on the other end chooses the secret.
+   */
+  async function inviteAccountantSeat() {
+    setBusy("Invite");
+    setMessage(null);
+    setSeatRefusal(null);
+    try {
+      const res = await fetch("/api/controls/seats", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: seatUsername, displayName: seatName }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        username?: string;
+        link?: string;
+        expiresAt?: string;
+      };
+      if (!res.ok) {
+        setSeatRefusal(body.error ?? "The invitation failed.");
+        return;
+      }
+      setSeatLink({ username: body.username ?? seatUsername, link: body.link ?? "", expiresAt: body.expiresAt ?? "" });
+      setSeatUsername("");
+      setSeatName("");
+    } catch (err: unknown) {
+      setSeatRefusal(err instanceof Error ? err.message : "The invitation failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function grant(decision?: DecisionDraft) {
     if (!grantPerson || !grantEntitlement) return;
     setBusy("Grant");
@@ -560,6 +603,15 @@ export default function PracticeRiskPage() {
             clearRefusal: () => setGrantRefused(null),
             submit: (d?: DecisionDraft) => void grant(d),
           }}
+          seatForm={{
+            username: seatUsername,
+            setUsername: setSeatUsername,
+            name: seatName,
+            setName: setSeatName,
+            link: seatLink,
+            refusal: seatRefusal,
+            submit: () => void inviteAccountantSeat(),
+          }}
           onRevoke={(p, e) => void revoke(p, e)}
           exceptionControls={{
             switchingId,
@@ -608,6 +660,21 @@ type AddressFormState = {
   prove: (code: string) => void;
 };
 
+/**
+ * Inviting the outside accountant's seat (Increment 1.71). The link comes back
+ * once and lives only in this render: the rows keep a hash of it, so a practice
+ * that loses it invites again rather than asking for a repeat.
+ */
+type SeatFormState = {
+  username: string;
+  setUsername: (v: string) => void;
+  name: string;
+  setName: (v: string) => void;
+  link: { username: string; link: string; expiresAt: string } | null;
+  refusal: string | null;
+  submit: () => void;
+};
+
 function RiskBody({
   data,
   isAdmin,
@@ -622,6 +689,7 @@ function RiskBody({
   onDecideFinding,
   grantForm,
   addressForm,
+  seatForm,
   onRevoke,
   exceptionControls,
 }: {
@@ -638,6 +706,7 @@ function RiskBody({
   onDecideFinding: (finding: FindingItem, draft: DecisionDraft) => void;
   grantForm: GrantFormState;
   addressForm: AddressFormState;
+  seatForm: SeatFormState;
   onRevoke: (person: RoleAssignment, entitlement: string) => void;
   exceptionControls: ExceptionControls;
 }) {
@@ -1245,6 +1314,72 @@ function RiskBody({
           entitled to read, first, what receiving them would mean — and because
           it is the only way the rule about what a message may carry is visible
           to the person it protects. */}
+      {/* Inviting the seat the practice cannot otherwise create (Increment 1.71).
+          `users` was written by the seed and by nothing else, so a practice
+          that wanted an outside accountant could not have one — and the reading
+          below would report an accountant who never said where to send their
+          messages without offering any way to add one. Only this seat, and only
+          the owner: it pairs with no duty in the SoD rulebook (1.49), so
+          inviting it creates no conflict, while a general invite would be a
+          grant path around `evaluateGrant`. */}
+      {isAdmin ? (
+        <section aria-labelledby="invite-seat" className="mb-10">
+          <h2 id="invite-seat" className="mb-1 text-lg font-semibold">
+            Invite the outside accountant
+          </h2>
+          <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
+            The seat reaches the month-end package and no other screen, and it holds no patient record. You name it; the
+            person you name sets their own password, which this practice never learns and cannot set for them. A firm&rsquo;s
+            shared mailbox holds the seat the same way a person does.
+          </p>
+          <div className="grid gap-3 rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4 sm:max-w-xl">
+            <label htmlFor="seat-username" className="text-sm font-semibold text-[var(--ink)]">
+              Username they will sign in with
+            </label>
+            <input
+              id="seat-username"
+              value={seatForm.username}
+              onChange={(e) => seatForm.setUsername(e.target.value)}
+              placeholder="firm-accounting"
+              className="rounded-[var(--radius)] border border-[var(--line)] px-3 py-2"
+            />
+            <label htmlFor="seat-name" className="text-sm font-semibold text-[var(--ink)]">
+              What this practice&rsquo;s screens will call them
+            </label>
+            <input
+              id="seat-name"
+              value={seatForm.name}
+              onChange={(e) => seatForm.setName(e.target.value)}
+              placeholder="Prentice &amp; Co"
+              className="rounded-[var(--radius)] border border-[var(--line)] px-3 py-2"
+            />
+            <button
+              id="invite-seat-submit"
+              type="button"
+              disabled={busy !== null || seatForm.username.trim() === "" || seatForm.name.trim() === ""}
+              onClick={seatForm.submit}
+              className="justify-self-start rounded-[var(--radius)] bg-navy px-4 py-2 font-semibold text-white disabled:opacity-60"
+            >
+              {busy === "Invite" ? "Inviting…" : "Invite this seat"}
+            </button>
+            {seatForm.refusal ? (
+              <p aria-live="polite" className="max-w-prose text-sm text-[var(--ink-2)]">
+                {seatForm.refusal}
+              </p>
+            ) : null}
+            {seatForm.link ? (
+              <div aria-live="polite" className="grid gap-2 rounded-md border border-[var(--line)] p-3">
+                <p className="max-w-prose text-sm text-[var(--ink-2)]">
+                  Send this link to {seatForm.link.username}. It works until {seatForm.link.expiresAt.slice(0, 10)}, once only, and
+                  this screen is the only place it appears — the practice keeps a hash of it and cannot show it again.
+                </p>
+                <code className="break-all rounded bg-[var(--surface-2,transparent)] p-2 text-xs">{seatForm.link.link}</code>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
       <section aria-labelledby="delivery" className="mb-10">
         <h2 id="delivery" className="mb-1 text-lg font-semibold">
           What would be sent to you

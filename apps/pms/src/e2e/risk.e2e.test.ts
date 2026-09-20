@@ -623,6 +623,51 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await b.audit("owner board, who the practice was never set up to reach");
   }, 120_000);
 
+  it("invites the outside accountant's seat, and the invited person opens it with a password the practice never sees", async () => {
+    // Increment 1.71. `users` was written by the seed and by nothing else, so a
+    // practice that wanted an accountant could not have one — and the card
+    // above would report a seat that never said where to send its messages
+    // while offering no way to add it.
+    await b.signIn("ridgeview-owner", "/risk");
+    const panel = page().locator("section[aria-labelledby=invite-seat]");
+    await panel.waitFor({ timeout: 60_000 });
+    await panel.locator("#seat-username").fill("firm-accounting");
+    await panel.locator("#seat-name").fill("Prentice and Co");
+    await panel.locator("#invite-seat-submit").click();
+    await expect.poll(async () => await panel.innerText(), { timeout: 60_000 }).toMatch(/Send this link to firm-accounting/);
+    const link = (await panel.locator("code").innerText()).trim();
+    expect(link).toMatch(/\/invite\/[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/);
+
+    // The seat appears on the board's "never set up" card straight away, which
+    // is the reading Increment 1.70 built and the reason this act exists.
+    await page().goto(`${app.base}/home`);
+    const setup = page().locator("section[aria-labelledby=setup]");
+    await setup.waitFor({ timeout: 60_000 });
+    await expect.poll(async () => await setup.innerText(), { timeout: 60_000 }).toMatch(/Prentice and Co/);
+
+    // The invited person opens the link with no session at all.
+    await page().context().clearCookies();
+    await page().goto(link, { waitUntil: "networkidle" });
+    expect(await page().locator("main").innerText()).toContain("outside accountant");
+    // It names the practice and the username, and never an address: this seat
+    // has none yet, and saying where to send its messages is its own act.
+    expect(await page().locator("main").innerText()).toContain("firm-accounting");
+    expect(await page().locator("main").innerText()).not.toContain("@");
+    await b.audit("invitation, before the password is set");
+
+    await page().locator("#invite-password").fill("a-long-enough-password");
+    await page().locator("#invite-confirm").fill("a-long-enough-password");
+    await page().locator("#invite-submit").click();
+    await expect
+      .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
+      .toMatch(/Sign in as firm-accounting/);
+    await b.audit("invitation, claimed");
+
+    // Once only: the same link now says so rather than opening a second time.
+    await page().goto(link, { waitUntil: "networkidle" });
+    expect(await page().locator("main").innerText()).toContain("already been used");
+  }, 180_000);
+
   it("shows a user-rank account the Refusal, not the page", async () => {
     await b.signIn("ridgeview-front", "/risk");
     await page().locator("main [role=alert]").waitFor({ timeout: 30_000 });

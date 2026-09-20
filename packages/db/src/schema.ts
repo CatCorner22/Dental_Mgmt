@@ -1058,6 +1058,37 @@ export const cpaThreadReads = pgTable("cpa_thread_reads", {
   readAt: timestamp("read_at", { withTimezone: true }).notNull(),
 });
 
+/**
+ * The practice's invitation to a seat, and the claim that spent it
+ * (Increment 1.71).
+ *
+ * Two tables rather than one with a `claimed_at`, for the reason a proof is a
+ * table and not a column on a challenge: a status column would be an UPDATE on
+ * an otherwise append-only row, and a fact that could be rewritten.
+ */
+export const seatInvitations = pgTable(
+  "seat_invitations",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    /** The seat this invitation was created alongside. */
+    userId: uuid("user_id").notNull(),
+    /** sha256 of the secret the link carries; the secret itself is never stored. */
+    tokenHash: text("token_hash").notNull(),
+    invitedBy: uuid("invited_by").notNull(),
+    invitedAt: timestamp("invited_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [uniqueIndex("seat_invitations_one_per_seat").on(t.tenantId, t.userId)]
+);
+
+export const seatInvitationClaims = pgTable("seat_invitation_claims", {
+  id: uuid("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull(),
+  invitationId: uuid("invitation_id").notNull(),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull(),
+});
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
   "reason_codes",
@@ -1105,4 +1136,6 @@ export const TENANT_SCOPED_TABLES = [
   "notice_address_refusals",
   "notice_rounds",
   "notice_sends",
+  "seat_invitations",
+  "seat_invitation_claims",
 ] as const;
