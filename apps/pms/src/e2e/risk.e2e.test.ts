@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays } from "@pms/controls-engine";
 import { assertNoProblems, e2eEnabled, openBrowser, startProductionApp, type E2eApp, type E2eBrowser } from "./harness";
+import { currentCodeForTest } from "../lib/auth/totp";
 
 /**
  * The Practice Risk page in a real browser against the production server:
@@ -666,6 +667,68 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     // Once only: the same link now says so rather than opening a second time.
     await page().goto(link, { waitUntil: "networkidle" });
     expect(await page().locator("main").innerText()).toContain("already been used");
+  }, 180_000);
+
+  it("takes the invited seat through its first sign-in with no authenticator, and into the month-end screen", async () => {
+    // Increment 1.72. The case above left `firm-accounting` with a password its
+    // holder set and no second factor at all, which is the state every invited
+    // seat starts in: `mfa_enrolled_at` is null. A seat that cannot finish
+    // signing in is a seat the practice only believes it has.
+    await page().context().clearCookies();
+    await page().goto(`${app.base}/signin?callbackUrl=${encodeURIComponent("/cpa")}`, { waitUntil: "networkidle" });
+    await page().fill('input[name="username"]', "firm-accounting");
+    await page().fill('input[name="password"]', "a-long-enough-password");
+    // Deliberately blank: they have no authenticator yet, and the field must
+    // not stand between them and the enrolment that gives them one.
+    await page().click('button[type="submit"]');
+    // Waited for by what the person sees rather than by the path: a server
+    // action redirects to the callback, the middleware then sends an
+    // unenrolled session to the enrolment screen, and the address bar keeps
+    // the action's target while the enrolment page renders. Asserting on the
+    // path would test that quirk rather than this increment's rule.
+    const enrolment = page().getByRole("heading", { name: "Set up your authenticator" });
+    await enrolment.waitFor({ timeout: 60_000 });
+    // The defect this case found: the route opened at `user` rank, so the one
+    // seat below it was told "You do not have access to this action" with no
+    // way forward and nothing naming what was wrong.
+    await expect
+      .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
+      .not.toMatch(/do not have access/);
+    await b.audit("first sign-in, enrolment");
+
+    // The setup URI the form shows is the only place this secret exists, so the
+    // case reads it the way the person's authenticator would.
+    const uri = (await page().locator("main code").innerText()).trim();
+    const secret = new URL(uri.replace("otpauth://", "https://")).searchParams.get("secret");
+    expect(secret).toMatch(/^[A-Z2-7]+$/);
+    await page().fill('input[name="totp"]', currentCodeForTest("firm-accounting", secret!, Date.now()));
+    await page().click('button[type="submit"]');
+    await expect
+      .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
+      .toMatch(/recovery codes/i);
+    await b.audit("first sign-in, recovery codes");
+
+    // Enrolment ends by signing them out, which is what keeps a session's
+    // "still needs enrolment" claim from outliving the enrolment itself.
+    await page().getByRole("button", { name: "Continue to sign in" }).click();
+    await page().waitForURL((url) => url.pathname === "/signin", { timeout: 60_000 });
+
+    await page().fill('input[name="username"]', "firm-accounting");
+    await page().fill('input[name="password"]', "a-long-enough-password");
+    await page().fill('input[name="totp"]', currentCodeForTest("firm-accounting", secret!, Date.now()));
+    await page().click('button[type="submit"]');
+    // Sign-in lands everybody on the practice home, and this seat is told in
+    // words that the board is not theirs rather than being moved without
+    // explanation — the refusal this product gives everywhere else. The header
+    // offers the one screen that is theirs.
+    await page().getByText(/The board is for the manager and owner seats/).waitFor({ timeout: 60_000 });
+    expect(await page().locator("header nav").getByRole("link").allInnerTexts()).toEqual(["Month-end"]);
+
+    await page().locator("header nav").getByRole("link", { name: "Month-end" }).click();
+    await page().waitForURL((url) => url.pathname === "/cpa", { timeout: 60_000 });
+    // The one screen this seat reaches (Increment 1.49), now reached by a seat
+    // the practice created for itself rather than one the seed provided.
+    await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
   }, 180_000);
 
   it("shows a user-rank account the Refusal, not the page", async () => {
