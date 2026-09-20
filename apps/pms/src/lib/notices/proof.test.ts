@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PROOF_LIFE_MS, REPROVE_WINDOW_MS, hashCode, mintCode, normaliseCode, proofLapsesAt, proofStanding } from "./proof";
 import { CODE_WINDOW_HOURS, renderProofMessage } from "./proofMessage";
+import { STOP_LIFE_DAYS } from "./stopLink";
 
 /**
  * The code, and the message that carries it (Increment 1.61).
@@ -45,6 +46,7 @@ describe("the message that carries a code", () => {
     practiceName: "Ridgeview Dental",
     code: "ABCD234XYZ",
     appUrl: "https://app.example",
+    stopUrl: "https://app.example/notices/stop/00000000-0000-7000-8000-000000000001.aaa",
   });
 
   it("keeps the code out of the subject", () => {
@@ -60,9 +62,18 @@ describe("the message that carries a code", () => {
   it("says how long the code lasts and what happens until it comes back", () => {
     expect(message.body).toContain(`${CODE_WINDOW_HOURS} hours`);
     expect(message.body).toContain("nothing else will be sent to this address");
-    // Somebody who was not expecting this is told the safe thing to do, which
-    // is nothing: an address nobody confirms receives nothing.
-    expect(message.body).toContain("If you were not expecting this, ignore it");
+  });
+
+  it("offers a reader who did not ask for this something to do about it", () => {
+    // Increment 1.61 ended this message by telling such a reader to ignore it.
+    // Ignoring it stops nothing: the practice may ask again, five times an
+    // hour, for as long as it likes. Increment 1.67 replaces the advice with a
+    // link, and the link is the whole of what this reader is owed.
+    expect(message.body).toContain("If that was not you, say so here:");
+    expect(message.body).toContain("https://app.example/notices/stop/00000000-0000-7000-8000-000000000001.aaa");
+    expect(message.body).toContain(`works for ${STOP_LIFE_DAYS} days`);
+    expect(message.body).toContain("will not be able to save it again");
+    expect(message.body).not.toContain("ignore it");
   });
 
   it("names nobody, like every message this product sends", () => {

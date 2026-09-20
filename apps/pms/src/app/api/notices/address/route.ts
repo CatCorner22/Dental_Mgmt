@@ -7,6 +7,7 @@ import { withTenantTransaction } from "@/lib/db/client";
 import { currentAddress, setAddress } from "@/lib/notices/addresses";
 import { renderMessage } from "@/lib/notices/message";
 import { currentProof, proofLapsesAt, proofStanding } from "@/lib/notices/proof";
+import { addressRefusal } from "@/lib/notices/stop";
 import { lastRound } from "@/lib/notices/round";
 import { lastSend } from "@/lib/notices/send";
 import { collectOutstanding, type NoticeSeat } from "@/lib/notices/outstanding";
@@ -36,10 +37,15 @@ export const GET = withGuard(
   async (req, ctx) => {
     const user = ctx.access.user;
     const seat = seatOf(user);
-    const { address, notices, practiceName, sent, proof, round, standing } = await withTenantTransaction(user.tenantId, user.id, async (db) => {
+    const { address, notices, practiceName, sent, proof, round, standing, refused } = await withTenantTransaction(user.tenantId, user.id, async (db) => {
       const address = await currentAddress(db, user.tenantId, user.id);
       return {
       address,
+      // Whether somebody reading that mailbox said they did not ask for these
+      // (Increment 1.67). It outranks the proof on this screen for the same
+      // reason it outranks it when a message would leave: a mailbox whose
+      // reader has said no is not a destination, proved or not.
+      refused: address?.address ? await addressRefusal(db, user.tenantId, address.address) : null,
       // Whether this exact address row has been proved to reach this person
       // (Increment 1.61). It is read per row rather than per person, so a
       // changed address is unproved without anything having to clear a flag.
@@ -66,6 +72,7 @@ export const GET = withGuard(
       address,
       proof,
       standing,
+      refused,
       lapsesAt: proof === null ? null : proofLapsesAt(proof),
       lastSend: sent,
       lastRound: round,

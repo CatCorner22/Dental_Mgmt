@@ -940,9 +940,37 @@ export const noticeAddressChallenges = pgTable(
     tokenHash: text("token_hash").notNull(),
     issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /**
+     * SHA-256 of the stop secret this message carried (Increment 1.67). A
+     * second token with the opposite power: the code proves an address, this
+     * one can only stop it. Null on a challenge issued before the link
+     * existed, which is a fact about that message rather than an exemption.
+     */
+    stopHash: text("stop_hash"),
   },
   (t) => [index("notice_address_challenges_lookup_idx").on(t.tenantId, t.userId, t.tokenHash)]
 );
+
+/**
+ * That somebody reading a mailbox said they did not ask for this practice's
+ * messages (Increment 1.67).
+ *
+ * The one row here written by nobody: the person who refuses has no account
+ * and never will, and what authorises the row is the secret the message
+ * carried rather than a session. It names the mailbox and not a user, because
+ * the person who refused is not the person who typed the address in.
+ *
+ * Keyed by the address text rather than by the address row, so changing one
+ * character and saving again does not hand the practice a fresh start.
+ */
+export const noticeAddressRefusals = pgTable("notice_address_refusals", {
+  id: uuid("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull(),
+  /** The message that provoked this, so "how do we know they were asked" has an answer. */
+  challengeId: uuid("challenge_id").notNull(),
+  address: text("address").notNull(),
+  refusedAt: timestamp("refused_at", { withTimezone: true }).notNull(),
+});
 
 /**
  * That one address row was proved to reach the person it names (Increment
@@ -1074,6 +1102,7 @@ export const TENANT_SCOPED_TABLES = [
   "notice_addresses",
   "notice_address_challenges",
   "notice_address_proofs",
+  "notice_address_refusals",
   "notice_rounds",
   "notice_sends",
 ] as const;

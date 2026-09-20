@@ -57,6 +57,24 @@ const kindSql = readFileSync(join(here, "../migrations/0046_notice_send_kind.sql
 const perCodeSql = readFileSync(join(here, "../migrations/0047_proof_is_per_code.sql"), "utf8");
 const roundCodeSql = readFileSync(join(here, "../migrations/0048_round_may_send_a_code.sql"), "utf8");
 const packageKindSql = readFileSync(join(here, "../migrations/0049_notice_package_kind.sql"), "utf8");
+const refusalsSql = readFileSync(join(here, "../migrations/0050_notice_address_refusals.sql"), "utf8");
+/**
+ * The statements of a migration, without its prose.
+ *
+ * A negative assertion over a file whose comments argue about the thing being
+ * ruled out fails on the argument rather than on the code — which is a test
+ * passing or failing for a reason other than its own name.
+ */
+const statementsOf = (sql: string): string =>
+  sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
+/** One CREATE TABLE body, so a check about its columns reads only its columns. */
+const columnsOf = (sql: string, table: string): string => {
+  const start = sql.indexOf(`CREATE TABLE ${table} (`);
+  if (start < 0) throw new Error(`no CREATE TABLE ${table} in this migration`);
+  const end = sql.indexOf("\n);", start);
+  if (end < 0) throw new Error(`CREATE TABLE ${table} is not closed`);
+  return statementsOf(sql.slice(start, end));
+};
 const increment01TenantTables = [
   "locations",
   "users",
@@ -463,6 +481,53 @@ describe("Increment 1.66 a fourth kind of message", () => {
     expect(packageKindSql).toMatch(/ALTER TABLE notice_rounds ALTER COLUMN packages_sent DROP DEFAULT;/);
     expect(packageKindSql).toMatch(/ALTER TABLE notice_rounds ALTER COLUMN packages_failed DROP DEFAULT;/);
     expect(packageKindSql).not.toMatch(/notice_rounds_counts_add_up/);
+  });
+});
+
+describe("Increment 1.67 a stranger stops a code they did not ask for", () => {
+  it("keys the refusal to the mailbox and not to a person or an address row", () => {
+    // The person who refuses has no account, and is not the person the
+    // practice typed the address for. A user id on this row would name the
+    // wrong person, and a row id would be escaped by changing one character.
+    expect(refusalsSql).toMatch(/CREATE TABLE notice_address_refusals[\s\S]*address text NOT NULL/);
+    expect(columnsOf(refusalsSql, "notice_address_refusals")).not.toMatch(/user_id/);
+    expect(refusalsSql).toMatch(
+      /CREATE UNIQUE INDEX notice_address_refusals_one_per_address\s*\n\s*ON notice_address_refusals \(tenant_id, lower\(address\)\);/
+    );
+  });
+
+  it("carries the stop secret as a hash on the challenge whose message held it", () => {
+    // A second token with the opposite power: the code proves an address, this
+    // one can only stop it. Nullable, because a challenge issued before this
+    // increment carried no link and no value written now could change that.
+    expect(refusalsSql).toMatch(/ADD COLUMN stop_hash text/);
+    expect(refusalsSql).toMatch(/CHECK \(stop_hash IS NULL OR stop_hash ~ '\^\[0-9a-f\]\{64\}\$'\)/);
+    expect(refusalsSql).not.toMatch(/stop_hash text NOT NULL/);
+    expect(statementsOf(refusalsSql)).not.toMatch(/UPDATE notice_address_challenges/);
+  });
+
+  it("refuses a refusal that names a mailbox the message never reached", () => {
+    expect(refusalsSql).toMatch(/FUNCTION notice_address_refusals_name_where_it_went/);
+    expect(refusalsSql).toMatch(/that code went to a different address/);
+  });
+
+  it("refuses a new address row naming a refused mailbox", () => {
+    // The refusal has to bite where the row is written, not only where a
+    // message would leave, or the practice keeps a destination on file that
+    // nothing will ever send to.
+    expect(refusalsSql).toMatch(/CREATE TRIGGER notice_addresses_not_refused\s*\n\s*BEFORE INSERT ON notice_addresses/);
+    expect(refusalsSql).toMatch(/lower\(address\) = lower\(btrim\(NEW\.address\)\)/);
+  });
+
+  it("is append-only and never asks who was signed in", () => {
+    // Nobody signs in to refuse. What authorises the row is a secret the
+    // database cannot see, so no trigger here pretends to check a session.
+    expect(refusalsSql).toMatch(/notice_address_refusals_no_update/);
+    expect(refusalsSql).toMatch(/notice_address_refusals_no_delete/);
+    expect(statementsOf(refusalsSql)).not.toMatch(/current_setting\('app\.user_id'/);
+    expect(refusalsSql).toMatch(/ALTER TABLE notice_address_refusals FORCE ROW LEVEL SECURITY;/);
+    expect(refusalsSql).toMatch(/GRANT SELECT, INSERT ON notice_address_refusals TO app_rw;/);
+    expect(refusalsSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*notice_address_refusals/);
   });
 });
 

@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { noticeAddresses, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { appendControlEvent } from "../controls/events";
+import { addressRefusal } from "./stop";
 
 /**
  * Where a person's notices would go, and who may say so (Increment 1.58).
@@ -42,7 +43,7 @@ export type NoticeAddress = {
 export type AddressRefusal = {
   ok: false;
   status: 400 | 409;
-  code: "malformed" | "unchanged";
+  code: "malformed" | "unchanged" | "refused";
   verb: string;
   why: string;
 };
@@ -98,6 +99,23 @@ export async function setAddress(
       verb: "set this address",
       why: `"${trimmed}" is not an address a message could reach. Use the form name@example.com, or clear it to stop receiving messages.`,
     };
+  }
+
+  // A mailbox whose reader said they did not ask for this practice's messages
+  // cannot be saved again (Increment 1.67). The database holds the rule; this
+  // says it in words, because a trigger firing reaches the screen as a broken
+  // page and the person typing is owed a sentence they can act on.
+  if (trimmed !== null) {
+    const refused = await addressRefusal(db, tenantId, trimmed);
+    if (refused !== null) {
+      return {
+        ok: false,
+        status: 409,
+        code: "refused",
+        verb: "set this address",
+        why: `Somebody reading ${trimmed} said on ${refused.refusedAt.slice(0, 10)} that they did not ask for this practice's messages. Use a different address.`,
+      };
+    }
   }
 
   const held = await currentAddress(db, tenantId, userId);

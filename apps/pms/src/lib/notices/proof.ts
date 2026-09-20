@@ -7,6 +7,8 @@ import { currentAddress } from "./addresses";
 import { deliverMessage, type Delivered } from "./send";
 import type { NoticeSeat } from "./outstanding";
 import { CODE_WINDOW_HOURS, renderProofMessage } from "./proofMessage";
+import { addressRefusal, hashStop, mintStop } from "./stop";
+import { stopUrl } from "./stopLink";
 import type { Transport } from "./transport";
 
 /**
@@ -129,7 +131,15 @@ export type ProofState = {
 export type ProofRefusal = {
   ok: false;
   status: 400 | 409;
-  code: "malformed" | "unknown" | "expired" | "already_proved" | "no_address" | "asked_too_often";
+  code:
+    | "malformed"
+    | "unknown"
+    | "expired"
+    | "already_proved"
+    | "no_address"
+    | "asked_too_often"
+    /** Somebody reading that mailbox said they did not ask for this (Increment 1.67). */
+    | "refused";
   verb: string;
   why: string;
 };
@@ -263,6 +273,23 @@ export async function sendProofCode(
           : `You asked on ${held.setAt.slice(0, 10)} not to receive messages, so there is nowhere to send a code.`,
     };
   }
+  // Checked before anything else about the address, because it is the one
+  // fact that outranks every other: a mailbox whose reader said they did not
+  // ask is not a destination, whatever the practice believes about it
+  // (Increment 1.67). The database holds the same rule against a *new* address
+  // row; this holds it against the row already on file, which is the row every
+  // refusal is about.
+  const refused = await addressRefusal(db, input.tenantId, held.address);
+  if (refused !== null) {
+    return {
+      ok: false,
+      status: 409,
+      code: "refused",
+      verb: "send a code",
+      why: `Somebody reading ${held.address} said on ${refused.refusedAt.slice(0, 10)} that they did not ask for this practice's messages. Nothing further goes there. Save a different address.`,
+    };
+  }
+
   const already = await currentProof(db, input.tenantId, held.id);
   // A proof that still stands comfortably needs no code. One inside its last
   // thirty days does: refusing there would mean the only way to re-prove an
@@ -300,6 +327,10 @@ export async function sendProofCode(
   }
 
   const code = mintCode();
+  // The second secret, minted beside the first and carried in the same message
+  // (Increment 1.67). Its hash is stamped on the challenge, so a refusal points
+  // back at the one message that provoked it.
+  const stopSecret = mintStop();
   const expiresAt = new Date(at.getTime() + CODE_WINDOW_HOURS * 60 * 60 * 1000);
   const challengeId = uuidv7();
   // The challenge is written before the message goes, so a code that reaches
@@ -312,6 +343,7 @@ export async function sendProofCode(
     userId: input.userId,
     addressId: held.id,
     tokenHash: hashCode(code),
+    stopHash: hashStop(stopSecret),
     issuedAt: at,
     expiresAt,
   });
@@ -322,7 +354,12 @@ export async function sendProofCode(
     recipientId: input.userId,
     recipientName: input.userName,
     seat: input.seat,
-    message: renderProofMessage({ practiceName: input.practiceName, code, appUrl: input.appUrl }),
+    message: renderProofMessage({
+      practiceName: input.practiceName,
+      code,
+      appUrl: input.appUrl,
+      stopUrl: stopUrl(input.appUrl, { tenantId: input.tenantId, secret: stopSecret }),
+    }),
     noticeCount: 0,
     address: held.address,
     why: null,
@@ -382,6 +419,20 @@ export async function proveAddress(
       why: "There is no address on file to prove. Save one, ask for a code, and bring it back.",
     };
   }
+  // A code minted before the mailbox refused is still a code, and bringing it
+  // back would prove an address whose reader has since said no. The refusal is
+  // the later statement and the one that stands (Increment 1.67).
+  const refused = await addressRefusal(db, tenantId, held.address);
+  if (refused !== null) {
+    return {
+      ok: false,
+      status: 409,
+      code: "refused",
+      verb: "prove this address",
+      why: `Somebody reading ${held.address} said on ${refused.refusedAt.slice(0, 10)} that they did not ask for this practice's messages. Nothing further goes there. Save a different address.`,
+    };
+  }
+
   const already = await currentProof(db, tenantId, held.id);
   if (already !== null && proofStanding(already, at) === "good") {
     return {

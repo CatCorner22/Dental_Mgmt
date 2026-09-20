@@ -76,6 +76,8 @@ type AddressResponse = {
   proof: { addressId: string; provedAt: string } | null;
   /** Where that proof stands: a proof lasts a year (Increment 1.65). */
   standing: "none" | "good" | "expiring" | "lapsed";
+  /** Set when somebody reading that mailbox said they did not ask for these (Increment 1.67). */
+  refused: { refusedAt: string } | null;
   lapsesAt: string | null;
   /** The last attempt and how it went (Increment 1.59); null where nobody has tried. */
   lastSend: SendRecord | null;
@@ -1302,7 +1304,19 @@ function RiskBody({
             by whoever does own that mailbox, so nothing but a code coming back
             tells the practice the difference. */}
         {delivery.address?.address ? (
-          delivery.proof && delivery.standing !== "lapsed" ? (
+          /* A mailbox whose reader said they did not ask for these is not a
+             destination, proved or not (Increment 1.67). The screen says so
+             here rather than leaving a person to wonder why an address that
+             looks settled receives nothing. */
+          delivery.refused ? (
+            <p className="mb-3 max-w-prose rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3 text-sm text-[var(--ink-2)]">
+              <strong>Somebody reading this address said on {delivery.refused.refusedAt.slice(0, 10)} that they did not
+              ask for this practice&apos;s messages.</strong>{" "}
+              Nothing further goes there, and this practice cannot save that address again. Save a different one, prove
+              it, and your notices resume. This is not undone from here: the only evidence that could lift it is a code
+              sent to that mailbox, which is the one thing this practice may no longer send there.
+            </p>
+          ) : delivery.proof && delivery.standing !== "lapsed" ? (
             <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
               Proved on {delivery.proof.provedAt.slice(0, 10)}: somebody opened this address and brought back the code sent
               to it. Changing the address means proving the new one, because a proof names the address rather than you.{" "}

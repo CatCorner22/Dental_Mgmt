@@ -555,6 +555,52 @@ The CPA month-end package, `docs/13` item 22, has sat in every "not in" list sin
 
 **Not in Increment 1.35.** QuickBooks Online and Xero export shapes (the mapping is theirs to feed, but the formats are not written); a starter chart of accounts; reason-code-level mappings in the page's form (the service and the resolver take them; the form proposes the wildcard); the CPA seat; month close.
 
+## Increment 1.67
+
+Increment 1.61 built the proof because a signed-in person can point this product's mail at an address that is not theirs. Increment 1.63 limited how often they may do it, and argued carefully about where the limit belongs. Neither gave the person on the other end anything to do.
+
+Read the message Increment 1.61 shipped from that person's side. A practice they have never heard of has their address, is sending them codes, and the last line of the message tells them to ignore it. Ignoring it stops nothing: the practice may ask again, five times an hour, for as long as it likes. The advice worked for the product and not for the reader.
+
+So this increment gives the reader the one thing this product had never offered anybody outside a practice: **a way to say no, and have it hold.**
+
+## A second secret, with the opposite power
+
+Increment 1.61 refused to put the code in a link, and that refusal stands. A link is a state-changing GET that leaves a bearer secret in a URL a browser keeps, a proxy logs, and a referrer leaks — and that secret **proves** an address.
+
+The stop secret proves nothing. All it can do is withhold. The worst a leaked stop link achieves is that a practice stops mailing one mailbox and says so, on the screen of the person whose mailbox it was — loudly, and where it can be acted on. The argument against a link was never about links; it was about what the thing in the link could do, and these two tokens can do opposite things.
+
+- **The GET shows, the POST acts.** Mail clients, scanners and link previewers fetch a URL before a person reads it, so a link that refused on being fetched would hand every anti-malware appliance a button it presses on its owner's behalf. The page reads; a form on it acts.
+- **A server action rather than a route.** The act runs through a server action, so "every route under `/api` passes through `withGuard`" stays true of the whole surface rather than true except here. What authorises it is the secret, rechecked against the rows rather than against what the page was rendered with.
+- **The page names the practice and never the mailbox.** A reader holding the message already knows which mailbox; a reader holding only a leaked URL should not learn one.
+- **The link carries the practice's id.** Every read in this product runs inside a transaction already told which practice it is for, because the database refuses cross-practice reads and that refusal is the isolation the schema rests on. A stranger's browser arrives with nothing to tell it, so the link has to. The id says which practice to ask; the secret is what the answer depends on. A wrong id with a right secret and a right id with a wrong secret both find nothing, and both are answered in the same words rather than becoming an oracle for which practice a secret belongs to.
+- **Thirty days, not twenty-four hours.** A code's window is about a proof resting on evidence somebody acted on promptly. A refusal rests on the message having been unwanted, which does not stop being true while the reader is away. The bound is what it protects rather than taste: a reader still being sent codes is still being handed fresh links, so the only person this ever runs out on is one who was mailed once and is no longer being bothered.
+
+## What the row says, and what it refuses to say
+
+| Decision | Why |
+|---|---|
+| **Names a mailbox, not a person** | Every other row in this schema names a user of the practice. The person who refuses has no account, will never have one, and is not the person the practice typed the address for. What they are entitled to say is "this mailbox did not ask" |
+| **Keyed to the address text**, not the address row | A refusal tied to the row would be escaped exactly as Increment 1.63's per-row limit would have been: change one character back and forth, and every new row is a fresh start |
+| **One practice, not the product** | A cross-practice list would be the only table here outside the isolation every other table has, and it would let one practice's reader learn that another mails the same mailbox. What the stranger holds is an unwanted message from one named practice |
+| **Folding happens in `lower()`, once** | Two implementations of one case fold are two answers waiting to disagree, and the disagreement would reach the screen as a database error where a sentence had been promised. The application compares through the same expression the trigger does |
+| **No acting-user rule** | Every other table in this group refuses a transaction with no `app.user_id`. Nobody signs in to refuse one. A trigger asserting something about the session here would assert a proxy for the rule rather than the rule, so the triggers assert what the database can actually check: that the refusal names the mailbox the message reached |
+
+**A refusal outranks a proof that still stands** — on the screen and in `sendNotices` alike. A mailbox can change hands, and the person reading it now is the person entitled to say so; that is the same reason a proof lapses (Increment 1.65), met at the moment somebody says it out loud rather than at the end of a year. It also outranks the `already_proved` refusal in `sendProofCode`, which is an ordering worth testing: a refusal checked after the proof would answer "already proved", which is true and useless.
+
+**It bites where the row is written.** A trigger refuses a new `notice_addresses` row naming a refused mailbox, so the practice cannot keep a destination on file that nothing will ever send to. `setAddress` says the same thing in words first, because a trigger firing reaches a screen as a broken page and the person typing is owed a sentence they can act on.
+
+**It is not undone.** The only evidence that could authorise lifting a refusal is a code sent to that mailbox, and a refused mailbox is one this practice may no longer send a code to. The deadlock is the guarantee: an undo authorised by the practice would be an undo authorised by exactly the party the refusal protects against. What the practice keeps is the other mailbox — a person whose address was refused saves a different one and proves it, so the product loses a destination rather than a person.
+
+## A defect this increment's browser suite found
+
+The server action first shipped exporting its initial state object beside itself. A `"use server"` file may export nothing but async functions.
+
+`tsc` passed. `next build` passed and emitted the route. The page answered **500 on its first load**, and only a browser found it. The state moved to `stopFormState.ts`, which is exactly why `loginFormState.ts` sits beside `loginAction.ts` — a precedent this increment had to rediscover, and has now written down.
+
+- **Tests.** Unit: a reference reads back exactly what it was packed from; a malformed one is refused before the practice id in it is set as a transaction's own; the whitespace a mail client wraps a URL in is tolerated; one path segment whatever the origin's punctuation; the link's life is derived from the message's own stamp and outlives the code. Live: the message carries a link and the database keeps only its hash; the address is proved first, so what stops later is a proof rather than an absence; an unknown secret and one aimed at another practice answer in the same words; a link past its life refuses and writes nothing; the refusal names the mailbox and nobody at all, with a chain event carrying no mailbox and no actor; the notices stop although the proof still stands; no further code may be sent and the refusal is the reason given rather than the proof; a code minted before the refusal no longer proves; the same mailbox typed again in a different case is refused in words, with the database as the backstop; a different mailbox saves; a second press is settled rather than a second row; a refusal naming a mailbox the message never reached is refused; update and delete are refused. Browser: the stranger's page with the cookies cleared, naming the practice and never the mailbox, the button, the settled state, the link reopened and answered as settled, the practice reading it on its own screen, and typing the mailbox again refused in words.
+
+**Not in Increment 1.67.** A refusal that reaches beyond one practice, which is the boundary argued above rather than an omission. Any way to lift one. Retiring an address nobody re-proves, which is the remaining hole in the address arc. Per-practice settings for whether the accountant is told or how long a proof stands. An address for somebody who is not a user. Nor does the product attempt to tell a refused mailbox that it worked: a confirmation message to an address whose reader just said "send me nothing" would be the product answering back, which is the behaviour this increment exists to stop.
+
 ## Increment 1.66
 
 The outside accountant's seat reaches the month-end package and nothing else (Increment 1.49). Until now it learned that a month had closed only by signing in to look.
