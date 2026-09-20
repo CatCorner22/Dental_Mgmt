@@ -145,14 +145,26 @@ describe.skipIf(!adminUrl)("sending what each seat owes (live)", () => {
     // busy for a second used to cost the practice the whole message.
     const before = (await rows()).length;
     const transport = flakyTransport(1, "The provider was busy.");
-    const result = await tx(async (d) => sendNotices(d, await base(transport)));
+    // Both attempts pinned to one stamp, deliberately. Left to the clock the
+    // two rows share a millisecond only sometimes, so the read below would be
+    // exercising the tiebreak on a coin toss — which is how this passed here
+    // and failed in CI. Pinned, it exercises it every run.
+    //
+    // Taken from the clock rather than written as a literal: the rows are read
+    // back in time order and sliced from what this case added, so a stamp
+    // older than the rows already in the table would sort the pair in front of
+    // them and slice the wrong window.
+    const at = new Date();
+    const result = await tx(async (d) => sendNotices(d, { ...(await base(transport)), at }));
     expect(result.outcome).toBe("sent");
     if (result.outcome === "nothing_owed") throw new Error("unreachable");
     expect(result.attempts).toBe(2);
     expect(transport.attempts).toBe(2);
-    // Two attempts, two rows. The failure is not erased by the success that
-    // followed it: a reader asking "did this practice have trouble reaching me"
-    // gets an answer.
+    // Two attempts, two rows, in the order they happened. The failure is not
+    // erased by the success that followed it: a reader asking "did this
+    // practice have trouble reaching me" gets an answer. With one stamp on
+    // both, the order rests entirely on the id, which is why `uuidv7` counts
+    // inside a millisecond rather than only across them.
     const added = (await rows()).slice(before);
     expect(added.map((r) => r.outcome)).toEqual(["failed", "sent"]);
     expect(added.map((r) => r.failure_kind)).toEqual(["transient", null]);
