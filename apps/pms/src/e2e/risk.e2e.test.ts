@@ -462,6 +462,65 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await b.audit("practice risk, sent");
   }, 180_000);
 
+  it("lets the person who reads that mailbox stop it, with no account and no session", async () => {
+    // Increment 1.67. The address this suite just proved is about to be
+    // refused by the one party who had never been given a say: whoever opens
+    // the mailbox. They have no account, will never have one, and are not the
+    // person the practice typed the address for.
+    const { rows } = await app.db.admin.query(
+      "SELECT body FROM notice_sends WHERE kind = 'proof_code' ORDER BY attempted_at DESC, id DESC LIMIT 1"
+    );
+    const link = /(https?:\/\/\S+\/notices\/stop\/[0-9a-f-]{36}\.[A-Za-z0-9_-]{43})/.exec(rows[0].body as string)?.[1] ?? "";
+    expect(link).toContain("/notices/stop/");
+
+    // No session at all, which is the point: the secret in the link is the
+    // whole of what authorises this.
+    await page().context().clearCookies();
+    await page().goto(link, { waitUntil: "networkidle" });
+    await page().getByRole("heading", { name: "Stop these messages" }).waitFor({ timeout: 30_000 });
+    const stopPage = page().locator("main");
+    expect(await stopPage.innerText()).toContain("Ridgeview Family Dental");
+    // The page names the practice and never the mailbox: a reader holding the
+    // message already knows which mailbox, and a reader holding only a leaked
+    // URL should not learn one.
+    expect(await stopPage.innerText()).not.toContain("riley@ridgeview.example");
+    await b.audit("stop page, offered to a stranger");
+
+    await page().getByRole("button", { name: "I did not ask for this" }).click();
+    await expect
+      .poll(async () => await stopPage.innerText(), { timeout: 30_000 })
+      .toMatch(/Ridgeview Family Dental has been told/);
+    await b.audit("stop page, settled");
+
+    // Opening the same link again says it is settled rather than offering the
+    // button a second time.
+    await page().goto(link, { waitUntil: "networkidle" });
+    await expect
+      .poll(async () => await stopPage.innerText(), { timeout: 30_000 })
+      .toMatch(/was already told on \d{4}-\d{2}-\d{2} that this mailbox did not ask/);
+    expect(await page().getByRole("button", { name: "I did not ask for this" }).count()).toBe(0);
+
+    // And the practice reads it on the screen where it typed the address,
+    // rather than discovering it as a silence.
+    await b.signIn("ridgeview-owner", "/risk");
+    const delivery = page().locator("section[aria-labelledby=delivery]");
+    await delivery.waitFor({ timeout: 60_000 });
+    await expect
+      .poll(async () => await delivery.innerText(), { timeout: 60_000 })
+      .toMatch(/Somebody reading this address said on \d{4}-\d{2}-\d{2} that they did not ask/);
+    expect(await delivery.innerText()).toContain("cannot save that address again");
+    await b.audit("practice risk, a mailbox that said no");
+
+    // Typing it again is refused in words, by the database's rule rather than
+    // by this screen's opinion of it.
+    await delivery.getByLabel("Your address").fill("RILEY@Ridgeview.Example");
+    await delivery.getByRole("button", { name: "Save address" }).click();
+    await expect
+      .poll(async () => await page().locator("p[aria-live=polite]").innerText(), { timeout: 30_000 })
+      .toMatch(/did not ask for this practice's messages[\s\S]*Use a different address/);
+    await b.audit("practice risk, refusing a mailbox that said no");
+  }, 180_000);
+
   it("shows a user-rank account the Refusal, not the page", async () => {
     await b.signIn("ridgeview-front", "/risk");
     await page().locator("main [role=alert]").waitFor({ timeout: 30_000 });

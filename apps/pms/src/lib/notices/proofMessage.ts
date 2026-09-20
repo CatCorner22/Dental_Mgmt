@@ -1,3 +1,4 @@
+import { STOP_LIFE_DAYS } from "./stopLink";
 import type { Message } from "./message";
 
 /**
@@ -16,12 +17,26 @@ import type { Message } from "./message";
  * **The message names nobody and carries nothing else.** It is the same rule
  * the notices message holds, and it is easier to hold here: this message has
  * one job, and the practice name and the code are the whole of it.
+ *
+ * **It now carries a way to say no** (Increment 1.67). The line it used to end
+ * on told a reader who had not asked for this to ignore it, which is advice
+ * that works for the product and not for the reader: ignoring it stops
+ * nothing, and the next one arrives anyway. The link is a second secret with
+ * the opposite power — it can stop this practice writing to the mailbox and it
+ * can prove nothing — so putting it in a URL costs what the code could not
+ * afford to.
  */
 
 /** How long a code is good for, said in the message rather than left to be discovered. */
 export const CODE_WINDOW_HOURS = 24;
 
-export function renderProofMessage(input: { practiceName: string; code: string; appUrl: string }): Message {
+export function renderProofMessage(input: {
+  practiceName: string;
+  code: string;
+  appUrl: string;
+  /** Where the reader says they did not ask for this. Increment 1.67. */
+  stopUrl: string;
+}): Message {
   return {
     subject: `${input.practiceName}: confirm where your messages go`,
     body: [
@@ -33,7 +48,10 @@ export function renderProofMessage(input: { practiceName: string; code: string; 
       `The code works once and stops working after ${CODE_WINDOW_HOURS} hours.`,
       "",
       "Until somebody brings this code back, nothing else will be sent to this address.",
-      "If you were not expecting this, ignore it: an address nobody confirms receives nothing.",
+      "",
+      "If that was not you, say so here:",
+      input.stopUrl,
+      `That link needs no account and works for ${STOP_LIFE_DAYS} days. ${input.practiceName} will then send nothing further to this address, and will not be able to save it again.`,
       "",
       "This message names no patient and quotes nobody's words.",
     ].join("\n"),

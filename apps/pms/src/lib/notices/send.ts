@@ -4,6 +4,7 @@ import type { AppDb } from "../db/client";
 import { appendControlEvent } from "../controls/events";
 import { currentAddress } from "./addresses";
 import { currentProof, proofLapsesAt, proofStanding } from "./proof";
+import { addressRefusal } from "./stop";
 import { renderMessage, type Message } from "./message";
 import type { Notice, NoticeSeat } from "./outstanding";
 import type { FailureKind, SendOutcome, SendRecord } from "./sendOutcome";
@@ -319,9 +320,19 @@ export async function sendNotices(db: AppDb, input: SendInput): Promise<SendResu
     // never-proved one does rather than earning an outcome of its own — what
     // differs is only the reason, because "nobody ever said" and "nobody has
     // said lately" call for different things from the reader.
-    const proof = await currentProof(db, input.tenantId, held.id);
+    // A refusal outranks a proof, including a good one (Increment 1.67). A
+    // mailbox can be proved and then change hands, and the person reading it
+    // now is the person entitled to say so — which is the same reason a proof
+    // lapses, met at the moment somebody says it out loud rather than at the
+    // end of a year.
+    const refused = await addressRefusal(db, input.tenantId, held.address);
+    const proof = refused === null ? await currentProof(db, input.tenantId, held.id) : null;
     const standing = proofStanding(proof, at);
-    if (standing === "none") {
+    if (refused !== null) {
+      why =
+        `Somebody reading this address said on ${refused.refusedAt.slice(0, 10)} that they did not ask for this practice's messages, so nothing was sent to it. ` +
+        "Save a different address, and these will go out.";
+    } else if (standing === "none") {
       why =
         "Nobody has proved that this address reaches you, so nothing was sent to it. " +
         "Ask for a code and bring it back, and these will go out.";
