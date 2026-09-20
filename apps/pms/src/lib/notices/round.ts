@@ -9,6 +9,9 @@ import { REPROVE_WINDOW_MS, currentProof, proofLapsesAt, proofStanding, sendProo
 import { renderMessage } from "./message";
 import { collectOutstanding, type NoticeSeat } from "./outstanding";
 import { computeDigest, loadDigestAck, periodEnding } from "../digest/digest";
+import { listMonthCloses } from "../cpa/close";
+import { computeMonthPackage } from "../cpa/package";
+import { renderPackageMessage } from "./packageMessage";
 import { renderDigestMessage } from "./digestMessage";
 import { deliverMessage, lastDelivered, sendNotices } from "./send";
 import type { Transport } from "./transport";
@@ -94,6 +97,9 @@ export type RoundReport = {
   /** A second axis over the same people: the week's digest (Increment 1.64). */
   digestsSent: number;
   digestsFailed: number;
+  /** A third: the month-end package, told to the accountant (Increment 1.66). */
+  packagesSent: number;
+  packagesFailed: number;
 };
 
 /**
@@ -157,6 +163,7 @@ export async function runNoticeRound(db: AppDb, input: RoundInput): Promise<Roun
 
   const counts = { sent: 0, failed: 0, unchanged: 0, nothingOwed: 0, unreachable: 0 };
   const digests = { sent: 0, failed: 0 };
+  const packages = { sent: 0, failed: 0 };
   let considered = 0;
 
   /**
@@ -183,6 +190,75 @@ export async function runNoticeRound(db: AppDb, input: RoundInput): Promise<Roun
       acknowledged: ack !== null,
     };
   })();
+
+  /**
+   * The month this practice closed most recently, and what a message would say
+   * about it (Increment 1.66). Computed once for the practice, like the digest,
+   * and only when there is a close to speak of.
+   */
+  const closes = await listMonthCloses(db, input.tenantId);
+  const newestClose = closes.reduce<(typeof closes)[number] | null>(
+    (best, c) => (best === null || c.closedAt > best.closedAt ? c : best),
+    null
+  );
+  const packageFacts =
+    newestClose === null
+      ? null
+      : {
+          practiceName: input.practiceName,
+          month: newestClose.month,
+          packageHash: newestClose.packageHash,
+          packageSchema: newestClose.packageSchema,
+          entryCount: newestClose.entryCount,
+          closedAt: newestClose.closedAt,
+          appUrl: input.appUrl,
+          // Label and whether it holds. The detail carries figures, so it stays
+          // behind the guard.
+          tieOuts: (await computeMonthPackage(db, input.tenantId, newestClose.month)).tieOut.map((t) => ({
+            label: t.label,
+            holds: t.holds,
+          })),
+        };
+
+  /**
+   * Tells the accountant that a month closed, once per close.
+   *
+   * The accountant's seat only: this is the artefact that seat exists for, and
+   * the practice's own people read the close on the screen they already open.
+   *
+   * "Once" is answered by the message itself, as the digest's is — the last
+   * package message that reached this person is older than the close now being
+   * reported, or there has not been one. No column records which month was
+   * told, because a close has a time and a message has a time.
+   */
+  const maybeSendPackage = async (
+    userId: string,
+    displayName: string,
+    seat: NoticeSeat,
+    address: string,
+    proved: boolean
+  ): Promise<void> => {
+    if (seat !== "accountant" || packageFacts === null || !proved) return;
+    const last = await lastDelivered(db, input.tenantId, userId, "package");
+    if (last !== null && last.at >= new Date(packageFacts.closedAt)) return;
+
+    const { record } = await deliverMessage(db, {
+      tenantId: input.tenantId,
+      kind: "package",
+      recipientId: userId,
+      recipientName: displayName,
+      seat,
+      message: renderPackageMessage(packageFacts),
+      noticeCount: 1,
+      address,
+      why: null,
+      transport: input.transport,
+      at: input.at,
+      pause: input.pause,
+    });
+    if (record.outcome === "sent") packages.sent += 1;
+    else packages.failed += 1;
+  };
 
   /**
    * The week's digest for one person, on its own rule.
@@ -316,38 +392,50 @@ export async function runNoticeRound(db: AppDb, input: RoundInput): Promise<Roun
     // same pure function on the same inputs inside the same transaction, so
     // what was weighed is what goes out.
     const message = renderMessage({ practiceName: input.practiceName, seat, notices, appUrl: input.appUrl });
-    if (message === null) {
-      counts.nothingOwed += 1;
-      continue;
-    }
 
-    const last = await lastDelivered(db, input.tenantId, userId);
-    if (!worthSending(message.body, last, at, input.resendAfterMs)) {
-      // Nothing happened, so nothing is written. The round's own row carries
-      // the count, which is where a reader looks for "what did the sender do".
-      counts.unchanged += 1;
-      continue;
-    }
+    /**
+     * This person's notices, and the two ways there are none to send.
+     *
+     * A defect until Increment 1.66: both of those ways used to leave the loop
+     * outright, which silently took the digest and the package with them — so
+     * a seat that owed nothing received neither, and owing nothing is the
+     * ordinary case for both. A decision about the notices now ends only the
+     * notices.
+     */
+    const sendTheNotices = async (): Promise<void> => {
+      if (message === null) {
+        counts.nothingOwed += 1;
+        return;
+      }
+      const last = await lastDelivered(db, input.tenantId, userId);
+      if (!worthSending(message.body, last, at, input.resendAfterMs)) {
+        // Nothing happened, so nothing is written. The round's own row carries
+        // the count, which is where a reader looks for "what did the sender do".
+        counts.unchanged += 1;
+        return;
+      }
+      const result = await sendNotices(db, {
+        tenantId: input.tenantId,
+        recipientId: userId,
+        recipientName: person.displayName,
+        seat,
+        practiceName: input.practiceName,
+        appUrl: input.appUrl,
+        notices,
+        transport: input.transport,
+        at: input.at,
+        pause: input.pause,
+      });
+      if (result.outcome === "sent") counts.sent += 1;
+      else if (result.outcome === "failed") counts.failed += 1;
+      else if (result.outcome === "unreachable") counts.unreachable += 1;
+      else counts.nothingOwed += 1;
+    };
 
-    const result = await sendNotices(db, {
-      tenantId: input.tenantId,
-      recipientId: userId,
-      recipientName: person.displayName,
-      seat,
-      practiceName: input.practiceName,
-      appUrl: input.appUrl,
-      notices,
-      transport: input.transport,
-      at: input.at,
-      pause: input.pause,
-    });
-    if (result.outcome === "sent") counts.sent += 1;
-    else if (result.outcome === "failed") counts.failed += 1;
-    else if (result.outcome === "unreachable") counts.unreachable += 1;
-    else counts.nothingOwed += 1;
-
+    await sendTheNotices();
     await maybeSendDigest(userId, person.displayName, seat, held.address, proved);
     await maybeAskToReprove(userId, person.displayName, seat, proofNow);
+    await maybeSendPackage(userId, person.displayName, seat, held.address, proved);
   }
 
   const roundId = uuidv7();
@@ -363,9 +451,25 @@ export async function runNoticeRound(db: AppDb, input: RoundInput): Promise<Roun
     unreachable: counts.unreachable,
     digestsSent: digests.sent,
     digestsFailed: digests.failed,
+    packagesSent: packages.sent,
+    packagesFailed: packages.failed,
   });
   // The chain carries the act with nobody as its actor, because nobody did it.
-  await appendControlEvent(db, input.tenantId, null, "notice.round_ran", { ...counts, considered }, at);
+  await appendControlEvent(
+    db,
+    input.tenantId,
+    null,
+    "notice.round_ran",
+    {
+      ...counts,
+      considered,
+      digestsSent: digests.sent,
+      digestsFailed: digests.failed,
+      packagesSent: packages.sent,
+      packagesFailed: packages.failed,
+    },
+    at
+  );
 
   return {
     roundId,
@@ -375,6 +479,8 @@ export async function runNoticeRound(db: AppDb, input: RoundInput): Promise<Roun
     nothingOwed: counts.nothingOwed,
     digestsSent: digests.sent,
     digestsFailed: digests.failed,
+    packagesSent: packages.sent,
+    packagesFailed: packages.failed,
   };
 }
 
@@ -399,5 +505,7 @@ export async function lastRound(db: AppDb, tenantId: string): Promise<RoundRepor
     unreachable: row.unreachable,
     digestsSent: row.digestsSent,
     digestsFailed: row.digestsFailed,
+    packagesSent: row.packagesSent,
+    packagesFailed: row.packagesFailed,
   };
 }

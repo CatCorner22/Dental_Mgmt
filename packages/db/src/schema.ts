@@ -917,6 +917,9 @@ export const noticeRounds = pgTable(
     /** A second axis over the same people (Increment 1.64), counted beside the sum rather than folded into it. */
     digestsSent: integer("digests_sent").notNull(),
     digestsFailed: integer("digests_failed").notNull(),
+    /** A third axis (Increment 1.66): the month-end package told to the accountant. */
+    packagesSent: integer("packages_sent").notNull(),
+    packagesFailed: integer("packages_failed").notNull(),
   },
   (t) => [index("notice_rounds_latest_idx").on(t.tenantId, t.ranAt)]
 );
