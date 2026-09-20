@@ -839,6 +839,72 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await b.audit("ledger (outside accountant refused)");
   }, 150_000);
 
+  it("lets the accountant's seat say where its own notices go, and mails it a screen that seat can open", async () => {
+    // Increment 1.74. `GET`/`POST /api/notices/address` and
+    // `POST /api/notices/prove` all carry `orEntitlement:
+    // CPA_SEAT_ENTITLEMENT`: the guards were widened for this seat
+    // deliberately. The only screen carrying the panel was Practice Risk,
+    // which is manager rank with no entitlement, and this seat is `readonly`
+    // by construction — so the product would mail this seat a code and tell it
+    // to open the one screen it meets a refusal on. A guard opened for a seat
+    // and a surface that was not: the shape Increment 1.72 found on enrolment.
+    await b.signIn("ridgeview-cpa", "/cpa");
+    await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
+    const delivery = page().locator("section[aria-labelledby=delivery]");
+    await delivery.waitFor({ timeout: 30_000 });
+    expect(await delivery.innerText()).toContain("You have never said where to send these");
+    await b.audit("month-end package, where the accountant's notices go");
+
+    // The banner, read on its own element: the outcome sentence reads the same
+    // in the banner and in the panel, so a locator by text would match both.
+    const banner = page().locator("p[aria-live=polite]");
+    await delivery.getByLabel("Your address").fill("casey@prentice.example");
+    await delivery.getByRole("button", { name: "Save address" }).click();
+    await expect
+      .poll(async () => await banner.innerText(), { timeout: 30_000 })
+      .toContain("Messages would go to casey@prentice.example.");
+    await expect
+      .poll(async () => await delivery.innerText(), { timeout: 30_000 })
+      .toContain("Only you can change this");
+
+    // An address nobody proved is still nowhere to send, so the seat asks for
+    // a code through the same transport everything else goes through.
+    await delivery.getByRole("button", { name: "Send me a code" }).click();
+    await expect
+      .poll(async () => await banner.innerText(), { timeout: 30_000 })
+      .toMatch(/Sent to casey@prentice\.example on \d{4}-\d{2}-\d{2}\./);
+
+    // The message itself, read out of the row the product wrote when it sent:
+    // it names the screen this seat can open rather than the one every other
+    // seat opens. This is the half that was broken.
+    const { rows } = await app.db.admin.query(
+      "SELECT body FROM notice_sends WHERE notice_count = 0 ORDER BY attempted_at DESC, id DESC LIMIT 1"
+    );
+    const body = rows[0].body as string;
+    expect(body).toContain("open Month-end, and type it beside your address");
+    expect(body).not.toContain("Practice Risk");
+
+    const code = /Your code is ([A-HJKMNP-Z2-9]{10})/.exec(body)?.[1] ?? "";
+    expect(code).toHaveLength(10);
+    await delivery.getByLabel("Code from that message").fill(code);
+    await delivery.getByRole("button", { name: "Prove this address" }).click();
+    await expect
+      .poll(async () => await banner.innerText(), { timeout: 30_000 })
+      .toMatch(/This address is proved\./);
+    await expect
+      .poll(async () => await delivery.innerText(), { timeout: 30_000 })
+      .toMatch(/Proved on \d{4}-\d{2}-\d{2}: somebody opened this address/);
+    await b.audit("month-end package, the accountant's proved address");
+
+    // And the screen the old message named still refuses this seat, so the
+    // panel here is the whole of the way in rather than a convenience beside
+    // one that worked.
+    await page().goto(`${app.base}/risk`);
+    await page().locator("main [role=alert]").waitFor({ timeout: 60_000 });
+    expect(await page().locator("main [role=alert]").innerText()).toMatch(/Practice Risk did not load/);
+  }, 180_000);
+
+
   it("lets the accountant ask about a line of the month, and the practice answer it from the board", async () => {
     // The package was one-way until now: read it, export it, and ask about a
     // figure by email, where the question ends up somewhere other than the

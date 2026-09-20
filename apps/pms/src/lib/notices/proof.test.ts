@@ -46,6 +46,7 @@ describe("the message that carries a code", () => {
     practiceName: "Ridgeview Dental",
     code: "ABCD234XYZ",
     appUrl: "https://app.example",
+    place: "Month-end",
     stopUrl: "https://app.example/notices/stop/00000000-0000-7000-8000-000000000001.aaa",
   });
 
@@ -78,6 +79,15 @@ describe("the message that carries a code", () => {
 
   it("names nobody, like every message this product sends", () => {
     expect(message.body).toContain("This message names no patient and quotes nobody's words.");
+  });
+
+  it("sends the reader to the screen the caller named, not to one screen for everybody", () => {
+    // Increment 1.74. This line used to name Practice Risk, which is the one
+    // screen the outside accountant's seat may not open, so the product mailed
+    // that seat a code and pointed it at a refusal. The caller knows the seat;
+    // the message takes the name.
+    expect(message.body).toContain("open Month-end, and type it beside your address");
+    expect(message.body).not.toContain("Practice Risk");
   });
 });
 
