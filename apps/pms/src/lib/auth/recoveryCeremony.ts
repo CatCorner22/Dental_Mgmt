@@ -29,7 +29,9 @@ type FailureReason =
   | "already_consumed"
   | "invalid_totp"
   | "invalid_password"
-  | "target_inactive";
+  | "target_inactive"
+  | "no_second_admin"
+  | "target_cannot_approve";
 
 function cryptoEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
   if (env.DEV_MFA_KEY || env.ENCRYPTION_KEY) return env;
@@ -53,16 +55,34 @@ function ceremonyOpen(row: RecoveryCeremonyRow, now: Date): FailureReason | null
   return null;
 }
 
+/**
+ * Starts a two-administrator recovery.
+ *
+ * `eligibleAdmins` is how many administrators of this practice carry a working
+ * second factor, counted by the caller from the practice's own rows
+ * (`eligibleAdmins` in `regainAccess.ts`). It is a parameter rather than
+ * something read here for the reason Increment 1.75 settled on: the acts in
+ * this file take a store and nothing else, and a count the caller already
+ * holds is cheaper and more testable than a second read.
+ *
+ * Fewer than two, and the ceremony is refused before it exists (Increment
+ * 1.77). `approveRecoveryCeremony` already refuses the initiator, so a
+ * single-administrator practice could otherwise open a ceremony that nobody
+ * alive could ever approve — a form nobody can complete, which Increments 1.72
+ * and 1.74 are both about.
+ */
 export async function initiateRecoveryCeremony(
   store: AuthStore,
   initiator: StoredUser,
   targetUserId: string,
   totp: string,
+  eligibleAdmins: number,
   now: Date,
   env: Record<string, string | undefined> = process.env
 ): Promise<{ ok: true; ceremonyId: string } | { ok: false; reason: FailureReason }> {
   if (!totpOk(initiator, totp, env, now)) return { ok: false, reason: "invalid_totp" };
   if (initiator.id === targetUserId) return { ok: false, reason: "same_admin" };
+  if (eligibleAdmins < 2) return { ok: false, reason: "no_second_admin" };
 
   const target = await store.getUserById(targetUserId);
   if (!target || !target.active || target.tenantId !== initiator.tenantId) {
@@ -99,6 +119,19 @@ export async function approveRecoveryCeremony(
   const row = await store.getRecoveryCeremony(ceremonyId);
   if (!row || row.tenantId !== approver.tenantId) return { ok: false, reason: "not_found" };
   if (row.initiatedBy === approver.id) return { ok: false, reason: "same_admin" };
+  /**
+   * Nor may the person the recovery is *for* approve it (Increment 1.77).
+   *
+   * Refusing only the initiator leaves a confused-deputy shape: one
+   * administrator starts a recovery against a second, the second approves it
+   * believing they are helping a colleague, and the first walks away holding a
+   * link into the second's account. The pair would be the attacker and the
+   * victim, which is not two independent administrators at all.
+   *
+   * It costs the honest case nothing. Somebody actually locked out cannot sign
+   * in to approve anything, so no real recovery ever reached this line.
+   */
+  if (row.targetUserId === approver.id) return { ok: false, reason: "target_cannot_approve" };
   const blocked = ceremonyOpen(row, now);
   if (blocked) return { ok: false, reason: blocked };
 
@@ -125,7 +158,7 @@ export async function consumeRecoveryCeremony(
   resetToken: string,
   newPassword: string,
   now: Date
-): Promise<{ ok: true } | { ok: false; reason: FailureReason }> {
+): Promise<{ ok: true; username: string } | { ok: false; reason: FailureReason }> {
   const policy = passwordPolicyError(newPassword);
   if (policy) return { ok: false, reason: "invalid_password" };
 
@@ -140,14 +173,38 @@ export async function consumeRecoveryCeremony(
 
   const passwordHash = await hashPassword(newPassword);
   await store.setPassword(row.targetUserId, passwordHash, now);
+  /**
+   * The second factor goes too (Increment 1.77).
+   *
+   * Until this, the ceremony reset a password and left the factor standing, so
+   * it could not help the one person it exists for: somebody whose
+   * authenticator is gone finished the reset and met the same demand for a
+   * code they cannot produce. Clearing the enrolment sends them to
+   * `/enroll-mfa` on the next sign-in, which Increment 1.76 made work for an
+   * account that carried a factor before.
+   *
+   * So a consumed ceremony always means both — a password set and a factor
+   * removed. One act, one event, and its payload says so rather than leaving a
+   * reader to infer it from the increment number.
+   */
+  await store.clearMfaEnrollment(row.targetUserId, now);
+  // Which takes the sessions with it, in the same write against Postgres. The
+  // separate revoke this line replaced said the same thing twice, and the two
+  // could have drifted.
   await store.consumeRecoveryCeremony(row.id, now);
-  await store.revokeSessionsForUser(row.targetUserId, now);
   await store.appendDomainEvent({
     tenantId: row.tenantId,
     actorUserId: row.targetUserId,
     kind: "auth.recovery.consumed",
-    payload: { ceremonyId: row.id, initiatedBy: row.initiatedBy, approvedBy: row.approvedBy },
+    payload: {
+      ceremonyId: row.id,
+      initiatedBy: row.initiatedBy,
+      approvedBy: row.approvedBy,
+      secondFactorCleared: true,
+    },
     at: now,
   });
-  return { ok: true };
+  // The username, so the page can tell the person what to type at the sign-in
+  // box. They arrived on a link and may not have signed in for some time.
+  return { ok: true, username: target.username };
 }
