@@ -186,6 +186,13 @@ export async function openBrowser(app: E2eApp): Promise<E2eBrowser> {
     const url = m.location().url ?? "";
     // A refusal answers 403 or 409 and the browser logs it; that is the product working.
     if (/status of (403|409)/.test(m.text()) && url.includes("/api/")) return;
+    // A session that has ended answers 401, and the enrolment screen is the one
+    // place a case meets that on purpose: finishing an enrolment revokes the
+    // session that reached it, so a person who comes back to the screen
+    // afterwards is answered 401 by design (Increment 1.80). Narrowed to that
+    // route deliberately — a 401 anywhere else is a session the product lost
+    // track of, and that must still fail a suite.
+    if (/status of 401/.test(m.text()) && url.includes("/api/enroll-mfa")) return;
     if (url.endsWith("/favicon.ico")) return;
     problems.push(`console: ${m.text()} @ ${url}`);
   });

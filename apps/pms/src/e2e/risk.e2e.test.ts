@@ -743,8 +743,19 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
       .not.toMatch(/do not have access/);
     await b.audit("first sign-in, enrolment");
 
+    // Increment 1.80. The gate holds this account out of the application, and
+    // it must not also hold the door. Driven here because this is the only
+    // moment in the suite where a session genuinely carries the claim — minted
+    // at sign-in, and, until this increment, never rewritten — and a person who
+    // wants to abandon a half-finished sign-in has to be able to.
+    await page().goto(`${app.base}/signin`, { waitUntil: "networkidle" });
+    await page().getByRole("heading", { name: "Sign in" }).waitFor({ timeout: 60_000 });
+    await page().goto(`${app.base}/enroll-mfa`, { waitUntil: "networkidle" });
+    await enrolment.waitFor({ timeout: 60_000 });
+
     // The setup URI the form shows is the only place this secret exists, so the
-    // case reads it the way the person's authenticator would.
+    // case reads it the way the person's authenticator would. Read after the
+    // detour above, because each visit starts a fresh pairing.
     const uri = (await page().locator("main code").innerText()).trim();
     const secret = new URL(uri.replace("otpauth://", "https://")).searchParams.get("secret");
     expect(secret).toMatch(/^[A-Z2-7]+$/);
@@ -755,9 +766,27 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
       .toMatch(/recovery codes/i);
     await b.audit("first sign-in, recovery codes");
 
-    // Enrolment ends by signing them out, which is what keeps a session's
-    // "still needs enrolment" claim from outliving the enrolment itself.
-    await page().getByRole("button", { name: "Continue to sign in" }).click();
+    // Increment 1.80, and the defect this case walks straight into: a reload.
+    //
+    // Finishing an enrolment revokes every session for the account, because not
+    // one of them passed the factor the account now has. The cookie used to
+    // survive that, still claiming the account owed a second factor, so the
+    // middleware sent every address back to this screen — whose own route then
+    // answered 401, because the session was gone. What was left was one error
+    // line, a button that could not be pressed, and no way anywhere. The only
+    // exit was the button below, which lives in React state a reload discards.
+    //
+    // So the session now ends in both halves at once, and the screen reads a
+    // 401 as the state it is rather than as an error beside the field. Both
+    // controls here share one handler, so driving this one drives the exit.
+    await page().reload({ waitUntil: "networkidle" });
+    await expect
+      .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
+      .toMatch(/This sign-in has ended/);
+    expect(await page().locator("main").innerText()).toMatch(/that pairing is what ended it/);
+    await b.audit("first sign-in, session ended after enrolment");
+
+    await page().getByRole("button", { name: "Go to sign in" }).click();
     await page().waitForURL((url) => url.pathname === "/signin", { timeout: 60_000 });
 
     await page().fill('input[name="username"]', "firm-accounting");
