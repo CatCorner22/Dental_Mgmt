@@ -42,7 +42,18 @@ async function currentSeat(): Promise<Seat | null> {
 }
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
-  const links = navLinksFor(await currentSeat());
+  /**
+   * The seat itself, not only its links (Increment 1.81). A header that simply
+   * emptied was the second half of this product's worst sentence: four screens
+   * told a person whose session had ended that their seat worked "from the
+   * links in the header", and the same fact had just taken those links away. A
+   * reader who cannot be resolved is offered the one thing that would help.
+   *
+   * Branching on the seat rather than on the length of the list matters: a
+   * seat can legitimately hold no links, and that reader is signed in.
+   */
+  const seat = await currentSeat();
+  const links = navLinksFor(seat);
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--ink)]">
       <header className="border-b border-[var(--line)] bg-[var(--surface)]">
@@ -65,13 +76,22 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 different question. Without a way in, the act would exist and
                 nobody would find it — which is what Increments 1.72 and 1.74
                 were both about. */}
-            <Link
-              className="text-xs text-[var(--link)] underline-offset-2 hover:underline"
-              href="/enroll-mfa"
-            >
-              Your authenticator
-            </Link>
-            <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.80</p>
+            {seat ? (
+              <Link
+                className="text-xs text-[var(--link)] underline-offset-2 hover:underline"
+                href="/enroll-mfa"
+              >
+                Your authenticator
+              </Link>
+            ) : (
+              <Link
+                className="text-xs font-semibold text-[var(--link)] underline-offset-2 hover:underline"
+                href="/signin"
+              >
+                Sign in
+              </Link>
+            )}
+            <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.81</p>
           </div>
         </div>
       </header>

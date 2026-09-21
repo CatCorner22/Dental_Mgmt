@@ -779,12 +779,14 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     // So the session now ends in both halves at once, and the screen reads a
     // 401 as the state it is rather than as an error beside the field. Both
     // controls here share one handler, so driving this one drives the exit.
-    await page().reload({ waitUntil: "networkidle" });
-    await expect
-      .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
-      .toMatch(/This sign-in has ended/);
-    expect(await page().locator("main").innerText()).toMatch(/that pairing is what ended it/);
-    await b.audit("first sign-in, session ended after enrolment");
+    await b.signedOut(async () => {
+      await page().reload({ waitUntil: "networkidle" });
+      await expect
+        .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
+        .toMatch(/This sign-in has ended/);
+      expect(await page().locator("main").innerText()).toMatch(/that pairing is what ended it/);
+      await b.audit("first sign-in, session ended after enrolment");
+    });
 
     await page().getByRole("button", { name: "Go to sign in" }).click();
     await page().waitForURL((url) => url.pathname === "/signin", { timeout: 60_000 });

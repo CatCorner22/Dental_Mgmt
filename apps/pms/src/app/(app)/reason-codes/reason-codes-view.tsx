@@ -2,14 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
+import { readViewer } from "@/lib/auth/viewer";
+import { SessionEnded } from "../session-ended";
 import { formatCents } from "@/lib/ledger/format";
 import { REASON_KIND_LABEL, REASON_KINDS, type ReasonCodeRow, type ReasonKind } from "@/lib/ledger/reasons";
 import { isLoosening } from "@/lib/ledger/reasonThreshold";
 
-type Me = { ok: boolean; role?: string };
-
 type LoadState =
   | { status: "loading" }
+  /** The sign-in is over (Increment 1.81). */
+  | { status: "signed_out" }
   | { status: "error"; message: string }
   | { status: "ready"; rows: ReasonCodeRow[]; isAdmin: boolean };
 
@@ -36,16 +38,28 @@ export function ReasonCodesView() {
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      fetch("/api/reason-codes").then(async (r) => ({ ok: r.ok, body: (await r.json()) as { items?: ReasonCodeRow[]; error?: string } })),
-      fetch("/api/me").then(async (r) => ((await r.json()) as Me)),
+      fetch("/api/reason-codes").then(async (r) => ({
+        ok: r.ok,
+        status: r.status,
+        body: (await r.json().catch(() => ({}))) as { items?: ReasonCodeRow[]; error?: string },
+      })),
+      fetch("/api/me").then(async (r) => readViewer(r.status, await r.json().catch(() => ({})))),
     ])
-      .then(([list, me]) => {
+      .then(([list, viewer]) => {
         if (cancelled) return;
+        // This screen read the body and never the status, so an ended session
+        // produced no role and the owner's controls quietly disappeared
+        // (Increment 1.81). Either answer settles it, because both routes
+        // answer 401 for the same reason.
+        if (list.status === 401 || viewer.state === "ended") {
+          setState({ status: "signed_out" });
+          return;
+        }
         if (!list.ok) {
           setState({ status: "error", message: list.body.error ?? "Could not load the reason codes." });
           return;
         }
-        const role = me.role ?? "";
+        const role = viewer.state === "present" ? viewer.role : "";
         setState({
           status: "ready",
           rows: list.body.items ?? [],
@@ -103,6 +117,7 @@ export function ReasonCodesView() {
   }
 
   if (state.status === "loading") return <p className="text-sm text-[var(--ink-2)]">Loading…</p>;
+  if (state.status === "signed_out") return <SessionEnded />;
   if (state.status === "error") return <p className="text-sm text-[var(--ink-2)]">{state.message}</p>;
 
   const byKind = REASON_KINDS.map((kind) => ({ kind, rows: state.rows.filter((r) => r.kind === kind) })).filter(

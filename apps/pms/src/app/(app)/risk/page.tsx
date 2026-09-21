@@ -29,7 +29,9 @@ import {
 import type { ReasonCodeRow } from "@/lib/ledger/reasons";
 import type { AttestationRow } from "@/lib/controls/attestations";
 import { DecisionForm, type DecisionDraft } from "../decision-form";
-import { Refusal, type RefusalContent } from "./refusal";
+import { Refusal, type RefusalContent } from "../refusal";
+import { SessionEnded } from "../session-ended";
+import { readViewer } from "@/lib/auth/viewer";
 import { RanksPanel } from "./ranks-panel";
 import { RegainPanel } from "./regain-panel";
 import { DeliveryPanel, type AddressFormState, type AddressResponse } from "../delivery-panel";
@@ -132,12 +134,25 @@ type Loaded = {
 
 type LoadState =
   | { status: "loading" }
+  /** The sign-in is over (Increment 1.81), which is not a load that failed. */
+  | { status: "signed_out" }
   | { status: "error"; message: string }
   | { status: "ready"; data: Loaded };
+
+/**
+ * Thrown when a guarded route answers 401 (Increment 1.81).
+ *
+ * This screen reads ten routes at once, so classifying the 401 where it happens
+ * is what keeps the answer out of a race with the `/api/me` read beside it:
+ * whichever finishes first, one `catch` decides, and it decides on the status
+ * rather than on a sentence it would have to match by its words.
+ */
+class SessionOver extends Error {}
 
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   const body = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (res.status === 401) throw new SessionOver("The sign-in is over.");
   if (!res.ok) throw new Error(body.error ?? `Could not load ${url}.`);
   return body;
 }
@@ -210,21 +225,34 @@ export default function PracticeRiskPage() {
   useEffect(() => {
     let cancelled = false;
     fetch("/api/me")
-      .then(async (res) => (await res.json()) as Me)
-      .then((body) => {
-        if (!cancelled) setMe(body);
+      .then(async (res) => readViewer(res.status, await res.json().catch(() => ({}))))
+      .then((viewer) => {
+        if (cancelled) return;
+        // This screen used to read the body and never the status, so an ended
+        // session produced no role, and the administrator controls simply
+        // vanished with nothing said (Increment 1.81).
+        if (viewer.state === "ended") setState({ status: "signed_out" });
+        else if (viewer.state === "present") setMe({ ok: true, role: viewer.role, displayName: viewer.displayName });
+        else setMe({ ok: false });
       })
       .catch(() => {
         if (!cancelled) setMe({ ok: false });
       });
     load()
       .then((data) => {
-        if (!cancelled) setState({ status: "ready", data });
+        if (!cancelled) setState((s) => (s.status === "signed_out" ? s : { status: "ready", data }));
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
-          setState({ status: "error", message: err instanceof Error ? err.message : "Could not load Practice Risk." });
+        if (cancelled) return;
+        if (err instanceof SessionOver) {
+          setState({ status: "signed_out" });
+          return;
         }
+        setState((s) =>
+          s.status === "signed_out"
+            ? s
+            : { status: "error", message: err instanceof Error ? err.message : "Could not load Practice Risk." }
+        );
       });
     return () => {
       cancelled = true;
@@ -524,6 +552,7 @@ export default function PracticeRiskPage() {
       </p>
 
       {state.status === "loading" && <p className="text-sm text-[var(--ink-2)]">Loading…</p>}
+      {state.status === "signed_out" && <SessionEnded />}
       {state.status === "error" && (
         <Refusal
           refusal={{
