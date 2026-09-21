@@ -964,6 +964,48 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.79
+
+`users.active` has been in the schema since Increment 0.2 and has never been reachable. Four facts, each checked against the code before anything was built:
+
+| | |
+|---|---|
+| `deactivateUser` has two callers | `authorize.test.ts` and `postgresStore.live.test.ts` — both tests, no route |
+| Nothing sets the column back | `active: true` appears only where an account is created |
+| The rulebook never reads it | `detectSodConflicts` does not look at `active`, and `assignmentsFromGrants` builds an assignment for every person `loadStaff` returns |
+| A *reason code* has both directions | `setReasonCodeActive` takes a direction and the screen offers both; people had neither |
+
+So a practice could not remove access for somebody who left — they kept their password, their second factor and every grant — and could not have undone it either.
+
+## Deactivating ends the grants, and that is the point
+
+The third fact is why flipping the column alone would not have been enough: a departed colleague's duty conflicts would stand on Practice Risk forever, a signal that never clears.
+
+Two ways out. Teaching the rulebook to skip inactive people would change what it scores — every practice's conflict counts would move, and `CONTROL_RULEBOOK_VERSION` would have to move with them, which is a real rulebook change made for a data problem. **Ending the person's live grant rows instead uses the mechanism already there**: `assignmentsFromGrants` reads live rows, the conflicts clear by themselves, no figure is redefined, and no stamp moves.
+
+It also makes coming back honest. Reactivating restores the account and **not** the powers: every grant is granted again deliberately, through `evaluateGrant`, which is where a duty is supposed to be weighed. A reactivation that silently handed back six entitlements would be a grant nobody decided. What it does restore is the sign-in — the password and the second factor are untouched by either direction, because a practice bringing somebody back has decided to, and asking them to re-pair a phone they still hold would be ceremony rather than control.
+
+- **`setPersonActive`** takes a direction rather than splitting into two functions, for the reason `setReasonCodeActive` does: one question about one column, and a practice reading two screens would have to decide which one to believe. It locks the practice, refuses, writes the column, and — on a deactivation — **revokes the sessions in the same transaction**, because `authorize` refuses an inactive account on the next sign-in and a session already minted is not a sign-in.
+- **Refusals**: somebody outside the practice, a state that is already the state, **standing yourself down**, and **standing down the only administrator**.
+- **Practice Risk's panel becomes "Who is on the practice"**, carrying both acts on one list. A person stood down is offered no rank change, because that act refuses a deactivated account and a button whose only outcome is a refusal is the shape Increments 1.72 and 1.74 were both about.
+
+## The second false premise this pair of increments produced
+
+Increment 1.78 found that its own reasoning about segregation of duties was wrong, and said so. This one began with a second wrong belief, and it is worth recording because it was wrong in the opposite direction.
+
+The plan said the last-administrator refusal — written in 1.78 and unreachable there — would **finally become reachable**, because `administrators()` counts only *active* administrators, so standing one down can take the count to zero where lowering a rank cannot.
+
+**That does not survive the guard.** The route is `minRank: "admin"`, so the actor is an active administrator; `self_deactivation` means the target is somebody else; and if that somebody else is also an administrator then there are two. The count is never one at that line. The refusal is exactly as unreachable through this route as through 1.78's, for a structurally identical reason, and the test says so rather than driving a path that would refuse on `self_deactivation` and prove nothing.
+
+It is kept for the reason 1.78 kept it, now under two acts rather than one: the state it prevents is the only state in this product that nothing inside it could repair.
+
+- **Tests.** Live (8): somebody outside the practice; an administrator standing themselves down, with the column unmoved; bringing back somebody who never left; the last-administrator refusal on the function where the rule lives, with its first next-step sentence; an administrator stood down once the practice has two, and the refusal returning when it has one again; every live grant ended and every session revoked in one act, **read off the rows**, with the person's conflicts then absent from the SoD report — the assertion the whole design turns on; the account brought back with `endedEntitlements` empty and no grant restored; and a second deactivation refused. Browser (1): the owner stands Nora Newhire down, the row says so, her rank control disappears, the owner's own row offers no standing control at all, and bringing her back says in the practice's own words that the powers did not come back with her.
+
+The live cases also caught two fixtures that would have proved nothing: the new hire holds no entitlements in the seed, so a grant-ending case run against that account would have asserted that zero grants ended; and two event counts were totals that asserted the order the file ran in rather than the act under test.
+
+**Not in Increment 1.79.** Inviting a new person at a rank, which still waits on the business-associate question `docs/05` leaves with the owner. Also out: a reason recorded against a standing change as a required field rather than an optional one; any notice to the person concerned; restoring grants on reactivation, which is refused by design rather than missing; and the JWT that keeps saying "needs enrolment" after enrolment completes.
+
+
 ## Increment 1.68
 
 Increment 1.65 gave a proof a life, and had the round ask for a new code inside its last thirty days so that nothing would stop in silence. It then left a trap nobody had walked into yet: **once the proof lapsed, the round stopped asking. Forever.**

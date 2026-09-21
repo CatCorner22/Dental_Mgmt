@@ -21,6 +21,7 @@ type Person = {
   rank: string;
   controlRole: string;
   entitlements: string[];
+  active: boolean;
   mine: boolean;
 };
 
@@ -102,18 +103,55 @@ export function RanksPanel({ isAdmin }: { isAdmin: boolean }) {
     [load, rank]
   );
 
+  const setStanding = useCallback(
+    async (userId: string, active: boolean) => {
+      setBusy(true);
+      setSaid(null);
+      try {
+        const res = await fetch("/api/controls/ranks", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ targetUserId: userId, active }),
+        });
+        const body = (await res.json()) as {
+          error?: string;
+          nextSteps?: string[];
+          endedEntitlements?: string[];
+        };
+        if (res.ok) {
+          setSaid(
+            active
+              ? "Back on the practice. Their grants were not restored — grant each one again, so each is decided."
+              : `Stood down. Their sessions are revoked and ${
+                  body.endedEntitlements?.length ?? 0
+                } grant${(body.endedEntitlements?.length ?? 0) === 1 ? "" : "s"} ended with them.`
+          );
+          setRefusal(null);
+          setEditing(null);
+          await load();
+        } else {
+          setRefusal({ why: body.error ?? "That was refused.", nextSteps: body.nextSteps ?? [] });
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [load]
+  );
+
   if (!view) return null;
 
   return (
     <section aria-labelledby="ranks" className="mb-10">
       <h2 id="ranks" className="mb-1 text-lg font-semibold">
-        Who holds which rank
+        Who is on the practice
       </h2>
       <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
         A rank decides which screens open. It also decides what the release rules call somebody: an administrator is
         &ldquo;Owner / Dentist&rdquo; to those rules, so a promotion moves duties the same way a grant does and meets
-        the same refusal. This practice has {view.administrators} administrator
-        {view.administrators === 1 ? "" : "s"}
+        the same refusal. Standing somebody down revokes their sessions and ends every grant they hold; bringing them
+        back returns the account and not the powers, so each grant is decided again. This practice has{" "}
+        {view.administrators} administrator{view.administrators === 1 ? "" : "s"}
         {view.administrators === 1
           ? ", which is why the controls needing two people cannot run here yet."
           : "."}
@@ -123,7 +161,10 @@ export function RanksPanel({ isAdmin }: { isAdmin: boolean }) {
         {view.people.map((p) => (
           <li key={p.userId} className="grid gap-2 rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <span className="font-semibold text-[var(--ink)]">{p.displayName}</span>
+              <span className="font-semibold text-[var(--ink)]">
+                {p.displayName}
+                {p.active ? null : <span className="ml-2 text-sm font-normal text-[var(--ink-3)]">stood down</span>}
+              </span>
               <span className="text-sm text-[var(--ink-2)]">
                 {p.rank} &middot; <span className="text-[var(--ink-3)]">{p.controlRole}</span>
               </span>
@@ -164,19 +205,32 @@ export function RanksPanel({ isAdmin }: { isAdmin: boolean }) {
                 </button>
               </div>
             ) : (
-              <button
-                id={`rank-open-${p.userId}`}
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  setEditing(p.userId);
-                  setRank("");
-                  setRefusal(null);
-                }}
-                className="justify-self-start rounded-[var(--radius)] border border-[var(--line-strong)] px-3 py-1 text-sm font-semibold text-[var(--link)] disabled:opacity-60"
-              >
-                Change rank
-              </button>
+              <div className="flex flex-wrap gap-3">
+                {p.active ? (
+                  <button
+                    id={`rank-open-${p.userId}`}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setEditing(p.userId);
+                      setRank("");
+                      setRefusal(null);
+                    }}
+                    className="rounded-[var(--radius)] border border-[var(--line-strong)] px-3 py-1 text-sm font-semibold text-[var(--link)] disabled:opacity-60"
+                  >
+                    Change rank
+                  </button>
+                ) : null}
+                <button
+                  id={`standing-${p.userId}`}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setStanding(p.userId, !p.active)}
+                  className="rounded-[var(--radius)] border border-[var(--line-strong)] px-3 py-1 text-sm font-semibold text-[var(--link)] disabled:opacity-60"
+                >
+                  {p.active ? "Stand down" : "Bring back"}
+                </button>
+              </div>
             )}
           </li>
         ))}
