@@ -921,6 +921,49 @@ So a practice with one administrator cannot do this, and the honest thing is to 
 **Not in Increment 1.77.** User administration, which is now the root cause behind two controls: no route writes `users.role`, so no practice this product can produce has the second administrator this one needs. The seeded practice therefore reads the refusal rather than the happy path, and the browser suite proves that rather than papering over it. Also out: any rate limit on how often a practice may start a recovery; telling the locked-out person their recovery is waiting, which needs an address this product may not hold for them; and the JWT that keeps saying "needs enrolment" after enrolment completes.
 
 
+## Increment 1.78
+
+Increments 1.75 and 1.77 both ended by naming the same root cause, and 1.77 made it urgent: its refusal tells a one-administrator practice to **appoint a second administrator**, and this product could not obey that instruction. A refusal that names an impossible remedy is worse than no refusal.
+
+Three facts, each checked against the code before anything was built:
+
+| | |
+|---|---|
+| No route writes `users.role` | a grep for a role in a `set` or `values` returns nothing outside comments |
+| The only `insert(users)` hard-codes `readonly` | `lib/auth/invite.ts:133`, the outside accountant's seat |
+| The store updates four things | `active`, the two second-factor columns, and the password — nothing else |
+
+## The premise this increment started from was half wrong
+
+It set out to put a promotion through the gate `evaluateGrant` applies, reasoning that `precogRole` maps `role === "admin"` onto "Owner / Dentist" and that a promotion therefore moves duties. **The wrong half is the half that would have shipped a check that never fires.**
+
+`detectSodConflicts` scores duty combinations from *entitlements*. This app builds its assignments with `assignmentsFromGrants`, which reads live grant rows and deliberately infers nothing from a label — the `ROLE_TEMPLATES` path runs only when a caller passes no assignments, which this app never does. So a change of rank grants nothing and creates no conflict. A probe over the engine's own fixtures confirmed it before the code was written: every promotion returned zero new conflicts, at every severity. The engine function written for that gate was deleted rather than shipped.
+
+What a rank **does** move is signing power. `listEligibleApprovers` reads `firstApproverRoles` and `secondApproverRoles` against the label, so promoting somebody changes which releases they may start and second with no entitlement granted. It still does not let one person be both halves: `evaluateRelease` filters the initiator out of the eligible seconds, so two distinct people are required whatever labels they carry.
+
+So the act **reports rather than refuses**. `signingShift` names the channels a change opens and closes, the screen says so, and the chain records it.
+
+- **`changeRank`** locks the practice, refuses, writes `users.role`, refreshes the findings and appends `role.rank_changed` carrying the four channel lists. The findings are refreshed although no conflict moves, because each stored conflict row carries the person's label: leaving them would make the SoD view name somebody by a rank they no longer hold.
+- **Refusals**: an unknown rank, somebody outside the practice, a deactivated account, a change that moves nothing, **an administrator changing their own rank**, and **lowering the last administrator**.
+- **Practice Risk gains "Who holds which rank"**, above the recovery panel, because appointing a second administrator is what makes that one usable. It shows the control role beside the rank, since a reader who cannot see that "administrator" becomes "Owner / Dentist" to the release rules cannot see why a promotion is a control change rather than a convenience.
+
+## One administrator may appoint another, deliberately
+
+Requiring two to make a third is circular: a practice with one could never reach two, and Increment 1.77's refusal would go on naming a remedy nobody can take. Appointing does not escalate the appointer either — they already hold every administrator power, and a second administrator dilutes that rather than extending it.
+
+What one administrator appointing a confederate defeats is the two-person rule itself, by supplying both people. No software prevents a practice hiring an accomplice. What software can do is make every appointment a dated fact naming who appointed whom, on the chain, with the duty concentration it creates reported on Practice Risk. This increment does that and claims nothing more.
+
+## A second check that never fires, kept on purpose and said so
+
+The last-administrator refusal **cannot be reached through the route**, and the test says why rather than driving a path that produces a different refusal. The route is `minRank: "admin"`, and the self-change refusal above it means anybody lowering an administrator is a *second* administrator — so the count is never one. The invariant is held by the self-change refusal; this is the net under it, for the day something else can lower or deactivate an administrator. It is kept, unlike the SoD gate, because the state it prevents is the one state in this product that nothing inside it could repair: a practice with no administrator cannot appoint one, and every route that would fix that needs the rank nobody holds. The live case exercises it on the function, where the rule lives.
+
+- **Tests.** Engine (5): a label that does not move moves nothing; the channels a promotion opens, each confirmed against `listEligibleApprovers` itself; a demotion's losses equalling the same promotion's gains, so a practice is told what it gives up; the caller's array left unmutated, so a change merely considered leaves the practice as it was; and a seat no release rule names moving nothing. App unit (5): who counts as an administrator, and who does not — somebody below the rank, somebody who has left, and a rank this product does not have, read as none rather than thrown on. Live (10): the seeded practice's single administrator; the five refusals; the rank written to the row with the signing shift reported and the chain event carrying it; **two administrators making the Increment 1.77 ceremony usable**; the demotion saying what was given up; and an appointment afterwards, so the refusal bounds nothing permanently. Browser (1): the owner promotes Finn Front on Practice Risk, the recovery panel's refusal becomes a form, and putting the rank back brings the refusal back.
+
+The browser case also caught a defect in its own first draft: it matched the row by the control role beside the name, and `precogRole` falls through to "Front Desk Lead" for everybody without a grant — so it promoted the one account with no second factor, left the eligible count at one, and failed for a reason that had nothing to do with what it asserts. It matches on the person's name now, and says why.
+
+**Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
+
+
 ## Increment 1.68
 
 Increment 1.65 gave a proof a life, and had the round ask for a new code inside its last thirty days so that nothing would stop in silence. It then left a trap nobody had walked into yet: **once the proof lapsed, the round stopped asking. Forever.**

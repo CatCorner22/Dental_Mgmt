@@ -30,6 +30,7 @@ import type { ReasonCodeRow } from "@/lib/ledger/reasons";
 import type { AttestationRow } from "@/lib/controls/attestations";
 import { DecisionForm, type DecisionDraft } from "../decision-form";
 import { Refusal, type RefusalContent } from "./refusal";
+import { RanksPanel } from "./ranks-panel";
 import { RegainPanel } from "./regain-panel";
 import { DeliveryPanel, type AddressFormState, type AddressResponse } from "../delivery-panel";
 import {
@@ -1370,6 +1371,14 @@ function RiskBody({
           </div>
         </section>
       ) : null}
+
+      {/* Increment 1.78. Nothing in this product wrote `users.role` until now,
+          so a practice kept the ranks it was seeded with forever — which is
+          what made Increment 1.75 need a governed exception and left
+          Increment 1.77's refusal naming a remedy nobody could take. The
+          panel sits above the recovery one because appointing a second
+          administrator is what makes that one usable. */}
+      <RanksPanel isAdmin={isAdmin} />
 
       {/* Increment 1.77. A person whose authenticator is gone cannot reach the
           screen Increment 1.76 built, because that screen needs a session they
