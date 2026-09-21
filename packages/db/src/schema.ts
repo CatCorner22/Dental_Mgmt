@@ -53,6 +53,8 @@ export const users = pgTable(
     active: boolean("active").notNull().default(true),
     /** Envelope-encrypted TOTP secret. Null until MFA enrollment completes. */
     mfaSecretEnc: jsonb("mfa_secret_enc"),
+    /** An authenticator being paired, not yet proved (Increment 1.76). Never read for a sign-in. */
+    mfaPendingSecretEnc: jsonb("mfa_pending_secret_enc"),
     mfaEnrolledAt: timestamp("mfa_enrolled_at", { withTimezone: true }),
     recoveryCodesHash: text("recovery_codes_hash"),
     passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }).notNull(),

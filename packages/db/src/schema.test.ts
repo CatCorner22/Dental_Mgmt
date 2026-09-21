@@ -61,6 +61,7 @@ const refusalsSql = readFileSync(join(here, "../migrations/0050_notice_address_r
 const invitationsSql = readFileSync(join(here, "../migrations/0051_seat_invitations.sql"), "utf8");
 const newestWinsSql = readFileSync(join(here, "../migrations/0052_seat_invitations_newest_wins.sql"), "utf8");
 const soleDeciderSql = readFileSync(join(here, "../migrations/0053_gl_mappings_sole_decider.sql"), "utf8");
+const pendingSecretSql = readFileSync(join(here, "../migrations/0054_mfa_pending_secret.sql"), "utf8");
 /**
  * The statements of a migration, without its prose.
  *
@@ -1255,5 +1256,31 @@ describe("migration 0053: one administrator may decide alone, once the practice 
     // reviewable decision" — and it stays the database's. The message names
     // the register rather than a person the practice may not have.
     expect(soleDeciderSql).toMatch(/RAISE EXCEPTION\s+'gl_mappings_maker_ne_checker: [^']*recorded no decision that one administrator may decide alone'/);
+  });
+});
+
+describe("migration 0054: an authenticator being paired does not displace the one that works", () => {
+  it("gives a pairing in progress a column of its own", () => {
+    // `setMfaPendingSecret` writes `mfa_secret_enc` itself, which is harmless
+    // on a first enrolment and destructive on a re-pair: opening the screen
+    // would overwrite the live secret, so a person who changed their mind
+    // would be locked out immediately rather than eventually.
+    expect(statementsOf(pendingSecretSql)).toMatch(/ALTER TABLE users ADD COLUMN mfa_pending_secret_enc jsonb;/);
+  });
+
+  it("says in the database what the column is for, and what never reads it", () => {
+    expect(pendingSecretSql).toMatch(/COMMENT ON COLUMN users\.mfa_pending_secret_enc/);
+    expect(pendingSecretSql).toMatch(/Never read for a sign-in/);
+  });
+
+  it("touches no existing column and rewrites no row", () => {
+    // Accounts mid-enrolment before this migration keep working: they are
+    // unenrolled, so `authorize` never trusts the stale secret, and their next
+    // attempt stages through the new column.
+    const statements = statementsOf(pendingSecretSql);
+    expect(statements).not.toMatch(/DROP COLUMN/);
+    expect(statements).not.toMatch(/ALTER COLUMN/);
+    expect(statements).not.toMatch(/UPDATE users/);
+    expect(statements).not.toMatch(/DELETE FROM users/);
   });
 });

@@ -25,7 +25,7 @@ describe("migration files", () => {
     const files = listMigrationFiles(DEFAULT_MIGRATIONS_DIR);
     expect(files.map((f) => f.version)).toEqual(files.map((_, i) => i + 1));
     expect(files[0].file).toBe("0001_init.sql");
-    expect(files.at(-1)?.file).toBe("0053_gl_mappings_sole_decider.sql");
+    expect(files.at(-1)?.file).toBe("0054_mfa_pending_secret.sql");
   });
 
   it("refuses a gap in numbering", () => {

@@ -203,11 +203,24 @@ export function createPostgresStore(
           .where(eq(users.id, userId));
       }, env);
     },
+    async getMfaPendingSecret(userId) {
+      const user = await this.getUserById(userId);
+      if (!user) return null;
+      return withTenantTransaction(user.tenantId, userId, async (db) => {
+        const rows = await db
+          .select({ pending: users.mfaPendingSecretEnc })
+          .from(users)
+          .where(eq(users.id, userId));
+        return (rows[0]?.pending as EncryptedBlob | null) ?? null;
+      }, env);
+    },
     async setMfaPendingSecret(userId, secretEnc) {
       const user = await this.getUserById(userId);
       if (!user) return;
       await withTenantTransaction(user.tenantId, userId, async (db) => {
-        await db.update(users).set({ mfaSecretEnc: secretEnc }).where(eq(users.id, userId));
+        // The live secret is untouched: a re-pair that is abandoned leaves the
+        // working factor exactly where it was (Increment 1.76).
+        await db.update(users).set({ mfaPendingSecretEnc: secretEnc }).where(eq(users.id, userId));
       }, env);
     },
     async completeMfaEnrollment(userId, input) {
@@ -218,6 +231,8 @@ export function createPostgresStore(
           .update(users)
           .set({
             mfaSecretEnc: input.secretEnc,
+            // A pairing is in progress or finished, never both.
+            mfaPendingSecretEnc: null,
             mfaEnrolledAt: input.enrolledAt,
             recoveryCodesHash: JSON.stringify(input.recoveryHashes),
           })

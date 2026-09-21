@@ -5,6 +5,13 @@ import { NextResponse } from "next/server";
  * Unenrolled accounts may reach /enroll-mfa and its API only. Every other
  * signed-in route waits until MFA enrollment completes and the user signs in
  * again with an authenticator code.
+ *
+ * An enrolled account may reach it too (Increment 1.76). It used to be bounced
+ * to /home, which was the last thing holding the second factor shut: recovery
+ * codes only ever decrease, and the one screen that mints a new set was closed
+ * to anybody who had already used it. A person on their last code and a new
+ * phone had nowhere to go, so every account was counting down to a lockout
+ * nothing could undo. The screen reads its visitor and says which act it is.
  */
 export default auth((req) => {
   const path = req.nextUrl.pathname;
@@ -18,9 +25,6 @@ export default auth((req) => {
 
   if (needs && !enrollPath) {
     return NextResponse.redirect(new URL("/enroll-mfa", req.url));
-  }
-  if (!needs && path === "/enroll-mfa" && session) {
-    return NextResponse.redirect(new URL("/home", req.url));
   }
   return NextResponse.next();
 });

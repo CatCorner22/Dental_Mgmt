@@ -5,6 +5,9 @@ import { useEffect, useState } from "react";
 
 export function EnrollMfaForm() {
   const [otpauthUri, setOtpauthUri] = useState("");
+  // Whether a factor already works on this account, which decides every word
+  // on this screen and whether leaving is an option (Increment 1.76).
+  const [repairing, setRepairing] = useState(false);
   const [totp, setTotp] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
   const [error, setError] = useState("");
@@ -16,9 +19,12 @@ export function EnrollMfaForm() {
     (async () => {
       try {
         const res = await fetch("/api/enroll-mfa");
-        const data = (await res.json()) as { otpauthUri?: string; error?: string };
+        const data = (await res.json()) as { otpauthUri?: string; repairing?: boolean; error?: string };
         if (!res.ok) throw new Error(data.error ?? "Could not start enrollment.");
-        if (!cancelled) setOtpauthUri(data.otpauthUri ?? "");
+        if (!cancelled) {
+          setOtpauthUri(data.otpauthUri ?? "");
+          setRepairing(data.repairing === true);
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Could not start enrollment.");
       } finally {
@@ -40,7 +46,7 @@ export function EnrollMfaForm() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ totp }),
       });
-      const data = (await res.json()) as { recoveryCodes?: string[]; error?: string };
+      const data = (await res.json()) as { recoveryCodes?: string[]; repaired?: boolean; error?: string };
       if (!res.ok) throw new Error(data.error ?? "Could not verify the code.");
       setRecoveryCodes(data.recoveryCodes ?? []);
     } catch (err) {
@@ -55,6 +61,9 @@ export function EnrollMfaForm() {
       <div className="grid gap-4">
         <p className="text-sm text-[var(--ink-2)]">
           Save these recovery codes somewhere safe. Each code works once if you lose your phone.
+          {repairing
+            ? " This is a new set: any codes you had before this no longer work, and neither does the authenticator you replaced."
+            : ""}
         </p>
         <ul className="grid gap-1 rounded-[var(--radius)] bg-white p-3 font-mono text-sm ring-1 ring-[var(--line)]">
           {recoveryCodes.map((code) => (
@@ -79,8 +88,9 @@ export function EnrollMfaForm() {
       ) : (
         <>
           <p className="text-sm text-[var(--ink-2)]">
-            Add this account to your authenticator app. In most apps you can paste the setup URI
-            below if scanning is not available.
+            {repairing
+              ? "Add this account to your authenticator app. The one on your old phone keeps working until you bring back a code from the new one — until then nothing has changed."
+              : "Add this account to your authenticator app. In most apps you can paste the setup URI below if scanning is not available."}
           </p>
           {/* Focusable and named, because it scrolls sideways: a keyboard user
               who cannot reach it cannot read the one string this screen exists
@@ -113,8 +123,16 @@ export function EnrollMfaForm() {
         disabled={pending || loading || !otpauthUri}
         className="rounded-[var(--radius)] bg-navy px-4 font-semibold text-white disabled:opacity-70"
       >
-        {pending ? "Verifying…" : "Finish enrollment"}
+        {pending ? "Verifying…" : repairing ? "Replace my authenticator" : "Finish enrollment"}
       </button>
+      {/* A person re-pairing arrived by choice and may leave the same way. One
+          finishing a first enrolment may not: the middleware holds them here
+          until the account has a factor, which is the whole of that gate. */}
+      {repairing && !loading ? (
+        <a className="text-center text-sm text-[var(--link)] underline-offset-2 hover:underline" href="/home">
+          Leave this as it is
+        </a>
+      ) : null}
       {error ? (
         <p className="text-sm text-[var(--ink-2)]" role="alert">
           {error}

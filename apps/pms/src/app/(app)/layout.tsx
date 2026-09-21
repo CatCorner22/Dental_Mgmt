@@ -58,7 +58,21 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
               </Link>
             ))}
           </nav>
-          <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.75</p>
+          <div className="flex items-center gap-4">
+            {/* Outside the nav, because this is not one of the screens a rank
+                or a grant opens (Increment 1.76): every signed-in person may
+                re-pair their own authenticator, and `navLinksFor` answers a
+                different question. Without a way in, the act would exist and
+                nobody would find it — which is what Increments 1.72 and 1.74
+                were both about. */}
+            <Link
+              className="text-xs text-[var(--link)] underline-offset-2 hover:underline"
+              href="/enroll-mfa"
+            >
+              Your authenticator
+            </Link>
+            <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.76</p>
+          </div>
         </div>
       </header>
       <div className="mx-auto max-w-5xl px-6 py-10">{children}</div>
