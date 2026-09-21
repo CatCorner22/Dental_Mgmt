@@ -1,5 +1,7 @@
 "use client";
 
+import { loadFailure } from "../session-ended";
+import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useCallback, useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
 import { readViewer } from "@/lib/auth/viewer";
@@ -46,7 +48,7 @@ type PackageResponse = {
 type LoadState =
   | { status: "loading" }
   /** The sign-in is over (Increment 1.81). Not the same fact as the one below. */
-  | { status: "signed_out" }
+  | { status: "sign_in_ended" }
   | { status: "not_for_seat" }
   | { status: "error"; message: string }
   | {
@@ -84,6 +86,7 @@ const EMPTY_DRAFT: Draft = { glBucket: GL_BUCKETS[0], kind: GL_KINDS[0], reasonC
 async function loadSoleDecider(): Promise<SoleDeciderStanding> {
   const res = await fetch("/api/controls/decisions");
   const body = (await res.json().catch(() => ({}))) as { items?: ControlDecision[]; asOf?: string; error?: string };
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error(body.error ?? "Could not read the decision register.");
   return soleDeciderStanding(body.items ?? [], body.asOf ?? new Date().toISOString().slice(0, 10));
 }
@@ -91,6 +94,7 @@ async function loadSoleDecider(): Promise<SoleDeciderStanding> {
 async function loadMappings(): Promise<MappingRow[]> {
   const res = await fetch("/api/cpa/mappings");
   const body = (await res.json().catch(() => ({}))) as { items?: MappingRow[]; error?: string };
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error(body.error ?? "Could not load the mappings.");
   return body.items ?? [];
 }
@@ -102,6 +106,7 @@ function thisMonth(): string {
 async function loadPackage(month: string): Promise<PackageResponse> {
   const res = await fetch(`/api/cpa/package?month=${encodeURIComponent(month)}`);
   const body = (await res.json().catch(() => ({}))) as PackageResponse & { error?: string };
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error(body.error ?? "Could not load the package.");
   return body;
 }
@@ -159,7 +164,7 @@ export function PackageView() {
     const meRes = await fetch("/api/me");
     const viewer = readViewer(meRes.status, await meRes.json().catch(() => ({})));
     if (viewer.state !== "present") {
-      setState(viewer.state === "ended" ? { status: "signed_out" } : { status: "error", message: viewer.why });
+      setState(viewer.state === "ended" ? { status: "sign_in_ended" } : { status: "error", message: viewer.why });
       return;
     }
     const role = isRole(viewer.role) ? viewer.role : undefined;
@@ -188,7 +193,7 @@ export function PackageView() {
     let cancelled = false;
     setState({ status: "loading" });
     load(month).catch((err: unknown) => {
-      if (!cancelled) setState({ status: "error", message: err instanceof Error ? err.message : "Could not load the package." });
+      if (!cancelled) setState(loadFailure(err, "Could not load the package."));
     });
     return () => {
       cancelled = true;
@@ -272,6 +277,7 @@ export function PackageView() {
         body: JSON.stringify({ month }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       setConfirmClose(null);
       const [data, mappings] = await Promise.all([loadPackage(month), loadMappings()]);
@@ -297,6 +303,7 @@ export function PackageView() {
         body: JSON.stringify({ ...draft, reasonCode: draft.reasonCode.trim() || undefined }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       setDraft(EMPTY_DRAFT);
       const [data, mappings] = await Promise.all([loadPackage(month), loadMappings()]);
@@ -397,6 +404,7 @@ export function PackageView() {
         }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       setSoleRefusal(null);
       const soleDecider = await loadSoleDecider();
@@ -429,7 +437,7 @@ export function PackageView() {
         </p>
       )}
       {state.status === "loading" && <p className="text-sm text-[var(--ink-2)]">Reading the month&apos;s rows…</p>}
-      {state.status === "signed_out" && <SessionEnded />}
+      {state.status === "sign_in_ended" && <SessionEnded />}
       {state.status === "not_for_seat" && (
         <p className="max-w-prose text-[var(--ink-2)]">The month-end package is for the manager and owner seats and for the practice&apos;s accountant. Your seat works from the links in the header.</p>
       )}

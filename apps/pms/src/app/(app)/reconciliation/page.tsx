@@ -1,5 +1,7 @@
 "use client";
 
+import { SessionEnded, loadFailure } from "../session-ended";
+import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { MatchingMeasurementSummary, ReconciliationMeasurementSummary } from "@pms/controls-engine";
@@ -17,6 +19,8 @@ type Measurements = {
 
 type LoadState =
   | { status: "loading" }
+  /** The sign-in behind this screen has ended (Increment 1.82). */
+  | { status: "sign_in_ended" }
   | { status: "error"; message: string }
   | { status: "ready"; runs: ReconciliationRunSummary[]; accounts: BankAccountOption[]; measurements: Measurements };
 
@@ -60,7 +64,9 @@ export default function ReconciliationPage() {
       error?: string;
     };
     const accountsBody = (await accountsRes.json()) as { accounts?: BankAccountOption[]; error?: string };
+    refuseIfSignInEnded(runsRes);
     if (!runsRes.ok) throw new Error(runsBody.error ?? "Could not load reconciliation runs.");
+    refuseIfSignInEnded(accountsRes);
     if (!accountsRes.ok) throw new Error(accountsBody.error ?? "Could not load bank accounts.");
     return {
       runs: runsBody.runs ?? [],
@@ -80,10 +86,7 @@ export default function ReconciliationPage() {
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setState({
-            status: "error",
-            message: err instanceof Error ? err.message : "Could not load reconciliation.",
-          });
+          setState(loadFailure(err, "Could not load reconciliation."));
         }
       });
     return () => {
@@ -111,6 +114,7 @@ export default function ReconciliationPage() {
         unmatchedCount?: number;
         matchedDepositCount?: number;
       };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error(body.error ?? "Import failed.");
       setImportMessage(
         `Imported statement. ${body.matchedDepositCount ?? 0} deposit(s) matched, ${body.unmatchedCount ?? 0} open variance(s).`
@@ -213,6 +217,7 @@ export default function ReconciliationPage() {
       )}
 
       {state.status === "loading" && <p className="text-sm text-[var(--ink-2)]">Loading runs…</p>}
+      {state.status === "sign_in_ended" && <SessionEnded />}
       {state.status === "error" && <p className="text-sm text-[var(--ink-2)]">{state.message}</p>}
       {state.status === "ready" && state.runs.length === 0 && (
         <p className="text-sm text-[var(--ink-2)]">No reconciliation runs yet. Import a statement to start.</p>

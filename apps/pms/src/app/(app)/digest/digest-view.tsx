@@ -1,5 +1,7 @@
 "use client";
 
+import { loadFailure } from "../session-ended";
+import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useCallback, useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
 import { readViewer } from "@/lib/auth/viewer";
@@ -25,7 +27,7 @@ type DigestResponse = {
 type LoadState =
   | { status: "loading" }
   /** The sign-in is over (Increment 1.81). Not the same fact as the one below. */
-  | { status: "signed_out" }
+  | { status: "sign_in_ended" }
   | { status: "not_for_seat" }
   | { status: "error"; message: string }
   | { status: "ready"; data: DigestResponse; isAdmin: boolean };
@@ -37,6 +39,7 @@ function today(): string {
 async function loadDigest(ending: string): Promise<DigestResponse> {
   const res = await fetch(`/api/digest?ending=${encodeURIComponent(ending)}`);
   const body = (await res.json().catch(() => ({}))) as DigestResponse & { error?: string };
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error(body.error ?? "Could not load the digest.");
   return body;
 }
@@ -87,7 +90,7 @@ export function DigestView() {
     const meRes = await fetch("/api/me");
     const viewer = readViewer(meRes.status, await meRes.json().catch(() => ({})));
     if (viewer.state !== "present") {
-      setState(viewer.state === "ended" ? { status: "signed_out" } : { status: "error", message: viewer.why });
+      setState(viewer.state === "ended" ? { status: "sign_in_ended" } : { status: "error", message: viewer.why });
       return;
     }
     const role = isRole(viewer.role) ? viewer.role : undefined;
@@ -102,7 +105,7 @@ export function DigestView() {
   useEffect(() => {
     let cancelled = false;
     load(ending).catch((err: unknown) => {
-      if (!cancelled) setState({ status: "error", message: err instanceof Error ? err.message : "Could not load the digest." });
+      if (!cancelled) setState(loadFailure(err, "Could not load the digest."));
     });
     return () => {
       cancelled = true;
@@ -120,6 +123,7 @@ export function DigestView() {
         body: JSON.stringify({ ending: state.data.digest.period.end, summaryHash: state.data.summaryHash }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       await load(ending);
       setMessage("Acknowledged. The stamp binds the digest as it read just now; if the rows change later, this page says so.");
@@ -130,7 +134,7 @@ export function DigestView() {
     }
   }
 
-  if (state.status === "signed_out") return <SessionEnded />;
+  if (state.status === "sign_in_ended") return <SessionEnded />;
   if (state.status === "not_for_seat") {
     return <p className="max-w-prose text-[var(--ink-2)]">The digest is for the manager and owner seats. Your seat works from the links in the header.</p>;
   }

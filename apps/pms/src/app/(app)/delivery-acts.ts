@@ -1,3 +1,4 @@
+import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { sendSentence, type SendRecord } from "@/lib/notices/sendOutcome";
 import type { AddressResponse } from "./delivery-panel";
 
@@ -29,6 +30,7 @@ async function refusal(res: Response, fallback: string): Promise<string> {
 export async function readDelivery(): Promise<AddressResponse> {
   const res = await fetch("/api/notices/address");
   const body = (await res.json().catch(() => ({}))) as AddressResponse & { error?: string };
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error(body.error ?? "Could not read where your messages would go.");
   return body;
 }
@@ -49,6 +51,7 @@ export async function saveAddress(address: string): Promise<string> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ address }),
   });
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error(await refusal(res, "Could not record that."));
   return address === "" ? "You will receive no messages." : `Messages would go to ${address}.`;
 }
@@ -67,6 +70,7 @@ export async function sendNoticesNow(): Promise<string> {
   const body = (await res.json().catch(() => ({}))) as
     | { outcome: "nothing_owed" }
     | { outcome: "sent" | "failed" | "unreachable"; record: SendRecord; attempts: number };
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error("Could not attempt a send.");
   if (body.outcome === "nothing_owed") return "Nothing is owed, so nothing was sent.";
   // The attempt count belongs to the act the person just asked for, and only to
@@ -95,6 +99,7 @@ export async function askForCode(): Promise<string> {
     error?: string;
     delivered?: { record: SendRecord; attempts: number };
   };
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error(body.why ?? body.error ?? "Could not send a code.");
   const record = body.delivered?.record;
   return record ? sendSentence(record) : "A code was sent.";
@@ -107,6 +112,7 @@ export async function proveAddress(code: string): Promise<string> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ code }),
   });
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error(await refusal(res, "Could not check that code."));
   return "This address is proved. Your notices will go to it.";
 }

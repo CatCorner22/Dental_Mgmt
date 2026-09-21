@@ -1,5 +1,8 @@
 "use client";
 
+import { isSignInEnded } from "@/lib/auth/guardedFetch";
+import { SessionEnded } from "../session-ended";
+import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useCallback, useEffect, useState } from "react";
 import type { AttestationRow, AttestationSeat } from "@/lib/controls/attestations";
 
@@ -23,6 +26,10 @@ const CHANNEL_LABEL: Record<string, string> = {
 export function AttestView({ month }: { month: string }) {
   const [data, setData] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Increment 1.82: this screen keeps its errors as a string, so the one
+  // state that is not an error keeps its own flag rather than being folded
+  // into a sentence the reader cannot act on.
+  const [signInEnded, setSignInEnded] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -31,6 +38,7 @@ export function AttestView({ month }: { month: string }) {
   const load = useCallback(async () => {
     const res = await fetch(`/api/controls/attestations?month=${encodeURIComponent(month)}`);
     const body = (await res.json().catch(() => ({}))) as Loaded & { error?: string };
+    refuseIfSignInEnded(res);
     if (!res.ok) throw new Error(body.error ?? "Could not load the attestations.");
     setData(body);
   }, [month]);
@@ -38,7 +46,9 @@ export function AttestView({ month }: { month: string }) {
   useEffect(() => {
     let cancelled = false;
     load().catch((err: unknown) => {
-      if (!cancelled) setError(err instanceof Error ? err.message : "Could not load the attestations.");
+      if (cancelled) return;
+      if (isSignInEnded(err)) setSignInEnded(true);
+      else setError(err instanceof Error ? err.message : "Could not load the attestations.");
     });
     return () => {
       cancelled = true;
@@ -70,6 +80,8 @@ export function AttestView({ month }: { month: string }) {
 
   if (error) return <p className="max-w-prose text-[var(--ink-2)]">{error}</p>;
   if (!data) return <p className="text-[var(--ink-2)]">Loading the attestations…</p>;
+
+  if (signInEnded) return <SessionEnded />;
 
   return (
     <section aria-labelledby="package-attest" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">

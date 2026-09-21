@@ -1,5 +1,7 @@
 "use client";
 
+import { SessionEnded, loadFailure } from "../session-ended";
+import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useEffect, useState } from "react";
 import { formatCents } from "@/lib/ledger/format";
 import type { DayCloseSnapshot, LatePostingRow } from "@/lib/day-close/types";
@@ -28,6 +30,8 @@ function lateRowWhen(row: LatePostingRow): string {
 
 type LoadState =
   | { status: "loading" }
+  /** The sign-in behind this screen has ended (Increment 1.82). */
+  | { status: "sign_in_ended" }
   | { status: "error"; message: string }
   | { status: "ready"; snapshot: DayCloseSnapshot };
 
@@ -42,6 +46,7 @@ export default function DayClosePage() {
       `/api/day-close?locationId=${DEMO_LOCATION}&businessDate=${businessDate}`
     );
     const body = (await res.json()) as { snapshot?: DayCloseSnapshot; error?: string };
+    refuseIfSignInEnded(res);
     if (!res.ok) throw new Error(body.error ?? "Could not load day close.");
     if (!body.snapshot) throw new Error("Missing snapshot.");
     return body.snapshot;
@@ -56,10 +61,7 @@ export default function DayClosePage() {
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setState({
-            status: "error",
-            message: err instanceof Error ? err.message : "Could not load day close.",
-          });
+          setState(loadFailure(err, "Could not load day close."));
         }
       });
     return () => {
@@ -126,6 +128,7 @@ export default function DayClosePage() {
       </label>
 
       {state.status === "loading" && <p className="text-sm text-[var(--ink-2)]">Loading…</p>}
+      {state.status === "sign_in_ended" && <SessionEnded />}
       {state.status === "error" && <p className="text-sm text-[var(--ink-2)]">{state.message}</p>}
       {state.status === "ready" && (
         <>

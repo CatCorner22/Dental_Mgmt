@@ -1,5 +1,8 @@
 "use client";
 
+import { isSignInEnded } from "@/lib/auth/guardedFetch";
+import { SessionEnded } from "../../session-ended";
+import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { formatCents, formatLedgerKind } from "@/lib/ledger/format";
@@ -41,6 +44,10 @@ export default function LedgerPostPage() {
   const [detail, setDetail] = useState<AccountDetail | null>(null);
   const [procedures, setProcedures] = useState<{ id: string; label: string }[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Increment 1.82: this screen keeps its errors as a string, so the one
+  // state that is not an error keeps its own flag rather than being folded
+  // into a sentence the reader cannot act on.
+  const [signInEnded, setSignInEnded] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState<FormState>({
@@ -59,12 +66,14 @@ export default function LedgerPostPage() {
     fetch("/api/ledger/accounts")
       .then(async (res) => {
         const body = (await res.json()) as { accounts?: LedgerAccountSummary[]; error?: string };
+        refuseIfSignInEnded(res);
         if (!res.ok) throw new Error(body.error ?? "Could not load accounts.");
         if (!cancelled) setAccounts(body.accounts ?? []);
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setLoadError(err instanceof Error ? err.message : "Could not load accounts.");
+          if (isSignInEnded(err)) setSignInEnded(true);
+          else setLoadError(err instanceof Error ? err.message : "Could not load accounts.");
         }
       });
     return () => {
@@ -81,6 +90,7 @@ export default function LedgerPostPage() {
     fetch(`/api/ledger/accounts/${form.accountId}`)
       .then(async (res) => {
         const body = (await res.json()) as AccountDetail & { error?: string };
+        refuseIfSignInEnded(res);
         if (!res.ok) throw new Error(body.error ?? "Could not load account.");
         if (!cancelled) {
           setDetail(body);
@@ -96,7 +106,8 @@ export default function LedgerPostPage() {
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setLoadError(err instanceof Error ? err.message : "Could not load account.");
+          if (isSignInEnded(err)) setSignInEnded(true);
+          else setLoadError(err instanceof Error ? err.message : "Could not load account.");
         }
       });
     return () => {
@@ -221,6 +232,8 @@ export default function LedgerPostPage() {
       setBusy(false);
     }
   }
+
+  if (signInEnded) return <SessionEnded />;
 
   return (
     <main>

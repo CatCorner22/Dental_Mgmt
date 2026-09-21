@@ -1,5 +1,7 @@
 "use client";
 
+import { loadFailure } from "../session-ended";
+import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
@@ -30,7 +32,7 @@ type Alerts = {
 type LoadState =
   | { status: "loading" }
   /** The sign-in is over (Increment 1.81). Not the same fact as the one below. */
-  | { status: "signed_out" }
+  | { status: "sign_in_ended" }
   | { status: "not_for_seat" }
   | { status: "error"; message: string }
   | { status: "ready"; board: Board; isAdmin: boolean; alerts: Alerts | null };
@@ -76,6 +78,7 @@ function Card({ id, title, children }: { id: string; title: string; children: Re
 async function loadBoard(): Promise<Board> {
   const res = await fetch("/api/home/board");
   const body = (await res.json().catch(() => ({}))) as Board & { error?: string };
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error(body.error ?? "Could not load the board.");
   return body;
 }
@@ -85,6 +88,7 @@ async function loadAlerts(isAdmin: boolean): Promise<Alerts | null> {
   if (!isAdmin) return null;
   const res = await fetch("/api/alerts");
   const body = (await res.json().catch(() => ({}))) as Alerts & { error?: string };
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error(body.error ?? "Could not load the hard events.");
   return body;
 }
@@ -112,7 +116,7 @@ export function OwnerBoard() {
       const viewer = readViewer(meRes.status, await meRes.json().catch(() => ({})));
       if (viewer.state !== "present") {
         if (!cancelled) {
-          setState(viewer.state === "ended" ? { status: "signed_out" } : { status: "error", message: viewer.why });
+          setState(viewer.state === "ended" ? { status: "sign_in_ended" } : { status: "error", message: viewer.why });
         }
         return;
       }
@@ -125,7 +129,7 @@ export function OwnerBoard() {
       const [board, alerts] = await Promise.all([loadBoard(), loadAlerts(isAdmin)]);
       if (!cancelled) setState({ status: "ready", board, isAdmin, alerts });
     })().catch((err: unknown) => {
-      if (!cancelled) setState({ status: "error", message: err instanceof Error ? err.message : "Could not load the board." });
+      if (!cancelled) setState(loadFailure(err, "Could not load the board."));
     });
     return () => {
       cancelled = true;
@@ -144,6 +148,7 @@ export function OwnerBoard() {
         body: JSON.stringify({ decisionId: id, action, note: note || undefined }),
       });
       const body = (await res.json().catch(() => ({}))) as { sentence?: string; error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       setReview(null);
       setState({ ...state, board: await loadBoard() });
@@ -170,6 +175,7 @@ export function OwnerBoard() {
         body: JSON.stringify({ action: "reply", threadId, body }),
       });
       const payload = (await res.json().catch(() => ({}))) as { why?: string; verb?: string };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error(`${payload.verb ?? "Not sent"}: ${payload.why ?? "The answer was not sent."}`);
       setAnswering(null);
       setState({ ...state, board: await loadBoard() });
@@ -194,6 +200,7 @@ export function OwnerBoard() {
         body: JSON.stringify({ kind: item.kind, subjectKind: item.subjectKind, subjectId: item.subjectId, note }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       setAcking(null);
       setState({ ...state, alerts: await loadAlerts(state.isAdmin) });
@@ -206,7 +213,7 @@ export function OwnerBoard() {
   }
 
   if (state.status === "loading") return <p className="text-sm text-[var(--ink-2)]">Reading yesterday's rows…</p>;
-  if (state.status === "signed_out") return <SessionEnded />;
+  if (state.status === "sign_in_ended") return <SessionEnded />;
   if (state.status === "not_for_seat") {
     return (
       <p className="max-w-prose text-[var(--ink-2)]">

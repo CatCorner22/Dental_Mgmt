@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import { isSignInEnded } from "@/lib/auth/guardedFetch";
 import { Refusal } from "./refusal";
 import {
   SESSION_ENDED_STEP,
@@ -40,4 +41,21 @@ export function SessionEnded() {
       </a>
     </Refusal>
   );
+}
+
+/**
+ * What a screen's load state becomes when the load threw (Increment 1.82).
+ *
+ * Every screen held this decision as the same four lines, and every one of
+ * them made it wrongly: a sign-in that had ended arrived as an ordinary
+ * `Error` carrying `requireAccess`'s own sentence, and went on screen as a
+ * paragraph with nothing to press. The fallback is still the caller's, because
+ * only the screen knows what it was trying to read.
+ */
+export function loadFailure(
+  err: unknown,
+  fallback: string
+): { status: "sign_in_ended" } | { status: "error"; message: string } {
+  if (isSignInEnded(err)) return { status: "sign_in_ended" };
+  return { status: "error", message: err instanceof Error ? err.message : fallback };
 }

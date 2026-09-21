@@ -1,5 +1,6 @@
 "use client";
 
+import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
 import { readViewer } from "@/lib/auth/viewer";
@@ -11,7 +12,7 @@ import { isLoosening } from "@/lib/ledger/reasonThreshold";
 type LoadState =
   | { status: "loading" }
   /** The sign-in is over (Increment 1.81). */
-  | { status: "signed_out" }
+  | { status: "sign_in_ended" }
   | { status: "error"; message: string }
   | { status: "ready"; rows: ReasonCodeRow[]; isAdmin: boolean };
 
@@ -52,7 +53,7 @@ export function ReasonCodesView() {
         // (Increment 1.81). Either answer settles it, because both routes
         // answer 401 for the same reason.
         if (list.status === 401 || viewer.state === "ended") {
-          setState({ status: "signed_out" });
+          setState({ status: "sign_in_ended" });
           return;
         }
         if (!list.ok) {
@@ -90,6 +91,7 @@ export function ReasonCodesView() {
         body: JSON.stringify({ action, code, ...extra, ...extraBody }),
       });
       const body = (await res.json()) as { ok?: boolean; error?: string; verb?: string; why?: string };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error(body.why ? `${body.verb}: ${body.why}` : (body.error ?? `${label} failed.`));
       setNotice(`${label} succeeded.`);
       setRelabelling(null);
@@ -117,7 +119,7 @@ export function ReasonCodesView() {
   }
 
   if (state.status === "loading") return <p className="text-sm text-[var(--ink-2)]">Loading…</p>;
-  if (state.status === "signed_out") return <SessionEnded />;
+  if (state.status === "sign_in_ended") return <SessionEnded />;
   if (state.status === "error") return <p className="text-sm text-[var(--ink-2)]">{state.message}</p>;
 
   const byKind = REASON_KINDS.map((kind) => ({ kind, rows: state.rows.filter((r) => r.kind === kind) })).filter(
