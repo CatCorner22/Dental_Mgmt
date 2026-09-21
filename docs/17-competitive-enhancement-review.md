@@ -964,6 +964,62 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.81
+
+Increment 1.80 ended by naming what it left: a general answer for a session revoked underneath somebody **elsewhere** in the product. Reading the code to build it turned up something sharper than the rough edge that was described.
+
+Seven screens ask `/api/me` before deciding what to show. Between them they gave five different answers to one question, and four of them gave a false one.
+
+| Screen | On a 401 | What the reader was told |
+|---|---|---|
+| Owner board, Locations, Weekly digest, Month-end package | `!meRes.ok` → `not_for_seat` | "…is for the manager and owner seats. Your seat works from the links in the header." |
+| Practice Risk, Reason codes | no status read at all | nothing; the administrator controls simply vanished |
+| `home/session-status.tsx` | `!state.ok` | "Not signed in", with the one sign-in link in the product |
+
+`!meRes.ok` is true of a 401 exactly as much as of a 403. So a person whose sign-in had ended was told their **seat** was the wrong one — and the reader might be the owner, whose rank had not moved. Worse, the sentence sent them to a header that `navLinksFor(null)` had emptied for the same reason, so the one remedy it named was the one thing the screen had just taken away. Two false statements, each propping up the other.
+
+**This is not a rare state.** `IDLE_MS` is thirty minutes at a desk and ten in an operatory, so a lunch break or one long appointment reaches it; and a stand-down (Increment 1.79), a recovery ceremony (Increment 1.77) and a re-pairing (Increment 1.76) each revoke sessions outright.
+
+## The rule
+
+**A session that has ended is never reported as a seat that lacks rank.**
+
+They are facts about different things. One is about the sign-in, which a person fixes in ten seconds. The other is about the seat, which they cannot fix at all — it takes an administrator, a conversation, and possibly a decision recorded on the chain. Telling somebody the second when the first is true sends them to their practice manager over a session timeout.
+
+`lib/auth/viewer.ts` holds the reading. 401 is the only status that means the sign-in is over: `requireAccess` answers it for a revoked session, an expired one, an idle one and no session at all, and 403 for every question about rank or grant. That is the line the four screens crossed, and it is now drawn in one place with a test on each side of it.
+
+## One sentence for four endings
+
+A person cannot act on the difference between a session revoked and a session timed out, and both want the same next step, so both wear the same words. Naming which one would be telling somebody about the product's bookkeeping rather than about their morning.
+
+- **`(app)/session-ended.tsx`** renders it as a **Refusal** — what was refused, why, and what to do next, which is what `docs/04` asks a refusal to be. A screen that declines to load without saying which of those three it means is the dead end that shape exists to prevent. The component moved up from `(app)/risk/refusal.tsx`, where only one screen could reach a shape the product names everywhere.
+- **The link carries the screen they were on**, through the same `sanitizeCallbackPath` guard the sign-in page applies to the parameter it receives — so a path the product cannot vouch for lands on the practice home rather than anywhere a caller chose.
+- **The header offers the door.** A reader the layout cannot resolve now gets "Sign in" where an enrolled person gets "Your authenticator". It branches on the seat rather than on the length of the link list, because a seat can legitimately hold no links and that reader is signed in.
+- **A 200 that names no seat is not a seat without rank either.** It reads as unknown, so no screen renders the read-only view as though the reader had been demoted.
+
+## A wrong hypothesis that produced a right change
+
+The browser case failed on its first run, and the reason it failed was not the reason first supposed. Both halves are worth the record.
+
+The case cleared its cookies and reloaded. The server rendered a signed-out header — so that request carried no session — and `fetch("/api/me")` still answered **200 with the owner's name, rank and grants**. The obvious reading was the browser's own HTTP cache, and `withGuard` was given a `Cache-Control: no-store` stamp on every answer it returns.
+
+The next run showed the header present **and the 200 unchanged**, which ruled the cache out. Printing the cookies around the clear showed what was really happening: they were gone immediately after clearing and **all three were back after the reload** — the previous screen's traffic was still landing, and its `Set-Cookie` put the session token straight back. So the case now ends the session the way the product ends one, by revoking the row, which is the state a stand-down, a ceremony, a re-pairing and an idle window all produce, and which no cookie race can undo.
+
+**The `no-store` stamp stays, on its own merits rather than as the fix it was mistaken for.** Nothing said a guarded answer must not be stored, and every route behind that wrapper reads tenant rows under a session: an answer kept on disk outlives the session that earned it, which on a shared front-desk machine is the last person's guarded data handed to whoever sits down next. `no-store` rather than `no-cache`, because `no-cache` permits storing and asks for revalidation — a promise about a request that a cache is free to skip when it cannot reach the server.
+
+`withGuard` had no unit test until now, because importing it reaches NextAuth through `resolveStore` and `sessionId`. Both are mocked and never called: every case passes its own ports.
+
+## The harness window, folded rather than widened
+
+Increment 1.80 excepted a 401 on `/api/enroll-mfa` from the rule that a console error fails a suite. This increment needs the same exception on other routes, and widening it to `/api/` would have hidden exactly the defect the rule exists to catch.
+
+So the exception became a window the case opens for as long as it is driving an ended sign-in on purpose, and Increment 1.80's case now uses it too. One concept, one mechanism, and outside the window a 401 still fails a suite.
+
+- **Tests.** Unit (18): the reading — a seat; a revoked session, a timed-out one and no session at all, all three carrying one sentence; **a 403 never read as a sign-in that ended**, which is the line this increment draws; entitlements kept only where usable; a success naming no seat refused; a 200 that does not say `ok` refused; the route's own words carried otherwise, with a fallback. The link — the screen carried, a query kept, and a path the guard cannot vouch for sent to the practice home. Then `withGuard` (5): the answer a live session earns, a refusal that names the session, a refusal about the seat, and a refusal made before the session is read at all, each stamped; and the handler's own headers and body left alone. Browser (1): the owner reads their own board, the session row is revoked underneath them, and the reload says the sign-in ended rather than that the board is not theirs — with the `no-store` stamp asserted on the wire, the header carrying the door, the same reading on a second of the four screens, and the link followed through a real sign-in back onto the screen they lost.
+
+**Not in Increment 1.81.** The loaders behind the seat check. Once a screen has read its viewer, a session that dies a moment later surfaces through `loadLocations`, `loadPackage` or `loadDigest` as the route's own sentence in a plain paragraph — true, and link-less. Closing that would mean a typed 401 threaded through every loader, which is the shape `getJson` already has on Practice Risk and which the other screens can adopt when one of them next changes for its own reasons. Also out: any change to how long a session lives, or a warning before an idle window closes — both are worth having and neither is this increment's question; a per-practice choice of idle window; and telling a person **which** of the four endings they met, which is deliberately withheld rather than missing.
+
+
 ## Increment 1.80
 
 Increment 1.79 closed by naming what it left behind: "the JWT that keeps saying 'needs enrolment' after enrolment completes". This is that, and it is the last of the cluster Increments 1.72 through 1.79 worked through — the one remaining way this product held somebody on a screen with nothing they could press.

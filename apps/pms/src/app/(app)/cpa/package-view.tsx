@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
+import { readViewer } from "@/lib/auth/viewer";
+import { SessionEnded } from "../session-ended";
 import { isCpaSeat } from "@/lib/auth/seats";
 import { ANY_REASON, GL_BUCKETS, GL_KINDS, GL_SIDES, type GlMapping } from "@/lib/cpa/types";
 import type { MonthClose } from "@/lib/cpa/close";
@@ -23,8 +25,6 @@ import {
   sendNoticesNow as sendNoticesNowAct,
 } from "../delivery-acts";
 
-type Me = { ok: boolean; role?: string; entitlements?: string[] };
-
 type PackageResponse = {
   month: string;
   inProgress: boolean;
@@ -45,6 +45,8 @@ type PackageResponse = {
 
 type LoadState =
   | { status: "loading" }
+  /** The sign-in is over (Increment 1.81). Not the same fact as the one below. */
+  | { status: "signed_out" }
   | { status: "not_for_seat" }
   | { status: "error"; message: string }
   | {
@@ -150,15 +152,23 @@ export function PackageView() {
   const [soleRefusal, setSoleRefusal] = useState<string[] | null>(null);
 
   const load = useCallback(async (m: string) => {
+    // A 401 is the sign-in ending, never the seat lacking rank (Increment
+    // 1.81). The old test was `!meRes.ok`, which is true of both, and told a
+    // person whose session had timed out that this screen was not for their
+    // seat — pointing them at a header the same fact had just emptied.
     const meRes = await fetch("/api/me");
-    const me = (await meRes.json().catch(() => ({ ok: false }))) as Me;
-    const role = me.role && isRole(me.role) ? me.role : undefined;
+    const viewer = readViewer(meRes.status, await meRes.json().catch(() => ({})));
+    if (viewer.state !== "present") {
+      setState(viewer.state === "ended" ? { status: "signed_out" } : { status: "error", message: viewer.why });
+      return;
+    }
+    const role = isRole(viewer.role) ? viewer.role : undefined;
     // The outside accountant reaches this screen on its grant rather than its
     // rank (Increment 1.49), and reads the package alone: the chart of accounts
     // is the practice's own maker-checker, so the seat neither loads nor is
     // offered it. Asking for it would answer 403, which is the right answer.
-    const seat = isCpaSeat(role ? { role, entitlements: me.entitlements ?? [] } : null);
-    if (!meRes.ok || (!meetsRole(role, "manager") && !seat)) {
+    const seat = isCpaSeat(role ? { role, entitlements: viewer.entitlements } : null);
+    if (!meetsRole(role, "manager") && !seat) {
       setState({ status: "not_for_seat" });
       return;
     }
@@ -419,6 +429,7 @@ export function PackageView() {
         </p>
       )}
       {state.status === "loading" && <p className="text-sm text-[var(--ink-2)]">Reading the month&apos;s rows…</p>}
+      {state.status === "signed_out" && <SessionEnded />}
       {state.status === "not_for_seat" && (
         <p className="max-w-prose text-[var(--ink-2)]">The month-end package is for the manager and owner seats and for the practice&apos;s accountant. Your seat works from the links in the header.</p>
       )}

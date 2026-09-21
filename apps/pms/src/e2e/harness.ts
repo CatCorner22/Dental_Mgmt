@@ -151,6 +151,13 @@ export type E2eBrowser = {
   audits: { state: string; title: string; passes: number; violations: number; incomplete: number }[];
   signIn(username: string, callbackPath: string): Promise<void>;
   /**
+   * Runs `fn` with a 401 on `/api/` tolerated, because the case is driving a
+   * sign-in that has ended on purpose (Increment 1.81). It is scoped rather
+   * than standing: outside this window a 401 still fails the suite, which is
+   * the check that catches a session the product lost track of.
+   */
+  signedOut<T>(fn: () => Promise<T>): Promise<T>;
+  /**
    * The document title once the head has settled, which is the only moment a
    * title assertion can be about the screen rather than about the frame. Reading
    * `page.title()` raw samples an instant that may fall inside a head swap; see
@@ -181,18 +188,21 @@ export async function openBrowser(app: E2eApp): Promise<E2eBrowser> {
   );
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
   const problems: string[] = [];
+  /** Open while a case is deliberately driving a sign-in that has ended. */
+  let signedOutWindow = false;
   page.on("console", (m) => {
     if (m.type() !== "error") return;
     const url = m.location().url ?? "";
     // A refusal answers 403 or 409 and the browser logs it; that is the product working.
     if (/status of (403|409)/.test(m.text()) && url.includes("/api/")) return;
-    // A session that has ended answers 401, and the enrolment screen is the one
-    // place a case meets that on purpose: finishing an enrolment revokes the
-    // session that reached it, so a person who comes back to the screen
-    // afterwards is answered 401 by design (Increment 1.80). Narrowed to that
-    // route deliberately — a 401 anywhere else is a session the product lost
-    // track of, and that must still fail a suite.
-    if (/status of 401/.test(m.text()) && url.includes("/api/enroll-mfa")) return;
+    // A sign-in that has ended answers 401, and a case may drive one on
+    // purpose — finishing an enrolment revokes the session that reached the
+    // screen (Increment 1.80), and a session can end under a person anywhere
+    // in the product (Increment 1.81). The window is opened by the case, for
+    // as long as it is driving that state, rather than standing open on a
+    // route: a 401 outside it is a session the product lost track of, and that
+    // must still fail a suite.
+    if (/status of 401/.test(m.text()) && url.includes("/api/") && signedOutWindow) return;
     if (url.endsWith("/favicon.ico")) return;
     problems.push(`console: ${m.text()} @ ${url}`);
   });
@@ -283,6 +293,14 @@ export async function openBrowser(app: E2eApp): Promise<E2eBrowser> {
         found.push(row);
       }
       return found.filter((v) => v.impact === "critical" || v.impact === "serious");
+    },
+    async signedOut(fn) {
+      signedOutWindow = true;
+      try {
+        return await fn();
+      } finally {
+        signedOutWindow = false;
+      }
     },
     async signIn(username, callbackPath) {
       await page.context().clearCookies();

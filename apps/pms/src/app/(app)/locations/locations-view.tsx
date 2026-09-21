@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
+import { readViewer } from "@/lib/auth/viewer";
+import { SessionEnded } from "../session-ended";
 import { validateWeekHours, WEEKDAY_LABEL, WEEKDAYS, type Weekday, type WeekHoursComplete } from "@/lib/locations/hours";
 import type { HoursChange, LocationRow } from "@/lib/locations/service";
 
-type Me = { ok: boolean; role?: string };
-
 type LoadState =
   | { status: "loading" }
+  /** The sign-in is over (Increment 1.81). Not the same fact as the one below. */
+  | { status: "signed_out" }
   | { status: "not_for_seat" }
   | { status: "error"; message: string }
   | { status: "ready"; items: LocationRow[]; isAdmin: boolean };
@@ -36,10 +38,20 @@ export function LocationsView() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // A 401 is the sign-in ending, never the seat lacking rank (Increment
+      // 1.81). The old test was `!meRes.ok`, which is true of both, and told a
+      // person whose session had timed out that this screen was not for their
+      // seat — pointing them at a header the same fact had just emptied.
       const meRes = await fetch("/api/me");
-      const me = (await meRes.json().catch(() => ({ ok: false }))) as Me;
-      const role = me.role && isRole(me.role) ? me.role : undefined;
-      if (!meRes.ok || !meetsRole(role, "manager")) {
+      const viewer = readViewer(meRes.status, await meRes.json().catch(() => ({})));
+      if (viewer.state !== "present") {
+        if (!cancelled) {
+          setState(viewer.state === "ended" ? { status: "signed_out" } : { status: "error", message: viewer.why });
+        }
+        return;
+      }
+      const role = isRole(viewer.role) ? viewer.role : undefined;
+      if (!meetsRole(role, "manager")) {
         if (!cancelled) setState({ status: "not_for_seat" });
         return;
       }
@@ -94,6 +106,7 @@ export function LocationsView() {
   }
 
   if (state.status === "loading") return <p className="text-sm text-[var(--ink-2)]">Reading the locations…</p>;
+  if (state.status === "signed_out") return <SessionEnded />;
   if (state.status === "not_for_seat") {
     return <p className="max-w-prose text-[var(--ink-2)]">Location hours are for the manager and owner seats. Your seat works from the links in the header.</p>;
   }

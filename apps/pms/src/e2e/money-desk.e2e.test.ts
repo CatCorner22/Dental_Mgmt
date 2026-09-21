@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SEED_BANK } from "@pms/db/seed-data";
+import { DEV_MFA_SECRET, DEV_PASSWORD, SEED_BANK } from "@pms/db/seed-data";
+import { currentCodeForTest } from "../lib/auth/totp";
 import { uuidv7 } from "@pms/db";
 import { assertNoProblems, e2eEnabled, openBrowser, startProductionApp, type E2eApp, type E2eBrowser } from "./harness";
 
@@ -1199,5 +1200,95 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await asked.waitFor({ timeout: 30_000 });
     expect(await asked.innerText()).toMatch(closedNote);
     await b.audit("home board, a question about a closed month");
+  }, 150_000);
+  it("says a sign-in has ended rather than telling somebody their seat is the wrong one", async () => {
+    /**
+     * Increment 1.81. Four screens tested `!meRes.ok` on `/api/me`, which is
+     * true of a 401 exactly as much as of a 403, and concluded that the seat
+     * lacked the rank. So a person whose session had ended was told:
+     *
+     *   "The board is for the manager and owner seats. Your seat works from
+     *    the links in the header."
+     *
+     * Both halves false, and each propping up the other: the reader here is
+     * the owner, whose rank has not moved, and the header the sentence points
+     * at is empty because `navLinksFor(null)` emptied it for the same reason.
+     *
+     * The state is an everyday one — `IDLE_MS` is thirty minutes at a desk and
+     * ten in an operatory — and the case reaches it the way `requireAccess`
+     * sees it, as a request carrying no session it will honour.
+     */
+    await b.signIn("ridgeview-owner", "/home");
+    await page().getByRole("heading", { name: "Today's board" }).waitFor({ timeout: 60_000 });
+    // The board is theirs while the sign-in stands, which is what makes the
+    // sentence below a lie rather than a difference of opinion.
+    expect(await page().locator("main").innerText()).not.toMatch(/for the manager and owner seats/);
+
+    await b.signedOut(async () => {
+      // The session is ended the way the product ends one — the row is
+      // revoked, and the browser keeps the cookie it was given. That is what a
+      // stand-down (Increment 1.79), a recovery ceremony (Increment 1.77) and
+      // a re-pairing (Increment 1.76) all leave behind, and what an idle
+      // window leaves at thirty minutes. An earlier draft cleared the cookies
+      // instead and proved flaky: the previous screen's traffic was still
+      // landing, and its `Set-Cookie` put the session token straight back.
+      await app.db.admin.query(
+        "UPDATE sessions SET revoked_at = now() WHERE revoked_at IS NULL AND user_id = (SELECT id FROM users WHERE username = $1)",
+        ["ridgeview-owner"]
+      );
+      await page().reload({ waitUntil: "networkidle" });
+
+      // A guarded answer is never stored (Increment 1.81). Nothing said so
+      // before, so a browser was free to keep a 200 that named the reader's
+      // rank and grants and hand it back after the sign-in behind it had
+      // ended — on a shared front-desk machine, to whoever sat down next.
+      expect(
+        await page().evaluate(async () => {
+          const res = await fetch("/api/me");
+          return { status: res.status, store: res.headers.get("cache-control") };
+        })
+      ).toEqual({ status: 401, store: "no-store" });
+
+      await expect
+        .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
+        .toMatch(/Your sign-in has ended/);
+      const said = await page().locator("main").innerText();
+      expect(said).not.toMatch(/for the manager and owner seats/);
+      expect(said).toMatch(/your seat has not changed/);
+      expect(said).toMatch(/Sign in again to carry on from the same screen/);
+      await b.audit("practice home, sign-in ended");
+
+      // The header carries the door as well, because the old sentence sent
+      // people to a header the same fact had emptied.
+      expect(await page().locator("header").innerText()).toMatch(/Sign in/);
+
+      // And the way back returns them to the screen they were on.
+      expect(await page().locator("#session-ended-signin").getAttribute("href")).toBe(
+        `/signin?callbackUrl=${encodeURIComponent("/home")}`
+      );
+
+      // One shape, not one screen's shape: the same reading on a second of the
+      // four, reached with the same dead session.
+      await page().goto(`${app.base}/locations`, { waitUntil: "networkidle" });
+      await expect
+        .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
+        .toMatch(/Your sign-in has ended/);
+      expect(await page().locator("main").innerText()).not.toMatch(/for the manager and owner seats/);
+      expect(await page().locator("#session-ended-signin").getAttribute("href")).toBe(
+        `/signin?callbackUrl=${encodeURIComponent("/locations")}`
+      );
+      await b.audit("locations, sign-in ended");
+    });
+
+    // Following it signs them in and lands them back on the screen they lost,
+    // which is the whole of what the refusal promised.
+    await page().locator("#session-ended-signin").click();
+    await page().waitForURL((url) => url.pathname === "/signin", { timeout: 60_000 });
+    await page().fill('input[name="username"]', "ridgeview-owner");
+    await page().fill('input[name="password"]', DEV_PASSWORD);
+    await page().fill('input[name="totp"]', currentCodeForTest("ridgeview-owner", DEV_MFA_SECRET, Date.now()));
+    await page().click('button[type="submit"]');
+    await page().waitForURL((url) => url.pathname === "/locations", { timeout: 60_000 });
+    await page().getByRole("heading", { name: "Business hours" }).waitFor({ timeout: 60_000 });
   }, 150_000);
 });

@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
+import { readViewer } from "@/lib/auth/viewer";
+import { SessionEnded } from "../session-ended";
 import { formatCents } from "@/lib/ledger/format";
 import type { CountRow, DigestAck, WeeklyDigest } from "@/lib/digest/digest";
 import type { AttestationCoverage } from "@/lib/controls/attestationCoverage";
 import type { ReachReading } from "@/lib/notices/reach";
 import type { SetupReading } from "@/lib/notices/setup";
-
-type Me = { ok: boolean; role?: string };
 
 type DigestResponse = {
   digest: WeeklyDigest;
@@ -24,6 +24,8 @@ type DigestResponse = {
 
 type LoadState =
   | { status: "loading" }
+  /** The sign-in is over (Increment 1.81). Not the same fact as the one below. */
+  | { status: "signed_out" }
   | { status: "not_for_seat" }
   | { status: "error"; message: string }
   | { status: "ready"; data: DigestResponse; isAdmin: boolean };
@@ -78,10 +80,18 @@ export function DigestView() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async (end: string) => {
+    // A 401 is the sign-in ending, never the seat lacking rank (Increment
+    // 1.81). The old test was `!meRes.ok`, which is true of both, and told a
+    // person whose session had timed out that this screen was not for their
+    // seat — pointing them at a header the same fact had just emptied.
     const meRes = await fetch("/api/me");
-    const me = (await meRes.json().catch(() => ({ ok: false }))) as Me;
-    const role = me.role && isRole(me.role) ? me.role : undefined;
-    if (!meRes.ok || !meetsRole(role, "manager")) {
+    const viewer = readViewer(meRes.status, await meRes.json().catch(() => ({})));
+    if (viewer.state !== "present") {
+      setState(viewer.state === "ended" ? { status: "signed_out" } : { status: "error", message: viewer.why });
+      return;
+    }
+    const role = isRole(viewer.role) ? viewer.role : undefined;
+    if (!meetsRole(role, "manager")) {
       setState({ status: "not_for_seat" });
       return;
     }
@@ -120,6 +130,7 @@ export function DigestView() {
     }
   }
 
+  if (state.status === "signed_out") return <SessionEnded />;
   if (state.status === "not_for_seat") {
     return <p className="max-w-prose text-[var(--ink-2)]">The digest is for the manager and owner seats. Your seat works from the links in the header.</p>;
   }
