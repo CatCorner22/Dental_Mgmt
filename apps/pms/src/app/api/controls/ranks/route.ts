@@ -1,13 +1,17 @@
 import { withGuard } from "@/lib/auth/withGuard";
 import { withTenantTransaction } from "@/lib/db/client";
 import { administrators, changeRank } from "@/lib/controls/ranks";
+import { setPersonActive } from "@/lib/controls/roster";
 import { loadStaff } from "@/lib/controls/staff";
 import { precogRole } from "@/lib/controls/people";
 import { isRole, ROLE_RANK } from "@/lib/auth/roles";
 
 type Body = {
   targetUserId?: string;
+  /** A rank change names this. */
   rank?: string;
+  /** Standing somebody down or bringing them back names this instead. */
+  active?: boolean;
   reason?: string;
 };
 
@@ -26,15 +30,20 @@ export const GET = withGuard(
     const staff = await withTenantTransaction(user.tenantId, user.id, (db) => loadStaff(db, user.tenantId));
     const admins = administrators(staff.rows.map((r) => ({ id: r.id, role: r.role, active: r.active })));
     return Response.json({
+      /**
+       * Everybody, not only the people still on the practice: a roster that
+       * hid somebody stood down would offer no way to bring them back
+       * (Increment 1.79).
+       */
       people: staff.rows
-        .filter((r) => r.active)
         .map((r) => ({
           userId: r.id,
           displayName: r.displayName,
           rank: r.role,
           controlRole: precogRole(r),
           entitlements: r.entitlements,
-          /** This viewer, whom `changeRank` refuses as `self_rank_change`. */
+          active: r.active,
+          /** This viewer, whom both acts refuse against themselves. */
           mine: r.id === user.id,
         }))
         .sort((a, b) => (ROLE_RANK[isRole(b.rank) ? b.rank : "readonly"] - ROLE_RANK[isRole(a.rank) ? a.rank : "readonly"]) || a.displayName.localeCompare(b.displayName)),
@@ -56,22 +65,43 @@ export const GET = withGuard(
  * to refuse; a gate modelled on `api/controls/grants` would refuse nothing
  * ever. What a rank moves is signing power, and that is reported rather than
  * gated. See `lib/controls/ranks.ts` for why.
+ *
+ * The same POST stands somebody down or brings them back when the body names
+ * `active` instead of `rank` (Increment 1.79). Deactivating ends every live
+ * grant and revokes the sessions; reactivating restores the account and not
+ * the powers. See `lib/controls/roster.ts` for why.
  */
 export const POST = withGuard(
   async (req, ctx) => {
     const body = (await req.json().catch(() => ({}))) as Body;
-    if (!body.targetUserId || !body.rank) {
-      return Response.json({ error: "targetUserId and rank are required." }, { status: 400 });
+    const standing = typeof body.active === "boolean";
+    if (!body.targetUserId || (!body.rank && !standing)) {
+      return Response.json({ error: "targetUserId and either rank or active are required." }, { status: 400 });
     }
     const user = ctx.access.user;
+    const actor = { id: user.id, name: user.displayName };
+    /**
+     * Two acts on one roster, behind one route (Increment 1.79). They read
+     * the same list and refuse on the same practice-level rule, and a practice
+     * that had to find them on two screens would have to decide which list was
+     * the roster.
+     */
     const result = await withTenantTransaction(user.tenantId, user.id, async (db) =>
-      changeRank(db, {
-        tenantId: user.tenantId,
-        actor: { id: user.id, name: user.displayName },
-        targetUserId: body.targetUserId!,
-        rank: body.rank!,
-        reason: body.reason,
-      })
+      standing
+        ? setPersonActive(db, {
+            tenantId: user.tenantId,
+            actor,
+            targetUserId: body.targetUserId!,
+            active: body.active!,
+            reason: body.reason,
+          })
+        : changeRank(db, {
+            tenantId: user.tenantId,
+            actor,
+            targetUserId: body.targetUserId!,
+            rank: body.rank!,
+            reason: body.reason,
+          })
     );
 
     if (!result.ok) {

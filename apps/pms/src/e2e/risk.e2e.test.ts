@@ -875,6 +875,45 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     );
   }, 180_000);
 
+  it("stands somebody down, ends their grants with them, and brings the account back without the powers", async () => {
+    /**
+     * Increment 1.79. `users.active` has been in the schema since Increment
+     * 0.2 and never reachable: `deactivateUser` had two callers, both tests,
+     * and nothing anywhere set the column back. So a practice could not
+     * remove access for somebody who left.
+     *
+     * The case drives Nora Newhire, who holds no grants and no second factor,
+     * so nothing else in this suite depends on her standing.
+     */
+    await b.signIn("ridgeview-owner", "/risk");
+    const roster = page().locator("section[aria-labelledby=ranks]");
+    await roster.waitFor({ timeout: 60_000 });
+
+    const row = (name: string) =>
+      page().locator("section[aria-labelledby=ranks] li").filter({ hasText: name });
+
+    await row("Nora Newhire").locator("[id^='standing-']").click();
+    await expect
+      .poll(async () => await row("Nora Newhire").innerText(), { timeout: 60_000 })
+      .toMatch(/stood down/);
+    // A person stood down is offered no rank change: the act would refuse a
+    // deactivated account, and a button whose only outcome is a refusal is
+    // the shape Increments 1.72 and 1.74 were both about.
+    expect(await row("Nora Newhire").locator("[id^='rank-open-']").count()).toBe(0);
+    expect(await roster.innerText()).toMatch(/Stood down\./);
+    await b.audit("practice risk, somebody stood down");
+
+    // The owner's own row offers no standing control at all.
+    expect(await row("Riley Owner").locator("[id^='standing-']").count()).toBe(0);
+
+    // Back on, and the sentence says the powers did not come back with them.
+    await row("Nora Newhire").locator("[id^='standing-']").click();
+    await expect
+      .poll(async () => await roster.innerText(), { timeout: 60_000 })
+      .toMatch(/their grants were not restored/i);
+    expect(await row("Nora Newhire").innerText()).not.toMatch(/stood down/);
+  }, 180_000);
+
   it("answers a recovery link that opens nothing in one sentence, and offers no way around it", async () => {
     // Increment 1.77, and the shape Increments 1.67 and 1.71 settled for every
     // page outside a session: a link that ran out, a link nobody approved and
