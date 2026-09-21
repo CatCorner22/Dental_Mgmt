@@ -60,6 +60,7 @@ const packageKindSql = readFileSync(join(here, "../migrations/0049_notice_packag
 const refusalsSql = readFileSync(join(here, "../migrations/0050_notice_address_refusals.sql"), "utf8");
 const invitationsSql = readFileSync(join(here, "../migrations/0051_seat_invitations.sql"), "utf8");
 const newestWinsSql = readFileSync(join(here, "../migrations/0052_seat_invitations_newest_wins.sql"), "utf8");
+const soleDeciderSql = readFileSync(join(here, "../migrations/0053_gl_mappings_sole_decider.sql"), "utf8");
 /**
  * The statements of a migration, without its prose.
  *
@@ -1208,5 +1209,51 @@ describe("migration 0052: an invitation may be replaced", () => {
     // `seat_invitations_token_uidx` is what makes a lookup by secret
     // unambiguous; only how many invitations a seat may accumulate changed.
     expect(statementsOf(newestWinsSql)).not.toMatch(/DROP INDEX seat_invitations_token_uidx/);
+  });
+});
+
+describe("migration 0053: one administrator may decide alone, once the practice records it", () => {
+  it("replaces the CHECK with a trigger, because the way out is a fact in another table", () => {
+    // A CHECK sees one row. Whether this practice has recorded that it decides
+    // alone lives in `control_decisions`, so the rule has to be able to read.
+    const statements = statementsOf(soleDeciderSql);
+    expect(statements).toMatch(/ALTER TABLE gl_mappings DROP CONSTRAINT gl_mappings_maker_ne_checker;/);
+    expect(statements).toMatch(/CREATE TRIGGER gl_mappings_maker_checker_ins\s+BEFORE INSERT ON gl_mappings/);
+    expect(statements).toMatch(/CREATE TRIGGER gl_mappings_maker_checker_upd\s+BEFORE UPDATE ON gl_mappings/);
+  });
+
+  it("reads the newest decision on the control, and only the kinds that license", () => {
+    // Newest-row-wins, as `seat_invitations` reads an invitation and
+    // `notice_addresses` reads an address. A `retire` row is not among the
+    // licensing kinds, so retiring tightens the control back by itself.
+    const statements = statementsOf(soleDeciderSql);
+    expect(statements).toMatch(/FROM control_decisions/);
+    expect(statements).toMatch(/subject_kind = 'control'/);
+    expect(statements).toMatch(/subject_id = 'gl_mapping_maker_checker'/);
+    expect(statements).toMatch(/kind IN \('accept_residual', 'compensate'\)/);
+    expect(statements).toMatch(/ORDER BY d\.decided_at DESC, d\.id DESC/);
+    expect(statements).toMatch(/LIMIT 1/);
+  });
+
+  it("adds no column that could disagree with the register", () => {
+    // Whether the control stands down is read from the decisions every time.
+    // A column on `gl_mappings` saying so would be a second answer, and the
+    // one a reader would find first. The licence is a function of the register
+    // — `gl_mappings_sole_decider_licensed` reads it on every write — rather
+    // than a value anybody stores, so the negative is about columns.
+    const statements = statementsOf(soleDeciderSql);
+    expect(statements).not.toMatch(/ADD COLUMN/);
+    expect(statements).not.toMatch(/ALTER TABLE gl_mappings ADD/);
+    expect(statements).toMatch(/CREATE OR REPLACE FUNCTION gl_mappings_sole_decider_licensed/);
+    // And nothing rewrites the mappings that already stand.
+    expect(statements).not.toMatch(/UPDATE gl_mappings/);
+    expect(statements).not.toMatch(/DELETE FROM gl_mappings/);
+  });
+
+  it("still refuses a self-decision that nothing licenses, and says where the licence would come from", () => {
+    // The guarantee moves from "never" to "never without a recorded,
+    // reviewable decision" — and it stays the database's. The message names
+    // the register rather than a person the practice may not have.
+    expect(soleDeciderSql).toMatch(/RAISE EXCEPTION\s+'gl_mappings_maker_ne_checker: [^']*recorded no decision that one administrator may decide alone'/);
   });
 });

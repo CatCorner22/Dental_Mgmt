@@ -11,6 +11,9 @@ import { formatCents } from "@/lib/ledger/format";
 import { AttestView } from "./attest-view";
 import { QuestionsView } from "./questions-view";
 import { DeliveryPanel, type AddressResponse } from "../delivery-panel";
+import { DecisionForm, type DecisionDraft } from "../decision-form";
+import { SOLE_DECIDER_CONTROL, soleDeciderStanding, type SoleDeciderStanding } from "@/lib/cpa/soleDecider";
+import type { ControlDecision } from "@pms/controls-engine";
 import {
   askForCode as askForCodeAct,
   proveAddress as proveAddressAct,
@@ -51,6 +54,8 @@ type LoadState =
       isAdmin: boolean;
       /** True for the outside accountant: it reads and exports, and the practice's own governance is not its to run. */
       seat: boolean;
+      /** Where the chart-of-accounts maker-checker stands (Increment 1.75); null for the seat, which is not offered it. */
+      soleDecider: SoleDeciderStanding | null;
       /**
        * Where this seat's own notices go (Increment 1.74), loaded only for the
        * seat that has nowhere else to say so. The three routes behind the panel
@@ -66,6 +71,20 @@ type MappingRow = GlMapping & { mine: boolean };
 type Draft = { glBucket: string; kind: string; reasonCode: string; accountCode: string; accountName: string; side: string };
 
 const EMPTY_DRAFT: Draft = { glBucket: GL_BUCKETS[0], kind: GL_KINDS[0], reasonCode: "", accountCode: "", accountName: "", side: GL_SIDES[0] };
+
+/**
+ * Where the chart-of-accounts maker-checker stands for this practice
+ * (Increment 1.75), read from the decision register rather than from anything
+ * stored beside it. Only the practice's own seats read this: the route is
+ * manager rank, and the outside accountant is not offered the chart of
+ * accounts at all.
+ */
+async function loadSoleDecider(): Promise<SoleDeciderStanding> {
+  const res = await fetch("/api/controls/decisions");
+  const body = (await res.json().catch(() => ({}))) as { items?: ControlDecision[]; asOf?: string; error?: string };
+  if (!res.ok) throw new Error(body.error ?? "Could not read the decision register.");
+  return soleDeciderStanding(body.items ?? [], body.asOf ?? new Date().toISOString().slice(0, 10));
+}
 
 async function loadMappings(): Promise<MappingRow[]> {
   const res = await fetch("/api/cpa/mappings");
@@ -125,6 +144,10 @@ export function PackageView() {
 
   const [addressDraft, setAddressDraft] = useState<string | null>(null);
   const [codeDraft, setCodeDraft] = useState("");
+  // The refusal a practice with one administrator meets, held so the act that
+  // answers it can be offered beside it rather than somewhere else entirely
+  // (Increment 1.75).
+  const [soleRefusal, setSoleRefusal] = useState<string[] | null>(null);
 
   const load = useCallback(async (m: string) => {
     const meRes = await fetch("/api/me");
@@ -139,15 +162,16 @@ export function PackageView() {
       setState({ status: "not_for_seat" });
       return;
     }
-    const [data, mappings, delivery] = await Promise.all([
+    const [data, mappings, delivery, soleDecider] = await Promise.all([
       loadPackage(m),
       seat ? Promise.resolve([]) : loadMappings(),
       // Only for the seat that cannot open Practice Risk, where everybody else
       // says where their notices go. Loading it for a manager would put one act
       // on two screens.
       seat ? readDelivery() : Promise.resolve(null),
+      seat ? Promise.resolve(null) : loadSoleDecider(),
     ]);
-    setState({ status: "ready", data, mappings, isAdmin: meetsRole(role, "admin"), seat, delivery });
+    setState({ status: "ready", data, mappings, isAdmin: meetsRole(role, "admin"), seat, delivery, soleDecider });
   }, []);
 
   useEffect(() => {
@@ -316,12 +340,60 @@ export function PackageView() {
         body: JSON.stringify({ mappingId: mapping.id, decision }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
-      if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      if (!res.ok) {
+        // A practice with nobody else to decide is refused in more than one
+        // sentence, and the last of them names an act. Flattening that into
+        // the banner would lose the act (Increment 1.75).
+        if (res.status === 403 && (body.errors?.length ?? 0) > 1) {
+          setSoleRefusal(body.errors ?? []);
+          return;
+        }
+        throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      }
+      setSoleRefusal(null);
       const [data, mappings] = await Promise.all([loadPackage(month), loadMappings()]);
       setState({ ...state, data, mappings });
       setMessage(`${decision === "approved" ? "Approved" : "Rejected"}: ${mapping.glBucket} · ${mapping.kind} → ${mapping.accountCode}.`);
     } catch (err: unknown) {
       setMessage(err instanceof Error ? err.message : "The mapping was not decided.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * Records that this practice has one administrator, which is what lets that
+   * administrator decide their own proposals (Increment 1.75).
+   *
+   * Recorded by the person it licenses, deliberately: requiring a different
+   * administrator would ask for the second pair of hands whose absence is the
+   * whole reason this exists. What stands in for that second person is the
+   * record itself — dated, carrying a review date, and reported to the outside
+   * accountant in every month-end package built on a mapping decided this way.
+   */
+  async function recordSoleDecider(decision: DecisionDraft) {
+    setBusy("sole-decider");
+    setMessage(null);
+    try {
+      const res = await fetch("/api/controls/decisions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          subjectKind: "control",
+          subjectId: SOLE_DECIDER_CONTROL,
+          kind: decision.kind,
+          note: decision.note,
+          reviewBy: decision.reviewBy || undefined,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      setSoleRefusal(null);
+      const soleDecider = await loadSoleDecider();
+      setState((st) => (st.status === "ready" ? { ...st, soleDecider } : st));
+      setMessage("Recorded. You may now decide your own proposals, and every mapping so decided is named in the month-end package.");
+    } catch (err: unknown) {
+      setMessage(err instanceof Error ? err.message : "The decision was not recorded.");
     } finally {
       setBusy(null);
     }
@@ -629,6 +701,52 @@ export function PackageView() {
               {state.data.package.mappings.unmappedLines} journal line{state.data.package.mappings.unmappedLines === 1 ? "" : "s"} unmapped this month. One
               person proposes a mapping and a different person approves it, so no one maps the practice&apos;s books alone.
             </p>
+
+            {/* Increment 1.75. A practice whose only administrator is the
+                proposer could propose a mapping nobody may decide, leaving
+                every line unmapped and no month closable — for ever, since
+                this product has no way to appoint a second administrator. The
+                way out is a decision, recorded here because here is where the
+                refusal happens. */}
+            {state.soleDecider && state.soleDecider.standing !== "none" ? (
+              <p className="mb-3 max-w-prose rounded-lg border border-[var(--line)] bg-[var(--cream)] p-3 text-sm text-[var(--ink-2)]">
+                <strong>This practice has recorded that one administrator decides alone.</strong>{" "}
+                {state.soleDecider.decision.decidedByName} recorded it on {state.soleDecider.decision.decidedAt.slice(0, 10)}:{" "}
+                {state.soleDecider.decision.note}{" "}
+                {state.soleDecider.standing === "overdue"
+                  ? `That review was due ${state.soleDecider.decision.reviewBy} and has not happened. It still stands — a licence that expired mid-month would close the practice's books to it without warning — but it is overdue, and Practice Risk lists it among the reviews that are.`
+                  : state.soleDecider.decision.reviewBy
+                    ? `It is looked at again on ${state.soleDecider.decision.reviewBy}. Retiring it from Practice Risk puts the second pair of hands back.`
+                    : "Retiring it from Practice Risk puts the second pair of hands back."}{" "}
+                Every mapping decided this way is counted in the month-end package your accountant receives.
+              </p>
+            ) : null}
+
+            {soleRefusal ? (
+              <div className="mb-3 max-w-prose rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] p-3" role="alert">
+                {soleRefusal.map((line) => (
+                  <p key={line} className="mb-2 text-sm text-[var(--ink-2)]">
+                    {line}
+                  </p>
+                ))}
+                {state.isAdmin ? (
+                  <DecisionForm
+                    /* Only the kinds that answer this refusal. Recording that
+                       the practice will monitor the control, or intends to
+                       remediate it, is a true thing to record and changes
+                       nothing about who may decide — so offering it here would
+                       hand somebody an act that looks like the way out and
+                       is not. Practice Risk is where the other kinds belong. */
+                    kinds={["accept_residual", "compensate"]}
+                    submitLabel="Record this decision"
+                    busy={busy !== null}
+                    reviewByRequired
+                    onSubmit={(d) => void recordSoleDecider(d)}
+                    onCancel={() => setSoleRefusal(null)}
+                  />
+                ) : null}
+              </div>
+            ) : null}
             {state.mappings.length > 0 && (
               <div className="overflow-x-auto rounded-lg border border-[var(--line)]">
                 <table className="min-w-full text-left text-sm">
@@ -657,7 +775,7 @@ export function PackageView() {
                         </td>
                         {state.isAdmin && (
                           <td className="px-3 py-2">
-                            {m.status === "proposed" && !m.mine ? (
+                            {m.status === "proposed" && (!m.mine || state.soleDecider?.standing !== "none") ? (
                               <span className="flex flex-wrap gap-2">
                                 <button
                                   type="button"
@@ -679,7 +797,24 @@ export function PackageView() {
                                 </button>
                               </span>
                             ) : m.status === "proposed" ? (
-                              <span className="text-xs text-[var(--ink-3)]">Yours; a different person decides it.</span>
+                              /* Increment 1.75. The button used to simply not
+                                 be here, which told a practice with one
+                                 administrator nothing about why, and offered
+                                 it nothing to do. Asking is now an act: it
+                                 meets the refusal, and the refusal carries the
+                                 decision that answers it. */
+                              <span className="flex flex-col items-start gap-1">
+                                <span className="text-xs text-[var(--ink-3)]">Yours; a different person decides it.</span>
+                                <button
+                                  type="button"
+                                  className="min-h-[var(--target)] rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-semibold disabled:opacity-50"
+                                  disabled={busy !== null}
+                                  aria-label={`Nobody else can decide mapping ${m.accountCode}`}
+                                  onClick={() => void decide(m, "approved")}
+                                >
+                                  Nobody else can decide this
+                                </button>
+                              </span>
                             ) : (
                               <span className="text-xs text-[var(--ink-3)]">Decided</span>
                             )}

@@ -28,7 +28,7 @@ import {
 } from "@/lib/controls/riskView";
 import type { ReasonCodeRow } from "@/lib/ledger/reasons";
 import type { AttestationRow } from "@/lib/controls/attestations";
-import { DecisionForm, type DecisionDraft } from "./decision-form";
+import { DecisionForm, type DecisionDraft } from "../decision-form";
 import { Refusal, type RefusalContent } from "./refusal";
 import { DeliveryPanel, type AddressFormState, type AddressResponse } from "../delivery-panel";
 import {

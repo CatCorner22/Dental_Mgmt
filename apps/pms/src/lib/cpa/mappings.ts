@@ -1,7 +1,10 @@
-import { and, asc, desc, eq } from "drizzle-orm";
-import { glMappings, uuidv7 } from "@pms/db";
+import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
+import type { ControlDecision } from "@pms/controls-engine";
+import { glMappings, users, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { appendControlEvent } from "../controls/events";
+import { listDecisions } from "../controls/decisions";
+import { soleDeciderRefusal, soleDeciderStanding } from "./soleDecider";
 import { ANY_REASON, GL_BUCKETS, GL_KINDS, GL_SIDES, mappingKey, type GlMapping, type GlSide, type MappingStatus } from "./types";
 
 export { ANY_REASON, GL_BUCKETS, GL_KINDS, GL_SIDES, mappingKey };
@@ -176,8 +179,17 @@ export async function decideMapping(
   if (row.status !== "proposed") {
     return { ok: false, status: 409, errors: [`This proposal was already ${row.status} by ${row.decidedByName ?? "someone"}.`] };
   }
+  let licensedBy: ControlDecision | null = null;
   if (row.proposedById === input.actor.id) {
-    return { ok: false, status: 403, errors: ["You proposed this mapping; a different person must approve or reject it."] };
+    // A practice with one administrator can propose a mapping nobody may
+    // decide, and then close no month ever (Increment 1.75). The control
+    // stands down only while a decision says so — read from the register, so
+    // nothing here can disagree with the rows a reader would check.
+    const standing = soleDeciderStanding(await listDecisions(db, input.tenantId), now.toISOString().slice(0, 10));
+    if (standing.standing === "none") {
+      return { ok: false, status: 403, errors: soleDeciderRefusal(await otherDeciders(db, input.tenantId, input.actor.id)) };
+    }
+    licensedBy = standing.decision;
   }
 
   await db
@@ -189,11 +201,42 @@ export async function decideMapping(
     input.tenantId,
     input.actor.id,
     "gl_mapping.decided",
-    { mappingId: row.id, decision: input.decision, glBucket: row.glBucket, kind: row.kind, reasonCode: row.reasonCode, accountCode: row.accountCode, proposedById: row.proposedById },
+    {
+      mappingId: row.id,
+      decision: input.decision,
+      glBucket: row.glBucket,
+      kind: row.kind,
+      reasonCode: row.reasonCode,
+      accountCode: row.accountCode,
+      proposedById: row.proposedById,
+      // Whether one pair of hands did both, and what licensed it. Neither is
+      // stored on the mapping: the row already carries both ids, so "decided
+      // alone" is `decidedById === proposedById` wherever anybody reads it,
+      // and a column repeating that could only ever disagree with it.
+      decidedAlone: row.proposedById === input.actor.id,
+      licensedBy: licensedBy?.id ?? null,
+    },
     now
   );
   const after = await db.select().from(glMappings).where(eq(glMappings.id, input.mappingId));
   return { ok: true, mapping: mapRow(after[0]!) };
+}
+
+/**
+ * How many other people could decide this proposal: active administrators of
+ * this practice who are not the caller (Increment 1.75).
+ *
+ * The refusal counts them rather than asserting that somebody exists, because
+ * the sentence it replaces named an act the reader might have no way to ask
+ * anybody to perform. Rank is read here the way `withGuard` reads it, so the
+ * count cannot promise a person the decide route would then turn away.
+ */
+async function otherDeciders(db: AppDb, tenantId: string, actorId: string): Promise<number> {
+  const rows = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(users)
+    .where(and(eq(users.tenantId, tenantId), eq(users.active, true), eq(users.role, "admin"), ne(users.id, actorId)));
+  return rows[0]?.n ?? 0;
 }
 
 /** Proposals waiting for a second person. */

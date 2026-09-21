@@ -598,7 +598,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await b.audit("month-end package (front desk refusal)");
   }, 150_000);
 
-  it("maps a journal line to an account under maker-checker: the owner proposes, cannot approve their own, and the approval reaches the journal", async () => {
+  it("maps a journal line under maker-checker: the owner proposes, cannot approve their own, records that this practice has one administrator, and the approval reaches the journal", async () => {
     await b.signIn("ridgeview-owner", "/cpa");
     const section = (id: string) => page().locator(`section[aria-labelledby=${id}]`);
     await section("package-mappings").waitFor({ timeout: 60_000 });
@@ -623,11 +623,57 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await mappings.innerText()).toMatch(/0 approved mappings; 1 waiting for a second person/);
     await b.audit("month-end package, mapping proposed");
 
+    // Increment 1.75. Until now this case stopped here and then cancelled a
+    // close, while its title claimed the approval reached the journal. It
+    // could not: Ridgeview has one administrator, and this product has no way
+    // to appoint a second, so the proposal was undecidable and the month
+    // uncloseable — which is the state every single-administrator practice's
+    // first month-end lands in.
+    //
+    // The owner asks anyway — the row offers that as an act now, rather than
+    // simply omitting a button and explaining nothing — and meets a refusal
+    // that names what to do instead of naming a person who does not exist.
+    await row.getByRole("button", { name: /^Nobody else can decide mapping 1200/ }).click();
+    const panel = mappings.locator("[role=alert]");
+    await panel.waitFor({ timeout: 30_000 });
+    const said = await panel.innerText();
+    expect(said).toContain("no other administrator who could decide it");
+    expect(said).toContain("cannot yet appoint a second administrator");
+    expect(said).toContain("reported to your accountant");
+    // Only the kinds that actually answer this refusal are offered: a decision
+    // to monitor the control would record something true and license nothing,
+    // which is an act that looks like the way out and is not.
+    expect(await panel.getByLabel("Decision").locator("option").allInnerTexts()).toEqual(["Accept residual", "Compensate"]);
+    await panel.getByLabel("Why (at least ten characters)").fill("This practice has one administrator and no way to appoint another.");
+    const reviewDay = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10);
+    await panel.getByLabel("Review by (required)").fill(reviewDay);
+    await panel.getByRole("button", { name: "Record this decision" }).click();
+    await flash(/^Recorded\. You may now decide your own proposals/).waitFor({ timeout: 30_000 });
+    await expect
+      .poll(async () => await mappings.innerText(), { timeout: 30_000 })
+      .toContain("This practice has recorded that one administrator decides alone");
+    await b.audit("month-end package, one administrator decides alone");
+
+    // And now the approval reaches the journal, which is what this case has
+    // claimed since Increment 1.35 and proves for the first time here.
+    await mappings.getByRole("button", { name: /^Approve mapping 1200/ }).click();
+    await flash(/^Approved: patient_ar · patient_payment → 1200\.$/).waitFor({ timeout: 30_000 });
+    await expect
+      .poll(async () => await mappings.innerText(), { timeout: 30_000 })
+      .toMatch(/1 approved mapping; 0 waiting for a second person/);
+    expect(await section("package-journal").innerText()).toContain("1200");
+
+    // The accountant is told, in the tie-out row their seat reads.
+    expect(await section("package-tieout").innerText()).toContain("decided by the person who proposed");
+    expect(await section("package-tieout").innerText()).toContain("under a recorded decision that this practice has one administrator");
+
     // The current month cannot be closed: it is still taking rows, so no control appears for it.
     expect(await section("package-stamp").innerText()).toMatch(/month in progress/);
     expect(await page().getByRole("button", { name: "Close month" }).count()).toBe(0);
 
-    // A month that has ended offers the close, behind one confirmation, and refuses while lines are unmapped.
+    // A month that has ended offers the close behind one confirmation. This
+    // case cancels rather than closing: a later case in this file closes a
+    // month for good, and two closes of one month is a 409 rather than a test.
     const lastMonth = new Date();
     lastMonth.setUTCDate(1);
     lastMonth.setUTCMonth(lastMonth.getUTCMonth() - 1);
@@ -638,7 +684,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await b.audit("month-end package, close confirmation");
     await page().getByRole("button", { name: "Cancel" }).click();
     expect(await page().getByRole("button", { name: "Close it for good" }).count()).toBe(0);
-  }, 150_000);
+  }, 180_000);
   it("holds a large correction as one request, shows it to the owner as a correction, and writes both halves on approval", async () => {
     await b.signIn("ridgeview-front", "/ledger");
     await page().getByRole("heading", { name: "Ledger" }).waitFor({ timeout: 60_000 });
