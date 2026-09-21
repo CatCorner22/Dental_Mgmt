@@ -783,6 +783,67 @@ Widening `/risk` would hand this seat the practice's SoD findings, its decision 
 **Not in Increment 1.74.** The month-close deadlock a single-admin practice sits in, which needs an argument about the SoD rulebook rather than a surface. Any change to who may hold an address: the seat still sets its own and nobody else's, enforced at the database. A landing that reads the viewer's seat, argued and reverted in Increment 1.72. The notices themselves — what this seat is owed is what Increment 1.57 derives, unchanged.
 
 
+## Increment 1.75
+
+A practice with one administrator can never close a month. Not "rarely" — **never**, and it is the first month-end every such practice reaches.
+
+The chart of accounts runs under maker-checker (Increment 1.35): proposing a mapping needs manager rank, deciding one needs administrator rank **and a different pair of hands**. `closeMonth` refuses while any journal line is unmapped, with no waiver. So the sole administrator proposes a mapping nobody may decide, every line stays unmapped, and the outside accountant never receives a frozen month.
+
+## What made it a trap rather than a gap
+
+**Nothing in the product gets them out.** No route writes `users.role`. The only `insert(users)` this product performs hard-codes `readonly` for the outside accountant's seat (Increment 1.71), and the store updates `active`, the MFA fields and the password — nothing else. A practice cannot appoint a second administrator, so the control asks for a person the product gives it no way to have.
+
+And the refusal said: *"You proposed this mapping; a different person must approve or reject it."* True, and useless. It names an act the reader cannot perform and implies a path that does not exist.
+
+## The escape is a decision, and the register already held everything it needed
+
+Increment 1.31 settled the shape for a control that must sometimes stand down: a decision with a reason, a residual note and a required review date, with the control's state **derived from whether that decision stands**. `DECISION_SUBJECT_KINDS` already carries `"control"`, `DECISION_KINDS` already carries `accept_residual`, and `validateDecision` already requires the review date.
+
+So this increment adds **no exception action, no channel, no table and no column**. `soleDeciderStanding` reads the newest decision on the subject `gl_mapping_maker_checker`; retiring it reads as undecided again, and the second pair of hands comes back with nothing to correct.
+
+`ThresholdException` would have been the wrong home. It is channel-scoped — `validateThresholdException` runs every entry through `isReleaseChannel` — and its four actions all govern money release. The chart of accounts is not a release channel, and a pseudo-channel for it would corrupt the vocabulary the six-channel coverage table reads.
+
+## The database keeps the guarantee, and learns to read
+
+Migration 0028 wrote maker-checker into the table: `CHECK (decided_by_id IS NULL OR decided_by_id <> proposed_by_id)`. A CHECK sees one row, and the way out is a fact in another table — so migration 0053 replaces it with a trigger that reads the register:
+
+| Before | After |
+|---|---|
+| A CHECK: the decider is never the proposer | A trigger: never, **unless the practice has recorded that it decides alone** |
+| Enforced at the database | Still enforced at the database |
+| No way out | A dated, reviewable, reported way out |
+
+A decider who is not the proposer is admitted exactly as before, and a self-decision with nothing behind it is refused exactly as before — with a message naming the register rather than a person the practice may not have.
+
+## The decision is self-licensed, and has to be
+
+`recordDecision` refuses self-licensing: nobody accepts or compensates a conflict on their own duties. Here the sole administrator records the decision that licenses the sole administrator, which is self-licensing in substance — and it slips past the letter, because the check derives its person from the subject id and a `"control"` subject names none.
+
+That is not something to leave silent. **Requiring a second administrator to record it reproduces the deadlock one level up**: the practice would need two administrators to license the state it is in precisely because it has one.
+
+So what makes it safe is not a second pair of hands. It is that the standing-down is dated, reviewed, and **reported to the one independent party this product has**. The month-end package states how many of the mappings this month's own figures were read through had one pair of hands on both ends, and `PACKAGE_SCHEMA_VERSION` moves to `package-v7` because that is a figure about the month and belongs inside the hash. `approved` and `pending` stay outside it, as they always have: those are the practice's position now, and folding them in would move a frozen month's hash from a later month's work.
+
+I rejected requiring the accountant to attest it. Increment 1.51's machinery fits and the seat is independent by construction, but a practice with no accountant would then be unable to close — a new deadlock in place of the old one. Reporting to that seat is unconditional; depending on it is not.
+
+## Two surfaces that would have shipped the same defect twice
+
+Building this, I twice nearly shipped the shape Increments 1.72 and 1.74 exist to fix.
+
+**The Approve button is hidden from the proposer.** A practice could record the decision and still find no way to act on it. So asking is now an act: the row offers "Nobody else can decide this", the refusal answers with what to do, and the decision form sits inside the refusal.
+
+**The form offered every decision kind.** Its default is `remediate`, which licenses nothing — the browser case caught this by recording a decision and watching the control stay shut. Recording that the practice will monitor the control is true and changes nothing, so offering it here would hand somebody an act that looks like the way out and is not. Only `accept_residual` and `compensate` are offered.
+
+## The test that claimed what the product could not do
+
+`money-desk.e2e.test.ts` carried a case titled *"…the owner proposes, cannot approve their own, and the approval reaches the journal"*. It proposed, asserted the owner could not decide their own, opened the close confirmation, and clicked **Cancel**. It never approved anything and never closed anything.
+
+Nobody noticed because the fixture *could not* approve: Ridgeview has one administrator and the product cannot make a second. The title recorded an intention the product had never satisfied. It now records the decision, approves, and watches the account land on the journal line — which that sentence has claimed since Increment 1.35 and proves here for the first time.
+
+- **Tests.** Unit (11): the standing read from the register; a decision about another subject licensing nothing; only the kinds that say the practice chose this state; a retirement tightening the control back; an overdue review still licensing and saying so; the refusal counting the people who could decide, and naming the act where there are none; the accountant's sentence. Live (5): the sole administrator refused in three sentences, and the database refusing it too; a `monitor` decision licensing nothing; the decision admitting the self-decision, with the chain naming `decidedAlone` and the decision that licensed it; the package reporting the count and the tie-out saying so in the row the accountant's seat reads; retirement putting the second pair of hands back, at the service and at the database. Migration (4): the CHECK dropped for a trigger; the newest-decision read with only the licensing kinds; no column that could disagree with the register; the refusal still naming where a licence would come from. Browser (1): the rewritten maker-checker case above.
+
+**Not in Increment 1.75.** User administration, which is the root cause: this product ships a control requiring two people and no way to have two people, and a recorded decision buys a practice a governed way to proceed rather than a second person. Retiring the decision from the month-end screen — Practice Risk is where the register is reviewed, and a second place to retire one would be a second answer. Any change to `closeMonth`, which still refuses while a line is unmapped; what changed is that the practice can now map them. The MFA recovery lockout the seat-reachability audit surfaced, which is queued and worse.
+
+
 ## Increment 1.68
 
 Increment 1.65 gave a proof a life, and had the round ask for a new code inside its last thirty days so that nothing would stop in silence. It then left a trap nobody had walked into yet: **once the proof lapsed, the round stopped asking. Forever.**

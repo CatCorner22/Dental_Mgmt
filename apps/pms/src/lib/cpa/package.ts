@@ -12,6 +12,8 @@ import { appendControlEvent } from "../controls/events";
 import { loadActivePolicy } from "../controls/policy";
 import { canonicalJson, computeDigest, type DigestPeriod, type WeeklyDigest } from "../digest/digest";
 import { activeMappings, pendingMappings, resolveMapping } from "./mappings";
+import type { GlMapping } from "./types";
+import { soleDeciderSentence } from "./soleDecider";
 import { formatCents, formatLedgerKind } from "../ledger/format";
 
 /**
@@ -76,8 +78,22 @@ export type MonthPackage = {
   depositRegister: { rows: DepositRow[]; count: number; totalCents: number };
   /** The same counts the weekly digest computes, over the month. */
   counts: WeeklyDigest;
-  /** The chart-of-accounts mapping in force, and what is still unmapped or waiting (Increment 1.35). */
-  mappings: { approved: number; pending: number; unmappedLines: number };
+  /**
+   * The chart-of-accounts mapping in force, and what is still unmapped or
+   * waiting (Increment 1.35).
+   *
+   * `decidedAlone` counts the mappings **this month's own lines were read
+   * through** that one person both proposed and decided (Increment 1.75), so
+   * it is a figure about the month and sits inside the hash. A practice with a
+   * single administrator can
+   * only close a month at all by recording a decision that lets it, and the
+   * accountant reading these figures is the one independent party this
+   * product has: they receive the fact here rather than depending on somebody
+   * thinking to mention it. Counted from the rows — a mapping was decided
+   * alone exactly when `decidedById` equals `proposedById` — so no stored
+   * figure can disagree with the mappings underneath it.
+   */
+  mappings: { approved: number; pending: number; unmappedLines: number; decidedAlone: number };
   /**
    * The days of this month the practice sealed, and what posted against them
    * afterward (Increment 1.44). Windowed on the sealed day, not on the posting:
@@ -129,8 +145,16 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
     .where(inWindow(ledgerEntries, ledgerEntries.postedAt))
     .groupBy(ledgerEntries.glBucket, ledgerEntries.kind)
     .orderBy(ledgerEntries.glBucket, ledgerEntries.kind);
+  // Which mappings this month's own lines were read through (Increment 1.75),
+  // so the single-person count below is a figure about the month rather than
+  // the practice's position now. `approved` and `pending` are position-now and
+  // deliberately outside the hash; a count over every active mapping would
+  // move a frozen month's hash whenever a later month decided one alone, which
+  // is precisely the coupling Increment 1.42 found and 1.43 made legible.
+  const mappingsUsed = new Map<string, GlMapping>();
   const journal = journalRows.map<JournalRow>((r) => {
     const mapping = resolveMapping(active, r.bucket, r.kind, null);
+    if (mapping) mappingsUsed.set(mapping.id, mapping);
     return {
       bucket: r.bucket,
       kind: r.kind,
@@ -141,6 +165,8 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
     };
   });
   const unmappedLines = journal.filter((r) => !r.account).length;
+  // One pair of hands on both ends of a mapping this month's figures rest on.
+  const decidedAlone = [...mappingsUsed.values()].filter((m) => m.decidedById !== null && m.decidedById === m.proposedById).length;
 
   // Adjustments, write-offs, refunds, and reversals by reason code, with how many cited an approval.
   const reasonRows = await db
@@ -280,10 +306,16 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
       key: "journal_mapped",
       label: "Every journal line is mapped to an account",
       holds: unmappedLines === 0,
+      // The single-person count rides here rather than on the chart-of-accounts
+      // section, because that section is the practice's own maker-checker and
+      // the accountant's seat is not offered it (Increment 1.49). This row is
+      // one the seat reads, and it is the row the count qualifies: "every line
+      // is mapped" says nothing about how many hands agreed the mapping.
       detail:
-        unmappedLines === 0
+        (unmappedLines === 0
           ? `${journal.length} line${journal.length === 1 ? "" : "s"} mapped from ${active.size} approved mapping${active.size === 1 ? "" : "s"}.`
-          : `${unmappedLines} of ${journal.length} lines have no approved mapping${pending.length ? `; ${pending.length} proposal${pending.length === 1 ? "" : "s"} waiting for a second person` : ""}.`,
+          : `${unmappedLines} of ${journal.length} lines have no approved mapping${pending.length ? `; ${pending.length} proposal${pending.length === 1 ? "" : "s"} waiting for a second person` : ""}.`) +
+        (decidedAlone > 0 ? ` ${soleDeciderSentence(decidedAlone, mappingsUsed.size)}` : ""),
     },
     {
       key: "sealed_days_undisturbed",
@@ -318,7 +350,7 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
     depositRegister: { rows: register, count: registerCount, totalCents: registerTotal },
     counts,
     sealedDays,
-    mappings: { approved: active.size, pending: pending.length, unmappedLines },
+    mappings: { approved: active.size, pending: pending.length, unmappedLines, decidedAlone },
     controls: {
       coverage: coverage.map((c) => ({ channel: c.channel, label: c.label, enforcement: c.enforcement, status: c.status, thresholdUsd: c.thresholdUsd, activeExceptions: c.activeExceptions })),
       activeExceptions: exceptions.map((e) => ({ id: e.id, label: e.label, action: e.action, channels: e.channels, effectiveTo: e.effectiveTo ?? null })),
@@ -357,7 +389,13 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
  * v5: the tie-out line for the channels nobody vouched for (1.52).
  * v6: the digest's count of channels attested in the period (1.53).
  */
-export const PACKAGE_SCHEMA_VERSION = "package-v6";
+/**
+ * Increment 1.75 moves this to v7: how many mappings in force one person
+ * decided alone is a figure about the month, so it belongs inside the hash.
+ * A month closed under v6 reports "the package changed shape" rather than "a
+ * figure moved", which is the fallback Increment 1.43 built for exactly this.
+ */
+export const PACKAGE_SCHEMA_VERSION = "package-v7";
 
 /**
  * What the hash covers: every figure the package states about the month.
@@ -399,6 +437,10 @@ export function hashedView(pkg: MonthPackage) {
       decisions: { recorded: decisions.recorded, reviews: decisions.reviews, snapshotsFrozen: decisions.snapshotsFrozen },
     },
     unmappedLines: pkg.mappings.unmappedLines,
+    // A figure about the month: how many of the mappings this month's lines
+    // were read through had one pair of hands on both ends (Increment 1.75).
+    // Sealed with the month, so the copy the accountant received still says it.
+    mappingsDecidedAlone: pkg.mappings.decidedAlone,
     sealedDays: pkg.sealedDays,
     controls: pkg.controls,
     eventsInMonth: pkg.chain.eventsInMonth,
@@ -460,6 +502,7 @@ export function packageRows(pkg: MonthPackage, hash: string): CsvRow[] {
     ["chain", "events_in_month", pkg.chain.eventsInMonth],
     ["mappings", "approved", pkg.mappings.approved],
     ["mappings", "pending", pkg.mappings.pending],
+    ["mappings", "decided_by_one_person", pkg.mappings.decidedAlone],
     ["mappings", "unmapped_journal_lines", pkg.mappings.unmappedLines],
   ];
   for (const [section, key, count] of flat) rows.push({ section, key, label: key.replace(/_/g, " "), count, cents: "" });

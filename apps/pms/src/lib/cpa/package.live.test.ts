@@ -61,7 +61,10 @@ describe.skipIf(!adminUrl)("CPA month-end package (live)", () => {
       ["external_channels_attested", false],
       ["chain_verified", false],
     ]);
-    expect(pkg.mappings).toEqual({ approved: 0, pending: 0, unmappedLines: pkg.journal.rows.length });
+    // `decidedAlone` counts the mappings this month's lines were read through
+    // that one person both proposed and decided (Increment 1.75); with nothing
+    // mapped at all, it is zero for the same reason `approved` is.
+    expect(pkg.mappings).toEqual({ approved: 0, pending: 0, unmappedLines: pkg.journal.rows.length, decidedAlone: 0 });
     expect(pkg.sealedDays).toEqual({ closesFrozen: 0, daysDisturbed: [], postings: 0, firstPostings: 0, totalCents: 0 });
     expect(pkg.tieOut.find((t) => t.key === "chain_verified")!.detail).toMatch(/^No chain check recorded yet/);
     expect(pkg.controls.coverage.map((c) => c.channel)).toEqual(["ach", "check", "writeoff", "vendor_new", "deposit", "payroll"]);
