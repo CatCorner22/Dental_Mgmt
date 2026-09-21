@@ -892,3 +892,80 @@ export function activeExceptionSummary(policy: DualReleasePolicy): {
     ).length,
   };
 }
+
+/**
+ * What a change of rank moves (Increment 1.78).
+ *
+ * The rules above name their signers by role **label** — `canInitiate` and
+ * `canSecond` in `listEligibleApprovers` read `rule.firstApproverRoles` and
+ * `rule.secondApproverRoles` against `p.role`. The app maps `role === "admin"`
+ * onto "Owner / Dentist", so promoting somebody changes which releases they
+ * may start and second without granting them a single entitlement.
+ *
+ * That is worth reporting, and it is **not** a segregation-of-duties conflict.
+ * `detectSodConflicts` scores duty combinations from entitlements, and the app
+ * builds its assignments with `assignmentsFromGrants`, which reads live grant
+ * rows and deliberately infers nothing from a label. So a promotion adds no
+ * conflict for the rulebook to refuse, and a gate modelled on `evaluateGrant`
+ * would be a check that never fires.
+ *
+ * Nor does it let one person be both halves of a release: `evaluateRelease`
+ * filters the initiator out of the eligible seconds, so two distinct people
+ * are still required whatever labels they carry.
+ *
+ * What is left is a fact the practice should read before it acts, and an
+ * auditor should read afterwards: these channels, gained or lost.
+ */
+export interface SigningShift {
+  /** Channels the person could not start before and could after. */
+  gainedInitiate: ReleaseChannel[];
+  /** Channels the person could not second before and could after. */
+  gainedSecond: ReleaseChannel[];
+  /** Channels the person could start before and could not after. */
+  lostInitiate: ReleaseChannel[];
+  /** Channels the person could second before and could not after. */
+  lostSecond: ReleaseChannel[];
+}
+
+function signingFor(
+  policy: DualReleasePolicy,
+  people: Person[],
+  personId: string,
+): { initiate: Set<ReleaseChannel>; second: Set<ReleaseChannel> } {
+  const initiate = new Set<ReleaseChannel>();
+  const second = new Set<ReleaseChannel>();
+  for (const rule of policy.rules) {
+    const me = listEligibleApprovers(policy, rule.channel, people).find((p) => p.id === personId);
+    if (!me) continue;
+    if (me.canInitiate) initiate.add(rule.channel);
+    if (me.canSecond) second.add(rule.channel);
+  }
+  return { initiate, second };
+}
+
+/**
+ * The channels one person's signing power gains and loses when their role
+ * label changes. Everybody else is left exactly as they are, so the answer is
+ * about this person and no one else.
+ */
+export function signingShift(
+  policy: DualReleasePolicy,
+  people: Person[],
+  personId: string,
+  toRole: string,
+): SigningShift {
+  const before = signingFor(policy, people, personId);
+  const after = signingFor(
+    policy,
+    people.map((p) => (p.id === personId ? { ...p, role: toRole } : p)),
+    personId,
+  );
+  const gained = (a: Set<ReleaseChannel>, b: Set<ReleaseChannel>) =>
+    Array.from(a).filter((c) => !b.has(c));
+  return {
+    gainedInitiate: gained(after.initiate, before.initiate),
+    gainedSecond: gained(after.second, before.second),
+    lostInitiate: gained(before.initiate, after.initiate),
+    lostSecond: gained(before.second, after.second),
+  };
+}

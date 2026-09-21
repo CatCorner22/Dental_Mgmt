@@ -803,6 +803,78 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await b.audit("practice risk, getting somebody back in");
   }, 120_000);
 
+  it("appoints a second administrator, which is what makes the recovery panel above usable", async () => {
+    /**
+     * Increment 1.78, and the one case that ties two increments together.
+     *
+     * The case above reads the refusal a one-administrator practice meets.
+     * Nothing in this product wrote `users.role` before this increment, so
+     * that refusal named a remedy — "appoint a second administrator" — the
+     * practice could not take. This drives the remedy and then watches the
+     * refusal turn into a form.
+     *
+     * It puts the rank back afterwards, because a later case in this suite
+     * signs in as `ridgeview-front` and expects the user-rank Refusal. That
+     * restoration is worth asserting in its own right: a practice that
+     * promotes somebody should be able to undo it.
+     */
+    await b.signIn("ridgeview-owner", "/risk");
+    const ranks = page().locator("section[aria-labelledby=ranks]");
+    await ranks.waitFor({ timeout: 60_000 });
+    expect(await ranks.innerText()).toMatch(/1 administrator\b/);
+
+    // The recovery panel offers nothing yet, which is the state this case
+    // exists to change.
+    expect(await page().locator("#regain-start").count()).toBe(0);
+
+    // The viewer's own row offers no control at all, for the reason a grant
+    // may not license its own conflict — it says so instead.
+    expect(await ranks.innerText()).toMatch(/Your own rank/);
+
+    /**
+     * Matched on the person's name, never on the control role beside it:
+     * `precogRole` falls through to "Front Desk Lead" for everybody without a
+     * grant, so a matcher reading that label picks whichever ungranted person
+     * happens to sort first — which here promoted the one account with no
+     * second factor, left the eligible count at one, and made this case fail
+     * for a reason that had nothing to do with what it asserts.
+     *
+     * Finn Front carries a second factor in the seed. Nora Newhire does not,
+     * and `isEligibleAdmin` refuses an administrator who cannot prove one, so
+     * promoting her would not open the panel below.
+     */
+    const setRank = async (displayName: string, rank: string, expected: RegExp) => {
+      const row = page().locator("section[aria-labelledby=ranks] li").filter({ hasText: displayName });
+      await row.waitFor({ timeout: 60_000 });
+      await row.locator("[id^='rank-open-']").click();
+      const select = row.locator("select");
+      await select.waitFor({ timeout: 30_000 });
+      await select.selectOption(rank);
+      await row.locator("[id^='rank-submit-']").click();
+      await expect.poll(async () => await ranks.innerText(), { timeout: 60_000 }).toMatch(expected);
+    };
+
+    await setRank("Finn Front", "admin", /2 administrators/);
+    await b.audit("practice risk, a second administrator appointed");
+
+    // And the refusal above is now a form: the remedy Increment 1.77 named is
+    // one this product can obey.
+    await page().reload({ waitUntil: "networkidle" });
+    await page().locator("#regain-start").waitFor({ timeout: 60_000 });
+    expect(await page().locator("#regain-target").count()).toBe(1);
+    expect(await page().locator("section[aria-labelledby=regain]").innerText()).not.toMatch(
+      /Appoint a second administrator/
+    );
+
+    // Put it back, so the later user-rank case reads what it was written for.
+    // Undoing an appointment is worth driving in its own right.
+    await setRank("Finn Front", "user", /1 administrator\b/);
+    await page().reload({ waitUntil: "networkidle" });
+    expect(await page().locator("section[aria-labelledby=regain]").innerText()).toMatch(
+      /Appoint a second administrator/
+    );
+  }, 180_000);
+
   it("answers a recovery link that opens nothing in one sentence, and offers no way around it", async () => {
     // Increment 1.77, and the shape Increments 1.67 and 1.71 settled for every
     // page outside a session: a link that ran out, a link nobody approved and
