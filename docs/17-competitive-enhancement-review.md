@@ -844,6 +844,53 @@ Nobody noticed because the fixture *could not* approve: Ridgeview has one admini
 **Not in Increment 1.75.** User administration, which is the root cause: this product ships a control requiring two people and no way to have two people, and a recorded decision buys a practice a governed way to proceed rather than a second person. Retiring the decision from the month-end screen — Practice Risk is where the register is reviewed, and a second place to retire one would be a second answer. Any change to `closeMonth`, which still refuses while a line is unmapped; what changed is that the practice can now map them. The MFA recovery lockout the seat-reachability audit surfaced, which is queued and worse.
 
 
+## Increment 1.76
+
+Every account in this product was counting down to a lockout nothing could undo. The practice owner's included.
+
+Four facts composed into it, and each is ordinary on its own:
+
+| | |
+|---|---|
+| `mfa_enrolled_at` is written once | by `completeMfaEnrollment`, and cleared **nowhere** |
+| both enrolment functions refused an enrolled account | `beginMfaEnrollment` threw; `completeMfaEnrollment` returned `already_enrolled` |
+| `/enroll-mfa` bounced anybody enrolled to `/home` | the middleware's second redirect |
+| recovery codes only ever decrease | `replaceRecoveryHashes` has exactly one caller, the burn in `authorize`, and the only writer that *adds* is the enrolment nobody enrolled can reach |
+
+So the supply is ten, it never goes up, and the screen that could refill it is shut to everyone who has ever used it. Burn the last code, lose the phone, and the account is gone — no re-pairing, no re-issue, and a two-admin recovery ceremony that resets only the password and has no surface at all.
+
+## The trap in the obvious fix
+
+Opening enrolment to an enrolled account is the fix, and doing it directly would have made things **worse**. `setMfaPendingSecret` writes `mfa_secret_enc` itself — harmless on a first enrolment, where the column is null and there is nothing to lose, and destructive on a re-pair, where merely **opening the screen** overwrites the working secret. A person who started a re-pair and changed their mind would have had the countdown replaced by an immediate lockout.
+
+So migration 0054 gives a pairing in progress a column of its own. The live factor is untouched until a code from the new authenticator comes back — the rule the address proof has held since Increment 1.61: nothing becomes the destination until somebody shows they can read from it.
+
+Neither auth lookup returns that column, deliberately. A pairing in progress is not a factor, and the functions that resolve a person for a sign-in or for a guard should be **incapable** of handing one out rather than merely disciplined about it. The enrolment path reads it through an accessor of its own. That also avoided altering `auth_lookup_user_by_id`, which is owned by `app_auth_lookup` and cannot be dropped by the migration role — a constraint I found by trying.
+
+## Why a session is the whole of the authority
+
+A session exists only because somebody passed the second factor or spent a recovery code. The person who has just spent one, on a phone they no longer have, **is** who a re-pair is for.
+
+- Asking for the old code as well would refuse the one case this exists to serve.
+- Asking a second administrator to approve it would be the deadlock Increment 1.75 spent an increment undoing, in a product where a practice may have exactly one.
+
+What the act does carry is consequence: the new secret replaces the old, a fresh set of ten codes replaces whatever was left, every other session is revoked, and the chain records `auth.mfa_repaired` rather than `auth.mfa_enrolled` — two acts, two kinds, so an audit can tell a factor that changed from one first set.
+
+## The reissue is the fix, not the re-pairing
+
+Pairing a new phone stops the countdown; **reissuing the codes is what ends it**. The same act that pairs the phone mints the ten codes that would be used to reach that phone, so the supply is restored rather than merely stopped from falling. Without that, a person who re-paired would still be walking the same one-way path with however many codes they had left.
+
+## Finding it
+
+The link sits in the app header, outside `nav`. `navLinksFor` answers which screens a rank or a grant opens; this is not one of those — every signed-in person may re-pair their own factor. A mechanism nobody can find is not a mechanism, which is what Increments 1.72 and 1.74 were both about, and what this increment would have repeated by shipping the route alone.
+
+The screen now serves both acts and reads its visitor: a first pairing is forced and offers no way out, while a re-pair says the old phone keeps working until a code comes back and offers "Leave this as it is".
+
+- **Tests.** Unit (8, five new): a pairing starts on an enrolled account and says so; the live factor, its enrolment date and its codes are untouched while one is staged; a code from the factor already on the account is refused, so a code the person already holds cannot finish a pairing nobody started and silently reissue their codes; the promotion replaces the secret, mints ten fresh codes and clears the staging; the new authenticator signs in and the old one does not; the chain names the act. Live (3): the same against real Postgres, plus a case asserting that **neither** auth lookup returns the pending column — read off the result fields, so it fails if anybody adds it. Migration (3): the column added, its comment, and nothing else touched. Browser (1): the owner finds the link in the header, reads that the old phone still works, pairs a new authenticator, sees ten new codes, and then signs in on the new one while the old one is refused.
+
+**Not in Increment 1.76.** The person who is **already** locked out: the two-admin recovery ceremony has three working routes, zero callers anywhere in the app, and resets only the password — so it cannot help somebody whose factor is gone even once it has a screen. That is the next increment, and it needs a way to clear an enrolment, which no store method offers today. Also out: the JWT that keeps saying "needs enrolment" after enrolment completes, pinning a dead session to `/enroll-mfa` with the only sign-out control in transient React state; and any rate limit on how often an account may re-pair.
+
+
 ## Increment 1.68
 
 Increment 1.65 gave a proof a life, and had the round ask for a new code inside its last thirty days so that nothing would stop in silence. It then left a trap nobody had walked into yet: **once the proof lapsed, the round stopped asking. Forever.**

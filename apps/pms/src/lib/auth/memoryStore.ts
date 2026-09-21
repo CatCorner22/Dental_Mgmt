@@ -56,6 +56,8 @@ export async function createMemoryStore(
   const pepper = cryptoEnv.DEV_MFA_KEY ?? cryptoEnv.ENCRYPTION_KEY ?? "a".repeat(64);
 
   const users = new Map<string, StoredUser>();
+  /** Authenticators being paired, kept off the user so no lookup can serve one. */
+  const pendingSecrets = new Map<string, EncryptedBlob>();
   const issuedRecoveryCodes = new Map<string, string[]>();
   for (const seed of DEV_USERS) {
     const enrolled = seed.mfaEnrolled;
@@ -159,10 +161,12 @@ export async function createMemoryStore(
       const user = users.get(userId);
       if (user) users.set(userId, { ...user, recoveryCodeHashes: [...hashes] });
     },
+    async getMfaPendingSecret(userId) {
+      return pendingSecrets.get(userId) ?? null;
+    },
     async setMfaPendingSecret(userId, secretEnc) {
-      const user = users.get(userId);
-      if (!user) return;
-      users.set(userId, { ...user, mfaSecretEnc: secretEnc });
+      if (!users.has(userId)) return;
+      pendingSecrets.set(userId, secretEnc);
     },
     async completeMfaEnrollment(userId, input) {
       const user = users.get(userId);
@@ -173,6 +177,8 @@ export async function createMemoryStore(
         mfaEnrolledAt: input.enrolledAt,
         recoveryCodeHashes: [...input.recoveryHashes],
       });
+      // A pairing is in progress or finished, never both.
+      pendingSecrets.delete(userId);
     },
     async logPhiAccess(input) {
       store.phiLog.push(input);

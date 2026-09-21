@@ -25,6 +25,17 @@ import { getAuthStore } from "@/lib/auth/resolveStore";
  * admits every signed-in account and no more; `requireMfa: false` is what lets
  * an unenrolled session through at all, and the session is still the thing
  * being trusted.
+ *
+ * Since Increment 1.76 the same route also re-pairs an account that already
+ * has a factor, and the session is the whole of the authority for that. A
+ * session exists only because somebody passed the second factor or spent a
+ * recovery code — and the person who has just spent one, on a phone they no
+ * longer have, is exactly who a re-pair is for. Asking for the old code as
+ * well would refuse the one case this exists to serve, and asking a second
+ * administrator to approve it would be the deadlock Increment 1.75 spent an
+ * increment undoing. The live factor is untouched until a code from the new
+ * authenticator comes back (migration 0054), so a session that wandered here
+ * and stopped has changed nothing.
  */
 
 export const GET = withGuard(
@@ -34,7 +45,7 @@ export const GET = withGuard(
       return Response.json({ error: "Authorization store is not configured." }, { status: 503 });
     }
     const start = await beginMfaEnrollment(store, ctx.access.user.id);
-    return Response.json({ ok: true, otpauthUri: start.otpauthUri });
+    return Response.json({ ok: true, otpauthUri: start.otpauthUri, repairing: start.repairing });
   },
   { requireMfa: false, minRank: "readonly" }
 );
@@ -55,7 +66,7 @@ export const POST = withGuard(
       );
     }
     await store.revokeSessionsForUser(ctx.access.user.id, new Date());
-    return Response.json({ ok: true, recoveryCodes: result.recoveryCodes, signOut: true });
+    return Response.json({ ok: true, recoveryCodes: result.recoveryCodes, repaired: result.repaired, signOut: true });
   },
   { requireMfa: false, minRank: "readonly" }
 );

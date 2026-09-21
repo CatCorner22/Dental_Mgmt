@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays } from "@pms/controls-engine";
 import { assertNoProblems, e2eEnabled, openBrowser, startProductionApp, type E2eApp, type E2eBrowser } from "./harness";
 import { currentCodeForTest } from "../lib/auth/totp";
+import { DEV_MFA_SECRET, DEV_PASSWORD } from "@pms/db/seed-data";
 
 /**
  * The Practice Risk page in a real browser against the production server:
@@ -730,7 +731,9 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     // unenrolled session to the enrolment screen, and the address bar keeps
     // the action's target while the enrolment page renders. Asserting on the
     // path would test that quirk rather than this increment's rule.
-    const enrolment = page().getByRole("heading", { name: "Set up your authenticator" });
+    // Increment 1.76 renamed this screen: it now serves a first pairing and a
+    // re-pairing alike, so it is named for the thing rather than for one act.
+    const enrolment = page().getByRole("heading", { name: "Your authenticator" });
     await enrolment.waitFor({ timeout: 60_000 });
     // The defect this case found: the route opened at `user` rank, so the one
     // seat below it was told "You do not have access to this action" with no
@@ -773,6 +776,68 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     // The one screen this seat reaches (Increment 1.49), now reached by a seat
     // the practice created for itself rather than one the seed provided.
     await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
+  }, 180_000);
+
+  it("lets an enrolled person pair a new authenticator, and signs them in on it", async () => {
+    // Increment 1.76. A second factor was a one-way door: `mfa_enrolled_at` is
+    // written once and cleared nowhere, both enrolment functions refused an
+    // account that carried it, recovery codes only ever decrease, and this
+    // screen bounced anybody already enrolled straight to /home. Ten sign-ins
+    // on codes and a lost phone left an account nobody could reach again — the
+    // owner's included. This case walks the way out.
+    await b.signIn("ridgeview-owner", "/home");
+    await page().getByRole("heading", { name: "Today's board" }).waitFor({ timeout: 60_000 });
+
+    // The act is reachable, which is the half that Increments 1.72 and 1.74
+    // were both about: a mechanism nobody can find is not a mechanism.
+    const link = page().locator("header").getByRole("link", { name: "Your authenticator" });
+    await link.waitFor({ timeout: 60_000 });
+    await link.click();
+    await page().getByRole("heading", { name: "Your authenticator" }).waitFor({ timeout: 60_000 });
+    // The screen reads its visitor: this one already has a factor, and is told
+    // that it keeps working until a code from the new one comes back.
+    await expect
+      .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
+      .toMatch(/The one on your old phone keeps working/);
+    expect(await page().getByRole("link", { name: "Leave this as it is" }).count()).toBe(1);
+    await b.audit("re-pairing an authenticator");
+
+    const uri = (await page().locator("main code").innerText()).trim();
+    const secret = new URL(uri.replace("otpauth://", "https://")).searchParams.get("secret");
+    expect(secret).toMatch(/^[A-Z2-7]+$/);
+    // A new authenticator, not the one the seed gave this account.
+    expect(secret).not.toBe(DEV_MFA_SECRET);
+
+    await page().fill('input[name="totp"]', currentCodeForTest("ridgeview-owner", secret!, Date.now()));
+    await page().getByRole("button", { name: "Replace my authenticator" }).click();
+    await expect
+      .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
+      .toMatch(/This is a new set/);
+    // The codes are reissued rather than merely stopped from falling, which is
+    // what ends the countdown.
+    expect(await page().locator("main li").count()).toBe(10);
+    await b.audit("re-paired, with a fresh set of recovery codes");
+
+    // And the new phone signs in while the old one no longer does.
+    await page().getByRole("button", { name: "Continue to sign in" }).click();
+    await page().waitForURL((url) => url.pathname === "/signin", { timeout: 60_000 });
+    await page().fill('input[name="username"]', "ridgeview-owner");
+    await page().fill('input[name="password"]', DEV_PASSWORD);
+    await page().fill('input[name="totp"]', currentCodeForTest("ridgeview-owner", DEV_MFA_SECRET, Date.now()));
+    await page().click('button[type="submit"]');
+    // Still on the sign-in screen, because the factor it names is gone. A
+    // regex that the sign-in page satisfies merely by existing would pass here
+    // whether or not the old authenticator still worked, so the check is that
+    // the board never arrives.
+    await expect
+      .poll(async () => await page().getByRole("heading", { name: "Today's board" }).count(), { timeout: 15_000 })
+      .toBe(0);
+
+    await page().fill('input[name="username"]', "ridgeview-owner");
+    await page().fill('input[name="password"]', DEV_PASSWORD);
+    await page().fill('input[name="totp"]', currentCodeForTest("ridgeview-owner", secret!, Date.now()));
+    await page().click('button[type="submit"]');
+    await page().getByRole("heading", { name: "Today's board" }).waitFor({ timeout: 60_000 });
   }, 180_000);
 
   it("shows a user-rank account the Refusal, not the page", async () => {
