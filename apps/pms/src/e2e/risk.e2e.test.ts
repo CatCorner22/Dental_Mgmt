@@ -778,6 +778,51 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
   }, 180_000);
 
+  it("tells a practice with one administrator why nobody can bring a locked-out person back", async () => {
+    /**
+     * Increment 1.77. Ridgeview seeds one administrator, which is what every
+     * practice this product can currently produce: no route writes
+     * `users.role`. So this is the state a real practice meets, and the
+     * assertion is that it meets a refusal that says the rule, the practice's
+     * own number, and the one thing that would change it — rather than a form
+     * whose only outcome is a dead end.
+     */
+    await b.signIn("ridgeview-owner", "/risk");
+    const section = page().locator("section[aria-labelledby=regain]");
+    await section.waitFor({ timeout: 60_000 });
+    const said = await section.innerText();
+    expect(said).toMatch(/takes two administrators/);
+    expect(said).toMatch(/one administrator who could take a part/);
+    expect(said).toMatch(/Appoint a second administrator/);
+    // A practice that has met the GL mapping exception (Increment 1.75) must
+    // not be left expecting one here.
+    expect(said).toMatch(/no recorded exception/);
+    // And nothing is offered that cannot be finished.
+    expect(await page().locator("#regain-start").count()).toBe(0);
+    expect(await page().locator("#regain-target").count()).toBe(0);
+    await b.audit("practice risk, getting somebody back in");
+  }, 120_000);
+
+  it("answers a recovery link that opens nothing in one sentence, and offers no way around it", async () => {
+    // Increment 1.77, and the shape Increments 1.67 and 1.71 settled for every
+    // page outside a session: a link that ran out, a link nobody approved and
+    // a link that was never ours are told apart by anybody holding a real one
+    // and by nobody else.
+    await page().context().clearCookies();
+    const shaped = `018f2a10-4c3b-7d21-9e44-5f6a7b8c9d0e.${"A".repeat(43)}`;
+    await page().goto(`${app.base}/regain/${shaped}`, { waitUntil: "networkidle" });
+    expect(await page().locator("main").innerText()).toMatch(/This link no longer works/);
+    // No form, and no sign-in offered as a consolation.
+    expect(await page().locator("#regain-password").count()).toBe(0);
+    expect(await page().locator('input[name="username"]').count()).toBe(0);
+    await b.audit("recovery link, opens nothing");
+
+    // A reference of another shape entirely reads the same, and is refused
+    // before any row is looked up.
+    await page().goto(`${app.base}/regain/not-a-token`, { waitUntil: "networkidle" });
+    expect(await page().locator("main").innerText()).toMatch(/This link no longer works/);
+  }, 120_000);
+
   it("lets an enrolled person pair a new authenticator, and signs them in on it", async () => {
     // Increment 1.76. A second factor was a one-way door: `mfa_enrolled_at` is
     // written once and cleared nowhere, both enrolment functions refused an

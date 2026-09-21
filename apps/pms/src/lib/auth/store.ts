@@ -67,6 +67,23 @@ export interface AuthStore {
     userId: string,
     input: { secretEnc: EncryptedBlob; recoveryHashes: string[]; enrolledAt: Date }
   ): Promise<void>;
+  /**
+   * Puts an account back to having no second factor at all (Increment 1.77):
+   * no live secret, no pairing in progress, no enrolment date, no recovery
+   * codes. One write, because a half-cleared account is worse than either end
+   * of it — an enrolment date with no secret makes `needsMfaEnrollment` false
+   * and every code refused, so the person can neither pass the factor nor be
+   * sent to set a new one.
+   *
+   * The account's sessions go with it: a person whose factor was just removed
+   * by somebody else must not keep a session minted under the old one. That is
+   * part of this rather than a second call beside it, so the two cannot drift
+   * and, against Postgres, so both land in one transaction.
+   *
+   * Only the two-administrator recovery ceremony calls this. Nothing a single
+   * person can reach clears somebody else's factor.
+   */
+  clearMfaEnrollment(userId: string, at: Date): Promise<void>;
   logPhiAccess(input: {
     tenantId: string;
     userId: string;

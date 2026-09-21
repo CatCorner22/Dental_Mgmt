@@ -62,6 +62,7 @@ const invitationsSql = readFileSync(join(here, "../migrations/0051_seat_invitati
 const newestWinsSql = readFileSync(join(here, "../migrations/0052_seat_invitations_newest_wins.sql"), "utf8");
 const soleDeciderSql = readFileSync(join(here, "../migrations/0053_gl_mappings_sole_decider.sql"), "utf8");
 const pendingSecretSql = readFileSync(join(here, "../migrations/0054_mfa_pending_secret.sql"), "utf8");
+const ceremonyGrantSql = readFileSync(join(here, "../migrations/0055_recovery_ceremony_lookup_grant.sql"), "utf8");
 /**
  * The statements of a migration, without its prose.
  *
@@ -1282,5 +1283,35 @@ describe("migration 0054: an authenticator being paired does not displace the on
     expect(statements).not.toMatch(/ALTER COLUMN/);
     expect(statements).not.toMatch(/UPDATE users/);
     expect(statements).not.toMatch(/DELETE FROM users/);
+  });
+});
+
+
+describe("migration 0055: the recovery ceremony lookup can read the table it selects from", () => {
+  it("admits the role the SECURITY DEFINER function runs as, with both halves the rule needs", () => {
+    // Migration 0003 wrote the rule down: FORCE ROW LEVEL SECURITY binds table
+    // owners too, so a lookup owned by `app_auth_lookup` needs a GRANT *and* a
+    // role-scoped SELECT policy. Migration 0007 handed it the function and
+    // gave it neither, so every call answered "permission denied for table
+    // recovery_ceremonies" — which nothing caught, because nothing called it.
+    const statements = statementsOf(ceremonyGrantSql);
+    expect(statements).toMatch(/GRANT SELECT ON recovery_ceremonies TO app_auth_lookup;/);
+    expect(statements).toMatch(/CREATE POLICY recovery_ceremonies_auth_lookup ON recovery_ceremonies\s+FOR SELECT TO app_auth_lookup USING \(true\);/);
+  });
+
+  it("widens nothing else: no other role gains anything, and no row is touched", () => {
+    const statements = statementsOf(ceremonyGrantSql);
+    expect(statements).not.toMatch(/TO PUBLIC/);
+    expect(statements).not.toMatch(/GRANT (INSERT|UPDATE|DELETE|ALL)/);
+    expect(statements).not.toMatch(/DISABLE ROW LEVEL SECURITY/);
+    expect(statements).not.toMatch(/(UPDATE|DELETE FROM) recovery_ceremonies/);
+    // The practice-isolation policy every other reader goes through stays
+    // exactly as it was.
+    expect(statements).not.toMatch(/DROP POLICY/);
+  });
+
+  it("says in the database why one table admits a reader that crosses practices", () => {
+    expect(ceremonyGrantSql).toMatch(/COMMENT ON POLICY recovery_ceremonies_auth_lookup ON recovery_ceremonies/);
+    expect(ceremonyGrantSql).toMatch(/no session and no tenant context/);
   });
 });

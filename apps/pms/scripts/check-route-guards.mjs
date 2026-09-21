@@ -2,6 +2,13 @@
 /**
  * Fails when a route handler or server action is exported without withGuard.
  * Allowlist: /api/health and /api/auth/* (NextAuth transport).
+ *
+ * It used to carry a third entry, api/recovery-ceremony/reset/route.ts, which
+ * Increment 1.77 deleted: the act it performed is now a server action, which
+ * is where this codebase puts every act no session stands behind (Increments
+ * 1.67, 1.71 and 1.77). So "every route under /api passes through withGuard"
+ * is held by the two transport exemptions alone, and an exemption that once
+ * stood for a product decision no longer does.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -14,7 +21,6 @@ const APP = path.join(ROOT, "src/app");
 const ALLOW = [
   path.join(APP, "api/health/route.ts"),
   path.join(APP, "api/auth/[...nextauth]/route.ts"),
-  path.join(APP, "api/recovery-ceremony/reset/route.ts"),
 ];
 
 function walk(dir) {

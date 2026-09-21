@@ -180,6 +180,18 @@ export async function createMemoryStore(
       // A pairing is in progress or finished, never both.
       pendingSecrets.delete(userId);
     },
+    async clearMfaEnrollment(userId, at) {
+      const user = users.get(userId);
+      if (!user) return;
+      users.set(userId, {
+        ...user,
+        mfaSecretEnc: null,
+        mfaEnrolledAt: null,
+        recoveryCodeHashes: [],
+      });
+      pendingSecrets.delete(userId);
+      await store.revokeSessionsForUser(userId, at);
+    },
     async logPhiAccess(input) {
       store.phiLog.push(input);
     },

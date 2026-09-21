@@ -239,6 +239,29 @@ export function createPostgresStore(
           .where(eq(users.id, userId));
       }, env);
     },
+    async clearMfaEnrollment(userId, at) {
+      const user = await this.getUserById(userId);
+      if (!user) return;
+      await withTenantTransaction(user.tenantId, userId, async (db) => {
+        // Every field of the factor, in one statement: see the contract note on
+        // why a half-cleared account is the one state worth refusing to reach.
+        await db
+          .update(users)
+          .set({
+            mfaSecretEnc: null,
+            mfaPendingSecretEnc: null,
+            mfaEnrolledAt: null,
+            recoveryCodesHash: JSON.stringify([]),
+          })
+          .where(eq(users.id, userId));
+        // The sessions go with it. A person whose factor was just removed by
+        // somebody else must not keep a session minted under the old one.
+        await db
+          .update(sessions)
+          .set({ revokedAt: at })
+          .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
+      }, env);
+    },
     async logPhiAccess(input) {
       await withTenantAppendTransaction(input.tenantId, input.userId, async (db) => {
         await db.insert(phiAccessLog).values({

@@ -30,6 +30,7 @@ import type { ReasonCodeRow } from "@/lib/ledger/reasons";
 import type { AttestationRow } from "@/lib/controls/attestations";
 import { DecisionForm, type DecisionDraft } from "../decision-form";
 import { Refusal, type RefusalContent } from "./refusal";
+import { RegainPanel } from "./regain-panel";
 import { DeliveryPanel, type AddressFormState, type AddressResponse } from "../delivery-panel";
 import {
   askForCode as askForCodeAct,
@@ -1369,6 +1370,13 @@ function RiskBody({
           </div>
         </section>
       ) : null}
+
+      {/* Increment 1.77. A person whose authenticator is gone cannot reach the
+          screen Increment 1.76 built, because that screen needs a session they
+          cannot get. Two administrators can. A manager reads this and an
+          administrator acts on it, which is how a practice learns whom to ask
+          — and, where it has one administrator, why nobody can. */}
+      <RegainPanel isAdmin={isAdmin} />
 
       <DeliveryPanel delivery={delivery} form={addressForm} busy={busy} />
 

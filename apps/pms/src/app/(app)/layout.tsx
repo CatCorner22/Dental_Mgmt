@@ -71,7 +71,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
             >
               Your authenticator
             </Link>
-            <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.76</p>
+            <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.77</p>
           </div>
         </div>
       </header>
