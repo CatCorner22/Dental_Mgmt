@@ -1,4 +1,5 @@
 import { auth } from "@/auth-edge";
+import { enrollmentGateAllows } from "@/lib/auth/enrollmentGate";
 import { NextResponse } from "next/server";
 
 /**
@@ -12,18 +13,19 @@ import { NextResponse } from "next/server";
  * to anybody who had already used it. A person on their last code and a new
  * phone had nowhere to go, so every account was counting down to a lockout
  * nothing could undo. The screen reads its visitor and says which act it is.
+ *
+ * Which paths the gate admits is `enrollmentGateAllows`, and it admits the
+ * sign-in page since Increment 1.80: the claim this middleware reads is minted
+ * at sign-in and never rewritten, so it outlives the enrolment that answered
+ * it, and a gate that also held the door shut turned a stale claim into a
+ * screen nobody could leave. That file carries the whole account.
  */
 export default auth((req) => {
   const path = req.nextUrl.pathname;
   const session = req.auth as { needsMfaEnrollment?: boolean } | null;
   const needs = session?.needsMfaEnrollment === true;
 
-  const enrollPath =
-    path === "/enroll-mfa" ||
-    path.startsWith("/api/enroll-mfa") ||
-    path.startsWith("/api/auth");
-
-  if (needs && !enrollPath) {
+  if (needs && !enrollmentGateAllows(path)) {
     return NextResponse.redirect(new URL("/enroll-mfa", req.url));
   }
   return NextResponse.next();

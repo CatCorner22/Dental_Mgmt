@@ -964,6 +964,64 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.80
+
+Increment 1.79 closed by naming what it left behind: "the JWT that keeps saying 'needs enrolment' after enrolment completes". This is that, and it is the last of the cluster Increments 1.72 through 1.79 worked through — the one remaining way this product held somebody on a screen with nothing they could press.
+
+Four facts, each read off the code before anything was built:
+
+| | |
+|---|---|
+| The claim is written once and never again | `auth.config.ts` assigns `token.needsMfaEnrollment` only where NextAuth hands the callback a `user`, which it does at sign-in and at no later request |
+| Finishing an enrolment revokes the session that reached it | `api/enroll-mfa/route.ts` calls `revokeSessionsForUser` on success — correctly, because not one of those sessions passed the factor the account now has |
+| The gate refused the sign-in page | `middleware.ts` admitted `/enroll-mfa`, `/api/enroll-mfa` and `/api/auth`, and redirected everything else, `/signin` included |
+| The only way off the screen lived in React state | the single `signOut` sat inside `if (recoveryCodes)`, which a reload discards |
+
+## The cookie outlived the row it named
+
+Put those four together from the person's side and the trap closes in one step.
+
+They sign in for the first time with no authenticator. They pair one. The route revokes every session for the account and answers with ten recovery codes. The signed cookie in their browser survives that, still carrying a claim minted before the factor existed: **this account still owes a second factor.** Then they reload the page, or close the tab and come back, or their laptop sleeps.
+
+The middleware reads the cookie and believes it, as it must — it runs on the edge, where there is no database to ask — and sends them to `/enroll-mfa`. That screen asks its own route for a setup URI. The route runs `requireAccess`, finds the session revoked, and answers **401**. The form had one reading for a refusal: put the words on the screen. With no setup URI the `Finish enrollment` button stayed disabled; with `repairing` false the `Leave this as it is` link never rendered; with no recovery codes in state the sign-out button was not there either.
+
+One error line, one button that cannot be pressed, and an address bar that refuses to go anywhere else. The session behind it was already dead, so nothing on the screen could have worked even if something had been pressable.
+
+A technical exit did exist — `GET /api/auth/signout` renders NextAuth's own confirmation page, and `/api/auth` was admitted — but it is an address nobody types, and a product whose only escape is an undocumented URL has not offered one.
+
+## A gate may hold somebody out of the application; it may not hold the door
+
+`enrollmentGateAllows` now admits `/signin`, and that is the rule this increment adds rather than a patch on the symptom. A person there holds nothing: every guarded route still refuses an unenrolled account through `requireAccess`, which reads the user row and not the token. What the old gate took from them was the ability to abandon a half-finished sign-in, which is something a person must always be able to do — and which, once the claim went stale, was the difference between a slow screen and a dead end.
+
+The two decisions that produced the trap now live in one tested file rather than in two places nothing could reach. The middleware runs on the edge under NextAuth's wrapper and the form is a client component, of which this app has none under test; so between them they held a person on a screen, and no suite had ever exercised either.
+
+## The field that was already in the response
+
+The route has answered `signOut: true` since Increment 1.72. Nothing read it.
+
+Reading it is what closes the gap: the route revokes the rows, and the screen ends the browser's half of the same session in the same breath, so **the cookie cannot outlive the row it names**. It is read strictly rather than defaulted, because the route is the one place that decides whether a session ends, and a screen that assumed it would be signing people out on its own authority.
+
+The codes stay on screen throughout — nothing is redirected — because they exist in one place, once. A person who reloads past them still loses them, exactly as before; what changes is where that loses them to. It is now the sign-in page, and re-pairing (Increment 1.76) mints a fresh set, so the loss is recoverable rather than terminal.
+
+## What a 401 is, and what it is not
+
+Every other failure this screen can meet leaves a person somewhere they can still act: the code was wrong, the store is not configured, the network dropped. Those belong beside the field, and stay there.
+
+A 401 is different in kind. It means the session this screen was reached on no longer exists, so nothing on the screen can work, and the only honest thing to offer is the way back. `requireAccess` answers 401 both for a revoked session and for no session at all, and the sentence covers both — with its second clause conditional, because only one of the two is the person's own doing.
+
+## One allowance in the browser harness, narrowed on purpose
+
+The harness fails a suite on any console error, excepting a 403 or 409 on `/api/` — a refusal the browser logs, which is the product working. A 401 was never excepted, because until now no case drove one deliberately.
+
+The allowance added here names `/api/enroll-mfa` and nothing else. Widening it to `/api/` would have been the smaller diff and the worse check: a 401 anywhere else is a session the product lost track of, which is the defect this increment is about, and a harness that stopped failing on it would have hidden the next one.
+
+- **Tests.** Unit (17): the screen and its route admitted, and NextAuth's endpoints, without which the one exit could not fetch a CSRF token; **the sign-in page admitted**, which is this increment's rule; the application itself refused, named screen by screen; and the two paths matched exactly rather than by prefix, so the gate opens on a decision and not on a spelling. Then the two readings: a first pairing and a re-pairing; **a 401 read as a session that is gone rather than as an error beside the field**, identically from both routes, so one state wears one sentence; the route's own words carried for every other failure, with a fallback when it said nothing usable; a 200 carrying no setup URI refused, because the alternative is an empty code block above an enabled button; the session's fate taken from the route's field and not assumed; and a mistyped six digits kept beside the field, where a person who is still on a working screen belongs. Browser: the first sign-in case now walks the trap — it leaves the enrolment screen for `/signin` while the claim is live and genuinely stale, comes back, finishes the pairing, and then **reloads**, which is the act nobody could survive.
+
+The browser case was checked against the unfixed code rather than assumed to bite. With both halves reverted it fails at the sign-in page, which the old middleware redirected away. With the gate fixed and the screen left alone it gets one step further and fails at the reload, on the sentence the old screen had no way to say. Both halves are load-bearing, and the record says so rather than claiming it.
+
+**Not in Increment 1.80.** Refreshing the claim itself — a `jwt` callback `trigger: "update"` path, or a middleware that re-reads the session row. The authority is already the server: `requireAccess` derives enrolment from the user row on every guarded call, and the token's copy is a redirect convenience sitting in front of it. Teaching the token to refresh would put a second answer beside one that is already correct, and the edge cannot read the row in any case. Also out: holding the recovery codes anywhere a reload could recover them, which would mean storing them somewhere they are meant never to rest; any change to what the enrolment route revokes, which is right as it stands; and a general answer for a session revoked underneath somebody **elsewhere** in the product — an enrolled person who re-pairs also loses their sessions, and lands not on a trap but on a degraded screen with an empty header whose fetches refuse. That is a real rough edge, it is not a dead end, and it wants one shape for "your sign-in ended" across every screen rather than a second copy of this one.
+
+
 ## Increment 1.79
 
 `users.active` has been in the schema since Increment 0.2 and has never been reachable. Four facts, each checked against the code before anything was built:
