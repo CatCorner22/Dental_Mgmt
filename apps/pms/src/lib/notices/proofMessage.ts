@@ -25,6 +25,14 @@ import type { Message } from "./message";
  * the opposite power — it can stop this practice writing to the mailbox and it
  * can prove nothing — so putting it in a URL costs what the code could not
  * afford to.
+ *
+ * **It names the screen the reader can open** (Increment 1.74). It used to say
+ * "Practice Risk", which is the screen the practice's own seats open and the
+ * one screen the outside accountant's seat may not. A message telling a person
+ * to go where their seat refuses them is worse than one that says nothing: it
+ * reads as the product working and the reader failing. The caller supplies the
+ * name, and `deliveryPlace` derives it from the same list the header draws the
+ * links from.
  */
 
 /** How long a code is good for, said in the message rather than left to be discovered. */
@@ -34,6 +42,8 @@ export function renderProofMessage(input: {
   practiceName: string;
   code: string;
   appUrl: string;
+  /** The screen this reader opens to type the code, named as the header names it. Increment 1.74. */
+  place: string;
   /** Where the reader says they did not ask for this. Increment 1.67. */
   stopUrl: string;
 }): Message {
@@ -44,7 +54,7 @@ export function renderProofMessage(input: {
       "",
       `Your code is ${input.code}`,
       "",
-      `Sign in at ${input.appUrl}, open Practice Risk, and type it beside your address.`,
+      `Sign in at ${input.appUrl}, open ${input.place}, and type it beside your address.`,
       `The code works once and stops working after ${CODE_WINDOW_HOURS} hours.`,
       "",
       "Until somebody brings this code back, nothing else will be sent to this address.",

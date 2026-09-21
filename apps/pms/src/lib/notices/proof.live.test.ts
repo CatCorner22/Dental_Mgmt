@@ -490,4 +490,65 @@ describe.skipIf(!adminUrl)("proving an address (live)", () => {
       }
     });
   });
+
+  /**
+   * The outside accountant's seat (Increment 1.74).
+   *
+   * The message used to name Practice Risk for every reader, which is the one
+   * screen this seat may not open: `/risk` is manager rank and the seat is
+   * `readonly` by construction. So the product mailed this seat a code and
+   * pointed it at a refusal. The unit cases hold the renderer; this one holds
+   * the wiring, because the renderer cannot be wrong on its own — what went
+   * wrong was that nobody passed it the reader's seat.
+   */
+  describe("the code the outside accountant's seat is sent", () => {
+    const cpa = DEV_USERS.find((u) => u.username === "ridgeview-cpa")!;
+
+    it("names the screen that seat can open, not the one the practice's own seats open", async () => {
+      // Set by the seat itself: the database refuses an address row naming
+      // anybody but the caller (Increment 1.58).
+      await withTenantTransaction(
+        tenantId,
+        cpa.id,
+        (d) => setAddress(d, tenantId, cpa.id, cpa.displayName, "casey@prentice.example"),
+        env
+      );
+      const transport = memoryTransport();
+      const result = await withTenantTransaction(
+        tenantId,
+        cpa.id,
+        (d) =>
+          sendProofCode(d, {
+            tenantId,
+            userId: cpa.id,
+            userName: cpa.displayName,
+            seat: "accountant",
+            practiceName: "Ridgeview Dental",
+            appUrl: "https://app.example",
+            transport,
+            pause: async () => {},
+          }),
+        env
+      );
+      expect(result.ok).toBe(true);
+      expect(transport.sent[0].to).toBe("casey@prentice.example");
+      const body = transport.sent[0].message.body;
+      expect(body).toContain("open Month-end, and type it beside your address");
+      expect(body).not.toContain("Practice Risk");
+      // And the codes this file already sent the owner name the owner's own
+      // screen, so this is a message that reads its reader rather than one
+      // renamed for everybody. Read from the rows rather than sent again: the
+      // cases above spent this hour's allowance, and an ask that the limit
+      // refused would prove nothing either way.
+      const owners = await db.admin.query(
+        "SELECT body FROM notice_sends WHERE tenant_id = $1 AND kind = 'proof_code' AND recipient_id = $2 AND outcome = 'sent'",
+        [tenantId, owner.id]
+      );
+      expect(owners.rows.length).toBeGreaterThan(0);
+      for (const row of owners.rows) {
+        expect(row.body).toContain("open Practice Risk, and type it beside your address");
+      }
+    });
+  });
+
 });

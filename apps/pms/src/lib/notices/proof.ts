@@ -4,6 +4,7 @@ import { noticeAddressChallenges, noticeAddressProofs, uuidv7 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { appendControlEvent } from "../controls/events";
 import { currentAddress } from "./addresses";
+import { deliveryPlace } from "./deliveryPlace";
 import { deliverMessage, type Delivered } from "./send";
 import type { NoticeSeat } from "./outstanding";
 import { CODE_WINDOW_HOURS, renderProofMessage } from "./proofMessage";
@@ -358,6 +359,9 @@ export async function sendProofCode(
       practiceName: input.practiceName,
       code,
       appUrl: input.appUrl,
+      // The screen this seat can open, rather than the one the practice's own
+      // seats open (Increment 1.74).
+      place: deliveryPlace(input.seat).label,
       stopUrl: stopUrl(input.appUrl, { tenantId: input.tenantId, secret: stopSecret }),
     }),
     noticeCount: 0,

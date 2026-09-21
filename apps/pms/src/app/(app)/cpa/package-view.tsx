@@ -10,6 +10,15 @@ import type { CloseComparison, RehashBaseline } from "@/lib/cpa/rehash";
 import { formatCents } from "@/lib/ledger/format";
 import { AttestView } from "./attest-view";
 import { QuestionsView } from "./questions-view";
+import { DeliveryPanel, type AddressResponse } from "../delivery-panel";
+import {
+  askForCode as askForCodeAct,
+  proveAddress as proveAddressAct,
+  readDelivery,
+  saveAddress as saveAddressAct,
+  saveAddressLabel,
+  sendNoticesNow as sendNoticesNowAct,
+} from "../delivery-acts";
 
 type Me = { ok: boolean; role?: string; entitlements?: string[] };
 
@@ -42,6 +51,13 @@ type LoadState =
       isAdmin: boolean;
       /** True for the outside accountant: it reads and exports, and the practice's own governance is not its to run. */
       seat: boolean;
+      /**
+       * Where this seat's own notices go (Increment 1.74), loaded only for the
+       * seat that has nowhere else to say so. The three routes behind the panel
+       * were widened for this seat long ago; the surface was not, so the seat
+       * could be mailed a code and told to open a screen it cannot open.
+       */
+      delivery: AddressResponse | null;
     };
 
 /** A mapping as the route serves it: the row plus whether the viewer proposed it. */
@@ -107,6 +123,9 @@ export function PackageView() {
   // The month the owner is confirming a close for; closing cannot be undone.
   const [confirmClose, setConfirmClose] = useState<string | null>(null);
 
+  const [addressDraft, setAddressDraft] = useState<string | null>(null);
+  const [codeDraft, setCodeDraft] = useState("");
+
   const load = useCallback(async (m: string) => {
     const meRes = await fetch("/api/me");
     const me = (await meRes.json().catch(() => ({ ok: false }))) as Me;
@@ -120,8 +139,15 @@ export function PackageView() {
       setState({ status: "not_for_seat" });
       return;
     }
-    const [data, mappings] = await Promise.all([loadPackage(m), seat ? Promise.resolve([]) : loadMappings()]);
-    setState({ status: "ready", data, mappings, isAdmin: meetsRole(role, "admin"), seat });
+    const [data, mappings, delivery] = await Promise.all([
+      loadPackage(m),
+      seat ? Promise.resolve([]) : loadMappings(),
+      // Only for the seat that cannot open Practice Risk, where everybody else
+      // says where their notices go. Loading it for a manager would put one act
+      // on two screens.
+      seat ? readDelivery() : Promise.resolve(null),
+    ]);
+    setState({ status: "ready", data, mappings, isAdmin: meetsRole(role, "admin"), seat, delivery });
   }, []);
 
   useEffect(() => {
@@ -244,6 +270,36 @@ export function PackageView() {
       setMessage("Proposed. A different person approves it before the journal reads it.");
     } catch (err: unknown) {
       setMessage(err instanceof Error ? err.message : "The mapping was not proposed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * Runs one delivery act and re-reads the panel from its route
+   * (Increment 1.74).
+   *
+   * The panel is a reading of rows rather than of what the browser last sent,
+   * so every act ends in a fresh read: an address saved, a code asked for and
+   * a code brought back each change what the next sentence on the screen may
+   * say, and a panel left showing the state before the act would tell this
+   * seat it still owes something it has just done. Increment 1.73 found that
+   * same omission on the invite panel.
+   *
+   * Only this seat reaches these: everybody else says where their notices go
+   * on Practice Risk, and one act offered on two screens would be two answers
+   * to one question.
+   */
+  async function runDelivery(label: string, act: () => Promise<string>) {
+    setBusy(label);
+    setMessage(null);
+    try {
+      const note = await act();
+      const delivery = await readDelivery();
+      setState((s) => (s.status === "ready" ? { ...s, delivery } : s));
+      setMessage(note);
+    } catch (err: unknown) {
+      setMessage(err instanceof Error ? err.message : `${label} failed.`);
     } finally {
       setBusy(null);
     }
@@ -525,6 +581,39 @@ export function PackageView() {
 
           {/* Either side may ask about a line of this month (Increment 1.50). */}
           <QuestionsView month={month} />
+
+          {/* Where this seat's own notices go (Increment 1.74).
+              `/risk` carries this panel for every other seat, and this seat
+              cannot open `/risk`: it is `readonly` by construction. The three
+              routes behind the panel were widened for it long ago, so without
+              this the product would mail it a code and name a screen it may
+              not reach. */}
+          {state.seat && state.delivery && (
+            <DeliveryPanel
+              delivery={state.delivery}
+              busy={busy}
+              form={{
+                draft: addressDraft,
+                setDraft: setAddressDraft,
+                save: (address) =>
+                  void runDelivery(saveAddressLabel(address), async () => {
+                    const note = await saveAddressAct(address);
+                    setAddressDraft(null);
+                    return note;
+                  }),
+                sendNow: () => void runDelivery("Send this to me now", () => sendNoticesNowAct()),
+                codeDraft,
+                setCodeDraft,
+                askForCode: () => void runDelivery("Send me a code", () => askForCodeAct()),
+                prove: (code: string) =>
+                  void runDelivery("Prove this address", async () => {
+                    const note = await proveAddressAct(code);
+                    setCodeDraft("");
+                    return note;
+                  }),
+              }}
+            />
+          )}
 
           {/* The chart of accounts is the practice's own maker-checker, so the
               outside accountant is not offered it; each journal line above

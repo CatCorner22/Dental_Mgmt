@@ -740,6 +740,49 @@ Two things, both mine. The invite panel never re-read after inviting, so the sea
 
 **Not in Increment 1.73.** Recovering a seat that has already been opened, which is password recovery and has its own ceremony. Withdrawing or deactivating a seat. Telling the invited person their link was replaced — the product has no address for them, which is the whole reason the link exists. Inviting any seat other than the outside accountant's.
 
+## Increment 1.74
+
+Increment 1.70 shipped a card naming the people a practice was never set up to reach, and the outside accountant's seat is on it from the day it is invited. Increment 1.71 created that seat, and 1.72 walked its first sign-in. This increment walked the next step — the seat clearing its own name off that card — and found the seat could not.
+
+The three routes behind the delivery panel had been widened for this seat deliberately. `GET` and `POST /api/notices/address`, `POST /api/notices/prove` and `POST /api/notices/send` all carry `{ minRank: "manager", orEntitlement: CPA_SEAT_ENTITLEMENT }`. The only screen carrying the panel was Practice Risk, which is `{ minRank: "manager" }` with no entitlement, and the seat is `readonly` **by construction** — `isCpaSeat` is exactly "holds the reporting grant and does not meet `user`".
+
+So the guards were opened for a seat and the surface was not. This is the shape Increment 1.72 found on the enrolment route, and it fails the same way: a permission nobody can exercise looks, from every reading the product takes, exactly like a permission that works.
+
+## The message made it worse than merely absent
+
+`renderProofMessage` ended on one sentence for every reader:
+
+> Sign in at `<app>`, open Practice Risk, and type it beside your address.
+
+The accountant's seat could ask for a code — the route admits it — receive the code, and be told to open the one screen in the product it meets a refusal on. A message that names a screen its reader cannot reach is worse than one that says nothing, because it reads as the product working and the reader failing.
+
+## One panel, not a second copy of the act
+
+The 187-line delivery section came out of `/risk` verbatim into `(app)/delivery-panel.tsx`, and its four acts — save, send now, ask for a code, prove — came out into `(app)/delivery-acts.ts`. Both screens render the one component and call the one set of acts; each keeps only what is its own: which control is busy, where the sentence goes, and the draft the saved value replaces.
+
+A second copy would be a second answer to one question, which is what this codebase refuses from the owner board's counts to the reading of who cannot be reached. It would also drift: the panel quotes the standing rules on retries, the hourly limit and the scheduled round, and two copies of those sentences are two places for a rule to be stated wrongly.
+
+## The screen a message names is derived, and checkable
+
+`DELIVERY_PLACES` maps each seat to the screen carrying its panel, and `deliveryPlace(seat)` names that screen **as the header names it**, reading the label back out of `NAV_LINKS`. A message calling the screen something the header does not would send a reader hunting for a link that is not there.
+
+Each entry also carries a `surface`: the file that renders the panel. That is the same claim `NavLink.gate` makes about a route file, and it is checked the same way — a unit case reads each `surface` and asserts it renders `DeliveryPanel`, and asserts the seat can open the `href` under `navLinksFor`. A constant that claims a place must be checkable against the place, or it is a comment with a type.
+
+| | Owner and the practice's own seats | The outside accountant's seat |
+|---|---|---|
+| Screen | Practice Risk (`/risk`) | Month-end (`/cpa`) |
+| What opens it | manager rank | the reporting grant |
+| What the code's message says | open Practice Risk | open Month-end |
+
+## Why the panel is on `/cpa` rather than `/risk` being widened
+
+Widening `/risk` would hand this seat the practice's SoD findings, its decision register, its exceptions and its grant controls — everything the seat exists not to have. The seat's whole shape is what lets it exist without a BAA. The panel belongs beside the seat's own screen; the screen does not belong to the panel.
+
+- **Tests.** Unit (9): every notice seat has a screen; each named screen renders the panel; each seat can open the screen named for it; each screen is called what the header calls it; the two seats resolve to different screens — plus the renderer taking the caller's name rather than one screen's. Live (1): a code sent for the accountant seat names Month-end, while every code this practice sent the owner still names Practice Risk, so the message reads its reader rather than having been renamed for everybody. Browser (1): the seat signs in, finds the panel on the only screen it has, saves an address, asks for a code, reads out of the sent row that the message names Month-end and not Practice Risk, brings the code back, and then meets the old screen's refusal — so the panel here is the whole of the way in rather than a convenience beside one that worked.
+
+**Not in Increment 1.74.** The month-close deadlock a single-admin practice sits in, which needs an argument about the SoD rulebook rather than a surface. Any change to who may hold an address: the seat still sets its own and nobody else's, enforced at the database. A landing that reads the viewer's seat, argued and reverted in Increment 1.72. The notices themselves — what this seat is owed is what Increment 1.57 derives, unchanged.
+
+
 ## Increment 1.68
 
 Increment 1.65 gave a proof a life, and had the round ask for a new code inside its last thirty days so that nothing would stop in silence. It then left a trap nobody had walked into yet: **once the proof lapsed, the round stopped asking. Forever.**
