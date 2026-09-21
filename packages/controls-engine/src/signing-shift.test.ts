@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { defaultDualReleasePolicy, listEligibleApprovers, signingShift } from "./controls/dual-release";
+import { defaultDualReleasePolicy, listEligibleApprovers } from "./controls/dual-release";
+import { signingShift } from "./signing";
 import type { Person } from "./types";
 
 /**

@@ -45,8 +45,9 @@ export {
   listEligibleApprovers,
   matchExceptions,
 } from "./controls/dual-release";
-export type { ExceptionAction, ExceptionScope, ReleaseStatus, SigningShift } from "./controls/dual-release";
-export { signingShift } from "./controls/dual-release";
+export type { ExceptionAction, ExceptionScope, ReleaseStatus } from "./controls/dual-release";
+export { signingShift } from "./signing";
+export type { SigningShift } from "./signing";
 
 export { ENTITLEMENT_IDS, isEntitlementId, assignmentsFromGrants, evaluateGrant } from "./grants";
 export type { GrantRow, GrantRequest, GrantEvaluation, AssignmentsFromGrants } from "./grants";
