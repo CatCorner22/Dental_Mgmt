@@ -964,6 +964,55 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.101
+
+Increments 1.97 and 1.100 both came from one shape: a fact the product **records and nobody reads**. So this swept for it properly — every chain event kind the app writes, against everything that reads one.
+
+**57 kinds written. 29 of them reached the practice's weekly record as their own identifier with the punctuation swapped.**
+
+> auth signin pending mfa · month rehash baseline · import curve hero staged · notice address withdrawn · reason code threshold changed
+
+`chain.otherKinds` lists every kind the digest has no named field for, and `eventLabel` falls back to `kind.replace(/[._]/g, " ")`. So the fallback was not the exception it reads as in the code — it was **most of the week**, in the one artefact the owner stamps a hash of and the month-end package folds into its own.
+
+For a product whose discipline everywhere else is to say the thing in words — every refusal since Increment 1.48, every act's sentence since 1.90 — the weekly record spoke in identifiers.
+
+## A dead label beside twenty-nine missing ones
+
+`EVENT_LABEL` carried `"import.applied": "Import applied"`, and **nothing writes `import.applied`**. The app writes `import.bank_statement.applied` and `import.curve_hero.applied`.
+
+That is how a hand-kept list drifts when nothing reads it back: one entry for an act that cannot happen, and none for twenty-nine that do.
+
+## What it says now
+
+Every kind the app writes has words, grouped by what they are about: getting in and getting back in; who is on the practice; the month with the accountant; money and its record; what the practice governs; reaching people.
+
+They are written for the person reading their week, not for the person who named the kind — *"Somebody used a recovery link to get back in"*, *"A closed month was re-baselined under a new package shape"*, *"Somebody stopped a code they had not asked for"*.
+
+## The gate
+
+`eventLabels.test.ts` reads **the source that writes the events** — every non-test file under `apps/pms/src` except `src/e2e`, comments stripped — for `append*Event(… "kind")` and `kind: "…"` in dotted lower-case form. Then:
+
+- **Every kind written must be covered** by a named digest field, a label, or a place the digest shows it from its own table. A new kind with no words fails by name.
+- **No label may name a kind nothing writes.** A promise about a week that cannot happen fails too.
+
+Read from the source rather than asserted about it, for the reason the nav gates and the route-guard checks are: a claim about what the code writes that does not read the code goes stale in silence. This is the third gate of that kind this session, after Increment 1.91's entitlement check and Increment 1.96's uncalled-route check.
+
+**Red-before, measured, both halves.** A probe kind added to an unrelated module fails the first with `expected [ 'probe.new_kind_without_words' ] to deeply equal []`; restoring the dead label fails the second with `expected [ 'import.applied' ] to deeply equal []`.
+
+## What the sweep decided not to call a defect
+
+The other 28 kinds are covered by `EVENT_FIELDS`, which sets a named digest figure, or by `EVENT_KINDS_SHOWN_ELSEWHERE`, whose four members are genuinely shown elsewhere from their own tables. Increment 1.100 removed the one member whose elsewhere was a month away; the rest hold.
+
+And a kind written and read nowhere is **not by itself a defect**. The chain is the record: it exists to be verified and read back, not to be summarised. What this increment fixes is narrower and truer — the digest already lists these kinds, and listed them in machine-speak.
+
+## Not in Increment 1.101
+
+**A named digest figure for any of the twenty-nine.** A label is words for a row that already appears; a field is a claim that the figure matters enough to have a name and to sit inside the hash. Increment 1.100 made that case for one figure and made it on its merits. Doing it for twenty-nine at once would be doing it for none of them.
+
+**The fallback itself.** It stays. A kind can be written by a migration, or by a future increment between edits, and a digest that threw would be worse than one that says the identifier. It is no longer what most of the week looks like.
+
+**A day-sheet charge that cannot be imported.** Recorded in Increment 1.95; it wants the question of an unknown procedure code settled first.
+
 ## Increment 1.100
 
 Increments 1.97 and 1.98 both recorded a debt to the digest, and both described it wrongly.

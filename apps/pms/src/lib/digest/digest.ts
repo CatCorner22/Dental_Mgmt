@@ -161,18 +161,79 @@ const EVENT_FIELDS: Record<string, string> = {
  */
 const EVENT_KINDS_SHOWN_ELSEWHERE = new Set(["reconciliation.cleared", "control.decision", "statement.drafted", "deposit.staged_applied"]);
 
+/**
+ * What each kind is called, for a person (Increment 1.101).
+ *
+ * `chain.otherKinds` lists every kind the digest has no named field for, and
+ * `eventLabel` fell back to the identifier with its punctuation swapped — so
+ * **29 of the 57 kinds this app writes** reached the practice's weekly record
+ * as "auth signin pending mfa", "month rehash baseline", "import curve hero
+ * staged". Machine-speak, in the one artefact the owner stamps a hash of and
+ * the month-end package folds into its own.
+ *
+ * `import.applied` sat here and **nothing writes it**: the app writes
+ * `import.bank_statement.applied` and `import.curve_hero.applied`. A dead
+ * label beside twenty-nine missing ones, which is how a list drifts when
+ * nothing reads it back.
+ *
+ * `digest.test.ts` now reads the source for every kind the app writes and
+ * fails on one this file has no words for, and on a label naming a kind
+ * nothing writes. The fallback stays, because a kind can be written by a
+ * migration or by a future increment between edits — but it is no longer what
+ * most of the week looks like.
+ */
 export const EVENT_LABEL: Record<string, string> = {
   "reconciliation.cleared": "Bank run cleared",
   "control.decision": "Control decision recorded",
   "statement.drafted": "Statement drafted",
   "deposit.staged_applied": "Staged deposit applied",
   "control.release_attested": "Release attested",
-  "import.applied": "Import applied",
   "cpa.package_exported": "CPA month-end package exported",
   "gl_mapping.proposed": "GL mapping proposed",
   "gl_mapping.decided": "GL mapping decided",
   "month.closed": "Month closed for the accountant",
   "auth.sessions_ended": "Sessions ended for one person",
+
+  // Getting in, and getting back in.
+  "auth.mfa_repaired": "Somebody paired a new authenticator",
+  "auth.signin.pending_mfa": "A sign-in waited for a second factor",
+  "auth.recovery.initiated": "A recovery was started for somebody locked out",
+  "auth.recovery.approved": "A second administrator approved a recovery",
+  "auth.recovery.consumed": "Somebody used a recovery link to get back in",
+
+  // Who is on the practice.
+  "seat.invited": "An outside accountant's seat was invited",
+  "seat.reinvited": "A seat was sent another link",
+  "seat.claimed": "An invited seat was opened and its password set",
+  "role.rank_changed": "Somebody's rank changed",
+  "roster.reactivated": "Somebody stood down was brought back",
+
+  // The month, with the accountant.
+  "cpa.question_asked": "The accountant asked about a line of the month",
+  "cpa.question_answered": "The practice answered the accountant",
+  "cpa.answer_read": "An answer was marked read",
+  "month.rehash_baseline": "A closed month was re-baselined under a new package shape",
+
+  // Money and its record.
+  "ledger.corrected": "An entry was corrected by a reversal and a repost",
+  "import.bank_statement.applied": "A bank statement was imported",
+  "import.bank_statement.failed": "A bank statement was refused",
+  "import.curve_hero.staged": "A practice-management report was read and staged",
+  "import.curve_hero.applied": "A staged report was posted to the ledger",
+
+  // What the practice governs.
+  "reason_code.added": "A reason code was adopted",
+  "reason_code.relabelled": "A reason code was relabelled",
+  "reason_code.restored": "A retired reason code was restored",
+  "reason_code.threshold_changed": "A reason code's threshold changed",
+
+  // Reaching people.
+  "notice.sent": "A notice was sent",
+  "notice.round_ran": "The notice round ran",
+  "notice.address_code_sent": "A code was sent to prove an address",
+  "notice.address_proved": "An address was proved",
+  "notice.address_refused": "Somebody stopped a code they had not asked for",
+  "notice.address_withdrawn": "An address was withdrawn",
 };
 
 export function eventLabel(kind: string): string {
