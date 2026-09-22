@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { currentSeat } from "@/lib/auth/currentSeat";
 import { navLinksFor } from "@/lib/auth/seats";
+import { APP_INCREMENT } from "@/lib/product";
 
 /**
  * The header names who is signed in, so these pages cannot be built once and
@@ -63,7 +64,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 Sign in
               </Link>
             )}
-            <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.104</p>
+            <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment {APP_INCREMENT}</p>
           </div>
         </div>
       </header>

@@ -2765,3 +2765,52 @@ It has a seat now, at `user`, which is its route's own rank. That is safe to off
 
 **Board wording for every entry.** Seven entries carry a `boardLabel`; the rest fall back to the header's word, which reads correctly on a button. Writing five more for the sake of symmetry would be writing five more things to keep true.
 
+## Increment 1.105
+
+`GET /api/health` carries no `withGuard`. It is the one answer this product gives somebody who has not signed in, and it said:
+
+```json
+{ "increment": "0.11", "phiPatientRows": false }
+```
+
+**Both were false, and the second is the serious one.**
+
+## Three false statements about protected health information
+
+Migration 0009 created `patients`: a first name, a last name, a date of birth and a record number. `seed-ledger.ts` writes two rows, Jane Doe and John Smith, with dates of birth. The product has stored patient identifiers since the ledger arrived.
+
+While it did, it said otherwise in three places a reader meets **before they have an account**:
+
+| Where | What it said |
+|---|---|
+| `GET /api/health` (unguarded) | `phiPatientRows: false` |
+| The sign-in screen's body copy | *"This shell holds no patient records."* |
+| The page description, in a tab and a link preview | *"Increment 0.11 shell. No patient records are stored."* |
+
+Each was true of Increment 0.11's shell. None was ever revisited. A promise about the **absence** of data is the claim most likely to go stale, because it is made once, when the absence is obvious, and nothing about adding a table brings anybody back to it.
+
+## Four stale statements about which product this is
+
+The same four surfaces — the two API routes, the sign-in eyebrow, the page description — all said **Increment 0.11**, ninety-three increments behind. The signed-in footer said `1.104`, and only because somebody edits it by hand on every increment: it is the one of the five that was right, and it was right by labour rather than by construction.
+
+## One constant each, and a check on both
+
+`lib/product.ts` holds `APP_INCREMENT` and `HOLDS_PATIENT_ROWS`, and generates the sentences from them. The five surfaces read it.
+
+- **`product.test.ts` reads the database schema** and fails if `HOLDS_PATIENT_ROWS` disagrees with it — in either direction. A product that later holds no patient rows must stop saying it does, exactly as this one had to stop saying it did not. The sentence is generated from the constant rather than written beside it, so the two cannot part company.
+- **`verify-docs.sh` reads `APP_INCREMENT`** against the last `## Increment N.M` heading in this document, and sweeps every other file under `apps/pms/src` for an increment number written as a literal. The hand-edit remains — somebody has to say which increment this is — but it is one edit, in one place, that a check keeps honest.
+
+**The sweep strips comments first, and that is the check rather than tidiness.** The health route's own doc comment quotes the literal it exists to describe; a sweep that counted it would fail on a correct file. Increment 1.96 learned the same thing from the other side: a gate prose can satisfy is not a gate. Here prose would have made a correct gate refuse correct code, which is the same defect wearing the other coat.
+
+**Red-before, measured, both halves.** Leaving `APP_INCREMENT` ahead of the record fails with *"APP_INCREMENT is 1.105; the last increment docs/17 records is 1.104"*. Putting the old literal back on the sign-in screen fails with *"apps/pms/src/app/signin/page.tsx: >Increment 0.11<"*.
+
+**Tests.** App unit (4): the PHI constant read against the schema's own columns; the sentence naming what is held rather than promising what is not; the page description carrying both facts; and the increment's shape, so a malformed constant fails where it is defined rather than in a shell script. `verify-docs.sh` is now 13 checks.
+
+## Not in Increment 1.105
+
+**A version derived from git.** A commit hash or a tag would need no hand-edit at all, and would answer a different question: *which build is this*, not *which increment is this*. The second is the one this product's record is written in, and `docs/17` is its authority. A build identifier is worth having and is its own increment.
+
+**What else `/api/health` says.** `bytestarDefault: "off"` and `authStore` are unchecked claims of the same kind — a constant and a function, neither read against anything. `authStore` is computed from the environment and is therefore true by construction; `bytestarDefault` is a literal, and whether it still describes the product is a question for whoever knows what Bytestar's default became. Naming it here beats quietly bundling it into a fix I cannot verify.
+
+**The `increment` field on `/api/me`.** It is odd there — that route answers who the caller is, and the build it is running is not part of that. Removing it is a change to a response shape that screens read, and this increment's job was to stop the number being wrong, not to redesign where it appears.
+
