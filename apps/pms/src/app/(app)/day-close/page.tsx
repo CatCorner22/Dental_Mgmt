@@ -1,7 +1,7 @@
 "use client";
 
 import { SessionEnded, loadFailure } from "../session-ended";
-import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useEffect, useState } from "react";
 import { formatCents } from "@/lib/ledger/format";
 import type { DayCloseSnapshot, LatePostingRow } from "@/lib/day-close/types";
@@ -101,6 +101,11 @@ export default function DayClosePage() {
         body.created !== undefined ? `Applied ${body.created} staged deposit(s).` : `${label} succeeded.`
       );
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setActionMessage(err instanceof Error ? err.message : `${label} failed.`);
     } finally {
       setBusy(false);

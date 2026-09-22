@@ -1,7 +1,7 @@
 "use client";
 
 import { loadFailure } from "../session-ended";
-import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useCallback, useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
 import { readViewer } from "@/lib/auth/viewer";
@@ -128,6 +128,11 @@ export function DigestView() {
       await load(ending);
       setMessage("Acknowledged. The stamp binds the digest as it read just now; if the rows change later, this page says so.");
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The digest was not acknowledged.");
     } finally {
       setBusy(false);

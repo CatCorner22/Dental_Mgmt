@@ -1,7 +1,7 @@
 "use client";
 
 import { loadFailure } from "../session-ended";
-import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
@@ -154,6 +154,11 @@ export function OwnerBoard() {
       setState({ ...state, board: await loadBoard() });
       setMessage(body.sentence ?? "Review recorded.");
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The review was not recorded.");
     } finally {
       setBusy(null);
@@ -181,6 +186,11 @@ export function OwnerBoard() {
       setState({ ...state, board: await loadBoard() });
       setMessage("Answered. The accountant reads it on the month-end package.");
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The answer was not sent.");
     } finally {
       setBusy(null);
@@ -206,6 +216,11 @@ export function OwnerBoard() {
       setState({ ...state, alerts: await loadAlerts(state.isAdmin) });
       setMessage(`Acknowledged: ${item.label}. The note is on the chain beside it.`);
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The hard event was not acknowledged.");
     } finally {
       setBusy(null);

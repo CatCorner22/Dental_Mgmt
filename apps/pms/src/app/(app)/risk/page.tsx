@@ -275,6 +275,11 @@ export default function PracticeRiskPage() {
       const note = await fn();
       await refresh(fresh, note ?? undefined);
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : `${label} failed.`);
     } finally {
       setBusy(null);
@@ -400,6 +405,10 @@ export default function PracticeRiskPage() {
         link?: string;
         expiresAt?: string;
       };
+      if (res.status === 401) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       if (!res.ok) {
         setSeatRefusal(body.error ?? "The invitation failed.");
         return;
@@ -412,6 +421,11 @@ export default function PracticeRiskPage() {
       // and then nothing, and a practice that mislaid it had no row to act on.
       await refresh(false);
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setSeatRefusal(err instanceof Error ? err.message : "The invitation failed.");
     } finally {
       setBusy(null);
@@ -435,6 +449,10 @@ export default function PracticeRiskPage() {
         body: JSON.stringify({ userId }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; username?: string; link?: string; expiresAt?: string };
+      if (res.status === 401) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       if (!res.ok) {
         setSeatRefusal(body.error ?? "The new link could not be sent.");
         return;
@@ -442,6 +460,11 @@ export default function PracticeRiskPage() {
       setSeatLink({ username: body.username ?? name, link: body.link ?? "", expiresAt: body.expiresAt ?? "" });
       await refresh(false, `Sent a new link for ${name}. The old one no longer works.`);
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setSeatRefusal(err instanceof Error ? err.message : "The new link could not be sent.");
     } finally {
       setBusy(null);
@@ -465,6 +488,10 @@ export default function PracticeRiskPage() {
         }),
       });
       const body = (await res.json().catch(() => ({}))) as Parameters<typeof grantRefusal>[0];
+      if (res.status === 401) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       if (!res.ok) {
         setGrantRefused(grantRefusal(body, res.status));
         return;
@@ -472,6 +499,11 @@ export default function PracticeRiskPage() {
       setGrantReason("");
       await refresh(false, `Granted ${entitlementLabel(grantEntitlement)}.`);
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The grant failed.");
     } finally {
       setBusy(null);

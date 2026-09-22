@@ -227,6 +227,11 @@ export default function LedgerPostPage() {
         duplicate: body.duplicate ?? false,
       });
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setSignInEnded(true);
+        return;
+      }
       setLoadError(err instanceof Error ? err.message : "Posting failed.");
     } finally {
       setBusy(false);

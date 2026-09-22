@@ -1,7 +1,7 @@
 "use client";
 
 import { SessionEnded, loadFailure } from "../session-ended";
-import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { MatchingMeasurementSummary, ReconciliationMeasurementSummary } from "@pms/controls-engine";
@@ -126,6 +126,11 @@ export default function ReconciliationPage() {
         window.location.href = `/reconciliation/${body.reconciliationRunId}`;
       }
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setImportMessage(err instanceof Error ? err.message : "Import failed.");
     } finally {
       setImporting(false);

@@ -1,7 +1,7 @@
 "use client";
 
 import { loadFailure } from "../session-ended";
-import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
 import { readViewer } from "@/lib/auth/viewer";
@@ -103,6 +103,11 @@ export function LocationsView() {
           : `Saved ${location.name}: ${changed.map((c) => `${c.label} ${c.before} → ${c.after}`).join("; ")}. The after-hours hold reads these hours from the next posting.`
       );
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The hours were not saved.");
     } finally {
       setBusy(null);

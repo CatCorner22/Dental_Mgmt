@@ -73,6 +73,10 @@ export function QuestionsView({ month }: { month: string }) {
         body: JSON.stringify({ action, ...payload }),
       });
       const body = (await res.json().catch(() => ({}))) as { why?: string; verb?: string };
+      if (res.status === 401) {
+        setSignInEnded(true);
+        return;
+      }
       if (!res.ok) {
         setNotice(`${body.verb ?? "Not sent"}: ${body.why ?? "The message was not sent."}`);
         return;
