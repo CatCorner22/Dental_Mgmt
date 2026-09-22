@@ -964,6 +964,50 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.87
+
+The practice invites its accountant, types a username, and presses the button. The screen reports a failure it cannot explain, no seat exists, and nothing says what to change. The username was free in this practice and taken in another.
+
+## Why the check could not see it
+
+A sign-in name is unique across **every** practice this product serves. `users_username_lower_uidx` (migration 0002) enforces it on `lower(username)` with no tenant in the key, because signing in carries no practice with it: `auth_lookup_user` finds one row by username alone, and a second row would make that lookup a question with two answers.
+
+`inviteAccountant`'s own check is tenant-scoped (`tenantId = ? AND username = ?`), and **row-level security is why it must be**. The query runs inside a tenant transaction with FORCE RLS on `users`, so it cannot see another practice's row — not by oversight, by design. The check could not find the row it would collide with, so the insert went ahead, violated the global index, and threw.
+
+`withGuard` catches nothing. The error travelled out to a bare 500 with no `error` field, which the screen's own loader read as `{}` and reported with its fallback sentence.
+
+## The insert is the check
+
+Some questions only the database can answer, and this is one. The insert now runs under a **savepoint**: a unique violation on that named index becomes a 409 refusal, and the savepoint rolls back so the surrounding transaction stays usable rather than aborted. `packages/db/src/pgErrors.ts` holds the reading — `isUniqueViolation(err, USERNAME_GLOBAL_UIDX)`.
+
+Naming the index is deliberate. A caller that refused on any `23505` would swallow a collision it did not anticipate and report it as the one it did, which is how a second defect hides behind the first one's refusal.
+
+## What the refusal says, and what it will not say
+
+It names the rule — sign-in names are unique across every practice — and it does not name the practice holding the username, nor confirm anything about that practice. The caller learns only what the rule already implies: this name is spent, choose another.
+
+That is a deliberate trade rather than an oversight. Saying less would hand back the dead end this increment exists to close; saying more would let one practice read another's roster one guess at a time. The live case asserts both halves — the sentence carries the rule, and it carries neither the other practice's name nor the sentence used when this practice already holds the username.
+
+## A wrong first fix, and the case that caught it
+
+The savepoint and the catch went in, and the test failed exactly as it had before: `duplicate key value violates unique constraint "users_username_lower_uidx"`, thrown rather than refused.
+
+Drizzle wraps a failed statement in its own error — `Failed query: insert into "users" ...` — and hangs the driver's error off `cause`. `isUniqueViolation` read `code` off the error it was handed, found none, and re-threw. It now walks the `cause` chain to a fixed depth, and a unit case pins the wrapped shape so the next reader does not rediscover it. **The reproduction is what found this, not the reading**; the fix looked right and did nothing.
+
+## One correction to the audit that named it
+
+The seat audit listed this as two findings — "inviting a username another practice already uses throws instead of refusing" and "invite fails with an unexplained 500 when the username is free in this practice but taken in another". They are one defect with one cause. It also implied more than one user-creating path; `invite.ts` holds **the only `insert(users)` in the product**, which the comments in `soleDecider.ts` and `ranks.ts` already state.
+
+A second hazard the audit did not raise turned out not to exist: a differently-cased duplicate within one practice would pass an exact-match check and violate an index on `lower(username)`. It cannot happen, because `USERNAME_SHAPE` admits lower-case letters, digits and hyphens only, so `lower(username)` is `username`. That was checked and discarded rather than carried into the increment.
+
+## Not in Increment 1.87
+
+**Making usernames unique per practice rather than globally.** That would end the collision at its root and break sign-in, which resolves a username with no practice to scope it by. It is a question about how people sign in, not about how a seat is invited.
+
+**A general error boundary on `withGuard`.** Every other route reaching a bare 500 on an unhandled throw is a real gap and a much wider change; this increment closes the one path it can prove.
+
+**The rest of the seat audit.** It ran against `2dab1b5` on 2026-09-20 and is substantially stale. Each remaining finding needs checking against the working tree before it counts as work.
+
 ## Increment 1.86
 
 The owner opens Practice Risk, finds the departing hygienist's card, and presses **Revoke** beside `bank_reconcile`. The screen says the duty is gone. The SoD finding closes. The `role.revoked` domain event is written. The person keeps the duty — on the session they are sitting in, and on every session after it, permanently.
