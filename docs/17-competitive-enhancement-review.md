@@ -997,6 +997,22 @@ This one buys five. The week moved from 2026-09-14 to 2026-09-19, not to the 202
 
 - **What moved.** Three ledger effective dates, the day-close business date, the approvals effective date and two statement effective dates, 2026-09-14 → 2026-09-19; the statements' as-of and issued dates, 2026-09-16 → 2026-09-21. Three demonstration defaults on the screens that offer a date moved with them. Seven assertions in the money-desk suite that name the sealed day moved with them.
 - **What did not.** `account_members.effective_from` at 2026-09-01, which is a membership start that no window rule reads. And every self-contained unit fixture that passes its own `now` — the great majority of the forty-odd files holding these dates — because those never drift and moving them would have been churn dressed as a fix.
+## A 401 belonging to no case
+
+The first CI run of this increment failed with every one of its twenty-six money-desk cases passing. `assertNoProblems`, which runs once the suite is over, reported a single console error:
+
+```
+Failed to load resource: the server responded with a status of 401 @ /api/approvals/inbox
+```
+
+A 401 attributed to nobody, on a route the last case never touched, raised after the last assertion had already passed.
+
+`b.signIn` opened each case by clearing the context's cookies and then navigating. The previous case's screen was still the live document at that moment, so whatever it still had in flight came back unauthorised — a console error from a page no case was looking at any more. Increment 1.82's case had just begun ending on `/approvals`, which is a screen that loads, and the case after it is the first thing to clear cookies underneath it.
+
+`signIn` now unloads the document before the cookies go. That is hygiene between cases rather than a softening of the rule: a 401 outside a `signedOut` window still fails a suite, exactly as strictly as before.
+
+**The record should say what it can and cannot claim.** The race never reproduced locally, across four full runs of the suite before and after the change. The evidence for the cause is the mechanism and CI's own log, not a reproduction — which is why the fix is the one that removes the race rather than one that makes a symptom quieter.
+
 - **Method.** The seed and the three defaults changed first, then the full gate ran and the failures named the rest. Predicting which of forty files cared would have been guesswork; four failures on the first run, and none on the second, is the measurement.
 
 ## Increment 1.83
