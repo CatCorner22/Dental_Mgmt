@@ -1262,14 +1262,15 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
    * it — and this one, which is how the practice's own day sheets reach the
    * ledger, did not.
    *
-   * Building the screen found what that cost. The check works; applying does
-   * not, and never has — the apply path reads `import_runs`, then `patients`
-   * and `account_members`, as the append role, which held a grant on none of
-   * them. Migration 0056 clears the first wall. The patient tables are a
-   * decision about who may read a patient record, so this screen offers no
-   * post act and says why, rather than offering a press that can only fail.
+   * Building the screen found what that cost: applying had never worked. The
+   * apply ran every read through the append role, which holds a grant on
+   * neither `patients` nor `account_members`, so it answered `permission
+   * denied` and `withGuard` — which carries no try/catch — passed a bare 500
+   * to the caller. Increment 1.95 split the apply into a plan that reads as
+   * `app_rw` and a write that writes as `app_append`, so both presses are
+   * real and the append role stayed as narrow as it was designed to be.
    */
-  it("reads a Curve Hero day sheet, says what it found, and offers no act it cannot finish", async () => {
+  it("reads a Curve Hero day sheet and posts it to the ledger, in two presses", async () => {
     await b.signIn("ridgeview-owner", "/import");
     await page().getByRole("heading", { name: "Bring in a Curve Hero report" }).waitFor({ timeout: 60_000 });
 
@@ -1277,31 +1278,69 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     const check = page().getByRole("button", { name: "Check this file" });
     expect(await check.isDisabled()).toBe(true);
 
+    /**
+     * One payment, for an account that still owes, and for no more than it
+     * owes. Two rules of this ledger decide the shape of this file:
+     *
+     * A day-sheet *charge* cannot post at all —
+     * `ledger_entries_charge_requires_procedure` demands a procedure row and a
+     * Curve Hero day sheet carries a code in its description and no procedure.
+     * That gap is named in the increment record rather than papered over here.
+     *
+     * And a payment may not allocate more than the account owes
+     * (`allocation_exceeds_charge`). The cases above this one have already
+     * moved these balances, so the figure is read from the ledger rather than
+     * written into the case — a constant here would be a case that passes
+     * alone and fails in its own suite, which is exactly how this was found.
+     */
+    const { rows: owing } = await app.db.admin.query(`
+      SELECT p.mrn,
+             SUM(CASE WHEN le.kind = 'charge' THEN le.amount_cents ELSE -le.amount_cents END)::int AS owed
+      FROM ledger_entries le
+      JOIN patients p ON p.id = le.patient_id
+      GROUP BY p.mrn
+      ORDER BY owed DESC
+      LIMIT 1
+    `);
+    expect(owing[0].owed).toBeGreaterThan(0);
+    const payCents = Math.min(owing[0].owed as number, 100);
+    const payAmount = (payCents / 100).toFixed(2);
     const daySheet = [
       "Date,Location,Patient MRN,Patient Name,Transaction Type,Amount,Provider,Description",
-      "09/14/2026,MAIN,CH-10042,Jane Doe,Charge,245.00,DR-SMITH,D2391 composite",
-      "09/14/2026,MAIN,CH-10042,Jane Doe,Payment,-100.00,,Patient copay",
-      "09/14/2026,MAIN,CH-10088,John Smith,Charge,89.00,DR-LEE,D0120 periodic exam",
+      `09/14/2026,MAIN,${owing[0].mrn},Imported,Payment,-${payAmount},,Patient copay`,
     ].join("\n");
     await page().fill("#import-content", daySheet);
     await page().fill("#import-file-name", "day-sheet-2026-09-14.csv");
     expect(await check.isDisabled()).toBe(false);
 
     await check.click();
-    await page().getByText(/^Read 3 rows, none of them refused\./).waitFor({ timeout: 30_000 });
+    await page().getByText(/^Read 1 row, none of them refused\./).waitFor({ timeout: 30_000 });
     expect(await page().getByText(/Nothing has reached the ledger/).count()).toBe(1);
-    // No act that could only fail, and the reason in words rather than a
-    // button that refuses.
-    expect(await page().getByRole("button", { name: "Post it to the ledger" }).count()).toBe(0);
-    expect(await page().getByText(/Posting an import to the ledger is not built yet/).count()).toBe(1);
-    await b.audit("import, a day sheet read and the post act honestly absent");
+    await b.audit("import, a day sheet read and not yet posted");
 
-    // The check is on the chain, which is what makes it an act rather than a
-    // page view.
+    // Second press is the act, and it reaches the ledger.
+    await page().getByRole("button", { name: "Post it to the ledger" }).click();
+    await page().getByText(/^Posted 1 entry/).waitFor({ timeout: 60_000 });
+    // The run is spent, so the act it offered is gone rather than left to refuse.
+    expect(await page().getByRole("button", { name: "Post it to the ledger" }).count()).toBe(0);
+    await b.audit("import, the day sheet posted");
+
+    // Both halves are on the chain, which is what makes each an act rather
+    // than a change that happened.
     const { rows } = await app.db.admin.query(
       "SELECT DISTINCT kind FROM domain_event WHERE kind LIKE 'import.curve_hero.%' ORDER BY kind"
     );
-    expect(rows.map((r: { kind: string }) => r.kind)).toEqual(["import.curve_hero.staged"]);
+    expect(rows.map((r: { kind: string }) => r.kind)).toEqual([
+      "import.curve_hero.applied",
+      "import.curve_hero.staged",
+    ]);
+
+    // And the run itself is stamped, which is what stops a second apply
+    // counting the same rows twice.
+    const { rows: runs } = await app.db.admin.query(
+      "SELECT status FROM import_runs WHERE report_kind = 'day_sheet' ORDER BY created_at DESC LIMIT 1"
+    );
+    expect(runs[0].status).toBe("applied");
   }, 180_000);
 
   it("says a sign-in has ended rather than telling somebody their seat is the wrong one", async () => {

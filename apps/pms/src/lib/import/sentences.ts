@@ -62,7 +62,7 @@ export type CheckedSummary = {
 export function checkedSentence(summary: CheckedSummary): string {
   const rows = `${summary.rowCount} ${summary.rowCount === 1 ? "row" : "rows"}`;
   if (summary.status === "validated") {
-    return `Read ${rows}, none of them refused. Nothing has reached the ledger: this practice cannot post an import yet, and the reason is on this screen.`;
+    return `Read ${rows}, none of them refused. Nothing has reached the ledger yet — posting it is the next act, and it is yours to make.`;
   }
   const bad = `${summary.errorCount} ${summary.errorCount === 1 ? "row" : "rows"}`;
   return `Read ${rows} and could not read ${bad}. Nothing has reached the ledger, and nothing will until a file this practice can read replaces this one.`;

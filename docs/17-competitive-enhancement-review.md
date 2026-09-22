@@ -964,6 +964,45 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.95
+
+Increment 1.94 found that applying a Curve Hero import had never worked, granted the append role the two staging tables it needed, and stopped — because the next thing the apply reads is `patients` and `account_members`, and letting the role that writes the chain read patient records is a decision about who may read a patient. It recommended the split rather than the grant. This is the split.
+
+## What moved
+
+`applyCurveHeroImport` was one function doing both halves on one connection, and the route ran it inside `withTenantAppendTransaction`. It is now two:
+
+- **`planCurveHeroImport`** reads. It loads the validated runs and their staged rows, resolves each row to an account, a patient and a location, counts what the import has no use for, and collects the rows it could not resolve as errors. It writes nothing.
+- **`writeCurveHeroImport`** writes. It posts what the plan resolved, stamps each run `applied`, and appends one chain event per run. **It looks nothing up.** The tables it touches are the ledger, `import_runs` and `domain_event` — exactly what the append role is granted.
+
+`applyCurveHeroImport` survives as the two called in order on one connection, for the `apply-cli` and the tests that drive the whole path. **The route does not use it**: it plans in a `withTenantTransaction` and writes in a `withTenantAppendTransaction`, which is the point of the increment.
+
+The eligibility check moved with it. `hasValidatedCurveImportRun` is a read, so it runs as `app_rw` now rather than as the role that cannot read the table it selects from.
+
+## One thing the split made necessary
+
+The two halves are separate transactions, so a second apply can arrive between them. The idempotency key on each entry already refuses to post a row twice; what was missing was the stamp. `writeCurveHeroImport` now stamps a run `applied` **only while it is still `validated`**, and appends its event only if that stamp took. A run somebody else applied in between is skipped rather than counted twice.
+
+## What the browser case proves, and what it cannot
+
+The case drives the whole path through the real route on the real roles: check a file, read *"Read 1 row, none of them refused"*, press **Post it to the ledger**, read *"Posted 1 entry"*, and then find `import.curve_hero.staged` **and** `import.curve_hero.applied` on the chain with the run stamped `applied`.
+
+Writing it ran into two rules of this ledger, both of which shaped the file it imports:
+
+**A day-sheet charge cannot post at all.** `ledger_entries_charge_requires_procedure` demands a procedure row, and a Curve Hero day sheet carries a procedure *code in its description* and no procedure. The three-row fixture this case started with — two charges and a payment — posted nothing. That is a real gap in the import, named in *Not in* below rather than papered over.
+
+**A payment may not allocate more than the account owes** (`allocation_exceeds_charge`). The case first carried a constant figure, passed alone, and failed inside its own suite, because every case above it has already moved those balances. It reads the largest outstanding account out of the ledger now and pays no more than it owes. A case that passes alone and fails in its suite is worth recording: the isolation that makes a case easy to write is the thing that hides what the suite does to it.
+
+## Not in Increment 1.95
+
+**Posting a day-sheet charge.** The import would have to resolve or create a procedure from a code in a description. That is a feature of the import, not of its transaction shape, and it wants its own increment — with the question of what this product does with a code it has never seen settled first.
+
+**Granting the append role the patient tables.** Still not done, and now not needed: nothing the append role runs reads them.
+
+**The other two unreferenced routes** from Increment 1.94's sweep, `/api/controls/policy` and `/api/controls/release/evaluate`.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
 ## Increment 1.94
 
 A sweep of every route under `src/app/api` against the rest of the app's source found **four whose path appears nowhere else**: `/api/controls/policy`, `/api/controls/release/evaluate`, and the pair this increment is about — `POST /api/import/curve` and `POST /api/import/curve/apply`.

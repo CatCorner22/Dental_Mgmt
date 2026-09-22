@@ -6,7 +6,9 @@ import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import {
   IMPORT_REPORT_KINDS,
   REPORT_KIND_LABEL,
+  appliedSentence,
   checkedSentence,
+  type AppliedResult,
   type CheckedSummary,
   type ImportReportKind,
 } from "@/lib/import/sentences";
@@ -19,18 +21,20 @@ import {
  * has a screen; this one did not, so the practice's own day sheets could reach
  * the ledger only through the CLI or a hand-written request.
  *
- * ## The check, and not yet the post
+ * ## Two acts, not one
  *
- * Building this screen found a second defect, of the same species: applying a
- * run reads `patients` and `account_members` as the append role, which holds
- * no grant on either, so `POST /api/import/curve/apply` has answered
- * "permission denied" for the whole life of this product. Migration 0056
- * clears the first wall it meets (`import_runs`, `import_staged_rows`); the
- * patient tables are a decision about who may read a patient record, and this
- * increment records it rather than settling it in passing.
+ * Checking the file and posting it are separate presses, because they are
+ * separate decisions. The check reads the file, says what it found and writes
+ * nothing to the ledger; posting is the act that does. A screen that did both
+ * on one press would make the practice read the outcome of a decision it had
+ * not consciously taken — and this is the door outside data comes through,
+ * which is the last place to hurry somebody.
  *
- * So this screen checks a file and says what it found, and offers no act that
- * could only fail.
+ * Increment 1.94 shipped this screen with the check alone, because applying
+ * had never worked: the apply ran every read through the append role, which
+ * holds no grant on `patients` or `account_members`. Increment 1.95 split the
+ * apply into a plan that reads as `app_rw` and a write that writes as
+ * `app_append`, so the post act is real and the append role stayed narrow.
  *
  * ## The run is held here and nowhere else
  *
@@ -47,11 +51,13 @@ export default function ImportPage() {
   const [busy, setBusy] = useState(false);
   const [staged, setStaged] = useState<Staged | null>(null);
   const [said, setSaid] = useState<string | null>(null);
+  const [applied, setApplied] = useState<AppliedResult | null>(null);
   const [ended, setEnded] = useState(false);
 
   const check = useCallback(async () => {
     setBusy(true);
     setSaid(null);
+    setApplied(null);
     setStaged(null);
     try {
       const res = await fetch("/api/import/curve", {
@@ -85,6 +91,41 @@ export default function ImportPage() {
       setBusy(false);
     }
   }, [content, fileName, reportKind]);
+
+  const post = useCallback(async () => {
+    if (!staged) return;
+    setBusy(true);
+    setSaid(null);
+    try {
+      const res = await fetch("/api/import/curve/apply", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ runId: staged.runId }),
+      });
+      refuseIfSignInEnded(res);
+      const body = (await res.json().catch(() => ({}))) as Partial<AppliedResult> & { error?: string };
+      if (!res.ok) {
+        setSaid(body.error ?? "Nothing was posted.");
+        return;
+      }
+      const result: AppliedResult = {
+        posted: body.posted ?? 0,
+        skipped: body.skipped ?? 0,
+        duplicates: body.duplicates ?? 0,
+        errors: (body.errors ?? []).map((e) => (typeof e === "string" ? e : JSON.stringify(e))),
+      };
+      setApplied(result);
+      setSaid(appliedSentence(result));
+      // The run is spent. Offering the button again would offer an act whose
+      // only outcome is a refusal, which this product does not do.
+      setStaged(null);
+    } catch (error) {
+      if (isSignInEnded(error)) setEnded(true);
+      else setSaid("Nothing was posted.");
+    } finally {
+      setBusy(false);
+    }
+  }, [staged]);
 
   if (ended) return <SessionEnded />;
 
@@ -144,6 +185,17 @@ export default function ImportPage() {
           >
             {busy ? "Working…" : "Check this file"}
           </button>
+          {staged !== null && staged.summary.status === "validated" && (
+            <button
+              id="import-post"
+              type="button"
+              className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-navy px-3 py-1 text-sm font-semibold text-white disabled:opacity-50"
+              disabled={busy}
+              onClick={() => void post()}
+            >
+              Post it to the ledger
+            </button>
+          )}
         </div>
 
         {said && (
@@ -160,21 +212,19 @@ export default function ImportPage() {
           </ul>
         )}
 
-        {/*
-          Why there is no second button yet (Increment 1.94). Applying a run
-          reads `patients` and `account_members` as the append role, which has
-          no grant on either, so `POST /api/import/curve/apply` has answered
-          "permission denied" for the whole life of this product — nothing
-          caught it because nothing called it. Offering the act here would be
-          offering a press that can only fail, which is the one shape
-          Increments 1.88, 1.89 and 1.93 exist to remove.
-        */}
-        {staged !== null && staged.summary.status === "validated" && (
-          <p className="max-w-prose text-sm text-[var(--ink-2)]">
-            Posting an import to the ledger is not built yet. The act reads patient records under a database role that
-            holds no grant on them, and widening that role is a decision about who may read a patient — not a thing to
-            settle on the way past. The check above is recorded either way.
+        {staged !== null && (
+          <p className="max-w-prose text-xs text-[var(--ink-3)]">
+            This check is recorded, and this screen is the only place it is offered for posting. Leaving the page means
+            checking the file again before it can post.
           </p>
+        )}
+
+        {applied !== null && applied.errors.length > 0 && (
+          <ul className="list-disc pl-5 text-sm text-[var(--ink-2)]">
+            {applied.errors.map((e) => (
+              <li key={e}>{e}</li>
+            ))}
+          </ul>
         )}
 
       </div>

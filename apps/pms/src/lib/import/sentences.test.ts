@@ -25,7 +25,7 @@ describe("checkedSentence", () => {
   it("says what was read and that nothing has posted yet", () => {
     const said = checkedSentence({ status: "validated", rowCount: 12, errorCount: 0 });
     expect(said).toContain("Read 12 rows");
-    expect(said).toContain("Nothing has reached the ledger");
+    expect(said).toContain("Nothing has reached the ledger yet");
   });
 
   it("counts one row in the singular", () => {
