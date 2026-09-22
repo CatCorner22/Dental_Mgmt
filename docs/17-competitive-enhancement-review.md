@@ -964,6 +964,51 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.90
+
+`POST /api/admin/revoke-all-sessions` has existed since **Increment 0.8**. Nothing ever called it.
+
+The search is short: across the repository the only references were the route file itself and three doc comments naming it as something the product has. No screen, no test that drove it through a browser, no link. An incident-response act — the one a practice reaches for in the hour somebody says a phone has gone astray — was reachable only by somebody who could write HTTP by hand, which is not the person who notices.
+
+## Two defects, not one
+
+**The act had no screen.** That is the visible one.
+
+**The reason was a constant.** The route wrote `reason: "admin_revoke_all"` into the chain event, which records that the act happened and nothing about why. Every such event in every practice would read the same. This is the act whose reason is most worth keeping, because the moment it is pressed is the moment somebody will later ask what was known and when — and a constant answers neither.
+
+The route now reads a typed reason and validates it: at least ten characters, at most two hundred. The floor is the same one a hard-event acknowledgement uses — enough to be a sentence rather than a keystroke. The ceiling says where the rest belongs: the detail goes wherever this practice keeps its incident notes, not into a chain payload.
+
+## Why a typed sentence and not "are you sure"
+
+The panel does not ask for confirmation. It asks for a reason, and the button stays disabled until there is one.
+
+A dialogue is dismissed by the same reflex that opened it, and it leaves nothing behind. A sentence somebody has to compose slows the press by the length of a thought, and the thought is the part worth keeping — it is on the chain afterwards, which a dialogue's "OK" never is. One guard, doing both jobs.
+
+## The half that makes this act different from Increment 1.88's
+
+Increment 1.88 gave the owner board the proportionate act: end the sessions of one named person, and refuse when that person is the reader, because ending your own sessions is a sign-out.
+
+This act ends **everybody's**, and the administrator pressing it is inside "everybody".
+
+That is not a consequence to be discovered. The panel says it before the press ("including your own", in the paragraph above the field), the answer repeats it after ("Ended 4 sign-ins across the practice — including your own"), and the screen then **reloads nothing**. Every later read from that screen would meet a session that no longer exists; the Increment 1.81 and 1.83 work would render it correctly as "your sign-in has ended", and the administrator would read the act's success as a fault. So the panel settles into a done state carrying the sentence and one link back to the sign-in screen.
+
+## What the tests cover
+
+- **Unit (8).** The reason floor and ceiling, each at its boundary; whitespace trimmed before either is measured; the sentence's singular and plural; the nobody-was-signed-in case, which says nothing changed rather than reporting zero; and the chain event carrying the typed reason and the count rather than a constant.
+- **Browser (1).** Signed in as the owner on Practice Risk: the button refuses while the field is empty, accepts a reason, and the page then says "including your own" and offers "Sign in again". Afterwards the database holds **no** live session for the tenant, and the chain holds one `auth.sessions_revoked_all` whose `payload->>'reason'` is the sentence that was typed — which is the assertion that would have passed against the old hardcoded constant only by coincidence, and does not.
+
+**The placement trap, walked into a second time.** The case first went at the end of the suite, after the case that pairs a new authenticator for the owner — which leaves `DEV_MFA_SECRET` no longer that account's secret, so any later `b.signIn("ridgeview-owner", …)` times out on a URL that never comes. Increment 1.89 recorded this; writing 1.90 reproduced it anyway, and reading the suite caught it before the run. It now sits before that case, with the reason in a comment beside it. Ending every session is safe for the cases that follow, because each signs in for itself.
+
+**An accessibility violation this increment introduced and its own gate caught.** The first browser run passed all 51 cases and axe reported one critical/serious violation: `link-in-text-block` on the "Sign in again" link. A link inside a paragraph, distinguished from the surrounding text by colour alone, fails for anybody who cannot tell that colour from the ink. The screen's other links sit on their own line, where the rule does not apply. This one is underlined now — `underline underline-offset-2`, with the reason in a comment so the next person does not take it back out as inconsistent. Re-run: 51 cases, 114 audited states, no violations.
+
+## Not in Increment 1.90
+
+**A second administrator's approval.** Ending every sign-in is recoverable by definition — everybody signs in again — so the two-pairs-of-hands control that Increment 1.77's recovery ceremony needs would buy nothing here and would cost the practice the minutes the act exists to save.
+
+**Ending sessions for a chosen group** (one location, one rank). The two acts this product has are the proportionate one (Increment 1.88, one named person) and the blunt one (this). A middle needs a reason to exist that an incident has not yet given.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
 ## Increment 1.89
 
 Increment 1.88 shipped without a browser case and said so in its own record — in the commit, the pull request and this document. This closes that, and writing it found something 1.88 had wrong.

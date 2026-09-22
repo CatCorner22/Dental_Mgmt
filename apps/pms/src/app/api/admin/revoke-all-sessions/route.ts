@@ -1,9 +1,29 @@
 import { withGuard } from "@/lib/auth/withGuard";
 import { getAuthStore } from "@/lib/auth/resolveStore";
-import { revokeAllSessionsForTenant } from "@/lib/auth/revokeAllSessions";
+import {
+  everybodySignedOutSentence,
+  revokeAllSessionsForTenant,
+  revokeReasonProblem,
+} from "@/lib/auth/revokeAllSessions";
 
+type Body = { reason?: unknown };
+
+/**
+ * End every live sign-in in the practice (Increment 1.90 gave it a screen).
+ *
+ * Administrator rank. This is the blunt act beside Increment 1.88's
+ * proportionate one: it signs out the person pressing it along with everybody
+ * else, which is why the screen says so before the press and why the reason is
+ * typed rather than assumed.
+ */
 export const POST = withGuard(
-  async (_req, ctx) => {
+  async (req, ctx) => {
+    const body = (await req.json().catch(() => ({}))) as Body;
+    const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+    const problem = revokeReasonProblem(reason);
+    if (problem !== null) {
+      return Response.json({ error: problem, code: "malformed" }, { status: 400 });
+    }
     const store = await getAuthStore();
     if (!store) {
       return Response.json({ error: "Authorization store is not configured." }, { status: 503 });
@@ -12,10 +32,14 @@ export const POST = withGuard(
     const result = await revokeAllSessionsForTenant(store, {
       tenantId: ctx.access.user.tenantId,
       actorUserId: ctx.access.user.id,
-      reason: "admin_revoke_all",
+      reason,
       at: now,
     });
-    return Response.json({ ok: true, revoked: result.revoked });
+    return Response.json({
+      ok: true,
+      revoked: result.revoked,
+      sentence: everybodySignedOutSentence(result.revoked),
+    });
   },
   { minRank: "admin" }
 );

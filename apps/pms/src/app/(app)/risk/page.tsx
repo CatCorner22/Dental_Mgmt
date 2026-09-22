@@ -34,6 +34,7 @@ import { SessionEnded } from "../session-ended";
 import { readViewer } from "@/lib/auth/viewer";
 import { getGuarded, isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { RanksPanel } from "./ranks-panel";
+import { SignOutEverybodyPanel } from "./sign-out-everybody-panel";
 import { RegainPanel } from "./regain-panel";
 import { DeliveryPanel, type AddressFormState, type AddressResponse } from "../delivery-panel";
 import {
@@ -1449,6 +1450,13 @@ function RiskBody({
           administrator acts on it, which is how a practice learns whom to ask
           — and, where it has one administrator, why nobody can. */}
       <RegainPanel isAdmin={isAdmin} />
+
+      {/* Increment 1.90. The blunt act beside Increment 1.88's proportionate
+          one, and the route Increment 0.8 built that no screen ever called.
+          It sits below the recovery panel because it is what a practice
+          reaches for when it does not yet know whose account is the problem —
+          after the ones that assume it does. */}
+      <SignOutEverybodyPanel isAdmin={isAdmin} />
 
       <DeliveryPanel delivery={delivery} form={addressForm} busy={busy} />
 
