@@ -192,10 +192,6 @@ const UNCALLED = new Map([
     "/api/controls/policy",
     "Reads the active control policy. Practice Risk reads the same material through /api/controls/risk, so no screen needs this one; it is kept as the plain read of a policy by version, and Increment 1.96 raised it from `user` to `manager` to match the screen rather than sit a rank below it.",
   ],
-  [
-    "/api/controls/release/evaluate",
-    "Attests a release on a channel the ledger does not carry — a deposit bag, a new vendor, a payroll file — and answers whether a second person is needed and who may second. A capability with no screen, recorded here rather than hidden: the act is real and exercised by live cases, and it wants a surface of its own.",
-  ],
 ]);
 
 const uncalled = [];
@@ -227,5 +223,6 @@ if (failures.length) {
 }
 
 console.log(
-  `Route guard coverage ok (${files.length} files; every guarded entitlement is one of the rulebook's ${CATALOG.size}; ${UNCALLED.size} routes nothing calls, each with its reason).`
+  `Route guard coverage ok (${files.length} files; every guarded entitlement is one of the rulebook's ${CATALOG.size}; ` +
+    `${UNCALLED.size} ${UNCALLED.size === 1 ? "route" : "routes"} nothing calls, each with its reason).`
 );

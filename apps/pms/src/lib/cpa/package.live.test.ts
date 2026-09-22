@@ -94,12 +94,11 @@ describe.skipIf(!adminUrl)("CPA month-end package (live)", () => {
    * codebase made on purpose and states beside the function.
    *
    * **In the seeded practice the two figures coincide, and the case says why
-   * rather than hiding it**: payroll is the only external channel this seed
-   * can attest — `wire` and `vendor` are not release channels and `deposit`
-   * is a ledger channel that refuses — and its threshold is **zero**, so
-   * every payroll release requires a second whatever it is worth. The figure
-   * separates them in a practice that sets a threshold; here it reports the
-   * sharper fact, which is that all of them need one.
+   * rather than hiding it**: the two channels `ENFORCEMENT` marks `external`
+   * — `payroll` and `vendor_new` — both carry a threshold of **zero**, so
+   * every release on either requires a second whatever it is worth. The
+   * figure separates them in a practice that sets a threshold; here it
+   * reports the sharper fact, which is that all of them need one.
    */
   it("counts how many attested releases the policy required a second pair of hands for", async () => {
     const big = await tx((d) => attestChannelRelease(d, { tenantId, actor, channel: "payroll", amountUsd: 18_000 }));
@@ -120,8 +119,10 @@ describe.skipIf(!adminUrl)("CPA month-end package (live)", () => {
     expect(payroll.requiredSecond).toBe(2);
 
     // A channel the ledger carries is not attestable by hand, and one the
-    // policy does not name is not a release channel at all — so payroll is
-    // the whole of what this practice can attest.
+    // policy does not name is not a release channel at all. Payroll is not
+    // the whole of what this practice can attest — `vendor_new` is external
+    // too (Increment 1.98 corrected that claim) — but both carry a threshold
+    // of zero, so the two figures coincide on either.
     const refusedLedger = await tx((d) => attestChannelRelease(d, { tenantId, actor, channel: "deposit", amountUsd: 10 }));
     expect(refusedLedger).toMatchObject({ ok: false, code: "ledger_channel" });
     const refusedUnknown = await tx((d) => attestChannelRelease(d, { tenantId, actor, channel: "wire", amountUsd: 10 }));

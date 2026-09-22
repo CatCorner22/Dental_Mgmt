@@ -964,6 +964,57 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.98
+
+`POST /api/controls/release/evaluate` has had no screen since it was built. Increment 1.96's sweep put it on the uncalled list with the reason that it wanted a surface of its own; Increment 1.97 made the figure it records readable in the month-end package and restated the debt. This is the surface.
+
+**Its arrival takes the route off that list, and the check verifies it.** `check-route-guards.mjs` fails on an allowlisted path something has since started calling, so the loop closes itself rather than leaving a stale claim behind: the run now reports *"1 route nothing calls"* where it reported two.
+
+## Its own screen, at its own rank
+
+The route opens at **`lead`**. Practice Risk needs `manager`, so a panel there would be a screen the people this act is for could not reach — **Increment 1.93's lesson read backwards**. `/releases` has a header link of its own at `lead`, gated on the route file, which `seats.test.ts` reads back.
+
+In the seeded practice that means the owner is offered it and the front desk is not, which the nav test now pins.
+
+## What the screen records, and what it says it cannot
+
+One person attests that a release happened and what the practice's policy asked for. It does **not** record that a second person signed, because `attestChannelRelease` accepts no second signer — deliberately, as Increment 1.97 found and recorded.
+
+So the answer says so, rather than leaving the reader to assume the opposite:
+
+> Recorded, and the policy required a second pair of hands. This product cannot hold that signature — keep it where the channel does, on the payroll file or the bank's own authorisation log. 2 people here may second it.
+
+And, beneath it, how the month-end package will read the channel:
+
+> This channel is attested, never enforced: the product does not hold its data, so nothing here checks that the release matched what was authorised.
+
+A practice where **nobody** may second gets that said plainly too, because a policy requiring a second pair of hands that no role can supply is worth the owner's attention on its own.
+
+## A correction to Increment 1.97's record
+
+Increment 1.97 wrote that **payroll is the only external channel this practice can attest**. That is **false**.
+
+`ENFORCEMENT` marks two channels `external` — `payroll` and `vendor_new` — and both attest. Probed against a live seeded database: `vendor_new` at $10 and at $5,000 both record, both with `dualRequired: true` and a threshold of zero, and the owner's own evaluation returns `blocked_role` on either. What is *not* attestable is `wire` and `vendor`, which are not release channels at all and refuse `unknown_channel`, and `deposit`, which the ledger enforces and which refuses `ledger_channel`.
+
+Nothing 1.97 built is wrong — the figure, the schema bump and the live assertions all stand, and the live case never asserted the "only". The prose did, and `docs/05`, `docs/17` and the comment in `package.live.test.ts` now say the true thing with the correction marked.
+
+**A test makes the claim unrepeatable.** The screen's channel list is pinned to `ENFORCEMENT` rather than restated: `EXTERNAL_RELEASE_CHANNELS` must equal exactly the channels marked `external`. A channel promoted to enforced has to leave this screen in the same change, or the screen would offer an act `attestChannelRelease` refuses as a ledger channel — an act that could only fail, which is the shape Increments 1.88, 1.89 and 1.93 exist to remove.
+
+## Tests
+
+- **Unit (8).** The channel list equals `ENFORCEMENT`'s external set and every channel has a label; the recorded sentence's below-threshold, above-threshold, nobody-may-second and one-person cases; and both enforcement sentences.
+- **Browser (1).** The owner opens `/releases`, cannot press the act without an amount, records an $18,000 payroll file, and reads that the policy required a second and that this product cannot hold that signature. The chain carries `control.release_attested` with `dualRequired` true, and the month-end package then shows *"payroll attested (external channel) · 1 needed a second pair of hands"* — Increment 1.97's figure, reached for the first time by pressing a button rather than by calling a function.
+
+## Not in Increment 1.98
+
+**Recording the second person's act.** Unchanged from Increment 1.97: it needs the second person's own sign-in and their own press, which is the shape of the recovery ceremony rather than of an attestation.
+
+**A list of what has been attested.** The screen records and says what the policy asked; the month-end package is where the month's attestations are read, and the digest counts the week's. A third list would be a third place to disagree.
+
+**The digest's flat label.** It still reads *"Release attested"* for every one. Recorded in Increment 1.97 and still the smaller, separate edit.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
 ## Increment 1.97
 
 `attestChannelRelease` has recorded `dualRequired` on every per-release attestation since Increment 1.12. **Nothing read it.**
@@ -984,7 +1035,9 @@ So `requiredSecond` is **what the practice still owes evidence for**, not what i
 
 In the seed the two figures **coincide**, and the live case says so rather than hiding it.
 
-Payroll is the only external channel this practice can attest — `wire` and `vendor` are not release channels at all and refuse `unknown_channel`, and `deposit` is a ledger channel that refuses `ledger_channel` because its evidence comes from the posting path. And **the seeded payroll threshold is zero**, so every payroll release requires a second whatever it is worth.
+There are **two** channels this practice can attest — `payroll` and `vendor_new`, the two `ENFORCEMENT` marks `external`. `wire` and `vendor` are not release channels at all and refuse `unknown_channel`, and `deposit` is a ledger channel that refuses `ledger_channel` because its evidence comes from the posting path. And **both seeded thresholds are zero**, so every release on either requires a second whatever it is worth.
+
+*(Corrected in Increment 1.98. This first read "payroll is the only external channel this practice can attest", which is false: `vendor_new` is external too and attests. Verified by probing a live seeded database, which also showed both thresholds at zero and the owner's own evaluation returning `blocked_role`.)*
 
 The figure separates them in a practice that sets a threshold. Here it reports the sharper fact: *all* of them need one, and the product can record none of them.
 
@@ -995,7 +1048,7 @@ The figure separates them in a practice that sets a threshold. Here it reports t
 ## Tests
 
 - **Unit.** The package fixture carries the new field, and the schema version is pinned to `package-v8`.
-- **Live (1).** Two payroll releases are attested, the package reports `count: 2, requiredSecond: 2`, the threshold is asserted to be zero so a reader knows why they are equal, and both refusals — the ledger channel and the channel the policy does not name — are driven so the case states the whole of what this practice can attest.
+- **Live (1).** Two payroll releases are attested, the package reports `count: 2, requiredSecond: 2`, the threshold is asserted to be zero so a reader knows why they are equal, and both refusals — the ledger channel and the channel the policy does not name — are driven.
 
 **Red-before, measured.** With `package.ts` reverted, the live case fails on `expected undefined to be 2`: the field is not there.
 

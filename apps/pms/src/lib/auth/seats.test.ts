@@ -66,6 +66,9 @@ describe("the links a viewer is offered", () => {
       "/day-close",
       "/statements",
       "/approvals",
+      // Increment 1.98 gave the release attestation a screen at `lead`, which
+      // the owner's rank opens and the front desk's does not.
+      "/releases",
       "/risk",
       "/digest",
       "/locations",

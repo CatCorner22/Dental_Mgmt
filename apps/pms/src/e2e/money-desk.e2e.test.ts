@@ -1343,6 +1343,58 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(runs[0].status).toBe("applied");
   }, 180_000);
 
+  /**
+   * Increment 1.98. `POST /api/controls/release/evaluate` had no screen since
+   * it was built; Increment 1.96's sweep put it on the uncalled list with the
+   * reason that it wanted one, and this is it. Its arrival takes the route off
+   * that list, which the check verifies: it fails on an allowlisted path
+   * something has started calling.
+   *
+   * The screen sits at `lead`, the route's own rank. A panel on Practice Risk
+   * would need `manager` and so would be a screen the people this act is for
+   * could not reach — Increment 1.93's lesson read backwards.
+   */
+  it("records a release on a channel the ledger does not carry, and says what it cannot hold", async () => {
+    await b.signIn("ridgeview-owner", "/releases");
+    await page().getByRole("heading", { name: "Money that left by a channel this product does not hold" }).waitFor({ timeout: 60_000 });
+
+    // The act cannot be pressed without an amount.
+    const record = page().getByRole("button", { name: "Record this release" });
+    expect(await record.isDisabled()).toBe(true);
+
+    await page().selectOption("#release-channel", "payroll");
+    await page().fill("#release-amount", "18000");
+    await page().fill("#release-payee", "Northwind Payroll");
+    await page().fill("#release-memo", "September payroll file");
+    expect(await record.isDisabled()).toBe(false);
+    await record.click();
+
+    /**
+     * The seeded payroll threshold is zero, so the policy requires a second
+     * pair of hands whatever the figure — and the answer says the product
+     * cannot hold that signature rather than letting the reader assume it did.
+     */
+    await page().getByText(/required a second pair of hands/).waitFor({ timeout: 30_000 });
+    expect(await page().getByText(/cannot hold that signature/).count()).toBe(1);
+    expect(await page().getByText(/attested, never enforced/).count()).toBe(1);
+    await b.audit("releases, one recorded on an external channel");
+
+    // It is on the chain, which is what makes it a record rather than a form.
+    const { rows } = await app.db.admin.query(
+      "SELECT payload->>'channel' AS channel, payload->'dualRequired' AS dual FROM domain_event WHERE kind = 'control.release_attested' ORDER BY seq DESC LIMIT 1"
+    );
+    expect(rows[0].channel).toBe("payroll");
+    expect(rows[0].dual).toBe(true);
+
+    // And the month-end package counts it among the ones that needed a second.
+    await page().goto(`${app.base}/cpa`);
+    await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
+    await expect
+      .poll(async () => await page().locator("section[aria-labelledby=package-controls]").innerText(), { timeout: 60_000 })
+      .toMatch(/payroll attested \(external channel\)[\s\S]*needed a second pair of hands/);
+    await b.audit("month-end package, the attested release that needed a second");
+  }, 180_000);
+
   it("says a sign-in has ended rather than telling somebody their seat is the wrong one", async () => {
     /**
      * Increment 1.81. Four screens tested `!meRes.ok` on `/api/me`, which is

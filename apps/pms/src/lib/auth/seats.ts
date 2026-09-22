@@ -63,6 +63,7 @@ export const NAV_LINKS: NavLink[] = [
   { href: "/day-close", label: "Day close", minRank: "user", gate: "api/day-close/route.ts" },
   { href: "/statements", label: "Statements", minRank: "user", gate: "api/statements/route.ts" },
   { href: "/approvals", label: "Approvals", entitlement: "approve_writeoffs", gate: "api/approvals/inbox/route.ts" },
+  { href: "/releases", label: "Releases", minRank: "lead", gate: "api/controls/release/evaluate/route.ts" },
   { href: "/risk", label: "Practice Risk", minRank: "manager", gate: "api/controls/risk/route.ts" },
   { href: "/digest", label: "Digest", minRank: "manager", gate: "api/digest/route.ts" },
   { href: "/locations", label: "Locations", minRank: "manager", gate: "api/locations/route.ts" },
