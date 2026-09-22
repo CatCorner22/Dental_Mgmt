@@ -964,6 +964,56 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.88
+
+The owner's board says: *"A holder of Approve write-offs and Reconcile bank to PMS signed in from a browser not seen before for that account, at 2026-09-22 04:17 UTC."*
+
+Until now the product offered nothing to do about it.
+
+## Three things wrong at once
+
+**The alarm's link went somewhere it does not belong.** `new_device_financial_role` carried `href: "/risk"`. Practice Risk renders **no hard events at all** — they render on the owner's board, the weekly digest and the CPA package. So the one link on the most alarming sentence the product prints led away from the alarm, to a screen that has neither it nor any control for it.
+
+**The act did not exist.** `revokeSessionsForUser` sits on the `AuthStore` interface and in both implementations, and its only caller is the enrolment route, acting on the caller's own sessions. **No route let an administrator end another person's sessions.**
+
+**The one session-ending route nothing calls is the wrong size.** `POST /api/admin/revoke-all-sessions` ends every session in the practice. It has no caller anywhere — the only other mention is a doc comment. Ending everybody's sign-ins because one person's browser is unfamiliar is not the act the alarm describes.
+
+## The proportionate act, where the alarm is
+
+`endSessionsForPerson` ends the sessions of the person the alarm names and nobody else's, and `POST /api/admin/end-sessions` carries it at administrator rank. The control sits on the board beside the acknowledgement, because that is where the owner already is; the event's `href` is now `null`, since there is nowhere else worth sending anybody.
+
+The event carries `personId` for this purpose. Its subject is the **session** — that is what was seen on a new browser — and ending a person's sign-ins needs the person, so the two are not the same field and the type now says so.
+
+## The tenant check belongs above the store
+
+`store.revokeSessionsForUser` resolves the **target's own** tenant and scopes its transaction to that, so it will end a session in any practice if handed an id from one. The guard therefore sits in `endSessionsForPerson`, before the call, and not in the store.
+
+A target in another practice answers exactly as one that does not exist — "No such person in this practice." Saying which it was would confirm an account to somebody who only guessed at it, and the caller can act on neither answer. A unit case asserts the two responses are identical rather than merely similar.
+
+## What it refuses, and what it says afterwards
+
+Ending **your own** sessions is refused with the way to do it instead: sign out from the header, which needs no administrator. It is a different act wearing the same words.
+
+A count of zero is reported plainly rather than as a failure — *"had no sessions left to end. Nothing was signed in, so nothing changed."* The person may have signed out already, or the session may have timed out between the alarm and the press, and in both cases the thing the owner wanted is true.
+
+The act is disruptive, not destructive: the person signs in again with the password and a code they already hold, and nothing they did is undone. The button says so beside itself, which is why it asks nothing further before acting.
+
+## Two integration points, checked rather than assumed
+
+**Metrics.** The domain event carries `targetUsername`. `redactEventPayload` in `packages/metrics` filters by key name, and `SENSITIVE_KEY` already matches `username` — so the payload is stripped before aggregation by design, not by luck.
+
+**The weekly digest.** An unmapped kind is not dropped; it falls through to a humanised label. `auth.sessions_ended` is now mapped explicitly to `access.sessionsRevoked`, beside the tenant-wide act, and carries its own label.
+
+## Not in Increment 1.88
+
+**A browser case.** Every other user-facing increment in this sequence has one, and this does not. Raising a `new_device_financial_role` event in a browser run means planting a session row with an unseen user agent for a critical-duty holder, and the honest choice at this point was to ship the increment with its unit and integration coverage and say the gap out loud rather than add a case built in haste. The existing 49 cases pass, including the board, which is what rules out a regression from dropping the `href`.
+
+**Surfacing the tenant-wide revoke.** `revoke-all-sessions` still has no screen. It is a blunter act with different consequences — it signs out the person pressing it along with everybody else — and it deserves its own increment and its own confirmation, not a button added beside this one.
+
+**Ending sessions from anywhere but this alarm.** The act is reachable only where the board names somebody. A general "end this person's sessions" beside every seat is a user-administration question, and belongs with that surface.
+
+**A stale comment found on the way.** `regainAccess.ts` says "nothing writes `users.role`", which Increment 1.78 made false when it added user administration. The behaviour is right and the comment is not; correcting it is not this increment's subject.
+
 ## Increment 1.87
 
 The practice invites its accountant, types a username, and presses the button. The screen reports a failure it cannot explain, no seat exists, and nothing says what to change. The username was free in this practice and taken in another.

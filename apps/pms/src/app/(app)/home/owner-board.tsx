@@ -18,6 +18,8 @@ type HardEventItem = {
   subjectId: string;
   sentence: string;
   href: string | null;
+  /** The person a hard event is about, when one can be acted on (Increment 1.88). */
+  personId?: string;
   /** The owner's acknowledgment, if recorded (Increment 1.33). */
   ack: { acknowledgedByName: string; acknowledgedAt: string; note: string } | null;
 };
@@ -222,6 +224,40 @@ export function OwnerBoard() {
         return;
       }
       setMessage(err instanceof Error ? err.message : "The hard event was not acknowledged.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * End one person's sign-ins, from beside the alarm that named them
+   * (Increment 1.88). Disruptive rather than destructive: they sign in again
+   * with the password and a code they already hold, and nothing they did is
+   * undone — which is why it asks nothing first beyond the press.
+   */
+  async function endSignIns(item: HardEventItem) {
+    if (state.status !== "ready" || !item.personId) return;
+    const key = `end|${item.subjectId}`;
+    setBusy(key);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/admin/end-sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: item.personId }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; sentence?: string };
+      refuseIfSignInEnded(res);
+      if (!res.ok) throw new Error(body.error ?? "Those sign-ins were not ended.");
+      setState({ ...state, alerts: await loadAlerts(state.isAdmin) });
+      setMessage(body.sentence ?? "Those sign-ins were ended.");
+    } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
+      setMessage(err instanceof Error ? err.message : "Those sign-ins were not ended.");
     } finally {
       setBusy(null);
     }
@@ -531,6 +567,21 @@ export function OwnerBoard() {
                         </>
                       )}
                     </p>
+                    {e.personId && (
+                      <p className="mt-1">
+                        <button
+                          type="button"
+                          className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-3 py-1 text-sm font-semibold text-[var(--ink)] disabled:opacity-50"
+                          disabled={busy !== null}
+                          onClick={() => void endSignIns(e)}
+                        >
+                          {busy === `end|${e.subjectId}` ? "Ending…" : "End their sign-ins"}
+                        </button>
+                        <span className="ml-2 text-xs text-[var(--ink-3)]">
+                          They sign in again with their password and a code. Nothing they did is undone.
+                        </span>
+                      </p>
+                    )}
                     {e.ack ? (
                       <p className="text-xs text-[var(--ink-3)]">
                         Seen by {e.ack.acknowledgedByName} on {e.ack.acknowledgedAt.slice(0, 10)}: {e.ack.note}
