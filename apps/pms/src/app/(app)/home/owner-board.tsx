@@ -20,6 +20,8 @@ type HardEventItem = {
   href: string | null;
   /** The person a hard event is about, when one can be acted on (Increment 1.88). */
   personId?: string;
+  /** The event names the reader, so the act on it is a sign-out (Increment 1.89). */
+  aboutViewer?: boolean;
   /** The owner's acknowledgment, if recorded (Increment 1.33). */
   ack: { acknowledgedByName: string; acknowledgedAt: string; note: string } | null;
 };
@@ -567,6 +569,11 @@ export function OwnerBoard() {
                         </>
                       )}
                     </p>
+                    {e.aboutViewer && (
+                      <p className="mt-1 text-xs text-[var(--ink-3)]">
+                        This names your own sign-in. To end it, sign out from the header — that needs no administrator.
+                      </p>
+                    )}
                     {e.personId && (
                       <p className="mt-1">
                         <button

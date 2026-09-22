@@ -964,6 +964,44 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.89
+
+Increment 1.88 shipped without a browser case and said so in its own record — in the commit, the pull request and this document. This closes that, and writing it found something 1.88 had wrong.
+
+## What the test found
+
+**In the seeded practice the only holder of a critical duty is the owner.** `CRITICAL_DUTIES` is the six entitlements weighted 5 — `collect_cash`, `prepare_deposit`, `bank_reconcile`, `approve_writeoffs`, `create_vendor`, `release_payment` — and of the seeded Ridgeview people only Riley Owner holds any (`approve_writeoffs`, `bank_reconcile`). Finn Front's `post_payments` is weighted 4.
+
+So the only `new_device_financial_role` alarm the seed can raise is **about the person reading it**, and `endSessionsForPerson` refuses that case by design: ending your own sessions is a sign-out, and the route says so. Increment 1.88 therefore put a button on the board that, for the one alarm a fresh practice sees, could only refuse.
+
+A button that can only refuse is worse than none.
+
+## Where the decision belongs
+
+The board knows its viewer's username, display name and role — `readViewer` carries no id, and adding one would push a comparison onto seven screens to answer a question one place already knows.
+
+**The alerts route knows both**: who is asking (`ctx.access.user.id`) and who each event names. It now clears `personId` and sets `aboutViewer` when they are the same person, so the board renders no act and says instead: *"This names your own sign-in. To end it, sign out from the header — that needs no administrator."* — the same guidance the route's refusal gives, arriving before the press rather than after it.
+
+`listHardEvents` is unchanged and still viewer-blind, which is right: it reads rows, and who is looking is not one of them.
+
+## The case itself
+
+It grants `bank_reconcile` to the front desk — making a second critical-duty holder, which the seed does not have — then plants **two** sessions for that person from one browser nobody has seen on that account. Two, not one, because the sentence counts them, and a count is the part that tells the owner the act reached more than the row the alarm named.
+
+Then, signed in as the owner, it asserts in one pass: the owner's own alarm carries the self line and **no** button; exactly one "End their sign-ins" button exists; pressing it says *"Ended 2 sign-ins for Finn Front"*; no live session remains for that person; and the chain holds one `auth.sessions_ended` event naming them with a count of two.
+
+**Placement mattered and cost a run.** The case first went at the end of the suite, after the case that pairs a new authenticator for the owner — which leaves `DEV_MFA_SECRET` no longer that account's secret, so `b.signIn` timed out waiting for a URL that never came. It now sits before that case. The failure named the wrong thing (a URL timeout) for the right reason, which is worth recording for whoever adds the next owner-signed-in case to this suite.
+
+**Red-before, measured.** With the route's decoration reverted, the case fails waiting for the self line, because the owner's own alarm still offers a button.
+
+## Not in Increment 1.89
+
+**Giving the seed a second critical-duty holder.** The case grants one and takes it back. Changing the seed would move what every other case sees of the SoD findings, the roster and the digest, for one case's convenience.
+
+**Surfacing the tenant-wide revoke**, which still has no screen — unchanged from 1.88 and still its own increment.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Still recorded, still not this increment's subject.
+
 ## Increment 1.88
 
 The owner's board says: *"A holder of Approve write-offs and Reconcile bank to PMS signed in from a browser not seen before for that account, at 2026-09-22 04:17 UTC."*

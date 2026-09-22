@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays } from "@pms/controls-engine";
 import { assertNoProblems, e2eEnabled, openBrowser, startProductionApp, type E2eApp, type E2eBrowser } from "./harness";
 import { currentCodeForTest } from "../lib/auth/totp";
-import { DEV_MFA_SECRET, DEV_PASSWORD } from "@pms/db/seed-data";
+import { DEV_MFA_SECRET, DEV_PASSWORD, DEV_TENANTS, DEV_USERS } from "@pms/db/seed-data";
+import { uuidv7 } from "@pms/db";
 
 /**
  * The Practice Risk page in a real browser against the production server:
@@ -963,6 +964,70 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     // before any row is looked up.
     await page().goto(`${app.base}/regain/not-a-token`, { waitUntil: "networkidle" });
     expect(await page().locator("main").innerText()).toMatch(/This link no longer works/);
+  }, 120_000);
+
+  /**
+   * The browser case Increment 1.88 left undone, and said so in its own record
+   * (Increment 1.89).
+   *
+   * Raising `new_device_financial_role` needs a holder of a critical duty with
+   * a sign-in from a browser nobody has seen on that account. The seeded
+   * practice has exactly one such holder — the owner — which is why this case
+   * grants one to the front desk first: pressing the button on the owner's own
+   * alarm is the case below, and it refuses by design.
+   */
+  it("ends the sign-ins a new-device alarm names, and offers nothing on the reader's own", async () => {
+    const tenantId = DEV_TENANTS[0]!.id;
+    const front = DEV_USERS.find((u) => u.username === "ridgeview-front")!;
+
+    await app.db.admin.query(
+      `INSERT INTO user_entitlements (id, tenant_id, user_id, entitlement, effective_from)
+       VALUES ($1, $2, $3, 'bank_reconcile', now())
+       ON CONFLICT DO NOTHING`,
+      [uuidv7(), tenantId, front.id]
+    );
+    // Two sign-ins from one browser nobody has seen on that account. Both end;
+    // the sentence counts them, which is what tells the owner the act reached
+    // more than the one row the alarm named.
+    for (const _ of [0, 1]) {
+      await app.db.admin.query(
+        `INSERT INTO sessions (id, tenant_id, user_id, created_at, last_seen_at, absolute_expires_at, idle_expires_at, device_profile, user_agent)
+         VALUES ($1, $2, $3, now(), now(), now() + interval '12 hours', now() + interval '30 minutes', 'desk', 'Unseen-Browser/1.0')`,
+        [uuidv7(), tenantId, front.id]
+      );
+    }
+
+    await b.signIn("ridgeview-owner", "/home");
+    await page().getByRole("heading", { name: "Today's board" }).waitFor({ timeout: 60_000 });
+
+    // The owner's own sign-ins raise the same alarm, and carry no button.
+    await page().getByText(/This names your own sign-in/).first().waitFor({ timeout: 30_000 });
+
+    const end = page().getByRole("button", { name: "End their sign-ins" });
+    expect(await end.count()).toBe(1);
+    await end.first().click();
+
+    await page().getByText(/Ended 2 sign-ins for Finn Front/).waitFor({ timeout: 30_000 });
+
+    const { rows } = await app.db.admin.query(
+      "SELECT count(*)::int AS live FROM sessions WHERE user_id = $1 AND revoked_at IS NULL",
+      [front.id]
+    );
+    expect(rows[0].live).toBe(0);
+
+    // And the chain records who did it to whom.
+    const { rows: events } = await app.db.admin.query(
+      "SELECT payload->>'targetUsername' AS who, payload->>'revoked' AS n FROM domain_event WHERE tenant_id = $1 AND kind = 'auth.sessions_ended'",
+      [tenantId]
+    );
+    expect(events).toEqual([{ who: "ridgeview-front", n: "2" }]);
+
+    await b.audit("owner board, new-device alarm acted on");
+
+    await app.db.admin.query(
+      "DELETE FROM user_entitlements WHERE user_id = $1 AND entitlement = 'bank_reconcile'",
+      [front.id]
+    );
   }, 120_000);
 
   it("lets an enrolled person pair a new authenticator, and signs them in on it", async () => {
