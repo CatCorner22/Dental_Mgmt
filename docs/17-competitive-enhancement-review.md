@@ -2644,3 +2644,46 @@ Increment 1.36 admitted a row into a closed month on its reason code alone. A re
 - Precog math is illustrative. Shipping scores before golden tests is a liability.
 - SuperByte's 3-read cost model must not auto-fire on every keystroke in a PHI product.
 - Solo-team capacity: Increment 0.1 is the only honest Phase 0 slice for one engagement. Decision 23 (budget and staffing) is still the gate on Phase 1 durations.
+
+## Increment 1.102
+
+Increment 1.90 made the reason for ending every sign-in **typed rather than hardcoded**. The guard refuses anything under ten characters, and the words beside the field say why:
+
+> "It goes on the chain beside the act, and it is what the practice reads afterwards."
+
+That last clause was not true. The reason reached the chain and stopped there. In the whole repository, **exactly one thing ever selected it** — a browser test, going round the product to Postgres:
+
+```sql
+SELECT payload->>'reason' FROM domain_event WHERE kind = 'auth.sessions_revoked_all'
+```
+
+No screen, no digest, no month-end package. The product demanded a sentence from a person during an incident, promised they would read it back, and gave them nowhere to read it.
+
+This is the shape Increments 1.97, 1.100 and 1.101 each found: **a fact the product records and nothing reads.** Here it is sharper, because the product does not merely record the fact — it refuses the act until a person composes one.
+
+## What it does now
+
+The practice's recent sign-out-everybody acts sit **above the form that takes another one**: when, who pressed, how many sign-ins ended, and what they typed. Five of them, because this act belongs to an incident and an incident is read in one sitting; the chain keeps every one and is the record a verifier reads.
+
+Above the form is the placement that matters. A second administrator during the same incident meets, before pressing, the fact that somebody already did this an hour ago and why — which is either the answer to their question or the reason to press anyway.
+
+## Three contingencies the rows carry
+
+- **The administrator has left.** The join to `users` is a left join: the act does not leave with them. The row reads *"An administrator whose seat has since gone ended 2 sign-ins"* rather than naming nobody.
+- **Nobody was signed in.** `revoked: 0` is not nothing happening. The act ran, and the row says it ran.
+- **A reason from before there were reasons.** A row this practice wrote while the route still hardcoded `admin_revoke_all` carries no reason at all. It reads *"Recorded before this screen asked why"*, never a blank — a blank would read as somebody having typed nothing, which the guard has refused since Increment 1.90.
+
+And one contingency the *screen* carries: the history is `null` until it loads, and only a load that came back empty prints "this practice has never ended every sign-in at once". A fetch that fails leaves the sentence unsaid rather than having the screen state something false about the practice's history because a request did not land.
+
+**Red-before, measured.** Without the increment the browser case fails on its first new assertion — `waiting for getByText(/never ended every sign-in at once/) to be visible`, 60s — on a screen where the panel's heading renders as it always did.
+
+**Tests.** App unit (7): the sentence naming who pressed and how many ended, the singular, the act that ended nothing, the administrator who has gone, a reason given back unchanged, the empty reason explained rather than blanked, and the never-done sentence. Live (4): nothing read back from a practice that has never done it; the reason, the name and the instant read back from one that has; the most recent first with **another practice's act absent**, because a reason names the incident a practice was in the middle of; and no more rows than the screen shows. Browser (1): the panel says it has never happened, the act runs, and after signing back in — the act the panel itself tells the administrator to take — the reason is on the screen.
+
+## Not in Increment 1.102
+
+**A clock time.** The row shows the date and carries the full instant in `<time dateTime>`. Every other screen in this product shows dates, and the instant a row shows belongs in whichever of the practice's locations the reader is standing in — a question `docs/05` leaves with the owner and one this increment will not answer by picking UTC quietly.
+
+**A gate over unread payload fields.** The obvious generalisation — every key written into an event payload must be read by something — was tried against the code and is **wrong**. Ten keys are written and unread, and they are forensic: `ceremonyId`, `secondFactorCleared`, `targetUsername`. The chain is the record, and a record exists to be verified, not to be summarised. What makes this increment's field different is that the product asked a person for it and told them it would be read.
+
+**The digest.** It counts these acts already, under Increment 1.101's label. A reason is a sentence about one incident, and a weekly figure is not where a sentence belongs.
+

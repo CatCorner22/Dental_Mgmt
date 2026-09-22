@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+
+import {
+  noSignOutActsSentence,
+  signOutActSentence,
+  signOutReasonSentence,
+} from "@/lib/auth/revokeAllSessions";
+
+type SignOutAct = { at: string; byName: string | null; revoked: number; reason: string };
 
 /**
  * Ending every sign-in in the practice (Increment 1.90).
@@ -20,14 +28,46 @@ import { useCallback, useState } from "react";
  * The panel does not ask "are you sure". A sentence somebody has to compose is
  * a better guard than a dialogue they can dismiss, and it leaves something
  * behind.
+ *
+ * Increment 1.102 reads that something back. "It leaves something behind" was
+ * the argument for typing a reason, and until now the something went to the
+ * chain and stopped: the reason was written where only a verifier or a SQL
+ * client could reach it. The practice's recent acts now sit above the form,
+ * which is also where a second administrator during the same incident learns
+ * that somebody has already done this, and why.
  */
 export function SignOutEverybodyPanel({ isAdmin }: { isAdmin: boolean }) {
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  /**
+   * `null` is "not read yet", not "none". The difference matters: a load that
+   * fails must not render the sentence saying this has never happened, which
+   * would be the screen stating something false about the practice's history
+   * because a fetch did not land.
+   */
+  const [acts, setActs] = useState<SignOutAct[] | null>(null);
 
   const reasonOk = reason.trim().length >= 10;
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let live = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/admin/revoke-all-sessions", { cache: "no-store" });
+        if (!res.ok) return;
+        const body = (await res.json()) as { items?: SignOutAct[] };
+        if (live) setActs(body.items ?? []);
+      } catch {
+        /* Leave the history unread rather than claim there is none. */
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [isAdmin]);
 
   const signOutEverybody = useCallback(async () => {
     setBusy(true);
@@ -71,6 +111,28 @@ export function SignOutEverybodyPanel({ isAdmin }: { isAdmin: boolean }) {
         sign-in at once, <strong>including your own</strong>. Nothing anybody did is undone and no account is closed:
         everybody signs in again with their password and a code from their authenticator.
       </p>
+      {acts !== null && !done && (
+        <div className="mb-3 sm:max-w-xl">
+          <h3 className="mb-1 text-sm font-semibold text-[var(--ink-2)]">When this practice last did it</h3>
+          {acts.length === 0 ? (
+            <p className="max-w-prose text-sm text-[var(--ink-2)]">{noSignOutActsSentence()}</p>
+          ) : (
+            <ul className="grid gap-2">
+              {acts.map((act) => (
+                <li key={act.at} className="rounded-md border border-[var(--line)] bg-[var(--surface)] p-3 text-sm">
+                  <p className="font-semibold text-[var(--ink)]">
+                    <time className="tabular-nums" dateTime={act.at}>
+                      {act.at.slice(0, 10)}
+                    </time>{" "}
+                    — {signOutActSentence(act)}
+                  </p>
+                  <p className="text-[var(--ink-2)]">{signOutReasonSentence(act.reason)}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       <div className="grid gap-3 rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4 sm:max-w-xl">
         {done ? (
           <p className="text-sm font-semibold text-[var(--ink)]" aria-live="polite">

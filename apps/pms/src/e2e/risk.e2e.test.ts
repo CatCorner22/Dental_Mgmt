@@ -1156,6 +1156,13 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await b.signIn("ridgeview-owner", "/risk");
     await page().getByRole("heading", { name: "End every sign-in in the practice" }).waitFor({ timeout: 60_000 });
 
+    /**
+     * Increment 1.102. The practice has never done this, and the panel says so
+     * — waited on rather than read once, because it arrives with the history
+     * and the heading renders before that lands.
+     */
+    await page().getByText(/never ended every sign-in at once/).waitFor({ timeout: 60_000 });
+
     const press = page().getByRole("button", { name: "End every sign-in" });
     // A reason is the guard: the act cannot be pressed without one.
     expect(await press.isDisabled()).toBe(true);
@@ -1181,7 +1188,28 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     expect(events).toEqual([{ why: "Lost phone reported by the front desk" }]);
 
     await b.audit("practice risk, every sign-in ended");
-  }, 120_000);
+
+    /**
+     * And the practice reads it back (Increment 1.102). This is the half the
+     * chain query above stood in for: until now the only reader of that reason
+     * in the whole repository was this test, going round the product to
+     * Postgres. Signing in again is the act the panel just told the
+     * administrator to take, so the case takes it.
+     */
+    await b.signIn("ridgeview-owner", "/risk");
+    await page().getByRole("heading", { name: "End every sign-in in the practice" }).waitFor({ timeout: 60_000 });
+    await page().getByText("Lost phone reported by the front desk").waitFor({ timeout: 60_000 });
+    /**
+     * The count is read, never asserted as a figure: how many sign-ins were
+     * live when the press landed depends on which cases ran before this one,
+     * and a case that hardcodes it passes alone and fails inside its suite.
+     */
+    await expect
+      .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
+      .toMatch(/Riley Owner ended (\d+ sign-ins?|every sign-in, and nobody was signed in)/);
+    expect(await page().getByText(/never ended every sign-in at once/).count()).toBe(0);
+    await b.audit("practice risk, the sign-out-everybody act read back");
+  }, 180_000);
 
   it("lets an enrolled person pair a new authenticator, and signs them in on it", async () => {
     // Increment 1.76. A second factor was a one-way door: `mfa_enrolled_at` is

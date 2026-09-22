@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   everybodySignedOutSentence,
+  noSignOutActsSentence,
   revokeAllSessionsForTenant,
   revokeReasonProblem,
+  signOutActSentence,
+  signOutReasonSentence,
 } from "./revokeAllSessions";
 import type { AuthStore } from "./store";
 
@@ -71,5 +74,50 @@ describe("revokeAllSessionsForTenant", () => {
       payload: { reason: "Lost phone reported by the front desk", revoked: 3 },
       at: AT,
     });
+  });
+});
+
+describe("reading the act back (Increment 1.102)", () => {
+  it("names who pressed and how many sign-ins ended", () => {
+    expect(signOutActSentence({ byName: "Riley Owner", revoked: 4 })).toBe("Riley Owner ended 4 sign-ins.");
+  });
+
+  it("counts one in the singular", () => {
+    expect(signOutActSentence({ byName: "Riley Owner", revoked: 1 })).toBe("Riley Owner ended 1 sign-in.");
+  });
+
+  /** Nobody signed in is not nothing happened: the act ran and the practice should read that it did. */
+  it("says the act ran even when nobody was signed in", () => {
+    expect(signOutActSentence({ byName: "Riley Owner", revoked: 0 })).toBe(
+      "Riley Owner ended every sign-in, and nobody was signed in."
+    );
+  });
+
+  /** An administrator can leave; the act they took does not leave with them. */
+  it("reads back an act whose administrator has gone", () => {
+    expect(signOutActSentence({ byName: null, revoked: 2 })).toBe(
+      "An administrator whose seat has since gone ended 2 sign-ins."
+    );
+  });
+
+  it("gives back what somebody typed, unchanged", () => {
+    expect(signOutReasonSentence("Lost phone reported by the front desk")).toBe(
+      "Lost phone reported by the front desk"
+    );
+  });
+
+  /**
+   * An empty reason cannot be somebody typing nothing — `revokeReasonProblem`
+   * has refused that since Increment 1.90. It is a row written before the
+   * reason was asked for, and it reads as that rather than as a blank.
+   */
+  it("explains an empty reason instead of showing a blank", () => {
+    expect(signOutReasonSentence("")).toBe("Recorded before this screen asked why.");
+    expect(signOutReasonSentence("   ")).toBe("Recorded before this screen asked why.");
+    expect(revokeReasonProblem("")).not.toBeNull();
+  });
+
+  it("says plainly that a practice has never done this", () => {
+    expect(noSignOutActsSentence()).toContain("never ended every sign-in at once");
   });
 });

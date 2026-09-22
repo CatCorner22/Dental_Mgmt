@@ -91,7 +91,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 Sign in
               </Link>
             )}
-            <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.101</p>
+            <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.102</p>
           </div>
         </div>
       </header>
