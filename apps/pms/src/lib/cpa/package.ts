@@ -105,7 +105,26 @@ export type MonthPackage = {
     coverage: { channel: string; label: string; enforcement: string; status: string; thresholdUsd: number; activeExceptions: number }[];
     activeExceptions: { id: string; label: string; action: string; channels: string[]; effectiveTo: string | null }[];
     decisions: { active: number; overdueAtMonthEnd: number; recordedInMonth: number };
-    attestations: { channel: string; count: number }[];
+    /**
+     * Per-release attestations on the channels this build cannot enforce, and
+     * how many of them the policy required a second pair of hands for
+     * (Increment 1.97).
+     *
+     * `attestChannelRelease` records `dualRequired` on every one, and until
+     * now nothing read it: the package counted attestations per channel, and
+     * a $40 deposit-bag release and an $18,000 payroll file the policy said
+     * needed two people read alike. `requiredSecond` is the figure that
+     * separates them.
+     *
+     * It is deliberately not a count of releases that *got* a second. That
+     * act records one person attesting what the policy said, and cannot
+     * record a second person's own act — a decision this codebase made on
+     * purpose and states beside `attestChannelRelease`, because one person
+     * asserting two people's participation is a weaker record than none.
+     * `requiredSecond` is therefore what the practice still owes evidence
+     * for, not what it failed to do.
+     */
+    attestations: { channel: string; count: number; requiredSecond: number }[];
     /**
      * Who said they reviewed each channel this build cannot enforce, for this
      * month (Increment 1.51). Distinct from `attestations` above, which counts
@@ -199,7 +218,13 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
   const decisions = await listDecisions(db, tenantId);
   const asOfEnd = decisions.filter((d) => d.decidedAt < period.endAt.toISOString());
   const attestRows = await db
-    .select({ channel: sql<string>`${domainEvent.payload}->>'channel'`, n: sql<number>`count(*)::int` })
+    .select({
+      channel: sql<string>`${domainEvent.payload}->>'channel'`,
+      n: sql<number>`count(*)::int`,
+      // `dualRequired` is a JSON boolean, so it is compared as one rather than
+      // as the string "true" (Increment 1.97).
+      requiredSecond: sql<number>`count(*) FILTER (WHERE ${domainEvent.payload}->'dualRequired' = 'true'::jsonb)::int`,
+    })
     .from(domainEvent)
     .where(and(inWindow(domainEvent, domainEvent.occurredAt), eq(domainEvent.kind, "control.release_attested")))
     .groupBy(sql`${domainEvent.payload}->>'channel'`)
@@ -359,7 +384,7 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
         overdueAtMonthEnd: overdueReviews(asOfEnd, period.end).length,
         recordedInMonth: counts.decisions.recorded.reduce((n, r) => n + r.count, 0),
       },
-      attestations: attestRows.map((r) => ({ channel: r.channel, count: Number(r.n) })),
+      attestations: attestRows.map((r) => ({ channel: r.channel, count: Number(r.n), requiredSecond: Number(r.requiredSecond) })),
       monthAttestations,
     },
     chain: {
@@ -394,8 +419,14 @@ export async function computeMonthPackage(db: AppDb, tenantId: string, month: st
  * decided alone is a figure about the month, so it belongs inside the hash.
  * A month closed under v6 reports "the package changed shape" rather than "a
  * figure moved", which is the fallback Increment 1.43 built for exactly this.
+ *
+ * Increment 1.97 moves it to v8: how many of a channel's attested releases
+ * the policy required a second pair of hands for is a figure about the month
+ * in the same way, and it is the figure that separates a $40 deposit bag from
+ * an $18,000 payroll file. The same v6 fallback carries a month closed under
+ * v7.
  */
-export const PACKAGE_SCHEMA_VERSION = "package-v7";
+export const PACKAGE_SCHEMA_VERSION = "package-v8";
 
 /**
  * What the hash covers: every figure the package states about the month.

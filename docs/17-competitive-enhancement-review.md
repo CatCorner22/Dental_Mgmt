@@ -964,6 +964,51 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.97
+
+`attestChannelRelease` has recorded `dualRequired` on every per-release attestation since Increment 1.12. **Nothing read it.**
+
+The month-end package counted attested releases per channel — `{ channel, count }` — so a release the policy said needed two people and one it did not read exactly alike. The digest labels them all *"Release attested"*. An accountant reading the month saw a number and no way to tell which of it the practice still owed evidence for.
+
+## What it is, and what it is not
+
+`attestations` now carries `requiredSecond` beside `count`, and the CPA screen says so on the row: *"payroll attested (external channel) · 1 needed a second pair of hands"*.
+
+**It is not a count of releases that failed to get a second.** The act records **one person attesting what the policy said**, and it cannot record a second person's own act. That is a decision this codebase made on purpose, and states in the doc comment above `attestChannelRelease`: *"no second signer is accepted from the request, so this path can never produce an approved_dual verdict."* One person asserting two people's participation is a weaker record than no record at all, and this product does not make it — the GL mapping maker-checker, the recovery ceremony and the correction approval all insist on two distinct acts by two people.
+
+So `requiredSecond` is **what the practice still owes evidence for**, not what it did wrong. The evidence lives where the channel does: a payroll file's own signatures, a bank's dual-authorisation log.
+
+**I went looking to "fix" this the other way first** — `ReleaseRequest` on the engine carries `secondPersonId`, `evaluateRelease` resolves it and refuses `blocked_same_person`, and the app wrapper simply never passes it. It reads like an oversight. It is not: the comment above the wrapper says why, and the increment that would have "fixed" it would have quietly weakened the record. Reading the comment before changing the code is the whole of the difference.
+
+## What the seeded practice shows, and what it cannot
+
+In the seed the two figures **coincide**, and the live case says so rather than hiding it.
+
+Payroll is the only external channel this practice can attest — `wire` and `vendor` are not release channels at all and refuse `unknown_channel`, and `deposit` is a ledger channel that refuses `ledger_channel` because its evidence comes from the posting path. And **the seeded payroll threshold is zero**, so every payroll release requires a second whatever it is worth.
+
+The figure separates them in a practice that sets a threshold. Here it reports the sharper fact: *all* of them need one, and the product can record none of them.
+
+## The package schema version
+
+`PACKAGE_SCHEMA_VERSION` moves **`package-v7` → `package-v8`**. How many of a channel's attested releases the policy required a second for is a figure about the month, so it belongs inside the hash — the same reasoning that moved v6 to v7 in Increment 1.75. A month closed under v7 reports *"the package changed shape"* rather than *"a figure moved"*, which is the fallback Increment 1.43 built for exactly this.
+
+## Tests
+
+- **Unit.** The package fixture carries the new field, and the schema version is pinned to `package-v8`.
+- **Live (1).** Two payroll releases are attested, the package reports `count: 2, requiredSecond: 2`, the threshold is asserted to be zero so a reader knows why they are equal, and both refusals — the ledger channel and the channel the policy does not name — are driven so the case states the whole of what this practice can attest.
+
+**Red-before, measured.** With `package.ts` reverted, the live case fails on `expected undefined to be 2`: the field is not there.
+
+## Not in Increment 1.97
+
+**A screen for the act.** Increment 1.96 put `POST /api/controls/release/evaluate` on the uncalled list with the reason that it wants a surface of its own, and that is still true. Note the rank when it comes: the route opens at `lead` and Practice Risk needs `manager`, so a panel there would be a screen a lead could not reach — the Increment 1.93 lesson read backwards.
+
+**Recording the second person's act.** It would need the second person's own sign-in and their own press, which is the shape of the recovery ceremony rather than of an attestation. Worth building; not worth faking.
+
+**The digest.** It still labels every one *"Release attested"*. The package is where an accountant reads the month, so that is where the figure went first; the digest is a smaller, separate edit.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
 ## Increment 1.96
 
 Three increments in a row found the same defect, and each found it the same way.

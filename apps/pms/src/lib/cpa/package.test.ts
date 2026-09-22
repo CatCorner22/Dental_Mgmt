@@ -40,7 +40,7 @@ function pkg(over: Partial<MonthPackage> = {}): MonthPackage {
       coverage: [{ channel: "writeoff", label: "Write-offs / adjustments", enforcement: "enforced", status: "enforced", thresholdUsd: 150, activeExceptions: 1 }],
       activeExceptions: [{ id: "ex-after-hours-hold", label: "After-hours hold", action: "force_dual", channels: ["writeoff", "check"], effectiveTo: null }],
       decisions: { active: 1, overdueAtMonthEnd: 0, recordedInMonth: 1 },
-      attestations: [{ channel: "payroll", count: 1 }],
+      attestations: [{ channel: "payroll", count: 1, requiredSecond: 1 }],
       monthAttestations: [{ channel: "payroll", seat: "accountant", byName: "Casey Prentice", at: "2026-09-03T12:00:00.000Z" }],
     },
     chain: { headSeq: 12, headHash: "ab".repeat(32), eventsInMonth: 12, lastCheck: null },
@@ -124,7 +124,7 @@ describe("packageHash and the flat rows", () => {
     // The hash is self-describing: the version is inside it, so a package computed
     // under a different shape cannot silently produce a comparable-looking digest.
     expect(hashedView(pkg()).schema).toBe(PACKAGE_SCHEMA_VERSION);
-    expect(PACKAGE_SCHEMA_VERSION).toBe("package-v7");
+    expect(PACKAGE_SCHEMA_VERSION).toBe("package-v8");
   });
 
   it("folds the whole digest into the hash, so a new digest field moves every frozen month", () => {

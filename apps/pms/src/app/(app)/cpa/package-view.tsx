@@ -690,7 +690,18 @@ export function PackageView() {
                 { key: "dec_recorded", label: "Decisions recorded this month", count: state.data.package.controls.decisions.recordedInMonth },
                 { key: "findings_open", label: "Detector findings open at month end", count: state.data.package.counts.findings.openNow },
                 { key: "acks", label: "Hard events acknowledged", count: state.data.package.counts.alerts.hardEventsAcknowledged },
-                ...state.data.package.controls.attestations.map((a) => ({ key: `att:${a.channel}`, label: `${a.channel} attested (external channel)`, count: a.count })),
+                ...state.data.package.controls.attestations.map((a) => ({
+                  key: `att:${a.channel}`,
+                  // Increment 1.97. A count alone read a deposit bag and a
+                  // payroll file alike; this says how many of them the policy
+                  // required a second pair of hands for, which is what the
+                  // practice still owes evidence for.
+                  label:
+                    a.requiredSecond > 0
+                      ? `${a.channel} attested (external channel) · ${a.requiredSecond} needed a second pair of hands`
+                      : `${a.channel} attested (external channel)`,
+                  count: a.count,
+                })),
               ]}
               empty=""
             />
