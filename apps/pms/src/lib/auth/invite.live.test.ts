@@ -107,6 +107,60 @@ describe.skipIf(!adminUrl)("inviting the outside accountant's seat (live)", () =
     expect(result.why).toContain(front.username);
   });
 
+  /**
+   * Increment 1.87. The check above is tenant-scoped, and row-level security is
+   * why: inside a tenant transaction this query cannot see another practice's
+   * rows. `users_username_lower_uidx` (migration 0002) spans every practice,
+   * because signing in carries no practice with it. So a name free here and
+   * taken elsewhere passed the check, the insert violated the global index, and
+   * the error travelled out through `withGuard` — which catches nothing — to a
+   * bare 500 with no `error` field: no seat, and nothing the inviter could act
+   * on. The insert is now the check, taken under a savepoint.
+   */
+  it("refuses a username another practice already uses, without saying which", async () => {
+    const elsewhere = DEV_USERS.find((u) => u.tenantId === otherTenantId)!;
+    const result = await asUser(owner.id, (d) =>
+      inviteAccountant(d, tenantId, { id: owner.id, name: owner.displayName }, { username: elsewhere.username, displayName: "Prentice & Co" }, at)
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.status).toBe(409);
+    expect(result.code).toBe("taken");
+    expect(result.why).toContain(elsewhere.username);
+    expect(result.why).toContain("unique across every practice");
+    // What it must not do: name the practice holding it, or say this one has it.
+    expect(result.why).not.toContain("Oak");
+    expect(result.why).not.toContain("This practice already has");
+
+    // No half-made seat: the savepoint took the row back out.
+    const rows = await asUser(owner.id, (d) =>
+      d.select({ id: users.id }).from(users).where(and(eq(users.tenantId, tenantId), eq(users.username, elsewhere.username)))
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  /**
+   * The savepoint's other half (Increment 1.87): a refusal must leave the
+   * surrounding transaction usable. Without one the failed insert aborts it,
+   * and every later statement answers 25P02 instead of doing its work.
+   */
+  it("leaves the transaction it refused in usable", async () => {
+    const elsewhere = DEV_USERS.find((u) => u.tenantId === otherTenantId)!;
+    const after = await asUser(owner.id, async (d) => {
+      const refused = await inviteAccountant(
+        d,
+        tenantId,
+        { id: owner.id, name: owner.displayName },
+        { username: elsewhere.username, displayName: "Prentice & Co" },
+        at
+      );
+      expect(refused.ok).toBe(false);
+      // The same transaction, still answering.
+      return d.select({ id: users.id }).from(users).where(eq(users.tenantId, tenantId));
+    });
+    expect(after.length).toBeGreaterThan(0);
+  });
+
   it("refuses a username that would make 'the same username' a question with two answers", async () => {
     const result = await asUser(owner.id, (d) =>
       inviteAccountant(d, tenantId, { id: owner.id, name: owner.displayName }, { username: "Firm Accounting", displayName: "Prentice & Co" }, at)

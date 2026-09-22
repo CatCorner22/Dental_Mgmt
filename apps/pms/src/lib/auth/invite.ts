@@ -1,6 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import {
+  USERNAME_GLOBAL_UIDX,
+  isUniqueViolation,
   seatInvitationClaims,
   seatInvitations,
   tenants,
@@ -13,6 +15,56 @@ import { appendControlEvent } from "../controls/events";
 import { CPA_SEAT_ENTITLEMENT } from "./seats";
 import { hashPassword, passwordPolicyError } from "./password";
 import { INVITE_LIFE_MS, usernameProblem } from "./inviteLink";
+
+/**
+ * A sign-in name is unique across every practice this product serves
+ * (`users_username_lower_uidx`, migration 0002), because signing in carries no
+ * practice with it — `auth_lookup_user` finds one row by username alone.
+ *
+ * The check above this one is tenant-scoped, and row-level security is why: a
+ * query issued inside a tenant transaction cannot see another practice's rows,
+ * so it cannot find the row it would collide with. Until Increment 1.87 that
+ * left one path open — a name free here and taken elsewhere passed the check,
+ * the insert violated the global index, and the error travelled out through
+ * `withGuard`, which catches nothing, to a bare 500 with no `error` field. The
+ * seat was not created and the person inviting it was told nothing they could
+ * act on.
+ *
+ * The insert is therefore the check, taken under a savepoint so the refusal
+ * leaves the surrounding transaction usable rather than aborted.
+ *
+ * **What the refusal says, and what it deliberately does not.** It names the
+ * rule — sign-in names are unique across practices — and it does not say which
+ * practice holds the name, nor confirm anything about that practice. A caller
+ * learns only what the rule already implies: this name is spent. Saying less
+ * than that would hand back the dead end this increment exists to close.
+ */
+async function insertSeat(
+  db: AppDb,
+  row: typeof users.$inferInsert,
+  username: string
+): Promise<InviteResult | null> {
+  await db.execute(sql`SAVEPOINT seat_insert`);
+  try {
+    await db.insert(users).values(row);
+    await db.execute(sql`RELEASE SAVEPOINT seat_insert`);
+    return null;
+  } catch (error) {
+    await db.execute(sql`ROLLBACK TO SAVEPOINT seat_insert`);
+    if (isUniqueViolation(error, USERNAME_GLOBAL_UIDX)) {
+      return {
+        ok: false,
+        status: 409,
+        code: "taken",
+        why:
+          `The username ${username} is not available. A sign-in name is unique across every ` +
+          `practice this product serves, because signing in carries no practice with it. ` +
+          `Choose another.`,
+      };
+    }
+    throw error;
+  }
+}
 
 /**
  * The practice invites the seat it cannot otherwise create (Increment 1.71).
@@ -130,7 +182,7 @@ export async function inviteAccountant(
   // until its holder sets one, which is what makes "the practice never learns
   // the secret" a property of the rows rather than a promise about the code.
   const unopenable = await hashPassword(randomBytes(32).toString("base64url"));
-  await db.insert(users).values({
+  const seatRow = await insertSeat(db, {
     id: userId,
     tenantId,
     username,
@@ -143,7 +195,8 @@ export async function inviteAccountant(
     active: true,
     passwordChangedAt: at,
     createdAt: at,
-  });
+  }, username);
+  if (seatRow !== null) return seatRow;
   await db.insert(userEntitlements).values({
     id: uuidv7(),
     tenantId,
