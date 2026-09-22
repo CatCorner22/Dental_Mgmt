@@ -13,7 +13,7 @@ export async function seedApprovalsDemo(db: Queryable, now: Date): Promise<void>
     glBucket: "patient_ar",
     amountCents: -7500,
     reasonCode: "courtesy",
-    effectiveDate: "2026-09-14",
+    effectiveDate: "2026-09-19",
     createdById: frontDeskId,
     createdByName: "Finn Front",
     memo: "Courtesy adjustment — demo inbox item",

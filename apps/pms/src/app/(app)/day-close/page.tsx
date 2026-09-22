@@ -7,7 +7,7 @@ import { formatCents } from "@/lib/ledger/format";
 import type { DayCloseSnapshot, LatePostingRow } from "@/lib/day-close/types";
 
 const DEMO_LOCATION = "0196b0a0-0000-7000-8000-000000000101";
-const DEMO_DATE = "2026-09-14";
+const DEMO_DATE = "2026-09-19";
 
 /**
  * What one late row is, in words (Increment 1.40). A correction announces

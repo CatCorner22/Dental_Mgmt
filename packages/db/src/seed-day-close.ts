@@ -4,7 +4,7 @@ import { SEED_BANK, SEED_LEDGER } from "./seed-data";
 /** Demo deposits for Ridgeview day-close walkthrough (matches deposit-slip fixture). */
 export async function seedDayCloseDemo(db: Queryable, now: Date): Promise<void> {
   const frontDeskId = "0196b0a0-0000-7000-8000-000000000012";
-  const businessDate = "2026-09-14";
+  const businessDate = "2026-09-19";
 
   const rows = [
     {

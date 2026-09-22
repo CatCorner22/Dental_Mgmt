@@ -37,7 +37,7 @@ type Outcome =
   | { type: "needs_second"; approvalRequestId: string; why: string }
   | { type: "refused"; why: string; verb?: string };
 
-const DEMO_DATE = "2026-09-14";
+const DEMO_DATE = "2026-09-19";
 
 export default function LedgerPostPage() {
   const [accounts, setAccounts] = useState<LedgerAccountSummary[]>([]);

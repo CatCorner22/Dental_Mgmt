@@ -964,6 +964,58 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.84
+
+On 2026-09-22 the repository's own test suite began failing, on `main`, for nobody's change. Two money-desk cases went red:
+
+- `shows the front desk the links only, and the owner a board that reflects the day`
+- `counts the week for the owner in the digest, stamps it once, and refuses the front desk`
+
+The seed writes `effective_date` as a written date — `2026-09-14` — and `posted_at` as the moment the seed runs. The gap between them therefore belongs to the wall clock and not to the fixture. `BACKDATE_DAYS = 7` in `controls/detectors.ts`, read by `alerts/hardEvents.ts`, raises a `retroactive_entry` once that gap passes seven days. On 2026-09-21 the gap was seven; on 2026-09-22 it was eight, and seven ordinary seeded rows became retroactive-dated entries on the owner's board — where one case asserts that kind is absent, and the other pins a count the first case's acknowledgment feeds.
+
+Nothing was wrong with the rule. The rule is right: a charge effective on the 14th and posted on the 22nd **is** eight days retroactive. What was wrong was a fixture that describes "last week" with a date that stops being last week.
+
+## The choice, and who made it
+
+Three ways forward were put to the owner, with the recommendation named:
+
+| | | |
+|---|---|---|
+| 1 | Anchor the seed's dates to the seed run | Ends the drift; moves every assertion that quotes them |
+| 2 | Move the written dates forward | Smallest; the same failure re-armed for a later date |
+| 3 | Rewrite the two cases to assert the rule | Honest about today; leaves the drift |
+
+**The owner chose 2**, and this increment is that choice carried out rather than argued with. What the record owes in return is the arithmetic, stated where the next person will meet it.
+
+## What a written date buys, exactly
+
+Two constraints bound it. `today - effective` must stay at or under seven, or the rule fires. And `effective` may not run ahead of the clock, or the fixture describes a practice posting next week's work. Between them, **any written date buys at most seven days**.
+
+This one buys five. The week moved from 2026-09-14 to 2026-09-19, not to the 2026-09-20 that six days would have allowed, because the money-desk suite imports its deposits at `daysAgo(2)` — which on 2026-09-22 *is* the 20th. A week anchored there put four rows on a day close that expects two, and the suite said so on the first run. Five days clears that collision for every day this week survives.
+
+**It fails again on 2026-09-27.** That sentence is in `seed-ledger.ts`, above the rows it governs, with the arithmetic and the decision that is waiting — so that the next failure arrives as a dated note rather than as a mystery about why `main` went red overnight.
+
+- **What moved.** Three ledger effective dates, the day-close business date, the approvals effective date and two statement effective dates, 2026-09-14 → 2026-09-19; the statements' as-of and issued dates, 2026-09-16 → 2026-09-21. Three demonstration defaults on the screens that offer a date moved with them. Seven assertions in the money-desk suite that name the sealed day moved with them.
+- **What did not.** `account_members.effective_from` at 2026-09-01, which is a membership start that no window rule reads. And every self-contained unit fixture that passes its own `now` — the great majority of the forty-odd files holding these dates — because those never drift and moving them would have been churn dressed as a fix.
+- **Method.** The seed and the three defaults changed first, then the full gate ran and the failures named the rest. Predicting which of forty files cared would have been guesswork; four failures on the first run, and none on the second, is the measurement.
+
+## Increment 1.83
+
+Increments 1.81 and 1.82 gave every screen one answer for a sign-in that has ended, on the way in. Pressing a button was still the old shape: the act's `catch` wrote `err.message` into the screen's message line, so a 401 mid-press produced one sentence and nothing to press.
+
+26 act sites across 12 screens now show the `SessionEnded` panel instead. 19 catches that write `set<X>(err instanceof Error ? err.message : ...)` gained a two-line guard ahead of that line. Seven act blocks that handle a refusal **without throwing** set the state directly on `res.status === 401` — those sit in `try/finally` with no `catch`, so a thrown `SignInEnded` would have been an unhandled rejection saying nothing to anybody.
+
+**The half-finished edit goes with the screen, deliberately.** The session is gone, so nothing on that screen can succeed; and the typing could not survive the sign-in either way, which Increment 1.82 put out of scope on its own merits. Offering the way back beats keeping a form that cannot be submitted.
+
+## A correction to Increment 1.82's record
+
+That increment's "Not in" paragraph said acts "still get the route's sentence". Once it inserted `refuseIfSignInEnded` at all forty-two sites, that stopped being true: a 401 mid-press began printing the message of the error class 1.82 introduced, rather than `requireAccess`'s "This session timed out. Sign in again." Both were link-less, and the second had lost the one instruction the first carried. The sentence was accurate when written and wrong by the time that increment merged, which is the kind of drift a "Not in" paragraph is most prone to.
+
+- **Tests.** Browser (1): the owner opens the Locations screen, types a real edit into the Friday closing time, the session row is revoked underneath them, and pressing **Save Main** shows the panel rather than a sentence — with the link carrying `/locations`, the way back followed through a real sign-in, and the practice's own hours unchanged, because the edit that could not be saved was not saved.
+
+**Not in Increments 1.83 and 1.84.** Anchoring the seed's dates to the seed run, which is option 1 above and remains the durable answer whenever the owner wants it. Anything about how long a session lives, or a warning before an idle window closes. A per-practice choice of that window. Re-running what a person was doing after they sign back in, which would mean holding a half-finished act across a sign-in and carries its own control implications. And a guard that would fail the suite loudly on the day the written week expires — worth having, and a different question from moving the date.
+
+
 ## Increment 1.82
 
 Increment 1.81 drew the line between a sign-in that has ended and a seat that lacks rank, and taught the seven screens that pre-read `/api/me` to respect it. Its own "Not in" paragraph described what was left as a narrow race — a session dying *after* the seat check. Reading the rest of the product found something wider.

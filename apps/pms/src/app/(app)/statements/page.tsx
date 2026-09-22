@@ -35,7 +35,7 @@ export default function StatementsPage() {
   const router = useRouter();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [accountId, setAccountId] = useState("");
-  const [asOf, setAsOf] = useState("2026-09-16");
+  const [asOf, setAsOf] = useState("2026-09-21");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 

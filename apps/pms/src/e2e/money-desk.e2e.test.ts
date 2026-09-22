@@ -34,7 +34,7 @@ const BANK_CSV = [
   "Date,Description,Amount,Reference",
   `${DEPOSIT_DAY},DEPOSIT CASH MAIN,250.00,`,
   `${DEPOSIT_DAY},DEPOSIT CHECK 1042,100.00,1042`,
-  "2026-09-14,ACH MERCHANT FEE,-150.00,",
+  "2026-09-19,ACH MERCHANT FEE,-150.00,",
 ].join("\n");
 
 /** The month that has ended, which is the month every attestation reader reports. */
@@ -188,7 +188,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     const detectors = page().locator("section[aria-labelledby=detectors]");
     const detectorRow = (label: string) => detectors.locator("tbody tr", { hasText: label });
     expect(await detectorRow("Unmatched bank line older than 48 hours").innerText()).toMatch(
-      /A \$150\.00 bank debit posted 2026-09-14 \(ACH MERCHANT FEE\) has had no matching deposit and no clearance for \d+ days\.[\s\S]*Open/
+      /A \$150\.00 bank debit posted 2026-09-19 \(ACH MERCHANT FEE\) has had no matching deposit and no clearance for \d+ days\.[\s\S]*Open/
     );
     // The seeded grants leave two highest-weight duties with one holder each; the rows name the duty, never the holder.
     expect(await detectorRow("Critical duty held by one person").count()).toBe(2);
@@ -289,7 +289,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await approvals.innerText()).toMatch(/0[\s\S]*Nothing is waiting on you/);
     expect(await page().getByRole("link", { name: "See who can clear independently" }).getAttribute("href")).toBe("/risk");
 
-    // 2026-09-14 is sealed by now and nothing has posted behind it, which the board says
+    // 2026-09-19 is sealed by now and nothing has posted behind it, which the board says
     // out loud rather than omitting (Increment 1.41).
     const sealed = page().locator("section[aria-labelledby=after-close]");
     await sealed.waitFor({ timeout: 30_000 });
@@ -767,8 +767,8 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await account.selectOption((await account.locator("option", { hasText: "Jane Doe" }).getAttribute("value"))!);
     await page().getByLabel("Kind").selectOption("patient_payment");
     await page().getByLabel("Amount (USD)").fill("40");
-    // The form already offers 2026-09-14, the day an earlier case sealed.
-    expect(await page().getByLabel("Effective date").inputValue()).toBe("2026-09-14");
+    // The form already offers 2026-09-19, the day an earlier case sealed.
+    expect(await page().getByLabel("Effective date").inputValue()).toBe("2026-09-19");
     await page().getByRole("button", { name: "Post", exact: true }).click();
     await flash(/^Posted successfully\./).waitFor({ timeout: 30_000 });
 
@@ -817,7 +817,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await hardCard.waitFor({ timeout: 30_000 });
     const sealedAlerts = hardCard.locator("li", { hasText: "First posting into a day already sealed" });
     expect(await sealedAlerts.count()).toBe(1);
-    expect(await sealedAlerts.first().innerText()).toMatch(/\$40\.00 patient payment[\s\S]*landed against 2026-09-14, a day the practice had already sealed/);
+    expect(await sealedAlerts.first().innerText()).toMatch(/\$40\.00 patient payment[\s\S]*landed against 2026-09-19, a day the practice had already sealed/);
     expect(await sealedAlerts.first().innerText()).not.toMatch(/Riley|Finn/);
     await b.audit("home (owner, postings into closed days)");
 
@@ -838,7 +838,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await packageSealed.waitFor({ timeout: 30_000 });
     const packageSealedText = await packageSealed.innerText();
     expect(packageSealedText).toMatch(/Sealed days · 1 frozen · 3 posted behind them/);
-    expect(packageSealedText).toMatch(/2026-09-14 · 1 first posting/);
+    expect(packageSealedText).toMatch(/2026-09-19 · 1 first posting/);
     expect(await page().locator("section[aria-labelledby=package-tieout]").innerText()).toMatch(
       /No row posted against a day this month after the practice sealed it: no\. 3 rows totalling \$10\.00 landed against 1 of 1 sealed day, 1 of them first postings\./
     );
