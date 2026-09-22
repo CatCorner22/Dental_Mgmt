@@ -18,5 +18,19 @@ export const GET = withGuard(
       policy: active.policy,
     });
   },
-  { minRank: "user" }
+  /**
+   * Manager, as Practice Risk is (Increment 1.96).
+   *
+   * This route answers with the practice's control policy — the dual-release
+   * thresholds among it — and it stood at `user` rank while
+   * `GET /api/controls/risk`, which shows the same material on a screen,
+   * needs `manager`. The figure a control enforces is exactly what somebody
+   * structuring payments beneath it would want, so the looser of two doors
+   * onto one thing is the one that decides.
+   *
+   * Nothing calls this route, which is why the gap sat unread; the sweep in
+   * `check-route-guards.mjs` now says so out loud rather than leaving it to
+   * be noticed.
+   */
+  { minRank: "manager" }
 );

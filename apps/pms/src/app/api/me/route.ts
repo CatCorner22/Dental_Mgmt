@@ -1,4 +1,5 @@
 import { withGuard } from "@/lib/auth/withGuard";
+import { APP_INCREMENT } from "@/lib/product";
 
 /**
  * Who the caller is, to the caller alone: the screens read it to decide what
@@ -13,7 +14,7 @@ export const GET = withGuard(async (_req, ctx) => {
   const { user, session } = ctx.access;
   return Response.json({
     ok: true,
-    increment: "0.11",
+    increment: APP_INCREMENT,
     username: user.username,
     displayName: user.displayName,
     role: user.role,

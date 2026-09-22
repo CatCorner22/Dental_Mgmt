@@ -1,9 +1,8 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { getAuthPorts } from "@/lib/auth/resolveStore";
-import { getSessionIdFromAuth } from "@/lib/auth/sessionId";
-import { isRole } from "@/lib/auth/roles";
-import { navLinksFor, type Seat } from "@/lib/auth/seats";
+import { currentSeat } from "@/lib/auth/currentSeat";
+import { navLinksFor } from "@/lib/auth/seats";
+import { APP_INCREMENT } from "@/lib/product";
 
 /**
  * The header names who is signed in, so these pages cannot be built once and
@@ -14,32 +13,6 @@ import { navLinksFor, type Seat } from "@/lib/auth/seats";
  * routes, so nothing was being served from a static shell anyway.
  */
 export const dynamic = "force-dynamic";
-
-/**
- * Reads the viewer for the header alone: the session cookie, the session row,
- * and the user row. It writes nothing and sets no tenant context, because the
- * header shows the viewer only what the viewer already knows about itself;
- * every screen behind these links still guards itself through `withGuard`.
- *
- * A viewer this cannot resolve is offered no links rather than every link,
- * which is the default-deny the rest of the product keeps.
- */
-async function currentSeat(): Promise<Seat | null> {
-  try {
-    const ports = await getAuthPorts(getSessionIdFromAuth);
-    if (!ports) return null;
-    const sessionId = await ports.getSessionId(new Request("http://localhost/"));
-    if (!sessionId) return null;
-    const session = await ports.getSession(sessionId);
-    if (!session || session.revokedAt) return null;
-    const user = await ports.getUser(session.userId);
-    if (!user || !user.active || user.tenantId !== session.tenantId) return null;
-    if (!isRole(user.role)) return null;
-    return { role: user.role, entitlements: user.entitlements };
-  } catch {
-    return null;
-  }
-}
 
 export default async function AppLayout({ children }: { children: ReactNode }) {
   /**
@@ -91,7 +64,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
                 Sign in
               </Link>
             )}
-            <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment 1.90</p>
+            <p className="text-xs text-[var(--ink-3)]">Money Desk · Increment {APP_INCREMENT}</p>
           </div>
         </div>
       </header>

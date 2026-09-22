@@ -6,7 +6,7 @@ import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { formatCents, formatLedgerKind } from "@/lib/ledger/format";
-import { reasonOptionsForPosting, type ReasonCodeRow } from "@/lib/ledger/reasons";
+import { reasonOptionsForPosting, type PostingReasonCode } from "@/lib/ledger/reasons";
 import { DEMO_EFFECTIVE_DATE } from "@/lib/demo/dates";
 
 import {
@@ -148,12 +148,12 @@ export default function LedgerPostPage() {
 
   // The practice's own codes, read once (Increment 1.45). A reason the practice
   // never adopted cannot reach the database, so the form must not offer one.
-  const [reasonCodes, setReasonCodes] = useState<ReasonCodeRow[]>([]);
+  const [reasonCodes, setReasonCodes] = useState<PostingReasonCode[]>([]);
   useEffect(() => {
     let cancelled = false;
     fetch("/api/reason-codes")
       .then(async (res) => {
-        const body = (await res.json()) as { items?: ReasonCodeRow[] };
+        const body = (await res.json()) as { items?: PostingReasonCode[] };
         if (res.ok && !cancelled) setReasonCodes(body.items ?? []);
       })
       .catch(() => {});

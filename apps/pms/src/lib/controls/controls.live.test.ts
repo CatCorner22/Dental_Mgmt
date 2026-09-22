@@ -177,6 +177,49 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     expect(monitorOnly).toMatchObject({ ok: false, status: 400, code: "decision_invalid" });
   });
 
+  /**
+   * Increment 1.91. `run_import` guards the two import routes and the apply
+   * route, and belonged to no catalog: `grantEntitlement` refused it as
+   * unknown while `revokeEntitlement` took any string it was handed. So a
+   * practice could end an import grant and never make another, and the only
+   * way anybody held one was the seed writing the row directly — which means
+   * that in a practice this product set up rather than seeded, nobody could
+   * import a bank statement at all.
+   *
+   * The duty is in the rulebook now, so this drives the whole door: grant,
+   * revoke, grant again. The middle step is the one that used to be one-way.
+   */
+  it("grants the import duty, revokes it, and grants it again", async () => {
+    const granted = await tx((d) =>
+      grantEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: front.id, entitlement: "run_import" })
+    );
+    expect(granted.ok).toBe(true);
+
+    // What the person can now do, which is the control rather than the record:
+    // `withGuard` reads the entitlements the auth store returns.
+    const afterGrant = await createPostgresStore(env).getUserById(front.id);
+    expect(afterGrant?.entitlements).toContain("run_import");
+
+    const revoked = await tx((d) =>
+      revokeEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: front.id, entitlement: "run_import" })
+    );
+    expect(revoked.ok).toBe(true);
+    const afterRevoke = await createPostgresStore(env).getUserById(front.id);
+    expect(afterRevoke?.entitlements).not.toContain("run_import");
+
+    const again = await tx((d) =>
+      grantEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: front.id, entitlement: "run_import" })
+    );
+    expect(again.ok).toBe(true);
+
+    // Left as the fixture found it, so the cases after this one read the
+    // practice they were written against.
+    const tidy = await tx((d) =>
+      revokeEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: front.id, entitlement: "run_import" })
+    );
+    expect(tidy.ok).toBe(true);
+  });
+
   it("refuses an administrator licensing their own critical conflict", async () => {
     // The office manager is promoted to admin for this case only.
     await db.admin.query("UPDATE users SET role = 'admin' WHERE id = $1", [om.id]);
@@ -619,7 +662,7 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
   it("freezes a snapshot with both versions and serves it back", async () => {
     const stored = await tx((d) => takeSnapshot(d, { tenantId: tenant.id, actor: asOwner, trigger: "manual" }));
     expect(stored.snapshot.scoringVersion).toBe("precog-residual-v1.1.0");
-    expect(stored.snapshot.rulebookVersion).toBe("0.2.0");
+    expect(stored.snapshot.rulebookVersion).toBe("0.3.0");
     expect(stored.snapshot.headline.unmitigatedCritical).toBeGreaterThanOrEqual(1);
     expect(stored.snapshot.assumptions.some((a) => /Payroll transmission/.test(a))).toBe(true);
 

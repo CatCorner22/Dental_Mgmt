@@ -9,12 +9,29 @@ import { meetsRole, type Role } from "./roles";
  * seat that is nothing but a grant: the lowest rank the product has, holding
  * one entitlement, reaching the month-end package and no other screen.
  *
- * That shape is what lets the seat exist without a BAA. The package is
- * aggregate and names no patient (Increment 1.34, proved by a live test since
- * this increment), so an accountant reading it receives no protected health
- * information; a seat that could reach the account ledger would receive it on
- * the first click, and would need the countersigned BAA docs/05 describes
- * before the practice could grant it at all.
+ * That shape is what the argument for the seat rests on. The package is
+ * aggregate and names no patient (Increment 1.34), and since Increment 1.49 a
+ * live case proves it rather than asserting it: it reads the practice's own
+ * patient and guarantor rows and looks for any of their names, record numbers
+ * or ids in the package and in its export. A seat that could reach the
+ * account ledger would receive protected health information on the first
+ * click, and would need the countersigned agreement docs/05 describes before
+ * the practice could grant it at all.
+ *
+ * **Restated on what is still true (Increment 1.106.)** That argument is about
+ * what the seat *reads*, and the set has grown three times since it was
+ * written — the question threads (1.50), the channel attestations (1.51), and
+ * where the seat's own notices go (1.74). Two of those carry words a person
+ * typed, and the live case can prove nothing about those: it proves what the
+ * product **derives** names no patient, which is a different claim.
+ *
+ * So the argument now stands on two legs rather than one. Everything the
+ * product computes for this seat is proved to name no patient. Everything a
+ * person writes to it is the practice's own to keep clean, and the product
+ * says so where the writing happens (`outsideReaderSentence`) rather than
+ * leaving it to a comment nobody reading the screen will see.
+ * `cpaSurfaces.test.ts` reads every route file for the seat's entitlement, so
+ * a fourth surface cannot open without somebody writing down what it gives.
  */
 
 /** The entitlement the outside accountant's seat carries. */
@@ -46,6 +63,15 @@ export function isCpaSeat(seat: Seat | null | undefined): boolean {
 export type NavLink = {
   href: string;
   label: string;
+  /**
+   * What the owner's home board calls it, where there is room for more than a
+   * header tab (Increment 1.104). It lives on the same entry as `label`
+   * because the board used to keep its own list of eleven links, and a second
+   * list is a second thing to keep true: that one had no rank or duty filter
+   * at all, had never gained `/import` or `/releases`, and offered the seeded
+   * owner "Post payment" for a screen whose route has always refused them.
+   */
+  boardLabel?: string;
   /** This rank or above opens it. */
   minRank?: Role;
   /** Holding this entitlement opens it, whatever the rank. */
@@ -56,18 +82,30 @@ export type NavLink = {
 
 export const NAV_LINKS: NavLink[] = [
   { href: "/home", label: "Home", minRank: "manager", gate: "api/home/board/route.ts" },
-  { href: "/ledger", label: "Ledger", minRank: "user", gate: "api/ledger/accounts/route.ts" },
-  { href: "/ledger/post", label: "Post", entitlement: "post_payments", gate: "api/ledger/post/route.ts" },
-  { href: "/reconciliation", label: "Reconciliation", entitlement: "bank_reconcile", gate: "api/reconciliation/runs/route.ts" },
+  { href: "/ledger", label: "Ledger", boardLabel: "Open ledger", minRank: "user", gate: "api/ledger/accounts/route.ts" },
+  { href: "/ledger/post", label: "Post", boardLabel: "Post payment", entitlement: "post_payments", gate: "api/ledger/post/route.ts" },
+  { href: "/reconciliation", label: "Reconciliation", boardLabel: "Bank reconciliation", entitlement: "bank_reconcile", gate: "api/reconciliation/runs/route.ts" },
+  { href: "/import", label: "Import", boardLabel: "Import a file", entitlement: "run_import", gate: "api/import/curve/route.ts" },
   { href: "/day-close", label: "Day close", minRank: "user", gate: "api/day-close/route.ts" },
   { href: "/statements", label: "Statements", minRank: "user", gate: "api/statements/route.ts" },
-  { href: "/approvals", label: "Approvals", entitlement: "approve_writeoffs", gate: "api/approvals/inbox/route.ts" },
+  { href: "/approvals", label: "Approvals", boardLabel: "Approvals inbox", entitlement: "approve_writeoffs", gate: "api/approvals/inbox/route.ts" },
+  { href: "/releases", label: "Releases", minRank: "lead", gate: "api/controls/release/evaluate/route.ts" },
   { href: "/risk", label: "Practice Risk", minRank: "manager", gate: "api/controls/risk/route.ts" },
-  { href: "/digest", label: "Digest", minRank: "manager", gate: "api/digest/route.ts" },
+  { href: "/digest", label: "Digest", boardLabel: "Weekly digest", minRank: "manager", gate: "api/digest/route.ts" },
   { href: "/locations", label: "Locations", minRank: "manager", gate: "api/locations/route.ts" },
+  /**
+   * The one screen the product had that no seat named (Increment 1.104). It
+   * was reachable from the owner's home board and nowhere else, so a seat
+   * that posts — the seat the list exists for — could not find it. The route
+   * opens at `user`, and since Increment 1.103 a seat below `manager` reads
+   * the list its forms are built from without the practice's governance of
+   * it, which is what makes the seat safe to offer.
+   */
+  { href: "/reason-codes", label: "Reasons", boardLabel: "Reason codes", minRank: "user", gate: "api/reason-codes/route.ts" },
   {
     href: "/cpa",
     label: "Month-end",
+    boardLabel: "Month-end package",
     minRank: "manager",
     entitlement: CPA_SEAT_ENTITLEMENT,
     gate: "api/cpa/package/route.ts",
@@ -88,4 +126,17 @@ export function navLinksFor(seat: Seat | null | undefined): NavLink[] {
       (link.minRank !== undefined && meetsRole(seat.role, link.minRank)) ||
       (link.entitlement !== undefined && seat.entitlements.includes(link.entitlement))
   );
+}
+
+/**
+ * The links the owner's home board offers (Increment 1.104).
+ *
+ * The same catalog the header filters, minus the board's own screen: a board
+ * that links to itself spends a row saying nothing. Everything else about the
+ * decision — which rank opens a screen, which duty does — is `navLinksFor`'s,
+ * because the board had its own answer to that question and the answer was
+ * "everybody".
+ */
+export function boardLinksFor(seat: Seat | null | undefined): NavLink[] {
+  return navLinksFor(seat).filter((link) => link.href !== "/home");
 }

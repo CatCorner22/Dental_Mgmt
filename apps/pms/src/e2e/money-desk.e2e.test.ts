@@ -90,9 +90,32 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await approvals.innerText()).toMatch(/1[\s\S]*\$75\.00 held until a second person decides/);
     expect(await page().getByText(/No control decision comes up for review/).count()).toBe(1);
     expect(await page().getByText(/Segregation health\. COSO overall \d+/).count()).toBe(1);
-    for (const name of ["Open ledger", "Post payment", "Bank reconciliation", "Day close", "Statements", "Approvals inbox", "Practice Risk", "Weekly digest", "Locations", "Reason codes", "Month-end package"]) {
+    /**
+     * The board offers what this seat may reach, and only that (Increment
+     * 1.104). It kept its own list of eleven links with no rank or duty
+     * filter: `Import a file` and `Releases` had never been added to it, and
+     * `Post payment` was on it for an owner who holds no `post_payments` and
+     * whose route has always refused them.
+     */
+    for (const name of [
+      "Open ledger",
+      "Bank reconciliation",
+      "Import a file",
+      "Day close",
+      "Statements",
+      "Approvals inbox",
+      "Releases",
+      "Practice Risk",
+      "Weekly digest",
+      "Locations",
+      "Reason codes",
+      "Month-end package",
+    ]) {
       expect(await page().locator("main").getByRole("link", { name, exact: true }).count()).toBe(1);
     }
+    // The link the owner's duties do not open, and the board's own screen.
+    expect(await page().locator("main").getByRole("link", { name: "Post payment", exact: true }).count()).toBe(0);
+    expect(await page().locator("main").getByRole("link", { name: "Home", exact: true }).count()).toBe(0);
     await b.audit("home (owner, no bank record)");
 
     await page().goto(`${app.base}/ledger`);
@@ -255,6 +278,52 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await detectorRow("Unmatched bank line older than 48 hours").innerText()).toMatch(/Closed[\s\S]*matched or cleared/);
     expect(await detectors.innerText()).not.toMatch(/Riley|Finn/);
     await b.audit("practice risk, detector findings open and closed");
+  }, 120_000);
+
+  /**
+   * Increment 1.93. `/day-close` and `/statements` are offered at `user` rank
+   * and every act on them opens on a duty: applying staged deposits and
+   * creating a statement need `post_payments`, freezing the close needs
+   * `bank_reconcile`. Neither screen read the viewer's duties, so all three
+   * buttons rendered for anybody who could open the screen — and the seeded
+   * practice carries both halves of the point, because the owner holds
+   * `bank_reconcile` and not `post_payments` while the front desk holds the
+   * reverse.
+   *
+   * `seats.test.ts` checks each header link against the route that serves the
+   * screen's read. Nothing checked the write half, which is stricter.
+   */
+  it("offers each of the day close and statement acts only to the duty that opens it", async () => {
+    // Still the owner, from the cases above: bank_reconcile, not post_payments.
+    /**
+     * Each wait is on the sentence rather than on the heading. The heading
+     * renders before the screen is ready and before `/api/me` has answered,
+     * so counting buttons at that point counts a screen that has not decided
+     * what to show — which is how this case first failed, reading zero of a
+     * button that was about to be there.
+     */
+    await page().goto(`${app.base}/day-close`);
+    await page().getByText(/Applying staged deposits needs/).waitFor({ timeout: 60_000 });
+    expect(await page().getByRole("button", { name: "Apply staged deposits" }).count()).toBe(0);
+    expect(await page().getByRole("button", { name: "Freeze day close" }).count()).toBe(1);
+    expect(await page().getByText(/Applying staged deposits needs/).innerText()).toMatch(/Post payments in PMS/);
+    await b.audit("day close, an act the reader's duties do not open");
+
+    await page().goto(`${app.base}/statements`);
+    await page().getByText(/Creating a statement needs/).waitFor({ timeout: 60_000 });
+    expect(await page().getByRole("button", { name: "Create draft" }).count()).toBe(0);
+    expect(await page().getByText(/Creating a statement needs/).innerText()).toMatch(
+      /Post payments in PMS[\s\S]*administrator grants it on Practice Risk/
+    );
+    await b.audit("statements, the draft act the owner's duties do not open");
+
+    // The mirror: the front desk can apply and cannot freeze.
+    await b.signIn("ridgeview-front", "/day-close");
+    await page().getByText(/Freezing the day close needs/).waitFor({ timeout: 60_000 });
+    expect(await page().getByRole("button", { name: "Apply staged deposits" }).count()).toBe(1);
+    expect(await page().getByRole("button", { name: "Freeze day close" }).count()).toBe(0);
+    expect(await page().getByText(/Freezing the day close needs/).innerText()).toMatch(/Reconcile bank to PMS/);
+    await b.audit("day close, the front desk's half of the same split");
   }, 120_000);
 
   it("lets the front desk draft and issue a statement from the same balances", async () => {
@@ -534,6 +603,31 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await page().getByRole("button", { name: /^Retire / }).count()).toBe(0);
     expect(await page().getByRole("button", { name: "Adopt", exact: true }).count()).toBe(0);
     expect(await page().getByRole("button", { name: /^Set threshold for / }).count()).toBe(0);
+
+    /**
+     * Increment 1.103. The list this seat reads is the one its posting forms
+     * are built from — the code, the wording, and whether it is offered. The
+     * figure above which a posting on a reason waits for a second person, and
+     * the count of entries citing it, are the practice's governance of its
+     * own reasons; they reach a screen at `manager` and above, and this seat
+     * is not handed them. The columns are absent rather than blank, because a
+     * blank in a threshold column reads as "no second person needed".
+     */
+    expect(await page().getByRole("columnheader", { name: "Second person over" }).count()).toBe(0);
+    expect(await page().getByRole("columnheader", { name: "Entries" }).count()).toBe(0);
+    expect(await page().getByText("$50.00").count()).toBe(0);
+    /**
+     * And the route itself, not merely the screen: a seat that reads the
+     * answer rather than the table finds the figure is not in it. Read from
+     * inside the page so the request carries this seat's own sign-in.
+     */
+    const asFront = await page().evaluate(async () => {
+      const res = await fetch("/api/reason-codes");
+      const body = (await res.json()) as { items: Record<string, unknown>[] };
+      return { status: res.status, keys: [...new Set(body.items.flatMap((i) => Object.keys(i)))].sort() };
+    });
+    expect(asFront.status).toBe(200);
+    expect(asFront.keys).toEqual(["active", "code", "kind", "label", "reserved"]);
     await b.audit("reason codes (front desk)");
 
     // Clearing the threshold hands those rows back to the channel's own figure,
@@ -541,6 +635,13 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     // change (Increment 1.47), exactly as switching the after-hours hold off is.
     await b.signIn("ridgeview-owner", "/reason-codes");
     await page().getByRole("heading", { name: "Why money moved" }).waitFor({ timeout: 60_000 });
+    // The rank that governs the reasons does receive what it governs (Increment 1.103).
+    const asOwner = await page().evaluate(async () => {
+      const res = await fetch("/api/reason-codes");
+      const body = (await res.json()) as { items: Record<string, unknown>[] };
+      return [...new Set(body.items.flatMap((i) => Object.keys(i)))].sort();
+    });
+    expect(asOwner).toEqual(["active", "code", "entries", "kind", "label", "requiresApprovalOverCents", "reserved"]);
     const ppoAgain = page().locator("tr", { hasText: "contractual_ppo" });
     await ppoAgain.waitFor({ timeout: 30_000 });
     await ppoAgain.getByRole("button", { name: "Set threshold for contractual_ppo" }).click();
@@ -974,6 +1075,14 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     // By role: the section's own heading reads "Questions about this month", so
     // a label match on "About" reaches the region as well as the control.
     await questions.getByRole("combobox").selectOption("journal|total");
+    /**
+     * Who reads this, said where it is written (Increment 1.106). Both halves
+     * of the thread leave the practice, so both boxes carry the sentence: the
+     * live case behind the seat's argument proves that what the product
+     * *derives* names no patient, and can prove nothing about a sentence
+     * somebody types.
+     */
+    expect(await questions.getByText(/holds no agreement to receive patient information/).count()).toBe(1);
     await questions.getByLabel("Question", { exact: true }).fill("The journal total sits under the deposits for the month. What am I missing?");
     await questions.getByRole("button", { name: "Ask", exact: true }).click();
     await page().getByText(/^Asked\. The practice sees it on the home board\.$/).waitFor({ timeout: 30_000 });
@@ -990,6 +1099,8 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await card.getByRole("button", { name: "Answer this" }).click();
     const answer = page().getByLabel("Your answer");
     await answer.waitFor({ timeout: 30_000 });
+    // The same sentence on the practice's side of the thread (Increment 1.106).
+    expect(await card.getByText(/Name the line and the figure, never the patient/).count()).toBe(1);
     // An answer says something: the button holds until it does.
     await answer.fill("too short");
     expect(await card.getByRole("button", { name: "Answer", exact: true }).isDisabled()).toBe(true);
@@ -1208,6 +1319,147 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await asked.innerText()).toMatch(closedNote);
     await b.audit("home board, a question about a closed month");
   }, 150_000);
+  /**
+   * Increment 1.94. `POST /api/import/curve` and `POST /api/import/curve/apply`
+   * have existed since Increment 1.3 and nothing ever called them: a search of
+   * the whole repository for either path finds the route files and nothing
+   * else. The bank statement import has a screen — `/reconciliation` posts to
+   * it — and this one, which is how the practice's own day sheets reach the
+   * ledger, did not.
+   *
+   * Building the screen found what that cost: applying had never worked. The
+   * apply ran every read through the append role, which holds a grant on
+   * neither `patients` nor `account_members`, so it answered `permission
+   * denied` and `withGuard` — which carries no try/catch — passed a bare 500
+   * to the caller. Increment 1.95 split the apply into a plan that reads as
+   * `app_rw` and a write that writes as `app_append`, so both presses are
+   * real and the append role stayed as narrow as it was designed to be.
+   */
+  it("reads a Curve Hero day sheet and posts it to the ledger, in two presses", async () => {
+    await b.signIn("ridgeview-owner", "/import");
+    await page().getByRole("heading", { name: "Bring in a Curve Hero report" }).waitFor({ timeout: 60_000 });
+
+    // The check cannot be pressed on nothing.
+    const check = page().getByRole("button", { name: "Check this file" });
+    expect(await check.isDisabled()).toBe(true);
+
+    /**
+     * One payment, for an account that still owes, and for no more than it
+     * owes. Two rules of this ledger decide the shape of this file:
+     *
+     * A day-sheet *charge* cannot post at all —
+     * `ledger_entries_charge_requires_procedure` demands a procedure row and a
+     * Curve Hero day sheet carries a code in its description and no procedure.
+     * That gap is named in the increment record rather than papered over here.
+     *
+     * And a payment may not allocate more than the account owes
+     * (`allocation_exceeds_charge`). The cases above this one have already
+     * moved these balances, so the figure is read from the ledger rather than
+     * written into the case — a constant here would be a case that passes
+     * alone and fails in its own suite, which is exactly how this was found.
+     */
+    const { rows: owing } = await app.db.admin.query(`
+      SELECT p.mrn,
+             SUM(CASE WHEN le.kind = 'charge' THEN le.amount_cents ELSE -le.amount_cents END)::int AS owed
+      FROM ledger_entries le
+      JOIN patients p ON p.id = le.patient_id
+      GROUP BY p.mrn
+      ORDER BY owed DESC
+      LIMIT 1
+    `);
+    expect(owing[0].owed).toBeGreaterThan(0);
+    const payCents = Math.min(owing[0].owed as number, 100);
+    const payAmount = (payCents / 100).toFixed(2);
+    const daySheet = [
+      "Date,Location,Patient MRN,Patient Name,Transaction Type,Amount,Provider,Description",
+      `09/14/2026,MAIN,${owing[0].mrn},Imported,Payment,-${payAmount},,Patient copay`,
+    ].join("\n");
+    await page().fill("#import-content", daySheet);
+    await page().fill("#import-file-name", "day-sheet-2026-09-14.csv");
+    expect(await check.isDisabled()).toBe(false);
+
+    await check.click();
+    await page().getByText(/^Read 1 row, none of them refused\./).waitFor({ timeout: 30_000 });
+    expect(await page().getByText(/Nothing has reached the ledger/).count()).toBe(1);
+    await b.audit("import, a day sheet read and not yet posted");
+
+    // Second press is the act, and it reaches the ledger.
+    await page().getByRole("button", { name: "Post it to the ledger" }).click();
+    await page().getByText(/^Posted 1 entry/).waitFor({ timeout: 60_000 });
+    // The run is spent, so the act it offered is gone rather than left to refuse.
+    expect(await page().getByRole("button", { name: "Post it to the ledger" }).count()).toBe(0);
+    await b.audit("import, the day sheet posted");
+
+    // Both halves are on the chain, which is what makes each an act rather
+    // than a change that happened.
+    const { rows } = await app.db.admin.query(
+      "SELECT DISTINCT kind FROM domain_event WHERE kind LIKE 'import.curve_hero.%' ORDER BY kind"
+    );
+    expect(rows.map((r: { kind: string }) => r.kind)).toEqual([
+      "import.curve_hero.applied",
+      "import.curve_hero.staged",
+    ]);
+
+    // And the run itself is stamped, which is what stops a second apply
+    // counting the same rows twice.
+    const { rows: runs } = await app.db.admin.query(
+      "SELECT status FROM import_runs WHERE report_kind = 'day_sheet' ORDER BY created_at DESC LIMIT 1"
+    );
+    expect(runs[0].status).toBe("applied");
+  }, 180_000);
+
+  /**
+   * Increment 1.98. `POST /api/controls/release/evaluate` had no screen since
+   * it was built; Increment 1.96's sweep put it on the uncalled list with the
+   * reason that it wanted one, and this is it. Its arrival takes the route off
+   * that list, which the check verifies: it fails on an allowlisted path
+   * something has started calling.
+   *
+   * The screen sits at `lead`, the route's own rank. A panel on Practice Risk
+   * would need `manager` and so would be a screen the people this act is for
+   * could not reach — Increment 1.93's lesson read backwards.
+   */
+  it("records a release on a channel the ledger does not carry, and says what it cannot hold", async () => {
+    await b.signIn("ridgeview-owner", "/releases");
+    await page().getByRole("heading", { name: "Money that left by a channel this product does not hold" }).waitFor({ timeout: 60_000 });
+
+    // The act cannot be pressed without an amount.
+    const record = page().getByRole("button", { name: "Record this release" });
+    expect(await record.isDisabled()).toBe(true);
+
+    await page().selectOption("#release-channel", "payroll");
+    await page().fill("#release-amount", "18000");
+    await page().fill("#release-payee", "Northwind Payroll");
+    await page().fill("#release-memo", "September payroll file");
+    expect(await record.isDisabled()).toBe(false);
+    await record.click();
+
+    /**
+     * The seeded payroll threshold is zero, so the policy requires a second
+     * pair of hands whatever the figure — and the answer says the product
+     * cannot hold that signature rather than letting the reader assume it did.
+     */
+    await page().getByText(/required a second pair of hands/).waitFor({ timeout: 30_000 });
+    expect(await page().getByText(/cannot hold that signature/).count()).toBe(1);
+    expect(await page().getByText(/attested, never enforced/).count()).toBe(1);
+    await b.audit("releases, one recorded on an external channel");
+
+    // It is on the chain, which is what makes it a record rather than a form.
+    const { rows } = await app.db.admin.query(
+      "SELECT payload->>'channel' AS channel, payload->'dualRequired' AS dual FROM domain_event WHERE kind = 'control.release_attested' ORDER BY seq DESC LIMIT 1"
+    );
+    expect(rows[0].channel).toBe("payroll");
+    expect(rows[0].dual).toBe(true);
+
+    // And the month-end package counts it among the ones that needed a second.
+    await page().goto(`${app.base}/cpa`);
+    await page().getByRole("heading", { name: "The month, for the accountant" }).waitFor({ timeout: 60_000 });
+    await expect
+      .poll(async () => await page().locator("section[aria-labelledby=package-controls]").innerText(), { timeout: 60_000 })
+      .toMatch(/payroll attested \(external channel\)[\s\S]*needed a second pair of hands/);
+    await b.audit("month-end package, the attested release that needed a second");
+  }, 180_000);
+
   it("says a sign-in has ended rather than telling somebody their seat is the wrong one", async () => {
     /**
      * Increment 1.81. Four screens tested `!meRes.ok` on `/api/me`, which is

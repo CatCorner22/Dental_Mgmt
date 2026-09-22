@@ -40,7 +40,15 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     expect(await page().locator("section[aria-labelledby=coverage] tbody tr").count()).toBe(6);
     expect(await page().getByText(/^Independent bank reconciliation:/).innerText()).toMatch(/stale import|not measured/);
     expect(await page().getByText(/^Bank matching:/).innerText()).toMatch(/no rate yet[\s\S]*nothing to measure/);
-    expect(await page().getByText(/outside the rulebook/).innerText()).toMatch(/2 grant row/);
+    /**
+     * This line used to read "2 grant row(s) name a duty outside the rulebook
+     * and are listed, not scored", and the two rows were the owner's and the
+     * front desk's `run_import` (Increment 1.91). The screen was telling its
+     * reader that the product enforced a duty it could not score, and that
+     * nothing here could grant or revoke. There is no such row now, so the
+     * notice does not render.
+     */
+    expect(await page().getByText(/outside the rulebook/).count()).toBe(0);
     expect(app.serverLog()).toMatch(/\[boot\] database role .*not superuser, not BYPASSRLS, owns no tables/);
     await b.audit("practice risk (owner)");
   }, 90_000);
@@ -149,9 +157,35 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await page().getByRole("button", { name: "Revoke Collect patient payments / cash drawer from Finn Front" }).click();
     await flash(/^Revoked Collect patient payments/).waitFor({ timeout: 30_000 });
     const tiles = await page().locator("section[aria-labelledby=headline] .grid > div").allInnerTexts();
+    /**
+     * Two, not none (Increment 1.91). Finn Front's duties are back, and what
+     * is left is the owner's own: the import duty entered the rulebook, and
+     * the owner holds it alongside reconciliation and write-off approval.
+     * Both combinations were true of the seeded practice from the first day
+     * and neither was scored, because the duty belonged to no catalog and the
+     * duty-family matrix had no row for it.
+     */
     expect(tiles.map((t) => t.replace(/\s+/g, " "))).toEqual(
-      expect.arrayContaining([expect.stringMatching(/OPEN CONFLICTS 0/), expect.stringMatching(/WITHOUT A DECISION 0/)])
+      expect.arrayContaining([expect.stringMatching(/OPEN CONFLICTS 2/), expect.stringMatching(/WITHOUT A DECISION 2/)])
     );
+    // Same-family rows are folded away by default, so the two are named on the
+    // checkbox before they are read in the table.
+    const conflicts = page().locator("section[aria-labelledby=conflicts]");
+    expect(await conflicts.getByText(/^Show same-family combinations/).innerText()).toMatch(/\(2\)/);
+    await conflicts.locator("input[type=checkbox]").check();
+    // A family row is titled by the two duty families rather than the two
+    // duties, so the pairs are read that way: the owner's import duty records,
+    // and it sits beside their reconciliation and their write-off approval.
+    const familyRows = conflicts.locator("tbody tr").filter({ hasText: "combination" });
+    await familyRows.first().waitFor({ timeout: 30_000 });
+    const familyTexts = await familyRows.allInnerTexts();
+    expect(familyTexts.length).toBe(2);
+    for (const text of familyTexts) {
+      expect(text).toMatch(/Riley Owner/);
+      expect(text).toMatch(/recording/);
+    }
+    expect(familyTexts.some((t) => /reconciliation/.test(t))).toBe(true);
+    expect(familyTexts.some((t) => /authorization/.test(t))).toBe(true);
   }, 120_000);
 
   it("brings decisions due to the home board with what happened since, and lets the owner keep one and retire one", async () => {
@@ -713,6 +747,26 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await expect
       .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
       .toMatch(/Sign in as firm-mislaid/);
+
+    /**
+     * And the panel stops saying the seat is waiting (Increment 1.92). This
+     * case built the exact state that was broken — invited, reissued, then
+     * opened on the link in force — and stopped at the claim, so the defect
+     * sat under a passing test: the superseded invitation row is unclaimed
+     * and always will be, and the list read that row rather than the seat.
+     * The practice was told for good that somebody who had set a password had
+     * not opened their seat, and the one act offered on the row refused every
+     * time it was pressed.
+     */
+    await b.signIn("ridgeview-owner", "/risk");
+    const seatPanel = page().locator("section[aria-labelledby=invite-seat]");
+    await seatPanel.waitFor({ timeout: 60_000 });
+    await expect
+      .poll(async () => await seatPanel.getByRole("listitem").filter({ hasText: "firm-mislaid" }).count(), {
+        timeout: 60_000,
+      })
+      .toBe(0);
+    await b.audit("practice risk, a reissued seat gone from the unopened list");
   }, 180_000);
 
   it("takes the invited seat through its first sign-in with no authenticator, and into the month-end screen", async () => {
@@ -943,7 +997,17 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await expect
       .poll(async () => await roster.innerText(), { timeout: 60_000 })
       .toMatch(/their grants were not restored/i);
-    expect(await row("Nora Newhire").innerText()).not.toMatch(/stood down/);
+    /**
+     * Polled, not read once. The sentence above is the flash, which the act
+     * sets as soon as the route answers; the row is redrawn from the refetch
+     * that follows it. Reading the row the moment the flash lands assumes
+     * those two happen together, and on a slower machine they do not — this
+     * assertion passed here and failed in CI, which is the shape of a race
+     * rather than of a defect. The assertion itself is unchanged.
+     */
+    await expect
+      .poll(async () => await row("Nora Newhire").innerText(), { timeout: 60_000 })
+      .not.toMatch(/stood down/);
   }, 180_000);
 
   it("answers a recovery link that opens nothing in one sentence, and offers no way around it", async () => {
@@ -1031,6 +1095,52 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
   }, 120_000);
 
   /**
+   * Increment 1.91. The duty that guarded three import routes and belonged to
+   * no catalog. Before this increment the dropdown did not offer it, because
+   * the dropdown is the catalog, and the route behind it refused it as
+   * unknown — so the only holders were the two the seed wrote rows for, and
+   * the screen said as much in the line this suite's first case now asserts
+   * the absence of.
+   *
+   * It sits before the case that ends every sign-in and the one that re-pairs
+   * the owner's authenticator, both of which leave the session or the secret
+   * somewhere a later sign-in cannot follow.
+   */
+  it("shows the import duty on the person who holds it, revokes it, and grants it back", async () => {
+    // The case before this one reads the owner board, so this comes back to
+    // Practice Risk rather than assuming where the suite left the browser.
+    await b.signIn("ridgeview-owner", "/risk");
+    await page().getByRole("heading", { name: "Who holds which duties" }).waitFor({ timeout: 60_000 });
+
+    /**
+     * Finn Front has held `run_import` since the seed wrote the row, and until
+     * this increment the screen did not show it: `assignmentsFromGrants` put
+     * the row in `unknownEntitlements`, which the duties section never reads.
+     * So the practice could not see the duty, and had no button to take it
+     * back.
+     */
+    const revoke = page().getByRole("button", {
+      name: "Revoke Import bank and practice-management files from Finn Front",
+    });
+    await revoke.waitFor({ timeout: 30_000 });
+    await revoke.click();
+    await flash(/^Revoked Import bank and practice-management files/).waitFor({ timeout: 30_000 });
+
+    /**
+     * And back again, which is the half that was impossible: `revokeEntitlement`
+     * took any string it was handed while `grantEntitlement` refused anything
+     * outside the catalog, so ending an import grant ended it for good.
+     */
+    const finn = await grantSelects().nth(0).locator("option", { hasText: "Finn Front" }).getAttribute("value");
+    await grantSelects().nth(0).selectOption(finn!);
+    await grantSelects().nth(1).selectOption("run_import");
+    await page().getByRole("button", { name: "Grant", exact: true }).click();
+    await flash(/^Granted Import bank and practice-management files/).waitFor({ timeout: 30_000 });
+    await revoke.waitFor({ timeout: 30_000 });
+    await b.audit("practice risk, the import duty revoked and granted back");
+  }, 120_000);
+
+  /**
    * Increment 1.90. The route has existed since Increment 0.8 and no screen
    * ever called it. This drives the whole act, including the half that makes
    * it different from Increment 1.88's: the administrator pressing it signs
@@ -1045,6 +1155,13 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
   it("ends every sign-in in the practice, including the administrator's own", async () => {
     await b.signIn("ridgeview-owner", "/risk");
     await page().getByRole("heading", { name: "End every sign-in in the practice" }).waitFor({ timeout: 60_000 });
+
+    /**
+     * Increment 1.102. The practice has never done this, and the panel says so
+     * — waited on rather than read once, because it arrives with the history
+     * and the heading renders before that lands.
+     */
+    await page().getByText(/never ended every sign-in at once/).waitFor({ timeout: 60_000 });
 
     const press = page().getByRole("button", { name: "End every sign-in" });
     // A reason is the guard: the act cannot be pressed without one.
@@ -1071,7 +1188,28 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     expect(events).toEqual([{ why: "Lost phone reported by the front desk" }]);
 
     await b.audit("practice risk, every sign-in ended");
-  }, 120_000);
+
+    /**
+     * And the practice reads it back (Increment 1.102). This is the half the
+     * chain query above stood in for: until now the only reader of that reason
+     * in the whole repository was this test, going round the product to
+     * Postgres. Signing in again is the act the panel just told the
+     * administrator to take, so the case takes it.
+     */
+    await b.signIn("ridgeview-owner", "/risk");
+    await page().getByRole("heading", { name: "End every sign-in in the practice" }).waitFor({ timeout: 60_000 });
+    await page().getByText("Lost phone reported by the front desk").waitFor({ timeout: 60_000 });
+    /**
+     * The count is read, never asserted as a figure: how many sign-ins were
+     * live when the press landed depends on which cases ran before this one,
+     * and a case that hardcodes it passes alone and fails inside its suite.
+     */
+    await expect
+      .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
+      .toMatch(/Riley Owner ended (\d+ sign-ins?|every sign-in, and nobody was signed in)/);
+    expect(await page().getByText(/never ended every sign-in at once/).count()).toBe(0);
+    await b.audit("practice risk, the sign-out-everybody act read back");
+  }, 180_000);
 
   it("lets an enrolled person pair a new authenticator, and signs them in on it", async () => {
     // Increment 1.76. A second factor was a one-way door: `mfa_enrolled_at` is

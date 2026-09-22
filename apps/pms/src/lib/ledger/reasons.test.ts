@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { allReasonOptions, reasonOptionsForPosting, REASON_KIND_FOR_POSTING, type ReasonCodeRow } from "./reasons";
+import {
+  allReasonOptions,
+  narrowForPostingSeat,
+  reasonCodesForViewer,
+  reasonOptionsForPosting,
+  REASON_FIELDS_ABOVE_POSTING,
+  REASON_KIND_FOR_POSTING,
+  type ReasonCodeRow,
+} from "./reasons";
+import { ROLE_RANK, type Role } from "../auth/roles";
 
 function row(over: Partial<ReasonCodeRow> & Pick<ReasonCodeRow, "code" | "kind" | "label">): ReasonCodeRow {
   return { active: true, reserved: false, requiresApprovalOverCents: null, entries: 0, ...over };
@@ -59,5 +68,59 @@ describe("the reason options a form offers", () => {
     // while the seed files it under `reversal`. Reading the rows settles it.
     expect(reasonOptionsForPosting(rows, "reversal").map((o) => o.value)).toEqual(["correction"]);
     expect(reasonOptionsForPosting(rows, "adjustment").map((o) => o.value)).not.toContain("correction");
+  });
+});
+
+/**
+ * What one rank receives (Increment 1.103).
+ *
+ * `GET /api/reason-codes` opens at `user`, because the posting forms are
+ * built from this list. It handed every posting seat the approval threshold
+ * on each reason — the line under which a write-off gets no second pair of
+ * hands — and a count of the entries citing it. No screen below `manager`
+ * reads either.
+ */
+describe("the reason codes one rank receives", () => {
+  const governed: ReasonCodeRow[] = [
+    row({ code: "courtesy", kind: "write_off", label: "Courtesy adjustment", requiresApprovalOverCents: 50_000, entries: 12 }),
+  ];
+
+  it("gives a posting seat the fields its forms are built from, and no others", () => {
+    expect(narrowForPostingSeat(governed)).toEqual([
+      { code: "courtesy", kind: "write_off", label: "Courtesy adjustment", active: true, reserved: false },
+    ]);
+  });
+
+  /**
+   * The gate. A field added to `ReasonCodeRow` reaches every posting seat
+   * unless somebody narrows it, and the narrowing is invisible from the
+   * route. This reads both objects and fails the day the difference between
+   * them stops being the two fields somebody decided on.
+   */
+  it("drops exactly the fields nobody below manager reads", () => {
+    const [full] = governed;
+    const [narrow] = narrowForPostingSeat(governed);
+    const dropped = Object.keys(full!).filter((k) => !(k in narrow!));
+    expect(dropped.sort()).toEqual([...REASON_FIELDS_ABOVE_POSTING].sort());
+  });
+
+  it("answers manager and above with the practice's governance of its reasons", () => {
+    for (const rank of ["manager", "admin"] as Role[]) {
+      expect(reasonCodesForViewer(governed, rank)).toEqual(governed);
+    }
+  });
+
+  it("answers every rank below manager with the narrower list", () => {
+    for (const rank of ["readonly", "user", "lead"] as Role[]) {
+      expect(reasonCodesForViewer(governed, rank)).toEqual(narrowForPostingSeat(governed));
+    }
+  });
+
+  /** Every rank this product has is decided here, so a sixth cannot slip through unconsidered. */
+  it("decides every rank the product has", () => {
+    for (const rank of Object.keys(ROLE_RANK) as Role[]) {
+      expect(reasonCodesForViewer(governed, rank)).toHaveLength(1);
+    }
+    expect(Object.keys(ROLE_RANK)).toEqual(["readonly", "user", "lead", "manager", "admin"]);
   });
 });

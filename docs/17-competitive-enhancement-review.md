@@ -910,7 +910,7 @@ The product already held the answer to that, and had held it since Increment 0.6
 - **The ceremony gets its screens.** Practice Risk gains "Getting somebody back in": a manager reads it and an administrator acts on it, which is the split the rest of that page holds. `GET /api/recovery-ceremony` answers what this practice can do; the approver receives one link, once, and this product keeps only a SHA-256 of it. `/regain/[ref]` is the third page outside a session, and borrows the shape Increments 1.67 and 1.71 settled: it reads and does not act, it answers a link that ran out and a link that was never ours in the same words, and it offers nothing else.
 - **`POST /api/recovery-ceremony/reset` is deleted.** It had no caller, it duplicated the new server action, and it was the one route under `/api` that did not pass through `withGuard`. Its entry in `check-route-guards.mjs` goes with it, leaving that allowlist holding only the two transport exemptions — so the invariant is restored rather than merely tidied.
 
-**Two administrators, and no exception.** Increment 1.75 met the same shape and answered it with a governed exception; this one gets none, and the refusal says so out loud so that a practice which has met the GL mapping exception is not left expecting one. The GL mapping control protects a figure. This one protects every account in the practice: one administrator who can clear somebody's second factor and set their password can post as them and approve as them, which is the whole of what maker-checker prevents. Nor does a weaker rule work — "one administrator may bring back somebody ranked below them" rests on the claim that an administrator already holds power over that account, and they do not. The only route an administrator has against another account revokes its sessions; nothing deactivates a user, nothing sets another person's password, and nothing writes `users.role`.
+**Two administrators, and no exception.** Increment 1.75 met the same shape and answered it with a governed exception; this one gets none, and the refusal says so out loud so that a practice which has met the GL mapping exception is not left expecting one. The GL mapping control protects a figure. This one protects every account in the practice: one administrator who can clear somebody's second factor and set their password can post as them and approve as them, which is the whole of what maker-checker prevents. Nor does a weaker rule work — "one administrator may bring back somebody ranked below them" rests on the claim that an administrator already holds power over that account. *(Corrected in Increment 1.99: when this was written the only such route revoked sessions, and nothing deactivated a user or wrote `users.role`. Increments 1.78, 1.79 and 1.90 made all three false — one administrator can now change a rank, stand somebody down and end their sign-ins. Every one of those takes something away; none is **becoming** that person, which is what the rule withholds. Becoming them needs their password, and the only thing that sets another person's password is the recovery ceremony itself, which needs two administrators. The rule rests on that one premise now, and a test reads the source to keep it true.)*
 
 So a practice with one administrator cannot do this, and the honest thing is to refuse before a ceremony exists — `approveRecoveryCeremony` has always refused the initiator, so without that check a single-administrator practice would open ceremonies nobody alive could approve. **User administration, the root cause Increment 1.75 also named, now blocks two controls rather than one.**
 
@@ -963,6 +963,557 @@ The browser case also caught a defect in its own first draft: it matched the row
 
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
+
+## Increment 1.101
+
+Increments 1.97 and 1.100 both came from one shape: a fact the product **records and nobody reads**. So this swept for it properly — every chain event kind the app writes, against everything that reads one.
+
+**57 kinds written. 29 of them reached the practice's weekly record as their own identifier with the punctuation swapped.**
+
+> auth signin pending mfa · month rehash baseline · import curve hero staged · notice address withdrawn · reason code threshold changed
+
+`chain.otherKinds` lists every kind the digest has no named field for, and `eventLabel` falls back to `kind.replace(/[._]/g, " ")`. So the fallback was not the exception it reads as in the code — it was **most of the week**, in the one artefact the owner stamps a hash of and the month-end package folds into its own.
+
+For a product whose discipline everywhere else is to say the thing in words — every refusal since Increment 1.48, every act's sentence since 1.90 — the weekly record spoke in identifiers.
+
+## A dead label beside twenty-nine missing ones
+
+`EVENT_LABEL` carried `"import.applied": "Import applied"`, and **nothing writes `import.applied`**. The app writes `import.bank_statement.applied` and `import.curve_hero.applied`.
+
+That is how a hand-kept list drifts when nothing reads it back: one entry for an act that cannot happen, and none for twenty-nine that do.
+
+## What it says now
+
+Every kind the app writes has words, grouped by what they are about: getting in and getting back in; who is on the practice; the month with the accountant; money and its record; what the practice governs; reaching people.
+
+They are written for the person reading their week, not for the person who named the kind — *"Somebody used a recovery link to get back in"*, *"A closed month was re-baselined under a new package shape"*, *"Somebody stopped a code they had not asked for"*.
+
+## The gate
+
+`eventLabels.test.ts` reads **the source that writes the events** — every non-test file under `apps/pms/src` except `src/e2e`, comments stripped — for `append*Event(… "kind")` and `kind: "…"` in dotted lower-case form. Then:
+
+- **Every kind written must be covered** by a named digest field, a label, or a place the digest shows it from its own table. A new kind with no words fails by name.
+- **No label may name a kind nothing writes.** A promise about a week that cannot happen fails too.
+
+Read from the source rather than asserted about it, for the reason the nav gates and the route-guard checks are: a claim about what the code writes that does not read the code goes stale in silence. This is the third gate of that kind this session, after Increment 1.91's entitlement check and Increment 1.96's uncalled-route check.
+
+**Red-before, measured, both halves.** A probe kind added to an unrelated module fails the first with `expected [ 'probe.new_kind_without_words' ] to deeply equal []`; restoring the dead label fails the second with `expected [ 'import.applied' ] to deeply equal []`.
+
+## What the sweep decided not to call a defect
+
+The other 28 kinds are covered by `EVENT_FIELDS`, which sets a named digest figure, or by `EVENT_KINDS_SHOWN_ELSEWHERE`, whose four members are genuinely shown elsewhere from their own tables. Increment 1.100 removed the one member whose elsewhere was a month away; the rest hold.
+
+And a kind written and read nowhere is **not by itself a defect**. The chain is the record: it exists to be verified and read back, not to be summarised. What this increment fixes is narrower and truer — the digest already lists these kinds, and listed them in machine-speak.
+
+## Not in Increment 1.101
+
+**A named digest figure for any of the twenty-nine.** A label is words for a row that already appears; a field is a claim that the figure matters enough to have a name and to sit inside the hash. Increment 1.100 made that case for one figure and made it on its merits. Doing it for twenty-nine at once would be doing it for none of them.
+
+**The fallback itself.** It stays. A kind can be written by a migration, or by a future increment between edits, and a digest that threw would be worse than one that says the identifier. It is no longer what most of the week looks like.
+
+**A day-sheet charge that cannot be imported.** Recorded in Increment 1.95; it wants the question of an unknown procedure code settled first.
+
+## Increment 1.100
+
+Increments 1.97 and 1.98 both recorded a debt to the digest, and both described it wrongly.
+
+They said the digest *"labels them all 'Release attested'"*. **It labels them nothing.** `control.release_attested` sat in `EVENT_KINDS_SHOWN_ELSEWHERE`, so the event-counting loop neither set a named field for it nor pushed it to `chain.otherKinds` — the week's reader saw it only inside the total on the chain line, and the `EVENT_LABEL` entry for the kind was unreachable through the only path that uses `eventLabel`.
+
+Four places in `docs/17` said the wrong thing and now say the right one, each with the correction marked.
+
+## "Shown elsewhere" was a promise the elsewhere did not keep
+
+The set's own comment says these kinds are *"counted from their own tables or from the chain but shown elsewhere; not listed twice."* For a release attestation the elsewhere was the **month-end package** — which, until Increment 1.97, showed a bare count per channel, and which is in any case a month away from the week a practice is reading.
+
+So a release that left the practice by a channel this build cannot enforce, in the week just gone, appeared in exactly one figure: the total number of events on the chain.
+
+## What the week now says
+
+`alerts` gains two counts:
+
+- **`releasesAttested`** — releases recorded on a channel the ledger does not carry. `control.release_attested` moves into `EVENT_FIELDS`, which is the same mechanism `control.channel_attested` has used since Increment 1.53, and leaves `EVENT_KINDS_SHOWN_ELSEWHERE` because the set is never consulted for a kind with a field and leaving it there would read as a claim that the week hides it.
+- **`releasesNeedingSecond`** — how many of them this practice's own policy asked two people for. A second query rather than a second group, because the loop above groups by kind alone and this asks about one kind's payload. It matches the package's `requiredSecond` from Increment 1.97, so the week's reader and the month's reader cannot disagree.
+
+Neither is a count of failures, for the reason Increment 1.97 recorded: the act records one person attesting what the policy said and cannot record a second person's own act. It is what the practice still owes evidence for.
+
+## The rule this increment had to obey
+
+`digest.test.ts` asserts the `alerts` block's exact key list, and its comment says why: the digest states its **seven days** and nothing about where the practice stands now, because the month-end package folds the whole digest into its own hash. A standing figure here would move every closed month's hash the moment somebody attested anything, and make a given acknowledgment read as stale.
+
+Both new keys are counts of what happened **in those seven days**. The shape guard is extended, not relaxed, and its comment now says that a standing figure is still forbidden.
+
+## Tests
+
+- **Unit.** The shape guard carries the two new keys and states the rule they obey; the digest and package fixtures carry them.
+- **Live (1).** A payroll release is attested and the week's digest moves by one on both counts, with the kind asserted **absent** from `chain.otherKinds` — the place a reader would look for it and, before this, not find it.
+
+**Red-before, measured.** With `digest.ts` reverted the live case fails on `expected undefined to be NaN`: the fields are not there.
+
+## Not in Increment 1.100
+
+**A digest schema version.** The digest has none — the package carries the version that a digest shape change rides on (Increment 1.43), and Increment 1.97 already moved it to `package-v8` for the figure this increment mirrors. A second bump for the same fact would say the package changed shape twice.
+
+**The other kinds in `EVENT_KINDS_SHOWN_ELSEWHERE`.** `reconciliation.cleared`, `control.decision`, `statement.drafted` and `deposit.staged_applied` each genuinely are shown elsewhere in the digest, from their own tables. Only the release attestation's elsewhere was a month away.
+
+**A day-sheet charge that cannot be imported.** Recorded in Increment 1.95; it wants the question of an unknown procedure code settled first.
+
+## Increment 1.99
+
+Every increment since 1.88 has carried the same line in its *Not in* paragraph: **the stale comment in `regainAccess.ts`** — "nothing writes `users.role`", which Increment 1.78 made false — *recorded, still not this increment's subject.* Eleven increments. This is its subject.
+
+And reading it properly showed it was never only a comment.
+
+## It is the argument for a security rule, and two of its three premises had lapsed
+
+`regainAccess.ts` explains why the two-administrator recovery ceremony gets **no governed exception**, where Increment 1.75's GL-mapping control got one. The paragraph then answers the obvious weaker rule — *"one administrator may bring back somebody who ranks below them"* — by arguing that an administrator does **not** already hold power over that account, and resting that on three facts:
+
+| Claim | Then | Now |
+|---|---|---|
+| "nothing deactivates a user" | true | **false** — Increment 1.79 built `setPersonActive`, with a screen |
+| "nothing sets another person's password" | true | **true**, and verified here |
+| "nothing writes `users.role`" | true | **false** — Increment 1.78 built rank administration |
+
+An argument for a security rule resting on lapsed facts is worse than an inconvenient rule: it invites the next reader to check the premises, find two of them false, and conclude the rule is unfounded.
+
+## The conclusion stands, and is better supported than it was
+
+One administrator, alone, **can** now end another person's sign-ins (Increment 1.90), stand them down and take their grants with them (Increment 1.79), and change their rank (Increment 1.78).
+
+Every one of those acts **takes something away**. None of them is *becoming* that person — posting as them, approving as them, being both halves of every maker-checker rule this product has. That is the power the rule withholds, and it is untouched by any of the three.
+
+Becoming them needs their password. **The only thing in this codebase that sets another person's password is the recovery ceremony itself**, which needs two administrators. `claimSeat` writes a password too, and it is the claimant setting their own from a link only they hold.
+
+So the rule now rests on one premise instead of three, and that premise is the one still true.
+
+## A test keeps it true
+
+`regainAccess.test.ts` reads every `.ts`/`.tsx` file under `apps/pms/src`, excluding tests, for callers of `.setPassword(` — and asserts the list is exactly `["lib/auth/recoveryCeremony.ts"]`. A second caller anywhere makes the whole argument false, so the test fails by path and name rather than letting a comment quietly stop being true again.
+
+A second case names `claimSeat`'s direct write of `password_hash`, so the omission from the first list reads as known rather than missed.
+
+**Red-before, measured.** With one probe call to `store.setPassword` added to an unrelated module, the test fails: *expected `['lib/auth/endSessions.ts', …(1)]` to deeply equal `['lib/auth/recoveryCeremony.ts']`*.
+
+## The same argument in docs/17
+
+Increment 1.77's record repeats the three-premise version. It is corrected in place, with the correction marked, rather than rewritten as though it had always said the true thing.
+
+The *Not in* lines in Increments 1.88 through 1.98 are left exactly as they were. Each was true when written, and a record of what an increment deliberately left undone is worth more intact than tidied.
+
+## Not in Increment 1.99
+
+**Any change to the rule itself.** The ceremony still needs two administrators, still offers no exception, and still says so in the words Increment 1.48 fixed for every refusal in this product. This increment changes what the codebase *says about why*, and nothing about what it does.
+
+**The digest, which shows a release attestation nowhere by name.** Recorded in Increments 1.97 and 1.98, still the smaller separate edit. *(Corrected in Increment 1.100: those records called it a flat label, and there was no label.)*
+
+**A day-sheet charge that cannot be imported.** Recorded in Increment 1.95; it wants the question of an unknown procedure code settled first.
+
+## Increment 1.98
+
+`POST /api/controls/release/evaluate` has had no screen since it was built. Increment 1.96's sweep put it on the uncalled list with the reason that it wanted a surface of its own; Increment 1.97 made the figure it records readable in the month-end package and restated the debt. This is the surface.
+
+**Its arrival takes the route off that list, and the check verifies it.** `check-route-guards.mjs` fails on an allowlisted path something has since started calling, so the loop closes itself rather than leaving a stale claim behind: the run now reports *"1 route nothing calls"* where it reported two.
+
+## Its own screen, at its own rank
+
+The route opens at **`lead`**. Practice Risk needs `manager`, so a panel there would be a screen the people this act is for could not reach — **Increment 1.93's lesson read backwards**. `/releases` has a header link of its own at `lead`, gated on the route file, which `seats.test.ts` reads back.
+
+In the seeded practice that means the owner is offered it and the front desk is not, which the nav test now pins.
+
+## What the screen records, and what it says it cannot
+
+One person attests that a release happened and what the practice's policy asked for. It does **not** record that a second person signed, because `attestChannelRelease` accepts no second signer — deliberately, as Increment 1.97 found and recorded.
+
+So the answer says so, rather than leaving the reader to assume the opposite:
+
+> Recorded, and the policy required a second pair of hands. This product cannot hold that signature — keep it where the channel does, on the payroll file or the bank's own authorisation log. 2 people here may second it.
+
+And, beneath it, how the month-end package will read the channel:
+
+> This channel is attested, never enforced: the product does not hold its data, so nothing here checks that the release matched what was authorised.
+
+A practice where **nobody** may second gets that said plainly too, because a policy requiring a second pair of hands that no role can supply is worth the owner's attention on its own.
+
+## A correction to Increment 1.97's record
+
+Increment 1.97 wrote that **payroll is the only external channel this practice can attest**. That is **false**.
+
+`ENFORCEMENT` marks two channels `external` — `payroll` and `vendor_new` — and both attest. Probed against a live seeded database: `vendor_new` at $10 and at $5,000 both record, both with `dualRequired: true` and a threshold of zero, and the owner's own evaluation returns `blocked_role` on either. What is *not* attestable is `wire` and `vendor`, which are not release channels at all and refuse `unknown_channel`, and `deposit`, which the ledger enforces and which refuses `ledger_channel`.
+
+Nothing 1.97 built is wrong — the figure, the schema bump and the live assertions all stand, and the live case never asserted the "only". The prose did, and `docs/05`, `docs/17` and the comment in `package.live.test.ts` now say the true thing with the correction marked.
+
+**A test makes the claim unrepeatable.** The screen's channel list is pinned to `ENFORCEMENT` rather than restated: `EXTERNAL_RELEASE_CHANNELS` must equal exactly the channels marked `external`. A channel promoted to enforced has to leave this screen in the same change, or the screen would offer an act `attestChannelRelease` refuses as a ledger channel — an act that could only fail, which is the shape Increments 1.88, 1.89 and 1.93 exist to remove.
+
+## Tests
+
+- **Unit (8).** The channel list equals `ENFORCEMENT`'s external set and every channel has a label; the recorded sentence's below-threshold, above-threshold, nobody-may-second and one-person cases; and both enforcement sentences.
+- **Browser (1).** The owner opens `/releases`, cannot press the act without an amount, records an $18,000 payroll file, and reads that the policy required a second and that this product cannot hold that signature. The chain carries `control.release_attested` with `dualRequired` true, and the month-end package then shows *"payroll attested (external channel) · 1 needed a second pair of hands"* — Increment 1.97's figure, reached for the first time by pressing a button rather than by calling a function.
+
+## Not in Increment 1.98
+
+**Recording the second person's act.** Unchanged from Increment 1.97: it needs the second person's own sign-in and their own press, which is the shape of the recovery ceremony rather than of an attestation.
+
+**A list of what has been attested.** The screen records and says what the policy asked; the month-end package is where the month's attestations are read, and the digest counts the week's. A third list would be a third place to disagree.
+
+**The digest.** It shows a release attestation nowhere by name. Recorded in Increment 1.97 and still the smaller, separate edit. *(Corrected in Increment 1.100: "flat label" described a label the digest never applied.)*
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
+## Increment 1.97
+
+`attestChannelRelease` has recorded `dualRequired` on every per-release attestation since Increment 1.12. **Nothing read it.**
+
+The month-end package counted attested releases per channel — `{ channel, count }` — so a release the policy said needed two people and one it did not read exactly alike. The digest showed them nowhere by name. *(Corrected in Increment 1.100: this first read "The digest labels them all \"Release attested\"", which is false — `control.release_attested` sat in `EVENT_KINDS_SHOWN_ELSEWHERE`, so it was counted only inside the chain total and never labelled. The `EVENT_LABEL` entry for it was unreachable.)* An accountant reading the month saw a number and no way to tell which of it the practice still owed evidence for.
+
+## What it is, and what it is not
+
+`attestations` now carries `requiredSecond` beside `count`, and the CPA screen says so on the row: *"payroll attested (external channel) · 1 needed a second pair of hands"*.
+
+**It is not a count of releases that failed to get a second.** The act records **one person attesting what the policy said**, and it cannot record a second person's own act. That is a decision this codebase made on purpose, and states in the doc comment above `attestChannelRelease`: *"no second signer is accepted from the request, so this path can never produce an approved_dual verdict."* One person asserting two people's participation is a weaker record than no record at all, and this product does not make it — the GL mapping maker-checker, the recovery ceremony and the correction approval all insist on two distinct acts by two people.
+
+So `requiredSecond` is **what the practice still owes evidence for**, not what it did wrong. The evidence lives where the channel does: a payroll file's own signatures, a bank's dual-authorisation log.
+
+**I went looking to "fix" this the other way first** — `ReleaseRequest` on the engine carries `secondPersonId`, `evaluateRelease` resolves it and refuses `blocked_same_person`, and the app wrapper simply never passes it. It reads like an oversight. It is not: the comment above the wrapper says why, and the increment that would have "fixed" it would have quietly weakened the record. Reading the comment before changing the code is the whole of the difference.
+
+## What the seeded practice shows, and what it cannot
+
+In the seed the two figures **coincide**, and the live case says so rather than hiding it.
+
+There are **two** channels this practice can attest — `payroll` and `vendor_new`, the two `ENFORCEMENT` marks `external`. `wire` and `vendor` are not release channels at all and refuse `unknown_channel`, and `deposit` is a ledger channel that refuses `ledger_channel` because its evidence comes from the posting path. And **both seeded thresholds are zero**, so every release on either requires a second whatever it is worth.
+
+*(Corrected in Increment 1.98. This first read "payroll is the only external channel this practice can attest", which is false: `vendor_new` is external too and attests. Verified by probing a live seeded database, which also showed both thresholds at zero and the owner's own evaluation returning `blocked_role`.)*
+
+The figure separates them in a practice that sets a threshold. Here it reports the sharper fact: *all* of them need one, and the product can record none of them.
+
+## The package schema version
+
+`PACKAGE_SCHEMA_VERSION` moves **`package-v7` → `package-v8`**. How many of a channel's attested releases the policy required a second for is a figure about the month, so it belongs inside the hash — the same reasoning that moved v6 to v7 in Increment 1.75. A month closed under v7 reports *"the package changed shape"* rather than *"a figure moved"*, which is the fallback Increment 1.43 built for exactly this.
+
+## Tests
+
+- **Unit.** The package fixture carries the new field, and the schema version is pinned to `package-v8`.
+- **Live (1).** Two payroll releases are attested, the package reports `count: 2, requiredSecond: 2`, the threshold is asserted to be zero so a reader knows why they are equal, and both refusals — the ledger channel and the channel the policy does not name — are driven.
+
+**Red-before, measured.** With `package.ts` reverted, the live case fails on `expected undefined to be 2`: the field is not there.
+
+## Not in Increment 1.97
+
+**A screen for the act.** Increment 1.96 put `POST /api/controls/release/evaluate` on the uncalled list with the reason that it wants a surface of its own, and that is still true. Note the rank when it comes: the route opens at `lead` and Practice Risk needs `manager`, so a panel there would be a screen a lead could not reach — the Increment 1.93 lesson read backwards.
+
+**Recording the second person's act.** It would need the second person's own sign-in and their own press, which is the shape of the recovery ceremony rather than of an attestation. Worth building; not worth faking.
+
+**The digest.** It shows them nowhere by name. The package is where an accountant reads the month, so that is where the figure went first; the digest is a smaller, separate edit. *(Corrected in Increment 1.100: this first said the digest "still labels every one", which it never did.)*
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
+## Increment 1.96
+
+Three increments in a row found the same defect, and each found it the same way.
+
+- **Increment 1.90:** the tenant-wide session revoke had existed since Increment 0.8, and no screen called it.
+- **Increment 1.94:** the Curve Hero import had no screen since Increment 1.3 — and giving it one showed that applying had *never worked at all*, because the append role held a grant on none of the tables the apply read.
+- **Migration 0055**, from Increment 1.77, had already written the lesson down for the recovery ceremony: **"nothing caught it because nothing called it."**
+
+Increment 1.94 ran the sweep by hand. This makes it a gate.
+
+## A route nothing calls must say why
+
+`scripts/check-route-guards.mjs` already fails a route exported without `withGuard`, and since Increment 1.91 a guard naming an entitlement the rulebook does not carry. It now also fails **a route whose path appears nowhere else in the app's own source**, unless that route is named in an `UNCALLED` allowlist with a written reason — the same device the two transport exemptions at the top of the file already are. An entry is a claim, and a route that leaves the list takes its claim with it: the check fails on an allowlisted path that something has since started calling, and on an entry naming a route this app does not have.
+
+## The first draft of this check was worthless, and said so
+
+It passed. It should not have.
+
+Removing the import screen — reproducing exactly the state Increment 1.94 found — left the check green, because Increments 1.94 and 1.95 had written those very paths into **doc comments** explaining that nothing called them. **A gate that prose can satisfy is not a gate.**
+
+Two exclusions fix it, and both are the check rather than tidiness:
+
+- **Comments are stripped before the search.** A path named in a comment is prose.
+- **Test files and `src/e2e` are left out.** A route only a test calls is precisely the defect: the recovery ceremony, the tenant-wide revoke and the Curve Hero import each had tests and no screen, and each was broken in a way only a real caller could show.
+
+**Measured.** With the import screen moved aside, the tightened check names `/api/import/curve` and `/api/import/curve/apply` by path — it would have caught Increment 1.94's defect on the day the routes were written. With the allowlist emptied, it names the two routes below.
+
+## The two routes on the list, and what the sweep found in one of them
+
+**`GET /api/controls/policy`** answers with the practice's control policy — the dual-release thresholds among it — and stood at **`user` rank**, while `GET /api/controls/risk`, which puts the same material on a screen, has always needed **`manager`**.
+
+The figure a control enforces is exactly what somebody structuring payments beneath it would want, and where one thing has two doors, the looser one decides. It is `manager` now. A unit test reads both route files and pins them together, rather than asserting about a guard it does not read — the same discipline the nav gates follow, for the same reason: a claim that does not read the thing goes stale in silence.
+
+**`POST /api/controls/release/evaluate`** attests a release on a channel the ledger does not carry — a deposit bag, a new vendor, a payroll file — and answers whether a second person is needed and who may second. It is a real capability with no screen, exercised by live cases and by nothing a person can reach. Its allowlist entry says so, which is the point: recorded rather than hidden, and a surface of its own is worth an increment.
+
+## Not in Increment 1.96
+
+**A screen for the release attestation.** Naming it on the list is not the same as building it, and this increment deliberately does the naming: three increments spent finding routes with no screens have earned a gate before they earn another screen.
+
+**Deleting `/api/controls/policy`.** Nothing calls it, and Increment 1.77 deleted a route whose purpose had moved, so the precedent exists. But a route that might have a caller outside this repository is safer tightened than removed, and tightening is the control-correct move in any case.
+
+**A check on which route a button calls.** Increment 1.93 recorded why: it needs to know which press reaches which path, and the honest way to hold that is a browser case, not a script guessing from source.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
+## Increment 1.95
+
+Increment 1.94 found that applying a Curve Hero import had never worked, granted the append role the two staging tables it needed, and stopped — because the next thing the apply reads is `patients` and `account_members`, and letting the role that writes the chain read patient records is a decision about who may read a patient. It recommended the split rather than the grant. This is the split.
+
+## What moved
+
+`applyCurveHeroImport` was one function doing both halves on one connection, and the route ran it inside `withTenantAppendTransaction`. It is now two:
+
+- **`planCurveHeroImport`** reads. It loads the validated runs and their staged rows, resolves each row to an account, a patient and a location, counts what the import has no use for, and collects the rows it could not resolve as errors. It writes nothing.
+- **`writeCurveHeroImport`** writes. It posts what the plan resolved, stamps each run `applied`, and appends one chain event per run. **It looks nothing up.** The tables it touches are the ledger, `import_runs` and `domain_event` — exactly what the append role is granted.
+
+`applyCurveHeroImport` survives as the two called in order on one connection, for the `apply-cli` and the tests that drive the whole path. **The route does not use it**: it plans in a `withTenantTransaction` and writes in a `withTenantAppendTransaction`, which is the point of the increment.
+
+The eligibility check moved with it. `hasValidatedCurveImportRun` is a read, so it runs as `app_rw` now rather than as the role that cannot read the table it selects from.
+
+## One thing the split made necessary
+
+The two halves are separate transactions, so a second apply can arrive between them. The idempotency key on each entry already refuses to post a row twice; what was missing was the stamp. `writeCurveHeroImport` now stamps a run `applied` **only while it is still `validated`**, and appends its event only if that stamp took. A run somebody else applied in between is skipped rather than counted twice.
+
+## What the browser case proves, and what it cannot
+
+The case drives the whole path through the real route on the real roles: check a file, read *"Read 1 row, none of them refused"*, press **Post it to the ledger**, read *"Posted 1 entry"*, and then find `import.curve_hero.staged` **and** `import.curve_hero.applied` on the chain with the run stamped `applied`.
+
+Writing it ran into two rules of this ledger, both of which shaped the file it imports:
+
+**A day-sheet charge cannot post at all.** `ledger_entries_charge_requires_procedure` demands a procedure row, and a Curve Hero day sheet carries a procedure *code in its description* and no procedure. The three-row fixture this case started with — two charges and a payment — posted nothing. That is a real gap in the import, named in *Not in* below rather than papered over.
+
+**A payment may not allocate more than the account owes** (`allocation_exceeds_charge`). The case first carried a constant figure, passed alone, and failed inside its own suite, because every case above it has already moved those balances. It reads the largest outstanding account out of the ledger now and pays no more than it owes. A case that passes alone and fails in its suite is worth recording: the isolation that makes a case easy to write is the thing that hides what the suite does to it.
+
+## Not in Increment 1.95
+
+**Posting a day-sheet charge.** The import would have to resolve or create a procedure from a code in a description. That is a feature of the import, not of its transaction shape, and it wants its own increment — with the question of what this product does with a code it has never seen settled first.
+
+**Granting the append role the patient tables.** Still not done, and now not needed: nothing the append role runs reads them.
+
+**The other two unreferenced routes** from Increment 1.94's sweep, `/api/controls/policy` and `/api/controls/release/evaluate`.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
+## Increment 1.94
+
+A sweep of every route under `src/app/api` against the rest of the app's source found **four whose path appears nowhere else**: `/api/controls/policy`, `/api/controls/release/evaluate`, and the pair this increment is about — `POST /api/import/curve` and `POST /api/import/curve/apply`.
+
+The Curve Hero import is how a practice's own day sheets reach this ledger. It has existed since Increment 1.3 and **no screen ever called it**. The bank statement import has one — `/reconciliation` posts to it — and this did not.
+
+## A correction to Increment 1.91's record
+
+Increment 1.91 wrote that a practice which could not grant `run_import` could import nothing, and called that *"the two screens that bring outside evidence in were dead."* **The bank statement screen exists.** What was dead was one screen and one pair of routes with no screen at all. The finding about `run_import` stands unchanged; the sentence describing its reach was wrong, and this says so rather than leaving it to be read.
+
+## Building the screen found a second defect
+
+Checking a file works. **Applying one never has.**
+
+`POST /api/import/curve/apply` runs inside `withTenantAppendTransaction`, so everything it touches it touches as `app_append`. It reads, in order:
+
+| Table | Grant to `app_append` before this increment |
+|---|---|
+| `import_runs` | none — `permission denied` (SQLSTATE 42501) |
+| `import_staged_rows` | none |
+| `patients`, `account_members` | none |
+
+Migration 0015 granted the two import tables to `app_rw` alone. `withGuard` carries no try/catch, so the failure reached the caller as a bare 500 with no `error` field — which is exactly what the new screen showed, and how this was found.
+
+**This is the third time this codebase has met the same species of defect.** Migration 0055 recorded it for `auth_lookup_recovery_ceremony` (Increment 1.77): the routes had no caller anywhere in the app, and the unit tests run against the memory store, which has no grants to get wrong. Increment 1.90 found the same shape on the tenant-wide session revoke. **A route with no screen is a route nobody has run.**
+
+## What this increment fixes, and what it deliberately does not
+
+**Migration 0056** grants `app_append` SELECT and UPDATE on `import_runs` and SELECT on `import_staged_rows`. UPDATE on the run and not on the rows, because applying stamps the run `applied` with the moment it completed and leaves the staged rows as they were. The isolation policies on both tables name no role — they compare `tenant_id` to `app.tenant_id` — so a GRANT is all that is needed, exactly as migration 0029 did when the posting path had to read `month_closes`.
+
+**The patient tables are left alone, on purpose.** Resolving a day-sheet row to an account reads `patients` and `account_members`. Granting the append role SELECT on those would let the role that exists to write chain rows read patient records, in a product whose thesis is a narrow, auditable role model under FORCE RLS everywhere. That is a decision about who may read a patient, and it is not one to settle on the way past a screen.
+
+**Two ways out, and which I would take.** Widen the append role by grant, or split `applyCurveHeroImport` into a resolution that runs as `app_rw` and a write that runs as `app_append`, passing the resolved ids across. **The split is the better answer**: it keeps the append role exactly as narrow as it was designed to be, and resolution is a read that has no business inside the transaction that writes the chain. It is a change to the import kernel with its own tests, and it belongs in its own increment rather than as a tail on this one.
+
+## So the screen offers no act it cannot finish
+
+There is no *Post it to the ledger* button. After a successful check the screen says:
+
+> Posting an import to the ledger is not built yet. The act reads patient records under a database role that holds no grant on them, and widening that role is a decision about who may read a patient — not a thing to settle on the way past. The check above is recorded either way.
+
+Offering the press would have been offering an act that can only fail, which is the one shape Increments 1.88, 1.89 and 1.93 exist to remove. Shipping it would have been the same mistake three increments in a row have been spent undoing.
+
+## The screen, and the link that reaches it
+
+`/import` sits behind `{ entitlement: "run_import" }` in `NAV_LINKS`, gated on `api/import/curve/route.ts` — which `seats.test.ts` reads back and checks. That link is possible **because of Increment 1.91**: before the duty was in the rulebook there was nothing to hang a link on, and the seeded owner and front desk both hold it, so the header offers them both the screen.
+
+**The page imports nothing from `@pms/import`.** Its entry point reaches `node:crypto` through the bank-statement validator, and webpack refuses that in a client component — which is how this was caught rather than shipped. The report kinds are declared app-side, as Increment 1.85 declared the demo dates rather than importing `@pms/db/seed-data`, and a unit test pins the two lists to each other because it runs in node and can import the package.
+
+## Tests
+
+- **Unit (6).** The app-side kind list equals the package's exactly; every kind has a label; the check sentence's singular and plural and its refusal wording; and the applied sentence, which stays and stays tested because the next increment posts.
+- **Database (3).** Migration 0056 grants exactly what applying needs and nothing more — no INSERT, no DELETE, no `TO PUBLIC`, no policy touched, no other role named — and says in its own text why nothing had caught it.
+- **Browser (1).** The owner opens `/import`, cannot press Check on nothing, pastes a three-row day sheet, and reads *"Read 3 rows, none of them refused."* No post button exists, the sentence explaining that is on the screen, and the chain carries `import.curve_hero.staged` and nothing else.
+
+## Not in Increment 1.94
+
+**The other two unreferenced routes**, `/api/controls/policy` and `/api/controls/release/evaluate`. Each is either a capability with no screen or a surface something outside the app uses, and each deserves reading before it is judged.
+
+**Listing import runs.** No route does, so a reload loses the staged run from the screen; the check itself survives on the chain. A list is worth building when there is an act to offer on a listed run.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
+## Increment 1.93
+
+`NAV_LINKS` offers `/day-close` and `/statements` at **`user` rank**. Every act on both opens on a **duty**:
+
+| Act | Route | What it needs |
+|---|---|---|
+| Create draft | `POST /api/statements` | `post_payments` |
+| Apply staged deposits | `POST /api/deposits/apply-staged` | `post_payments` |
+| Freeze day close | `POST /api/day-close/freeze` | `bank_reconcile` |
+
+Neither screen read the viewer's duties. All three buttons rendered for anybody who could open the screen, and for anybody without the duty each one could only refuse.
+
+## The seeded practice carries both halves of it
+
+**Riley Owner is an administrator who does not hold `post_payments`.** The seed gives the owner `approve_writeoffs`, `run_import` and `bank_reconcile`. So the practice owner — the highest rank this product has — was offered *Create draft* on Statements and *Apply staged deposits* on Day close, and both refused every time.
+
+**Finn Front holds `post_payments` and not `bank_reconcile`**, so the front desk met the mirror: *Freeze day close* could only refuse.
+
+A rank is not a duty, and this product has always said so at the routes. The screens had not caught up.
+
+## Why the check that exists did not catch it
+
+`seats.test.ts` reads each nav link's declared `gate` file and asserts the link and the route still agree — the comment beside `NAV_LINKS` says exactly that, and it is a good check. But a `gate` names **the route that serves the screen's read**: `api/statements/route.ts` for Statements, `api/day-close/route.ts` for Day close. Both open at `user` rank, so both links agree with their gates and always did.
+
+The write half is on the same route file or a different one, and nothing compared it to anything. The check was answering a narrower question than its name suggests, which is worth recording: a screen can agree with its gate and still invite an act it cannot do.
+
+## What it does now
+
+One helper, `lib/auth/heldDuty.ts`, over the entitlements `readViewer` already returns:
+
+- `holdsDuty(viewer, entitlement)` — true only for a `present` viewer holding it. An `ended` or `unknown` viewer holds nothing, which is the safe way round: the act is not offered, and the route would refuse it anyway.
+- `dutyLabel(entitlement)` — the catalog's own words for the duty, falling back to the id rather than inventing a name.
+- `dutyNeededSentence(act, entitlement)` — *"Creating a statement needs the “Post payments in PMS” duty, which you do not hold. An administrator grants it on Practice Risk."*
+
+The sentence names the duty rather than the entitlement id, and says who grants it **and where**, because the person reading it cannot grant it to themselves and the next thing they need is whom to ask.
+
+Both screens read `/api/me` as Practice Risk does, and render each act only for a holder, with the sentence in its place otherwise. **The screen is the courtesy and the route is the control**: every one of these routes still refuses a request that reaches it, exactly as before.
+
+## Saying it before the press
+
+This is Increment 1.90's reasoning applied to three more acts. The refusal is the same sentence either way; it is worth more arriving before the press than after it. And an act offered where it can only refuse is the shape Increments 1.88 and 1.89 named on the owner board — found there on an alarm, found here on two ordinary screens.
+
+## Tests
+
+- **Unit (6).** Holding and not holding; that rank is not read as a duty, pinned on the seeded owner's exact grant list; that an ended or unknown viewer holds nothing; the two duty labels the screens use; the fallback for an id the catalog does not carry; and that the sentence names the act, the duty and who grants it.
+- **Browser (1).** The whole matrix in one case: as the owner, *Apply staged deposits* is absent and *Freeze day close* is present on Day close, and *Create draft* is absent on Statements, each with its sentence; then as the front desk, the mirror on Day close.
+
+**A first draft of that case failed on its own timing.** It waited for the screen's heading, which renders before the screen is ready and before `/api/me` has answered, then counted buttons — and read zero of a button that was about to be there. Each wait is on the sentence now, which appears only once the viewer has been read, with the reason in a comment.
+
+**Red-before, measured.** With both pages reverted and rebuilt, the case fails on the first wait: the sentence never appears.
+
+## Not in Increment 1.93
+
+**A check that compares a screen's acts to its routes' guards.** Increment 1.91 added one for a guard naming a duty that does not exist, which is a textual question. This one is not: it needs to know which button calls which route, and the honest way to hold it is the browser case above rather than a script that guesses from source.
+
+**The other screens.** `/ledger` is offered at `user` rank and renders no act. The manager-rank screens gate their acts on rank, which they already read. This increment is the two screens where a rank opens the screen and a duty opens the act.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
+## Increment 1.92
+
+A seat whose invitation link was reissued, and whose holder then opened the link that replaced it, is listed as **"Invited, not yet opened" forever**. The one act the practice is offered on that row refuses every time it is pressed.
+
+## Why, exactly
+
+`unclaimedInvitations` asked its question of the **invitation row**:
+
+```
+.leftJoin(seatInvitationClaims, eq(seatInvitationClaims.invitationId, seatInvitations.id))
+.where(and(eq(seatInvitations.tenantId, tenantId), isNull(seatInvitationClaims.id), …))
+```
+
+A reissued seat has two invitation rows: the superseded one and the one in force (Increment 1.73). The accountant can open only the one in force, because `lookUpInvite` refuses a superseded link — which is the whole point of reissuing. So claiming attaches a claim to the newer row and leaves the older one unclaimed, permanently.
+
+The SQL then filters out the claimed row and keeps the unclaimed one. The dedupe by seat that follows, which exists to show one link per seat rather than three, has only that row to pick. The practice reads that somebody who has set a password has not opened their seat.
+
+**And the row carries a button that can only refuse.** `reinviteSeat` reads `newestInvitation` — the invitation *in force*, the claimed one — and returns 409 `claimed`: *"has already opened this seat and set a password. Somebody who cannot sign in needs their password recovered, not a new invitation."* Correct in itself, and unreachable as advice, because it arrives only after a press on a row that should not be there.
+
+This is the shape Increment 1.89 named on the owner board: an act offered where it can only refuse.
+
+## The fix
+
+The claim belongs to the **seat**, not to the invitation. The read now excludes a person who has claimed *any* of their invitations, with a `notExists` over an alias of `seat_invitations` joined to the claims — `seat_invitation_claims` carries `invitation_id` and no `user_id`, so the join is how the question reaches the person.
+
+The exclusion is permanent, and it is right that it is: `reinviteSeat` refuses once the in-force invitation is claimed, so no later invitation can follow a claim. A seat that has been opened is opened for good.
+
+Nothing else changes. A genuinely unclaimed seat reissued three times still appears once, as the newest row, which the case from Increment 1.73 still pins.
+
+## Where the test was, and why it passed
+
+Two tests were within one line of this and neither reached it.
+
+The live case **"refuses to reissue for a seat that has already been opened"** invites once, claims, and reinvites. One invitation row, one claim, no superseded row — the defect needs a reissue before the claim.
+
+The browser case **"sends another link to a seat whose first one went astray, and the old link then opens nothing"** builds the exact state: it invites `firm-mislaid`, reissues, proves the stale link opens nothing, and opens the seat on the fresh one. Then it stops. The panel that had just been telling the truth was never read again.
+
+Both now go one step further:
+
+- **Live (1).** Invite, reissue, assert the seat is listed once while nobody has opened either link, claim the link in force, assert the seat is gone, and assert that the act the row used to offer refuses. Red-before, measured: without the fix the seat is still listed after the claim.
+- **Browser (extended).** After `firm-mislaid` sets a password, sign back in as the owner and assert the invite panel carries no row for that seat.
+
+## Not in Increment 1.92
+
+**A record of who opened which link.** The claim names the invitation it was made against, which is enough for this list and for the refusal; a practice asking *which of three links was used* has a question this product has not been asked.
+
+**Telling the practice that a seat was opened.** The row leaves the list, which is the product's usual way of saying a thing is done; a positive notice is a different feature with a different reader.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
+## Increment 1.91
+
+Three routes have been guarded by a duty the control rulebook does not carry, for the whole life of this product.
+
+`POST /api/import/bank-statement`, `POST /api/import/curve` and `POST /api/import/curve/apply` each declare `{ entitlements: ["run_import"] }`. `run_import` is not a member of `EntitlementId` and has no row in `ENTITLEMENTS`, which is what `isEntitlementId` tests. Four consequences follow, and each one was live:
+
+- **The practice could not grant it.** `grantEntitlement` refuses an unknown entitlement 400 before it does anything else. So no administrator, on any screen, could give anybody the duty that opens the import routes.
+- **The practice could revoke it.** `revokeEntitlement` never asks whether the string it was handed is a duty — it matches live rows and stamps `effective_to`. A one-way door, of the shape Increment 1.76 closed for the authenticator: the practice could end an import grant and never make another.
+- **Nobody could be given it in the first place.** The only writer was `pnpm db:seed`, inserting the row directly. In a practice this product set up rather than seeded, **nobody could import a bank statement or a Curve Hero file at all**. *(Corrected in Increment 1.94: this first read "the two screens that bring outside evidence in were dead". The bank statement screen exists; the Curve Hero import had no screen at all.)*
+- **The rulebook scored nobody who held it.** `assignmentsFromGrants` puts a grant naming an unknown duty into `unknownEntitlements` and leaves it out of the assignment, so the duty-family matrix had no row for it and no person's combination could include it.
+
+## The screen was already saying so
+
+Practice Risk renders, under the duty combinations: *"N grant row(s) name a duty outside the rulebook and are listed, not scored."* In the seeded practice N was **2** — the owner's `run_import` and the front desk's — and the browser suite has asserted that figure since Increment 1.17.
+
+So a test has been pinning, all along, the product's own statement that it enforces a duty it cannot score. The suite now asserts that the notice does not render, which is the same fact read the other way round.
+
+## What the duty is
+
+`run_import` joins the catalog as **recording** — importing writes somebody else's record into this practice's books — at **risk weight 4**. Four rather than five is deliberate: `CRITICAL_DUTIES` is the weight-5 set that the sole-holder detector and the new-device alarm read, and a duty that stages a file for somebody else to post is not the custody of cash. Nothing in those detectors moves.
+
+## What the practice sees that it did not
+
+The duty-family matrix gains a row and a column, so the seeded owner — who holds `run_import`, `bank_reconcile` and `approve_writeoffs` — now carries **two open combinations**: recording beside reconciliation, and recording beside authorization. The person who imports the bank statement also reconciles against it, and also approves the write-offs. Both were true from the first day and neither was scored.
+
+The browser suite's figures move with it, and the case that used to end at zero open conflicts now ends at two and names them. Segregation health for that practice reads 93 of 100 rather than 100.
+
+## The check that would have caught this on day one
+
+`scripts/check-route-guards.mjs` already fails a route exported without `withGuard`. It now also fails a guard naming an entitlement the rulebook does not carry — reading the catalog out of `conflict-rules.ts` as text, since the script is plain node, and resolving an `orEntitlement` written as a constant by finding its `export const NAME = "..."` under `src/lib`. A guard naming a duty nothing can confer is a route only the seed can open, and that is the shape the check refuses.
+
+Reverted against the catalog addition, the check fails and names all three import routes by path.
+
+## The rulebook version
+
+`CONTROL_RULEBOOK_VERSION` moves **0.2.0 → 0.3.0**. The version file's own instruction is to bump when SoD pairs change, and the golden fixtures say the same: *"Regenerate only with a deliberate scoring or rulebook change, alongside a version bump."* Adding a duty to the catalog adds a row and a column to every pair scan, so it is one.
+
+Three golden hashes moved, each traced rather than accepted:
+
+| Hash | Why it moved |
+|---|---|
+| `buildPracticeState` | the duty matrix gained a row and a column |
+| `evaluateGrant` | its result carries the state it evaluated against |
+| `takeControlSnapshot` | a snapshot stamps the rulebook version, now 0.3.0 |
+
+`channelCoverage` did not move, and of the ten hashes in the ridgeview golden only `detectSodConflicts` did. One app assertion pinned `"0.2.0"` and now pins `"0.3.0"`.
+
+## Not in Increment 1.91
+
+**A named conflict rule pairing import with reconciliation.** The duty-family matrix already registers that pair, at family severity, which is why the owner's combination shows up at all. Raising it to a named `critical` rule would change the residual score and would make `grantEntitlement` refuse the grant without a control decision — a calibration decision, and `version.ts` says in its own words that the weights are directional until a CPA calibrates them. The pair is visible and scored; what it is worth is a separate question with a separate bump.
+
+**The import screens themselves.** This increment makes the duty grantable; it does not change who is offered `/reconciliation` or what the import forms do.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
 
 ## Increment 1.90
 
@@ -2093,3 +2644,228 @@ Increment 1.36 admitted a row into a closed month on its reason code alone. A re
 - Precog math is illustrative. Shipping scores before golden tests is a liability.
 - SuperByte's 3-read cost model must not auto-fire on every keystroke in a PHI product.
 - Solo-team capacity: Increment 0.1 is the only honest Phase 0 slice for one engagement. Decision 23 (budget and staffing) is still the gate on Phase 1 durations.
+
+## Increment 1.102
+
+Increment 1.90 made the reason for ending every sign-in **typed rather than hardcoded**. The guard refuses anything under ten characters, and the words beside the field say why:
+
+> "It goes on the chain beside the act, and it is what the practice reads afterwards."
+
+That last clause was not true. The reason reached the chain and stopped there. In the whole repository, **exactly one thing ever selected it** — a browser test, going round the product to Postgres:
+
+```sql
+SELECT payload->>'reason' FROM domain_event WHERE kind = 'auth.sessions_revoked_all'
+```
+
+No screen, no digest, no month-end package. The product demanded a sentence from a person during an incident, promised they would read it back, and gave them nowhere to read it.
+
+This is the shape Increments 1.97, 1.100 and 1.101 each found: **a fact the product records and nothing reads.** Here it is sharper, because the product does not merely record the fact — it refuses the act until a person composes one.
+
+## What it does now
+
+The practice's recent sign-out-everybody acts sit **above the form that takes another one**: when, who pressed, how many sign-ins ended, and what they typed. Five of them, because this act belongs to an incident and an incident is read in one sitting; the chain keeps every one and is the record a verifier reads.
+
+Above the form is the placement that matters. A second administrator during the same incident meets, before pressing, the fact that somebody already did this an hour ago and why — which is either the answer to their question or the reason to press anyway.
+
+## Three contingencies the rows carry
+
+- **The administrator has left.** The join to `users` is a left join: the act does not leave with them. The row reads *"An administrator whose seat has since gone ended 2 sign-ins"* rather than naming nobody.
+- **Nobody was signed in.** `revoked: 0` is not nothing happening. The act ran, and the row says it ran.
+- **A reason from before there were reasons.** A row this practice wrote while the route still hardcoded `admin_revoke_all` carries no reason at all. It reads *"Recorded before this screen asked why"*, never a blank — a blank would read as somebody having typed nothing, which the guard has refused since Increment 1.90.
+
+And one contingency the *screen* carries: the history is `null` until it loads, and only a load that came back empty prints "this practice has never ended every sign-in at once". A fetch that fails leaves the sentence unsaid rather than having the screen state something false about the practice's history because a request did not land.
+
+**Red-before, measured.** Without the increment the browser case fails on its first new assertion — `waiting for getByText(/never ended every sign-in at once/) to be visible`, 60s — on a screen where the panel's heading renders as it always did.
+
+**Tests.** App unit (7): the sentence naming who pressed and how many ended, the singular, the act that ended nothing, the administrator who has gone, a reason given back unchanged, the empty reason explained rather than blanked, and the never-done sentence. Live (4): nothing read back from a practice that has never done it; the reason, the name and the instant read back from one that has; the most recent first with **another practice's act absent**, because a reason names the incident a practice was in the middle of; and no more rows than the screen shows. Browser (1): the panel says it has never happened, the act runs, and after signing back in — the act the panel itself tells the administrator to take — the reason is on the screen.
+
+## Not in Increment 1.102
+
+**A clock time.** The row shows the date and carries the full instant in `<time dateTime>`. Every other screen in this product shows dates, and the instant a row shows belongs in whichever of the practice's locations the reader is standing in — a question `docs/05` leaves with the owner and one this increment will not answer by picking UTC quietly.
+
+**A gate over unread payload fields.** The obvious generalisation — every key written into an event payload must be read by something — was tried against the code and is **wrong**. Ten keys are written and unread, and they are forensic: `ceremonyId`, `secondFactorCleared`, `targetUsername`. The chain is the record, and a record exists to be verified, not to be summarised. What makes this increment's field different is that the product asked a person for it and told them it would be read.
+
+**The digest.** It counts these acts already, under Increment 1.101's label. A reason is a sentence about one incident, and a weekly figure is not where a sentence belongs.
+
+## Increment 1.103
+
+Increment 1.96 found one figure behind two doors: `GET /api/controls/policy` answered at `user` while `GET /api/controls/risk` needed `manager` for the same dual-release thresholds. **Where one thing has two doors, the looser decides.** A sweep of every route's rank found the same shape again.
+
+`GET /api/reason-codes` opens at `user`, and the route's own comment says why:
+
+> "Anyone who posts needs to read them, because the posting forms are built from them."
+
+True of the code, the kind, the wording, and whether a reason is still offered. **Not true of the other two fields it returned.**
+
+- **`requiresApprovalOverCents`** — the dollar line above which a posting on that reason waits for a second person.
+- **`entries`** — how many ledger entries in the practice cite it.
+
+Neither reaches a form. `reasonOptionsForPosting` and `allReasonOptions`, the only two functions the posting screens build their menus with, read `code`, `kind`, `label` and `active`. **No screen below `manager` has ever read either field**: the threshold surfaces on the reason-codes table, whose acts need `admin`, and on Practice Risk, which needs `manager`.
+
+So every seat that posts held the figure under which a write-off gets no second pair of eyes. That is the one number somebody structuring beneath a control would want, and the product handed it over as a side effect of a payload shape.
+
+## What it does now
+
+`reasonCodesForViewer` decides by rank. `manager` and above read the practice's governance of its own reasons; everybody else reads the list their forms are built from. The narrowing is a type, `PostingReasonCode`, so a screen cannot ask for a field a rank was not given — the compiler produced nine errors the moment it existed, one per place that had been reading a governed field without knowing it.
+
+**The screen stayed open.** A seat below `manager` still reads the reason-codes table: which reasons exist, what they read as, which are retired. It was tempting to refuse the whole screen, which is one line rather than a column-by-column narrowing — but Increment 1.45 put that list there for the person who has to choose among the reasons, and taking the screen away to close a leak in two of its columns would fix the leak by removing something else. The two governed columns are **absent rather than blank**: a blank in a threshold column reads as "no second person needed".
+
+**Red-before, measured.** Without the increment the browser case fails on `expected 3 to be +0` — the "Second person over" column heading, present in each of the three reason groups on the front desk's own screen.
+
+**Tests.** App unit (5): the narrowed row's exact fields; the **dropped-field gate**, which reads both objects and fails the day the difference between them stops being the two fields somebody decided on; `manager` and `admin` receiving the governance; every rank below `manager` receiving the narrower list; and every rank the product has being decided, so a sixth cannot slip through unconsidered. Browser (2 assertions added to the existing case): the front desk's screen carries neither column and neither figure, and the route answers that seat with exactly `active, code, kind, label, reserved` — read from inside the page, so the request carries that seat's own sign-in — while the owner's answer carries all seven.
+
+## Not in Increment 1.103
+
+**Telling the person posting that their entry will wait.** There is a good product argument for it: somebody about to post $600 under a reason that holds at $500 is better off knowing before they press than after. But that is a sentence the posting screen would say about *this* posting, computed where the hold is decided, not a table of every reason's line handed to every seat. It is worth building; it is not what removing a leak looks like.
+
+**A gate over route ranks generally.** `routeRanks.test.ts` pins the one pair Increment 1.96 found, and this increment's gate pins the fields rather than the rank. A rule that every route's rank must match some other route's is not a rule the product has — the ranks differ for reasons, and a check that cannot say which pairs are the same material would fail honest ones.
+
+**The entry count.** It went behind the same door as the threshold, on the weaker argument: a per-reason census of the practice's ledger is not something a seat needs to post, and the two fields travel together in the same payload. If the practice ever wants a posting seat to see how established a reason is, that is a decision to make on its own.
+
+## Increment 1.104
+
+The header has filtered its links since the seat catalog existed, and `navLinksFor`'s own comment says what the filter is for:
+
+> "Every screen guards itself, so this filter is never the control — it is the courtesy of not offering a person eleven screens that refuse them."
+
+**The owner's home board kept a second list of eleven links, with no rank or duty filter at all.**
+
+Two consequences, both true of the seeded practice today:
+
+- **The owner started every day beside a door that could only refuse.** Riley holds `approve_writeoffs`, `run_import` and `bank_reconcile` — never `post_payments`, because in this product the front desk posts and the owner approves. The header has withheld "Post" from them since Increment 1.49. The board offered "Post payment", and `POST /api/ledger/post` has refused them from the first day. This is Increment 1.93's defect in a third place, and it survived 1.93 for a reason worth recording: **1.93 looked at screens whose nav seat was a rank while their acts needed a duty. This seat's duty was right. The second door was the one nobody was looking at.**
+- **The board had drifted.** Increment 1.94 gave the Curve Hero import a screen and Increment 1.98 gave the release attestation one. Both got nav seats. Neither ever reached the board, because a second list is a second thing to keep true and nothing read the two against each other.
+
+## One list
+
+`boardLinksFor` is `navLinksFor` minus the board's own screen — a board that links to itself spends a row saying nothing. Board wording lives on the catalog entry as `boardLabel`, so *"Open ledger"* and *"Post payment"* survive as words without surviving as a second list. `currentSeat` moved out of the app layout into `lib/auth`, because two readers of "who is this" would be two answers to it.
+
+## The screen no seat named
+
+The sweep that found this also found `/reason-codes`: **the one screen in the product with no catalog entry.** It was reachable from that hardcoded board link and from nowhere else — so the seat its list exists for, the seat that posts and must choose among the reasons, could not find it at all. Increment 1.72 recorded the principle on a smaller thing: a mechanism nobody can find is not a mechanism.
+
+It has a seat now, at `user`, which is its route's own rank. That is safe to offer because Increment 1.103 made what a seat below `manager` reads there the list its forms are built from, without the practice's governance of it. **The two increments had to land in this order**, and the second is why the first could be more than a narrowing.
+
+## The gate
+
+`screenSeats.test.ts` walks `app/(app)` for every `page.tsx` and fails on:
+
+- **a screen no catalog entry names**, unless it is listed in `REACHED_FROM_A_PARENT` **with the screen that leads to it written down** — three are, each a row chosen on its parent: an account on `/ledger`, a run on `/reconciliation`, a statement on `/statements`;
+- **a catalog entry naming a screen that does not exist**;
+- **an excuse that no longer needs excusing**, or one whose named parent is not itself a screen.
+
+`seats.test.ts` has read each entry against the route it names since Increment 1.49 — a link cannot promise a screen that refuses. Nothing read the other direction until now. This is the fifth gate of the session, and like the other four it reads the source rather than asserting about it.
+
+**Red-before, measured, both halves.** Removing the `/reason-codes` entry fails the gate with `expected [ '/reason-codes' ] to deeply equal []`. Without the increment the browser case fails on `expected +0 to be 1` — "Import a file", absent from the owner's board.
+
+**Tests.** App unit (5 board + 3 gate): the board offering exactly what the header offers minus `/home`; the owner not offered `/ledger/post`; the two screens the board had never gained; a viewer that could not be resolved offered nothing; words for every link; and the three gate assertions. Browser (1 case extended): the owner's board carries twelve links, **not** "Post payment", and **not** a link to the screen it is.
+
+## Not in Increment 1.104
+
+**A rank filter on the board's cards.** The links are filtered; the board's own cards — approvals waiting, decisions due, practice health — are not, and a card can still name something the reader cannot act on. Increment 1.89 settled that for the hard-event alarms by having the route decide what the viewer may be offered. The cards each come from their own route and deserve the same treatment one at a time, not a sweeping filter over a board this increment has not read closely enough.
+
+**Board wording for every entry.** Seven entries carry a `boardLabel`; the rest fall back to the header's word, which reads correctly on a button. Writing five more for the sake of symmetry would be writing five more things to keep true.
+
+## Increment 1.105
+
+`GET /api/health` carries no `withGuard`. It is the one answer this product gives somebody who has not signed in, and it said:
+
+```json
+{ "increment": "0.11", "phiPatientRows": false }
+```
+
+**Both were false, and the second is the serious one.**
+
+## Three false statements about protected health information
+
+Migration 0009 created `patients`: a first name, a last name, a date of birth and a record number. `seed-ledger.ts` writes two rows, Jane Doe and John Smith, with dates of birth. The product has stored patient identifiers since the ledger arrived.
+
+While it did, it said otherwise in three places a reader meets **before they have an account**:
+
+| Where | What it said |
+|---|---|
+| `GET /api/health` (unguarded) | `phiPatientRows: false` |
+| The sign-in screen's body copy | *"This shell holds no patient records."* |
+| The page description, in a tab and a link preview | *"Increment 0.11 shell. No patient records are stored."* |
+
+Each was true of Increment 0.11's shell. None was ever revisited. A promise about the **absence** of data is the claim most likely to go stale, because it is made once, when the absence is obvious, and nothing about adding a table brings anybody back to it.
+
+## Four stale statements about which product this is
+
+The same four surfaces — the two API routes, the sign-in eyebrow, the page description — all said **Increment 0.11**, ninety-three increments behind. The signed-in footer said `1.104`, and only because somebody edits it by hand on every increment: it is the one of the five that was right, and it was right by labour rather than by construction.
+
+## One constant each, and a check on both
+
+`lib/product.ts` holds `APP_INCREMENT` and `HOLDS_PATIENT_ROWS`, and generates the sentences from them. The five surfaces read it.
+
+- **`product.test.ts` reads the database schema** and fails if `HOLDS_PATIENT_ROWS` disagrees with it — in either direction. A product that later holds no patient rows must stop saying it does, exactly as this one had to stop saying it did not. The sentence is generated from the constant rather than written beside it, so the two cannot part company.
+- **`verify-docs.sh` reads `APP_INCREMENT`** against the last `## Increment N.M` heading in this document, and sweeps every other file under `apps/pms/src` for an increment number written as a literal. The hand-edit remains — somebody has to say which increment this is — but it is one edit, in one place, that a check keeps honest.
+
+**The sweep strips comments first, and that is the check rather than tidiness.** The health route's own doc comment quotes the literal it exists to describe; a sweep that counted it would fail on a correct file. Increment 1.96 learned the same thing from the other side: a gate prose can satisfy is not a gate. Here prose would have made a correct gate refuse correct code, which is the same defect wearing the other coat.
+
+**Red-before, measured, both halves.** Leaving `APP_INCREMENT` ahead of the record fails with *"APP_INCREMENT is 1.105; the last increment docs/17 records is 1.104"*. Putting the old literal back on the sign-in screen fails with *"apps/pms/src/app/signin/page.tsx: >Increment 0.11<"*.
+
+**Tests.** App unit (4): the PHI constant read against the schema's own columns; the sentence naming what is held rather than promising what is not; the page description carrying both facts; and the increment's shape, so a malformed constant fails where it is defined rather than in a shell script. `verify-docs.sh` is now 13 checks.
+
+## Not in Increment 1.105
+
+**A version derived from git.** A commit hash or a tag would need no hand-edit at all, and would answer a different question: *which build is this*, not *which increment is this*. The second is the one this product's record is written in, and `docs/17` is its authority. A build identifier is worth having and is its own increment.
+
+**What else `/api/health` says.** `bytestarDefault: "off"` and `authStore` are unchecked claims of the same kind — a constant and a function, neither read against anything. `authStore` is computed from the environment and is therefore true by construction; `bytestarDefault` is a literal, and whether it still describes the product is a question for whoever knows what Bytestar's default became. Naming it here beats quietly bundling it into a fix I cannot verify.
+
+**The `increment` field on `/api/me`.** It is odd there — that route answers who the caller is, and the build it is running is not part of that. Removing it is a change to a response shape that screens read, and this increment's job was to stop the number being wrong, not to redesign where it appears.
+
+## Increment 1.106
+
+Increment 1.105 found a claim about protected health information that had quietly stopped being true. This is the same sweep run against the other one — the argument that lets an outside firm hold a seat in this product at all.
+
+`seats.ts` has carried it since Increment 1.49:
+
+> "The package is aggregate and names no patient, so an accountant reading it receives no protected health information."
+
+**That argument is about what the seat reads, and the set of things it reads has grown three times since it was written.**
+
+| Increment | What it opened to the seat |
+|---|---|
+| 1.50 | The question threads about a month's lines — **both halves, free text** |
+| 1.51 | The channel attestations, each with **the note whoever attested it wrote** |
+| 1.74 | Where the seat's own notices go |
+
+Increment 1.49's live case is a good one: it reads the practice's own `patients` and `guarantor_accounts` rows and searches the package and its CSV for any of their names, record numbers or ids, and it asserts that both haystacks contain a string that *is* there, so an empty result is an absence rather than a search that could never have found anything. **It proves what the product derives names no patient.** It can prove nothing about a sentence somebody typed, and nothing in 1.50's or 1.51's record mentions the question.
+
+## Two legs rather than one
+
+The argument is restated where it is made, in the manner of Increment 1.99.
+
+- **Everything the product computes for this seat** is proved to name no patient, by that live case.
+- **Everything a person writes to it** is the practice's own to keep clean — and the product now says so where the writing happens rather than in a comment nobody reading the screen will see.
+
+`outsideReaderSentence()` sits above both boxes: the accountant's question and the practice's answer.
+
+> "This goes to the outside accountant, who holds no agreement to receive patient information. Name the line and the figure, never the patient."
+
+Both halves, because a question naming a patient puts one in the record as surely as an answer would. This is Increment 1.90's reasoning about the sign-out reason applied to a different field: the product cannot stop the typing, a check that pretended to would be worse than none, and a sentence beside the field is what it can honestly do.
+
+## The gate
+
+`cpaSurfaces.test.ts` reads **every route file** under `src/app/api` for the seat's entitlement and fails when the set disagrees with `CPA_SURFACES`, which says of each what the seat receives there and whether it can carry words a person typed. A fourth surface cannot open to this seat until somebody has written that down.
+
+That is the whole of what a check can do here. **Whether a practice is content to have a free-text channel to an outside firm at all is the practice's decision**, and `docs/05` is where it belongs — this increment makes the channel visible and says who reads it, rather than settling a question that is not the product's to settle.
+
+**Red-before, measured, both halves.** Adding the seat's entitlement to an eighth route fails the gate with `expected [ …(8) ] to deeply equal [ …(7) ]`. Without the sentences the browser case fails on `expected +0 to be 1`.
+
+**Tests.** App unit (3): the set read from the guards against the written one; a note of real length on every entry; and the two free-text surfaces named, so losing that distinction fails rather than passes quietly. Browser (2 assertions added to Increment 1.50's own case): the sentence above the accountant's question box and above the practice's answer box.
+
+## What the browser suite caught in the first draft
+
+Both sentences sat **inside** the `<label>`. That made each one part of the field's accessible name, so a screen reader would have announced *"Question This goes to the outside accountant, who holds no agreement…"* every time the field took focus, in place of the one word the field is called. The suite found it by no longer being able to reach the field by its name — a timeout on `getByLabel("Question", { exact: true })`, two cases red.
+
+It is a description, not a name, and `aria-describedby` is what descriptions are for: announced after the label, on focus, and never in place of it. The sentence now sits beside the field with an id, the field points at it, and the label is the one word again. Worth recording because the failure looked like a test breaking and was not: **the assertion that broke was the accessible name, which is the thing that mattered.**
+
+## Not in Increment 1.106
+
+**Scanning what somebody typed.** A check for patient names in a message body would need the practice's patient rows on the path of every send, would refuse legitimate words (a practice may have a patient named Marsh and a bank line about a marsh), and would put the product in the position of promising something it cannot deliver. The sentence says who reads this; the practice decides what to write.
+
+**The attestation note.** It is the second free-text surface and it carries the same exposure — but it is written *by* the accountant rather than to them, so the practice is not the one who could put a patient in it. Naming it in the register is the right amount for now; a sentence on that box belongs with whatever increment next touches the attestation screen.
+
+**A decision row for the practice.** The honest end of this is a recorded decision — the practice reading what the seat reaches and saying it is content, the way Increments 1.31 and 1.47 record a control decision. That is a screen and a table, and it should be built once somebody has decided it is the right shape, not bolted onto a sweep.
+

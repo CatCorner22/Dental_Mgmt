@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, notExists, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import {
   USERNAME_GLOBAL_UIDX,
   isUniqueViolation,
@@ -520,11 +521,34 @@ export async function reinviteSeat(
   };
 }
 
-/** Seats this practice has invited and nobody has claimed, newest last. */
+/**
+ * Seats this practice has invited and nobody has claimed, newest last.
+ *
+ * ## The claim belongs to the seat, not to the invitation (Increment 1.92)
+ *
+ * This read used to ask whether *this invitation row* carried a claim, and a
+ * seat whose link had been reissued has more than one row. The accountant can
+ * only open the one in force — `lookUpInvite` refuses a superseded link — so
+ * claiming leaves the superseded row unclaimed forever. That row passed the
+ * filter, the dedupe by seat had only it to pick, and the practice read
+ * "Invited, not yet opened" about somebody who had opened their seat and set
+ * a password.
+ *
+ * Worse than a stale row: the only act offered on it is Send a new link, and
+ * `reinviteSeat` reads the invitation *in force* — the claimed one — so it
+ * refuses every time with "has already opened this seat". A row that never
+ * leaves, carrying a button that can only refuse.
+ *
+ * So the question is asked of the seat: has this person claimed **any** of
+ * their invitations. A claim is permanent — `reinviteSeat` refuses once the
+ * in-force invitation is claimed, so no later invitation can follow one — and
+ * that makes the exclusion permanent too, which is what the list wants.
+ */
 export async function unclaimedInvitations(
   db: AppDb,
   tenantId: string
 ): Promise<{ userId: string; username: string; displayName: string; invitedAt: string; expiresAt: string }[]> {
+  const anyInvitation = alias(seatInvitations, "any_invitation");
   const rows = await db
     .select({
       invitationId: seatInvitations.id,
@@ -533,12 +557,27 @@ export async function unclaimedInvitations(
       displayName: users.displayName,
       invitedAt: seatInvitations.invitedAt,
       expiresAt: seatInvitations.expiresAt,
-      claimId: seatInvitationClaims.id,
     })
     .from(seatInvitations)
     .innerJoin(users, eq(users.id, seatInvitations.userId))
-    .leftJoin(seatInvitationClaims, eq(seatInvitationClaims.invitationId, seatInvitations.id))
-    .where(and(eq(seatInvitations.tenantId, tenantId), isNull(seatInvitationClaims.id), eq(users.active, true)))
+    .where(
+      and(
+        eq(seatInvitations.tenantId, tenantId),
+        eq(users.active, true),
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(seatInvitationClaims)
+            .innerJoin(anyInvitation, eq(anyInvitation.id, seatInvitationClaims.invitationId))
+            .where(
+              and(
+                eq(anyInvitation.tenantId, tenantId),
+                eq(anyInvitation.userId, seatInvitations.userId)
+              )
+            )
+        )
+      )
+    )
     .orderBy(desc(seatInvitations.invitedAt), desc(seatInvitations.id));
 
   // One row per seat, the one in force (Increment 1.73). A seat reissued three

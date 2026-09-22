@@ -5,6 +5,7 @@ import { DEV_TENANTS, DEV_USERS, SEED_LEDGER } from "@pms/db/seed-data";
 import { uuidv7 } from "@pms/db";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { computeMonthPackage, listPackageExports, packageHash, packageRows, recordPackageExport, toCsv } from "./package";
+import { attestChannelRelease } from "../controls/release";
 
 /**
  * The month-end package on the seeded Ridgeview tenant, as app_rw
@@ -79,6 +80,53 @@ describe.skipIf(!adminUrl)("CPA month-end package (live)", () => {
     const empty = await tx((d) => computeMonthPackage(d, tenantId, "2020-01"));
     expect(empty.journal.rows).toEqual([]);
     expect(empty.counts.chain.events).toBe(0);
+  });
+
+  /**
+   * Increment 1.97. `attestChannelRelease` has recorded `dualRequired` on
+   * every per-release attestation since Increment 1.12, and nothing read it:
+   * the package counted attestations per channel, so a release the policy
+   * said needed two people read exactly like one it did not.
+   *
+   * The figure is what the practice still owes evidence for, not what it
+   * failed to do — the act records one person attesting what the policy said
+   * and cannot record a second person's own act, which is a decision this
+   * codebase made on purpose and states beside the function.
+   *
+   * **In the seeded practice the two figures coincide, and the case says why
+   * rather than hiding it**: the two channels `ENFORCEMENT` marks `external`
+   * — `payroll` and `vendor_new` — both carry a threshold of **zero**, so
+   * every release on either requires a second whatever it is worth. The
+   * figure separates them in a practice that sets a threshold; here it
+   * reports the sharper fact, which is that all of them need one.
+   */
+  it("counts how many attested releases the policy required a second pair of hands for", async () => {
+    const big = await tx((d) => attestChannelRelease(d, { tenantId, actor, channel: "payroll", amountUsd: 18_000 }));
+    expect(big.ok).toBe(true);
+    if (!big.ok) return;
+    expect(big.evaluation.dualRequired).toBe(true);
+
+    const small = await tx((d) => attestChannelRelease(d, { tenantId, actor, channel: "payroll", amountUsd: 40 }));
+    expect(small.ok).toBe(true);
+    if (!small.ok) return;
+    // Zero, which is what makes both of them require a second.
+    expect(small.evaluation.thresholdUsd).toBe(0);
+    expect(small.evaluation.dualRequired).toBe(true);
+
+    const pkg = await tx((d) => computeMonthPackage(d, tenantId, month));
+    const payroll = pkg.controls.attestations.find((a) => a.channel === "payroll")!;
+    expect(payroll.count).toBe(2);
+    expect(payroll.requiredSecond).toBe(2);
+
+    // A channel the ledger carries is not attestable by hand, and one the
+    // policy does not name is not a release channel at all. Payroll is not
+    // the whole of what this practice can attest — `vendor_new` is external
+    // too (Increment 1.98 corrected that claim) — but both carry a threshold
+    // of zero, so the two figures coincide on either.
+    const refusedLedger = await tx((d) => attestChannelRelease(d, { tenantId, actor, channel: "deposit", amountUsd: 10 }));
+    expect(refusedLedger).toMatchObject({ ok: false, code: "ledger_channel" });
+    const refusedUnknown = await tx((d) => attestChannelRelease(d, { tenantId, actor, channel: "wire", amountUsd: 10 }));
+    expect(refusedUnknown).toMatchObject({ ok: false, code: "unknown_channel" });
   });
 
   it("records an export on the chain with its hash, keeps the hash while the rows stand, and moves it when they change", async () => {

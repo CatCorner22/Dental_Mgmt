@@ -9,6 +9,8 @@ import { formatCents } from "@/lib/ledger/format";
 import type { LedgerAccountSummary } from "@/lib/ledger/types";
 import type { StatementRecord } from "@/lib/statements/snapshot";
 import { DEMO_AS_OF_DATE } from "@/lib/demo/dates";
+import { dutyNeededSentence, holdsDuty } from "@/lib/auth/heldDuty";
+import { readViewer, type Viewer } from "@/lib/auth/viewer";
 
 type LoadState =
   | { status: "loading" }
@@ -39,9 +41,27 @@ export default function StatementsPage() {
   const [asOf, setAsOf] = useState(DEMO_AS_OF_DATE);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  /**
+   * Who is reading, for the one question this screen asks of them: do they
+   * hold the duty the draft route needs (Increment 1.93). Read from `/api/me`
+   * as Practice Risk reads it, rather than inferred from the rank — the rank
+   * opens this screen and does not open the act.
+   */
+  const [me, setMe] = useState<Viewer | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    void fetch("/api/me")
+      .then(async (res) => readViewer(res.status, await res.json().catch(() => ({}))))
+      .then((viewer) => {
+        if (!cancelled) setMe(viewer);
+      })
+      .catch(() => {
+        // A viewer this screen could not read holds no duty as far as it is
+        // concerned, which is the safe way round: the act is not offered, and
+        // the route would refuse it anyway.
+        if (!cancelled) setMe({ state: "unknown", why: "Could not read who is signed in." });
+      });
     Promise.all([
       fetch("/api/statements").then(async (res) => {
         const body = (await res.json()) as { statements?: StatementRecord[]; error?: string };
@@ -111,6 +131,11 @@ export default function StatementsPage() {
       {state.status === "error" && <p className="text-sm text-[var(--ink-2)]">{state.message}</p>}
       {state.status === "ready" && (
         <>
+          {me !== null && !holdsDuty(me, "post_payments") ? (
+            <p className="mb-8 max-w-prose text-sm text-[var(--ink-2)]">
+              {dutyNeededSentence("Creating a statement", "post_payments")}
+            </p>
+          ) : (
           <form
             className="mb-8 flex flex-wrap items-end gap-4"
             onSubmit={(event) => {
@@ -149,6 +174,7 @@ export default function StatementsPage() {
               Create draft
             </button>
           </form>
+          )}
           {message && <p className="mb-6 text-sm text-[var(--ink-2)]">{message}</p>}
 
           {state.statements.length === 0 ? (

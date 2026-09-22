@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   eligibleAdmins,
@@ -131,5 +134,57 @@ describe("the sentence a practice that can run this reads", () => {
   it("counts what waits, in singular and plural", () => {
     expect(regainStanding(3, 1)).toContain("One recovery is waiting");
     expect(regainStanding(3, 2)).toContain("2 recoveries are waiting");
+  });
+});
+
+
+const srcDir = fileURLToPath(new URL("../../", import.meta.url));
+
+function filesUnder(dir: string): string[] {
+  const out: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) out.push(...filesUnder(full));
+    else if (name.endsWith(".ts") || name.endsWith(".tsx")) out.push(full);
+  }
+  return out;
+}
+
+/**
+ * The one premise the two-administrator rule now rests on (Increment 1.99).
+ *
+ * The argument above `regainAccess.ts` used to rest on three claims about what
+ * one administrator can do alone, and Increments 1.78 and 1.79 made two of
+ * them false: a rank can be changed and a person can be stood down. Both of
+ * those acts take something away. Neither is *becoming* that person, which is
+ * the power the rule withholds.
+ *
+ * Becoming them needs their password, so the argument now rests on this: the
+ * only thing that sets another person's password is the recovery ceremony,
+ * which needs two administrators. A one-administrator password reset anywhere
+ * in this codebase would make the whole argument false, so this reads the
+ * source and says so rather than letting the next reader find a comment that
+ * has quietly stopped being true.
+ */
+describe("the premise the two-administrator rule rests on", () => {
+  it("has exactly one caller of setPassword, and it is the recovery ceremony", () => {
+    const callers = filesUnder(srcDir)
+      .filter((f) => !/\.test\.tsx?$/.test(f))
+      .filter((f) => /\.setPassword\(/.test(readFileSync(f, "utf8")))
+      .map((f) => f.slice(srcDir.length))
+      .sort();
+    expect(callers).toEqual(["lib/auth/recoveryCeremony.ts"]);
+  });
+
+  /**
+   * `claimSeat` writes a password too, and it is the claimant setting their
+   * own from a link only they hold — not one person setting another's. It
+   * writes the column directly rather than through the store, which is why it
+   * does not appear above; this names it so the omission reads as known.
+   */
+  it("knows the other writer of a password, and that it is the person's own", () => {
+    const invite = readFileSync(join(srcDir, "lib/auth/invite.ts"), "utf8");
+    expect(invite).toMatch(/passwordHash: await hashPassword\(password\)/);
+    expect(invite).toMatch(/claimSeat/);
   });
 });

@@ -9,6 +9,7 @@ import { readViewer } from "@/lib/auth/viewer";
 import { SessionEnded } from "../session-ended";
 import { formatCents } from "@/lib/ledger/format";
 import type { OwnerBoard as Board, TileShape } from "@/lib/home/board";
+import { outsideReaderSentence } from "@/lib/auth/cpaSurfaces";
 
 type HardEventItem = {
   kind: string;
@@ -466,14 +467,36 @@ export function OwnerBoard() {
                   {t.closedMonth && <p className="mt-1 max-w-prose text-xs text-[var(--ink-3)]">{t.closedMonth.sentence}</p>}
                   {answering === t.id ? (
                     <span className="mt-2 flex flex-wrap items-end gap-2">
-                      <label className="flex flex-col text-sm">
-                        <span className="mb-1 font-semibold">Your answer</span>
+                      <span className="flex flex-col text-sm">
+                        {/*
+                         * Who reads this, said where it is written (Increment
+                         * 1.106). The seat's whole argument is that the
+                         * month-end package is aggregate and names no patient,
+                         * and a live case proves that of everything the product
+                         * derives. It can prove nothing about a sentence
+                         * somebody types, so the sentence is where the practice
+                         * is told.
+                         *
+                         * It is a description, not part of the label. Inside
+                         * the `<label>` it became the field's accessible name,
+                         * so a screen reader announced the whole paragraph in
+                         * place of "Your answer" — which the browser suite
+                         * caught by no longer finding the field by its name.
+                         */}
+                        <label className="mb-1 font-semibold" htmlFor={`answer-${t.id}`}>
+                          Your answer
+                        </label>
+                        <span id={`answer-note-${t.id}`} className="mb-1 max-w-prose text-xs text-[var(--ink-3)]">
+                          {outsideReaderSentence()}
+                        </span>
                         <input
+                          id={`answer-${t.id}`}
+                          aria-describedby={`answer-note-${t.id}`}
                           className="w-80 rounded-md border border-[var(--line)] bg-[var(--bg)] px-2 py-1"
                           value={answer}
                           onChange={(e) => setAnswer(e.target.value)}
                         />
-                      </label>
+                      </span>
                       <button
                         type="button"
                         className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-3 py-1 text-sm font-semibold disabled:opacity-50"

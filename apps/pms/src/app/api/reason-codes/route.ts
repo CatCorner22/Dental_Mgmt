@@ -1,17 +1,32 @@
 import { withGuard } from "@/lib/auth/withGuard";
 import { withTenantTransaction } from "@/lib/db/client";
 import { addReasonCode, listReasonCodes, renameReasonCode, setReasonCodeActive, setReasonThreshold } from "@/lib/ledger/reasonCodes";
+import { isRole, type Role } from "@/lib/auth/roles";
+import { reasonCodesForViewer } from "@/lib/ledger/reasons";
 
 /**
  * The practice's reason codes (Increment 1.45). Anyone who posts needs to read
  * them, because the posting forms are built from them; changing them is the
  * administrator's, as with the locations and the policy.
+ *
+ * What "them" means depends on the rank (Increment 1.103). The forms are built
+ * from the code, the kind, the label and whether it is live. The approval
+ * threshold and the entry count are the practice's governance of its own
+ * reasons, they reach a screen only at `manager` and above, and the threshold
+ * is the line under which a write-off gets no second pair of eyes — so the
+ * rank that posts receives the list its forms need and nothing further.
  */
 export const GET = withGuard(
   async (_req, ctx) => {
     const user = ctx.access.user;
-    const items = await withTenantTransaction(user.tenantId, user.id, (db) => listReasonCodes(db, user.tenantId));
-    return Response.json({ items });
+    const rows = await withTenantTransaction(user.tenantId, user.id, (db) => listReasonCodes(db, user.tenantId));
+    /**
+     * A rank this product does not have reads as the narrower answer rather
+     * than throwing: `withGuard` has already decided the seat may be here, and
+     * the safe reading of an unfamiliar label is the one that gives less.
+     */
+    const rank: Role = isRole(user.role) ? user.role : "user";
+    return Response.json({ items: reasonCodesForViewer(rows, rank) });
   },
   { minRank: "user" }
 );

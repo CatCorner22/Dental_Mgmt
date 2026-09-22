@@ -6,6 +6,7 @@ import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useCallback, useEffect, useState } from "react";
 import type { Thread, ThreadSeat } from "@/lib/cpa/questions";
 import type { ThreadRead } from "@/lib/cpa/threadReads";
+import { outsideReaderSentence } from "@/lib/auth/cpaSurfaces";
 
 /**
  * The threads the accountant and the practice hold about one month's package
@@ -231,14 +232,30 @@ export function QuestionsView({ month }: { month: string }) {
             ))}
           </select>
         </label>
-        <label className="flex flex-col text-sm">
-          <span className="mb-1 font-semibold">Question</span>
+        <span className="flex flex-col text-sm">
+          {/*
+           * Both sides of the thread are read by somebody outside the practice
+           * (Increment 1.106), so both sides carry the sentence. A question
+           * naming a patient would put one in the record as surely as an answer
+           * would.
+           *
+           * Described by, never labelled by: inside the `<label>` the sentence
+           * became the field's accessible name.
+           */}
+          <label className="mb-1 font-semibold" htmlFor="cpa-question">
+            Question
+          </label>
+          <span id="cpa-question-note" className="mb-1 max-w-prose text-xs text-[var(--ink-3)]">
+            {outsideReaderSentence()}
+          </span>
           <input
+            id="cpa-question"
+            aria-describedby="cpa-question-note"
             className="w-80 rounded-md border border-[var(--line)] bg-[var(--bg)] px-2 py-1"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
           />
-        </label>
+        </span>
         <button
           type="submit"
           className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
