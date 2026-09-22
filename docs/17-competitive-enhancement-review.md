@@ -2722,3 +2722,46 @@ So every seat that posts held the figure under which a write-off gets no second 
 
 **The entry count.** It went behind the same door as the threshold, on the weaker argument: a per-reason census of the practice's ledger is not something a seat needs to post, and the two fields travel together in the same payload. If the practice ever wants a posting seat to see how established a reason is, that is a decision to make on its own.
 
+## Increment 1.104
+
+The header has filtered its links since the seat catalog existed, and `navLinksFor`'s own comment says what the filter is for:
+
+> "Every screen guards itself, so this filter is never the control — it is the courtesy of not offering a person eleven screens that refuse them."
+
+**The owner's home board kept a second list of eleven links, with no rank or duty filter at all.**
+
+Two consequences, both true of the seeded practice today:
+
+- **The owner started every day beside a door that could only refuse.** Riley holds `approve_writeoffs`, `run_import` and `bank_reconcile` — never `post_payments`, because in this product the front desk posts and the owner approves. The header has withheld "Post" from them since Increment 1.49. The board offered "Post payment", and `POST /api/ledger/post` has refused them from the first day. This is Increment 1.93's defect in a third place, and it survived 1.93 for a reason worth recording: **1.93 looked at screens whose nav seat was a rank while their acts needed a duty. This seat's duty was right. The second door was the one nobody was looking at.**
+- **The board had drifted.** Increment 1.94 gave the Curve Hero import a screen and Increment 1.98 gave the release attestation one. Both got nav seats. Neither ever reached the board, because a second list is a second thing to keep true and nothing read the two against each other.
+
+## One list
+
+`boardLinksFor` is `navLinksFor` minus the board's own screen — a board that links to itself spends a row saying nothing. Board wording lives on the catalog entry as `boardLabel`, so *"Open ledger"* and *"Post payment"* survive as words without surviving as a second list. `currentSeat` moved out of the app layout into `lib/auth`, because two readers of "who is this" would be two answers to it.
+
+## The screen no seat named
+
+The sweep that found this also found `/reason-codes`: **the one screen in the product with no catalog entry.** It was reachable from that hardcoded board link and from nowhere else — so the seat its list exists for, the seat that posts and must choose among the reasons, could not find it at all. Increment 1.72 recorded the principle on a smaller thing: a mechanism nobody can find is not a mechanism.
+
+It has a seat now, at `user`, which is its route's own rank. That is safe to offer because Increment 1.103 made what a seat below `manager` reads there the list its forms are built from, without the practice's governance of it. **The two increments had to land in this order**, and the second is why the first could be more than a narrowing.
+
+## The gate
+
+`screenSeats.test.ts` walks `app/(app)` for every `page.tsx` and fails on:
+
+- **a screen no catalog entry names**, unless it is listed in `REACHED_FROM_A_PARENT` **with the screen that leads to it written down** — three are, each a row chosen on its parent: an account on `/ledger`, a run on `/reconciliation`, a statement on `/statements`;
+- **a catalog entry naming a screen that does not exist**;
+- **an excuse that no longer needs excusing**, or one whose named parent is not itself a screen.
+
+`seats.test.ts` has read each entry against the route it names since Increment 1.49 — a link cannot promise a screen that refuses. Nothing read the other direction until now. This is the fifth gate of the session, and like the other four it reads the source rather than asserting about it.
+
+**Red-before, measured, both halves.** Removing the `/reason-codes` entry fails the gate with `expected [ '/reason-codes' ] to deeply equal []`. Without the increment the browser case fails on `expected +0 to be 1` — "Import a file", absent from the owner's board.
+
+**Tests.** App unit (5 board + 3 gate): the board offering exactly what the header offers minus `/home`; the owner not offered `/ledger/post`; the two screens the board had never gained; a viewer that could not be resolved offered nothing; words for every link; and the three gate assertions. Browser (1 case extended): the owner's board carries twelve links, **not** "Post payment", and **not** a link to the screen it is.
+
+## Not in Increment 1.104
+
+**A rank filter on the board's cards.** The links are filtered; the board's own cards — approvals waiting, decisions due, practice health — are not, and a card can still name something the reader cannot act on. Increment 1.89 settled that for the hard-event alarms by having the route decide what the viewer may be offered. The cards each come from their own route and deserve the same treatment one at a time, not a sweeping filter over a board this increment has not read closely enough.
+
+**Board wording for every entry.** Seven entries carry a `boardLabel`; the rest fall back to the header's word, which reads correctly on a button. Writing five more for the sake of symmetry would be writing five more things to keep true.
+

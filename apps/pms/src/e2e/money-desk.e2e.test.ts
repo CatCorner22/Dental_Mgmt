@@ -90,9 +90,32 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await approvals.innerText()).toMatch(/1[\s\S]*\$75\.00 held until a second person decides/);
     expect(await page().getByText(/No control decision comes up for review/).count()).toBe(1);
     expect(await page().getByText(/Segregation health\. COSO overall \d+/).count()).toBe(1);
-    for (const name of ["Open ledger", "Post payment", "Bank reconciliation", "Day close", "Statements", "Approvals inbox", "Practice Risk", "Weekly digest", "Locations", "Reason codes", "Month-end package"]) {
+    /**
+     * The board offers what this seat may reach, and only that (Increment
+     * 1.104). It kept its own list of eleven links with no rank or duty
+     * filter: `Import a file` and `Releases` had never been added to it, and
+     * `Post payment` was on it for an owner who holds no `post_payments` and
+     * whose route has always refused them.
+     */
+    for (const name of [
+      "Open ledger",
+      "Bank reconciliation",
+      "Import a file",
+      "Day close",
+      "Statements",
+      "Approvals inbox",
+      "Releases",
+      "Practice Risk",
+      "Weekly digest",
+      "Locations",
+      "Reason codes",
+      "Month-end package",
+    ]) {
       expect(await page().locator("main").getByRole("link", { name, exact: true }).count()).toBe(1);
     }
+    // The link the owner's duties do not open, and the board's own screen.
+    expect(await page().locator("main").getByRole("link", { name: "Post payment", exact: true }).count()).toBe(0);
+    expect(await page().locator("main").getByRole("link", { name: "Home", exact: true }).count()).toBe(0);
     await b.audit("home (owner, no bank record)");
 
     await page().goto(`${app.base}/ledger`);

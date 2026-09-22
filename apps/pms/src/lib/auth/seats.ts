@@ -46,6 +46,15 @@ export function isCpaSeat(seat: Seat | null | undefined): boolean {
 export type NavLink = {
   href: string;
   label: string;
+  /**
+   * What the owner's home board calls it, where there is room for more than a
+   * header tab (Increment 1.104). It lives on the same entry as `label`
+   * because the board used to keep its own list of eleven links, and a second
+   * list is a second thing to keep true: that one had no rank or duty filter
+   * at all, had never gained `/import` or `/releases`, and offered the seeded
+   * owner "Post payment" for a screen whose route has always refused them.
+   */
+  boardLabel?: string;
   /** This rank or above opens it. */
   minRank?: Role;
   /** Holding this entitlement opens it, whatever the rank. */
@@ -56,20 +65,30 @@ export type NavLink = {
 
 export const NAV_LINKS: NavLink[] = [
   { href: "/home", label: "Home", minRank: "manager", gate: "api/home/board/route.ts" },
-  { href: "/ledger", label: "Ledger", minRank: "user", gate: "api/ledger/accounts/route.ts" },
-  { href: "/ledger/post", label: "Post", entitlement: "post_payments", gate: "api/ledger/post/route.ts" },
-  { href: "/reconciliation", label: "Reconciliation", entitlement: "bank_reconcile", gate: "api/reconciliation/runs/route.ts" },
-  { href: "/import", label: "Import", entitlement: "run_import", gate: "api/import/curve/route.ts" },
+  { href: "/ledger", label: "Ledger", boardLabel: "Open ledger", minRank: "user", gate: "api/ledger/accounts/route.ts" },
+  { href: "/ledger/post", label: "Post", boardLabel: "Post payment", entitlement: "post_payments", gate: "api/ledger/post/route.ts" },
+  { href: "/reconciliation", label: "Reconciliation", boardLabel: "Bank reconciliation", entitlement: "bank_reconcile", gate: "api/reconciliation/runs/route.ts" },
+  { href: "/import", label: "Import", boardLabel: "Import a file", entitlement: "run_import", gate: "api/import/curve/route.ts" },
   { href: "/day-close", label: "Day close", minRank: "user", gate: "api/day-close/route.ts" },
   { href: "/statements", label: "Statements", minRank: "user", gate: "api/statements/route.ts" },
-  { href: "/approvals", label: "Approvals", entitlement: "approve_writeoffs", gate: "api/approvals/inbox/route.ts" },
+  { href: "/approvals", label: "Approvals", boardLabel: "Approvals inbox", entitlement: "approve_writeoffs", gate: "api/approvals/inbox/route.ts" },
   { href: "/releases", label: "Releases", minRank: "lead", gate: "api/controls/release/evaluate/route.ts" },
   { href: "/risk", label: "Practice Risk", minRank: "manager", gate: "api/controls/risk/route.ts" },
-  { href: "/digest", label: "Digest", minRank: "manager", gate: "api/digest/route.ts" },
+  { href: "/digest", label: "Digest", boardLabel: "Weekly digest", minRank: "manager", gate: "api/digest/route.ts" },
   { href: "/locations", label: "Locations", minRank: "manager", gate: "api/locations/route.ts" },
+  /**
+   * The one screen the product had that no seat named (Increment 1.104). It
+   * was reachable from the owner's home board and nowhere else, so a seat
+   * that posts — the seat the list exists for — could not find it. The route
+   * opens at `user`, and since Increment 1.103 a seat below `manager` reads
+   * the list its forms are built from without the practice's governance of
+   * it, which is what makes the seat safe to offer.
+   */
+  { href: "/reason-codes", label: "Reasons", boardLabel: "Reason codes", minRank: "user", gate: "api/reason-codes/route.ts" },
   {
     href: "/cpa",
     label: "Month-end",
+    boardLabel: "Month-end package",
     minRank: "manager",
     entitlement: CPA_SEAT_ENTITLEMENT,
     gate: "api/cpa/package/route.ts",
@@ -90,4 +109,17 @@ export function navLinksFor(seat: Seat | null | undefined): NavLink[] {
       (link.minRank !== undefined && meetsRole(seat.role, link.minRank)) ||
       (link.entitlement !== undefined && seat.entitlements.includes(link.entitlement))
   );
+}
+
+/**
+ * The links the owner's home board offers (Increment 1.104).
+ *
+ * The same catalog the header filters, minus the board's own screen: a board
+ * that links to itself spends a row saying nothing. Everything else about the
+ * decision — which rank opens a screen, which duty does — is `navLinksFor`'s,
+ * because the board had its own answer to that question and the answer was
+ * "everybody".
+ */
+export function boardLinksFor(seat: Seat | null | undefined): NavLink[] {
+  return navLinksFor(seat).filter((link) => link.href !== "/home");
 }

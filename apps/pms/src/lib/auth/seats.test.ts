@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { CONFLICT_RULES } from "@pms/controls-engine";
-import { CPA_SEAT_ENTITLEMENT, NAV_LINKS, isCpaSeat, navLinksFor } from "./seats";
+import { CPA_SEAT_ENTITLEMENT, NAV_LINKS, boardLinksFor, isCpaSeat, navLinksFor } from "./seats";
 
 const appDir = fileURLToPath(new URL("../../app/", import.meta.url));
 
@@ -72,6 +72,10 @@ describe("the links a viewer is offered", () => {
       "/risk",
       "/digest",
       "/locations",
+      // Increment 1.104 gave the one screen no seat named one. Its route opens
+      // at `user`, and Increment 1.103 made what a seat below `manager` reads
+      // there the list its forms are built from, without the thresholds.
+      "/reason-codes",
       "/cpa",
     ]);
     expect(navLinksFor(front).map((l) => l.href)).toEqual([
@@ -80,6 +84,7 @@ describe("the links a viewer is offered", () => {
       "/import",
       "/day-close",
       "/statements",
+      "/reason-codes",
     ]);
   });
 
@@ -109,6 +114,55 @@ describe("the links a viewer is offered", () => {
       if (link.entitlement && link.minRank) {
         expect({ href: link.href, orGrant: Boolean(orGrant) }).toEqual({ href: link.href, orGrant: true });
       }
+    }
+  });
+});
+
+/**
+ * The owner's home board (Increment 1.104).
+ *
+ * The board kept its own list of eleven links with no rank or duty filter,
+ * beside a header that has filtered since Increment 1.71 — whose comment says
+ * exactly what the filter is for: "the courtesy of not offering a person
+ * eleven screens that refuse them". The board offered eleven.
+ */
+describe("the links the home board offers", () => {
+  it("offers what the header offers, minus the board's own screen", () => {
+    expect(boardLinksFor(owner).map((l) => l.href)).toEqual(
+      navLinksFor(owner)
+        .map((l) => l.href)
+        .filter((h) => h !== "/home")
+    );
+    expect(boardLinksFor(owner).some((l) => l.href === "/home")).toBe(false);
+  });
+
+  /**
+   * The defect in one line. The seeded owner holds `approve_writeoffs`,
+   * `run_import` and `bank_reconcile` — never `post_payments`, because the
+   * front desk posts and the owner approves. The header has withheld that
+   * link since Increment 1.49, which is when the entry gained its duty; the
+   * board offered it anyway, and the route behind it has refused the owner
+   * all along.
+   */
+  it("does not offer the owner the one screen the owner's duties do not open", () => {
+    expect(boardLinksFor(owner).map((l) => l.href)).not.toContain("/ledger/post");
+  });
+
+  /** And offers the two screens the board had never gained. */
+  it("offers the screens later increments added", () => {
+    const hrefs = boardLinksFor(owner).map((l) => l.href);
+    expect(hrefs).toContain("/import");
+    expect(hrefs).toContain("/releases");
+  });
+
+  it("offers a viewer it could not resolve nothing at all", () => {
+    expect(boardLinksFor(null)).toEqual([]);
+  });
+
+  /** Every board entry has board wording or a header label to fall back on. */
+  it("has words for every link it offers", () => {
+    for (const link of boardLinksFor(owner)) {
+      expect((link.boardLabel ?? link.label).length).toBeGreaterThan(0);
     }
   });
 });
