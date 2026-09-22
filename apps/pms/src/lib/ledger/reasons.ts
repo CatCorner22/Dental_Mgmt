@@ -1,3 +1,5 @@
+import { meetsRole, type Role } from "../auth/roles";
+
 /**
  * The reason options a form offers, derived from the practice's own rows
  * (Increment 1.45; a hard-coded list until then).
@@ -70,8 +72,47 @@ export type ReasonCodeRow = {
 
 export type ReasonOption = { value: string; label: string };
 
+/**
+ * Two doors onto one figure, again (Increment 1.103).
+ *
+ * `requiresApprovalOverCents` is the dollar line above which a posting on
+ * this reason waits for a second person. It reaches a screen in two places —
+ * the reason-codes table, whose acts need `admin`, and Practice Risk, which
+ * needs `manager` — and `GET /api/reason-codes` handed it to every seat that
+ * posts, because the posting forms are built from the same list. They are
+ * built from the code, the kind, the label and whether it is live; **no
+ * screen below `manager` has ever read the threshold or the entry count.**
+ *
+ * This is the shape Increment 1.96 found on `GET /api/controls/policy`, where
+ * the practice-wide version of the same figure stood one rank easier to reach
+ * than the screen that shows it. Where one thing has two doors, the looser
+ * decides — and the line under which a write-off gets no second pair of eyes
+ * is exactly what somebody structuring beneath it would want.
+ *
+ * The narrowing is a type, not a deletion: a seat below `manager` receives a
+ * `PostingReasonCode`, which is what its screens use.
+ */
+export type PostingReasonCode = Omit<ReasonCodeRow, "requiresApprovalOverCents" | "entries">;
 
-function toOption(row: ReasonCodeRow): ReasonOption {
+/** The fields a seat below `manager` never receives, named so a test can pin them. */
+export const REASON_FIELDS_ABOVE_POSTING = ["requiresApprovalOverCents", "entries"] as const;
+
+export function narrowForPostingSeat(rows: ReasonCodeRow[]): PostingReasonCode[] {
+  return rows.map(({ code, kind, label, active, reserved }) => ({ code, kind, label, active, reserved }));
+}
+
+/**
+ * What one rank receives. `manager` and above read the practice's governance
+ * of its own reasons; everybody else reads the list their forms are built
+ * from.
+ */
+export function reasonCodesForViewer(rows: ReasonCodeRow[], rank: Role): ReasonCodeRow[] | PostingReasonCode[] {
+  return meetsRole(rank, "manager") ? rows : narrowForPostingSeat(rows);
+}
+
+
+
+function toOption(row: PostingReasonCode): ReasonOption {
   return { value: row.code, label: row.label };
 }
 
@@ -86,7 +127,7 @@ function byLabel(a: ReasonOption, b: ReasonOption): number {
  * applies it itself, so offering it as a first posting's reason would invite
  * a meaning it does not have.
  */
-export function reasonOptionsForPosting(rows: ReasonCodeRow[], postingKind: string): ReasonOption[] {
+export function reasonOptionsForPosting(rows: PostingReasonCode[], postingKind: string): ReasonOption[] {
   const kind = REASON_KIND_FOR_POSTING[postingKind];
   if (!kind) return [];
   return rows
@@ -101,7 +142,7 @@ export function reasonOptionsForPosting(rows: ReasonCodeRow[], postingKind: stri
  * reserved codes stay out for the same reason as above — into a closed month
  * the service applies `prior_period` itself.
  */
-export function allReasonOptions(rows: ReasonCodeRow[]): ReasonOption[] {
+export function allReasonOptions(rows: PostingReasonCode[]): ReasonOption[] {
   return rows
     .filter((r) => r.active && !(RESERVED_REASON_CODES as readonly string[]).includes(r.code))
     .map(toOption)

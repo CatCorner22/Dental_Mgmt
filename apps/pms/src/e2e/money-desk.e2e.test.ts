@@ -580,6 +580,31 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await page().getByRole("button", { name: /^Retire / }).count()).toBe(0);
     expect(await page().getByRole("button", { name: "Adopt", exact: true }).count()).toBe(0);
     expect(await page().getByRole("button", { name: /^Set threshold for / }).count()).toBe(0);
+
+    /**
+     * Increment 1.103. The list this seat reads is the one its posting forms
+     * are built from — the code, the wording, and whether it is offered. The
+     * figure above which a posting on a reason waits for a second person, and
+     * the count of entries citing it, are the practice's governance of its
+     * own reasons; they reach a screen at `manager` and above, and this seat
+     * is not handed them. The columns are absent rather than blank, because a
+     * blank in a threshold column reads as "no second person needed".
+     */
+    expect(await page().getByRole("columnheader", { name: "Second person over" }).count()).toBe(0);
+    expect(await page().getByRole("columnheader", { name: "Entries" }).count()).toBe(0);
+    expect(await page().getByText("$50.00").count()).toBe(0);
+    /**
+     * And the route itself, not merely the screen: a seat that reads the
+     * answer rather than the table finds the figure is not in it. Read from
+     * inside the page so the request carries this seat's own sign-in.
+     */
+    const asFront = await page().evaluate(async () => {
+      const res = await fetch("/api/reason-codes");
+      const body = (await res.json()) as { items: Record<string, unknown>[] };
+      return { status: res.status, keys: [...new Set(body.items.flatMap((i) => Object.keys(i)))].sort() };
+    });
+    expect(asFront.status).toBe(200);
+    expect(asFront.keys).toEqual(["active", "code", "kind", "label", "reserved"]);
     await b.audit("reason codes (front desk)");
 
     // Clearing the threshold hands those rows back to the channel's own figure,
@@ -587,6 +612,13 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     // change (Increment 1.47), exactly as switching the after-hours hold off is.
     await b.signIn("ridgeview-owner", "/reason-codes");
     await page().getByRole("heading", { name: "Why money moved" }).waitFor({ timeout: 60_000 });
+    // The rank that governs the reasons does receive what it governs (Increment 1.103).
+    const asOwner = await page().evaluate(async () => {
+      const res = await fetch("/api/reason-codes");
+      const body = (await res.json()) as { items: Record<string, unknown>[] };
+      return [...new Set(body.items.flatMap((i) => Object.keys(i)))].sort();
+    });
+    expect(asOwner).toEqual(["active", "code", "entries", "kind", "label", "requiresApprovalOverCents", "reserved"]);
     const ppoAgain = page().locator("tr", { hasText: "contractual_ppo" });
     await ppoAgain.waitFor({ timeout: 30_000 });
     await ppoAgain.getByRole("button", { name: "Set threshold for contractual_ppo" }).click();

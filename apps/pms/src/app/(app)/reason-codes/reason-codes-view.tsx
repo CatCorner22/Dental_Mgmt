@@ -6,7 +6,7 @@ import { isRole, meetsRole } from "@/lib/auth/roles";
 import { readViewer } from "@/lib/auth/viewer";
 import { SessionEnded } from "../session-ended";
 import { formatCents } from "@/lib/ledger/format";
-import { REASON_KIND_LABEL, REASON_KINDS, type ReasonCodeRow, type ReasonKind } from "@/lib/ledger/reasons";
+import { REASON_KIND_LABEL, REASON_KINDS, type PostingReasonCode, type ReasonCodeRow, type ReasonKind } from "@/lib/ledger/reasons";
 import { isLoosening } from "@/lib/ledger/reasonThreshold";
 
 type LoadState =
@@ -14,7 +14,22 @@ type LoadState =
   /** The sign-in is over (Increment 1.81). */
   | { status: "sign_in_ended" }
   | { status: "error"; message: string }
-  | { status: "ready"; rows: ReasonCodeRow[]; isAdmin: boolean };
+  | {
+      status: "ready";
+      rows: PostingReasonCode[];
+      isAdmin: boolean;
+      /**
+       * What the practice has decided about each reason (Increment 1.103):
+       * the figure above which a posting on it waits for a second person, and
+       * how many entries cite it. `null` for a seat below `manager`, which
+       * the route answers with the list its forms are built from and nothing
+       * further — so the two columns are absent here rather than blank, and
+       * the screen cannot render a figure it was not given.
+       */
+      governance: Map<string, Governance> | null;
+    };
+
+type Governance = { requiresApprovalOverCents: number | null; entries: number };
 
 export function ReasonCodesView() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
@@ -42,7 +57,7 @@ export function ReasonCodesView() {
       fetch("/api/reason-codes").then(async (r) => ({
         ok: r.ok,
         status: r.status,
-        body: (await r.json().catch(() => ({}))) as { items?: ReasonCodeRow[]; error?: string },
+        body: (await r.json().catch(() => ({}))) as { items?: PostingReasonCode[]; error?: string },
       })),
       fetch("/api/me").then(async (r) => readViewer(r.status, await r.json().catch(() => ({})))),
     ])
@@ -61,10 +76,28 @@ export function ReasonCodesView() {
           return;
         }
         const role = viewer.state === "present" ? viewer.role : "";
+        const rows = list.body.items ?? [];
+        /**
+         * The route hands a seat below `manager` the list its posting forms
+         * are built from, without the threshold or the entry count
+         * (Increment 1.103). The screen reads its own rank for the same
+         * reason: a column built from a field that is not there would render
+         * a blank where a figure belongs, and a blank in a threshold column
+         * reads as "no second person needed".
+         */
+        const governed = isRole(role) && meetsRole(role, "manager");
         setState({
           status: "ready",
-          rows: list.body.items ?? [],
+          rows,
           isAdmin: isRole(role) && meetsRole(role, "admin"),
+          governance: governed
+            ? new Map(
+                (rows as ReasonCodeRow[]).map((r) => [
+                  r.code,
+                  { requiresApprovalOverCents: r.requiresApprovalOverCents, entries: r.entries },
+                ])
+              )
+            : null,
         });
       })
       .catch(() => {
@@ -119,8 +152,8 @@ export function ReasonCodesView() {
   }
 
   /** Whether what is typed would let through what used to wait for a second person. */
-  function needsDecision(row: ReasonCodeRow): boolean {
-    return isLoosening(row.requiresApprovalOverCents, enteredCents());
+  function needsDecision(g: Governance | undefined): boolean {
+    return isLoosening(g?.requiresApprovalOverCents ?? null, enteredCents());
   }
 
   if (state.status === "loading") return <p className="text-sm text-[var(--ink-2)]">Loading…</p>;
@@ -151,13 +184,15 @@ export function ReasonCodesView() {
                   <th className="px-4 py-3 font-semibold">Code</th>
                   <th className="px-4 py-3 font-semibold">Reads as</th>
                   <th className="px-4 py-3 font-semibold">On the forms</th>
-                  <th className="px-4 py-3 font-semibold">Second person over</th>
-                  <th className="px-4 py-3 font-semibold tabular-nums">Entries</th>
+                  {state.governance && <th className="px-4 py-3 font-semibold">Second person over</th>}
+                  {state.governance && <th className="px-4 py-3 font-semibold tabular-nums">Entries</th>}
                   {state.isAdmin && <th className="px-4 py-3 font-semibold">Change</th>}
                 </tr>
               </thead>
               <tbody>
-                {group.rows.map((row) => (
+                {group.rows.map((row) => {
+                  const governance = state.governance?.get(row.code);
+                  return (
                   <tr key={row.code} className="border-b border-[var(--line)] last:border-0 align-top">
                     <td className="px-4 py-3">
                       <code className="text-xs">{row.code}</code>
@@ -196,6 +231,7 @@ export function ReasonCodesView() {
                       )}
                     </td>
                     <td className="px-4 py-3">{row.active ? "Offered" : "Retired"}</td>
+                    {state.governance && (
                     <td className="px-4 py-3">
                       {threshold === row.code ? (
                         <span className="flex flex-wrap items-center gap-2">
@@ -216,11 +252,11 @@ export function ReasonCodesView() {
                             // A loosening needs its decision complete before it is worth
                             // sending: the server refuses an incomplete one anyway, and a
                             // form that already knows should say so without the round trip.
-                            disabled={busy !== null || (needsDecision(row) && (!decisionNote.trim() || !reviewBy))}
+                            disabled={busy !== null || (needsDecision(governance) && (!decisionNote.trim() || !reviewBy))}
                             onClick={() => {
                               const cents = enteredCents();
                               if (cents !== null && !Number.isFinite(cents)) return;
-                              const decision = needsDecision(row)
+                              const decision = needsDecision(governance)
                                 ? { kind: decisionKind, note: decisionNote.trim(), reviewBy }
                                 : undefined;
                               void act("threshold", row.code, {}, "Set the threshold", { cents, decision });
@@ -235,7 +271,7 @@ export function ReasonCodesView() {
                           >
                             Cancel
                           </button>
-                          {needsDecision(row) && (
+                          {needsDecision(governance) && (
                             <span className="flex w-full flex-wrap items-end gap-2">
                               <span className="w-full max-w-prose text-sm text-[var(--ink-2)]">
                                 That lets through what used to wait for a second person. Accept the residual or name
@@ -275,11 +311,11 @@ export function ReasonCodesView() {
                       ) : (
                         <span className="flex flex-wrap items-center gap-2">
                           <span className="tabular-nums">
-                            {row.requiresApprovalOverCents === null
+                            {governance?.requiresApprovalOverCents == null
                               ? "the channel's figure"
-                              : row.requiresApprovalOverCents === 0
+                              : governance.requiresApprovalOverCents === 0
                                 ? "every one"
-                                : formatCents(row.requiresApprovalOverCents)}
+                                : formatCents(governance.requiresApprovalOverCents)}
                           </span>
                           {state.isAdmin && (
                             <button
@@ -287,7 +323,11 @@ export function ReasonCodesView() {
                               className="min-h-[var(--target)] rounded-md border border-[var(--line)] px-3 py-1 text-sm"
                               onClick={() => {
                                 setThreshold(row.code);
-                                setDollars(row.requiresApprovalOverCents === null ? "" : (row.requiresApprovalOverCents / 100).toFixed(2));
+                                setDollars(
+                                  governance?.requiresApprovalOverCents == null
+                                    ? ""
+                                    : (governance.requiresApprovalOverCents / 100).toFixed(2)
+                                );
                                 setNotice(null);
                               }}
                             >
@@ -297,7 +337,8 @@ export function ReasonCodesView() {
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 tabular-nums">{row.entries}</td>
+                    )}
+                    {state.governance && <td className="px-4 py-3 tabular-nums">{governance?.entries ?? 0}</td>}
                     {state.isAdmin && (
                       <td className="px-4 py-3">
                         <span className="flex flex-wrap gap-2">
@@ -336,7 +377,8 @@ export function ReasonCodesView() {
                       </td>
                     )}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

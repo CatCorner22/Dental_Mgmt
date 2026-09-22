@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatCents, formatLedgerKind } from "@/lib/ledger/format";
-import { allReasonOptions, type ReasonCodeRow } from "@/lib/ledger/reasons";
+import { allReasonOptions, type PostingReasonCode } from "@/lib/ledger/reasons";
 
 import type { LedgerAccountDetail, LedgerExplanationRow } from "@/lib/ledger/types";
 
@@ -73,12 +73,12 @@ export default function LedgerAccountPage() {
   const [reload, setReload] = useState(0);
   // The practice's own codes, read once (Increment 1.45): a correction cites one
   // the practice adopted, and the column is a foreign key into exactly those.
-  const [reasonCodes, setReasonCodes] = useState<ReasonCodeRow[]>([]);
+  const [reasonCodes, setReasonCodes] = useState<PostingReasonCode[]>([]);
   useEffect(() => {
     let cancelled = false;
     fetch("/api/reason-codes")
       .then(async (res) => {
-        const body = (await res.json()) as { items?: ReasonCodeRow[] };
+        const body = (await res.json()) as { items?: PostingReasonCode[] };
         if (res.ok && !cancelled) setReasonCodes(body.items ?? []);
       })
       .catch(() => {});

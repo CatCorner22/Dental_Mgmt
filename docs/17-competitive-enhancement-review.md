@@ -2687,3 +2687,38 @@ And one contingency the *screen* carries: the history is `null` until it loads, 
 
 **The digest.** It counts these acts already, under Increment 1.101's label. A reason is a sentence about one incident, and a weekly figure is not where a sentence belongs.
 
+## Increment 1.103
+
+Increment 1.96 found one figure behind two doors: `GET /api/controls/policy` answered at `user` while `GET /api/controls/risk` needed `manager` for the same dual-release thresholds. **Where one thing has two doors, the looser decides.** A sweep of every route's rank found the same shape again.
+
+`GET /api/reason-codes` opens at `user`, and the route's own comment says why:
+
+> "Anyone who posts needs to read them, because the posting forms are built from them."
+
+True of the code, the kind, the wording, and whether a reason is still offered. **Not true of the other two fields it returned.**
+
+- **`requiresApprovalOverCents`** — the dollar line above which a posting on that reason waits for a second person.
+- **`entries`** — how many ledger entries in the practice cite it.
+
+Neither reaches a form. `reasonOptionsForPosting` and `allReasonOptions`, the only two functions the posting screens build their menus with, read `code`, `kind`, `label` and `active`. **No screen below `manager` has ever read either field**: the threshold surfaces on the reason-codes table, whose acts need `admin`, and on Practice Risk, which needs `manager`.
+
+So every seat that posts held the figure under which a write-off gets no second pair of eyes. That is the one number somebody structuring beneath a control would want, and the product handed it over as a side effect of a payload shape.
+
+## What it does now
+
+`reasonCodesForViewer` decides by rank. `manager` and above read the practice's governance of its own reasons; everybody else reads the list their forms are built from. The narrowing is a type, `PostingReasonCode`, so a screen cannot ask for a field a rank was not given — the compiler produced nine errors the moment it existed, one per place that had been reading a governed field without knowing it.
+
+**The screen stayed open.** A seat below `manager` still reads the reason-codes table: which reasons exist, what they read as, which are retired. It was tempting to refuse the whole screen, which is one line rather than a column-by-column narrowing — but Increment 1.45 put that list there for the person who has to choose among the reasons, and taking the screen away to close a leak in two of its columns would fix the leak by removing something else. The two governed columns are **absent rather than blank**: a blank in a threshold column reads as "no second person needed".
+
+**Red-before, measured.** Without the increment the browser case fails on `expected 3 to be +0` — the "Second person over" column heading, present in each of the three reason groups on the front desk's own screen.
+
+**Tests.** App unit (5): the narrowed row's exact fields; the **dropped-field gate**, which reads both objects and fails the day the difference between them stops being the two fields somebody decided on; `manager` and `admin` receiving the governance; every rank below `manager` receiving the narrower list; and every rank the product has being decided, so a sixth cannot slip through unconsidered. Browser (2 assertions added to the existing case): the front desk's screen carries neither column and neither figure, and the route answers that seat with exactly `active, code, kind, label, reserved` — read from inside the page, so the request carries that seat's own sign-in — while the owner's answer carries all seven.
+
+## Not in Increment 1.103
+
+**Telling the person posting that their entry will wait.** There is a good product argument for it: somebody about to post $600 under a reason that holds at $500 is better off knowing before they press than after. But that is a sentence the posting screen would say about *this* posting, computed where the hold is decided, not a table of every reason's line handed to every seat. It is worth building; it is not what removing a leak looks like.
+
+**A gate over route ranks generally.** `routeRanks.test.ts` pins the one pair Increment 1.96 found, and this increment's gate pins the fields rather than the rank. A rule that every route's rank must match some other route's is not a rule the product has — the ranks differ for reasons, and a check that cannot say which pairs are the same material would fail honest ones.
+
+**The entry count.** It went behind the same door as the threshold, on the weaker argument: a per-reason census of the practice's ledger is not something a seat needs to post, and the two fields travel together in the same payload. If the practice ever wants a posting seat to see how established a reason is, that is a decision to make on its own.
+
