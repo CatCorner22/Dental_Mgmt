@@ -299,6 +299,14 @@ export function DigestView() {
                 ["After-hours holds", state.data.digest.alerts.afterHoursHolds],
                 ["Hard events acknowledged", state.data.digest.alerts.hardEventsAcknowledged],
                 ["Channels attested", state.data.digest.alerts.channelsAttested],
+                // Increment 1.100. The week's reader saw these only inside the
+                // chain total; the "elsewhere" they were held for was the
+                // month-end package, which is a month away.
+                ["Releases recorded on a channel the ledger does not carry", state.data.digest.alerts.releasesAttested],
+                [
+                  "…of those, the ones this practice's policy asked two people for",
+                  state.data.digest.alerts.releasesNeedingSecond,
+                ],
               ])}
               empty="No hard events."
             />

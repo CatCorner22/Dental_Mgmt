@@ -90,7 +90,30 @@ export type WeeklyDigest = {
    * only kind of figure this object may carry, because the month-end package
    * folds the digest in whole and hashes it.
    */
-  alerts: { afterHoursHolds: number; hardEventsAcknowledged: number; channelsAttested: number };
+  alerts: {
+    afterHoursHolds: number;
+    hardEventsAcknowledged: number;
+    channelsAttested: number;
+    /**
+     * Releases the practice recorded on a channel this build cannot enforce,
+     * and how many of them its own policy required a second pair of hands for
+     * (Increment 1.100).
+     *
+     * `control.release_attested` used to sit in `EVENT_KINDS_SHOWN_ELSEWHERE`,
+     * so the week's reader saw it only inside the total on the chain line —
+     * and the "elsewhere" was the month-end package, which until Increment
+     * 1.97 showed a bare count per channel. A release whose policy asked for
+     * two people is a thing about *this week*, and the digest is where a
+     * practice reads its week.
+     *
+     * `needingSecond` counts what the practice still owes evidence for. It is
+     * not a count of failures: the act records one person attesting what the
+     * policy said and cannot record a second person's own act, deliberately.
+     * It matches the package's `requiredSecond` so the two readers agree.
+     */
+    releasesAttested: number;
+    releasesNeedingSecond: number;
+  };
   chain: { events: number; firstSeq: number | null; lastSeq: number | null; acknowledgments: number; otherKinds: CountRow[] };
   /** The sentence that says what these numbers are and are not. */
   scope: string;
@@ -125,10 +148,18 @@ const EVENT_FIELDS: Record<string, string> = {
   "hard_event.acknowledged": "alerts.hardEventsAcknowledged",
   /** Somebody vouched for a channel the product cannot enforce (Increment 1.53). */
   "control.channel_attested": "alerts.channelsAttested",
+  /** Money left by a channel this build cannot enforce (Increment 1.100). */
+  "control.release_attested": "alerts.releasesAttested",
 };
 
 /** Kinds counted from their own tables or from the chain but shown elsewhere; not listed twice. */
-const EVENT_KINDS_SHOWN_ELSEWHERE = new Set(["reconciliation.cleared", "control.decision", "statement.drafted", "deposit.staged_applied", "control.release_attested"]);
+/**
+ * Kinds counted from their own tables or from the chain but shown elsewhere;
+ * not listed twice. `control.release_attested` left this set in Increment
+ * 1.100: it has a field of its own now, so the set is never consulted for it,
+ * and leaving it here would read as a claim that the week hides it.
+ */
+const EVENT_KINDS_SHOWN_ELSEWHERE = new Set(["reconciliation.cleared", "control.decision", "statement.drafted", "deposit.staged_applied"]);
 
 export const EVENT_LABEL: Record<string, string> = {
   "reconciliation.cleared": "Bank run cleared",
@@ -179,7 +210,7 @@ export async function computeDigest(db: AppDb, tenantId: string, period: DigestP
     findings: { opened: [], closed: [], openNow: 0 },
     decisions: { recorded: [], reviews: { keep: 0, tighten: 0, retire: 0 }, overdueNow: 0, snapshotsFrozen: 0 },
     access: { signIns: 0, mfaEnrolled: 0, sessionsRevoked: 0, granted: 0, revoked: 0, policyChanges: 0 },
-    alerts: { afterHoursHolds: 0, hardEventsAcknowledged: 0, channelsAttested: 0 },
+    alerts: { afterHoursHolds: 0, hardEventsAcknowledged: 0, channelsAttested: 0, releasesAttested: 0, releasesNeedingSecond: 0 },
     chain: { events: 0, firstSeq: null, lastSeq: null, acknowledgments: 0, otherKinds: [] },
     scope: SCOPE_SENTENCE,
   };
@@ -305,6 +336,24 @@ export async function computeDigest(db: AppDb, tenantId: string, period: DigestP
     if (field) setPath(digest as unknown as Record<string, unknown>, field, count);
     else if (!EVENT_KINDS_SHOWN_ELSEWHERE.has(e.kind)) digest.chain.otherKinds.push({ key: e.kind, label: eventLabel(e.kind), count });
   }
+
+  /**
+   * How many of the week's attested releases the policy asked two people for
+   * (Increment 1.100). A second query rather than a second group, because the
+   * loop above groups by kind alone and this asks about one kind's payload.
+   * `dualRequired` is a JSON boolean, so it is compared as one.
+   */
+  const [needing] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(domainEvent)
+    .where(
+      and(
+        inWindow(domainEvent, domainEvent.occurredAt),
+        eq(domainEvent.kind, "control.release_attested"),
+        sql`${domainEvent.payload}->'dualRequired' = 'true'::jsonb`
+      )
+    );
+  digest.alerts.releasesNeedingSecond = Number(needing?.n ?? 0);
 
   return digest;
 }

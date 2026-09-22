@@ -4,6 +4,7 @@ import { seedDatabase } from "@pms/db/seed";
 import { DEV_TENANTS, DEV_USERS } from "@pms/db/seed-data";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
 import { attestChannelMonth } from "../controls/attestations";
+import { attestChannelRelease } from "../controls/release";
 import { lastCompleteMonth } from "../controls/attestationCoverage";
 import { computeMonthPackage, packageHash } from "../cpa/package";
 import { computeDigest, digestHash, periodEnding } from "./digest";
@@ -118,4 +119,33 @@ describe.skipIf(!adminUrl)("the digest's attestation count (live)", () => {
 
     expect(packageHash(await tx((d) => computeMonthPackage(d, tenantId, "2020-01")))).toBe(before);
   });
+  /**
+   * Increment 1.100. `control.release_attested` sat in
+   * `EVENT_KINDS_SHOWN_ELSEWHERE`, so the week's reader saw these only inside
+   * the total on the chain line — and the "elsewhere" they were held for was
+   * the month-end package, which until Increment 1.97 showed a bare count per
+   * channel and is in any case a month away.
+   *
+   * `needingSecond` is what the practice still owes evidence for, matching the
+   * package's `requiredSecond` so the two readers cannot disagree.
+   */
+  it("counts the week's releases on a channel the ledger does not carry, and how many needed a second", async () => {
+    const before = await tx((d) => computeDigest(d, tenantId, period));
+
+    const first = await tx((d) =>
+      attestChannelRelease(d, { tenantId, actor: { id: owner.id, name: owner.displayName }, channel: "payroll", amountUsd: 18_000 })
+    );
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.evaluation.dualRequired).toBe(true);
+
+    const after = await tx((d) => computeDigest(d, tenantId, period));
+    expect(after.alerts.releasesAttested).toBe(before.alerts.releasesAttested + 1);
+    expect(after.alerts.releasesNeedingSecond).toBe(before.alerts.releasesNeedingSecond + 1);
+
+    // And it no longer hides among the chain's other kinds, which is where a
+    // reader would look for it and not find it.
+    expect(after.chain.otherKinds.some((k) => k.key === "control.release_attested")).toBe(false);
+  });
+
 });

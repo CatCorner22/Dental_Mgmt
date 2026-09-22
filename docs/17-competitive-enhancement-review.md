@@ -964,6 +964,50 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.100
+
+Increments 1.97 and 1.98 both recorded a debt to the digest, and both described it wrongly.
+
+They said the digest *"labels them all 'Release attested'"*. **It labels them nothing.** `control.release_attested` sat in `EVENT_KINDS_SHOWN_ELSEWHERE`, so the event-counting loop neither set a named field for it nor pushed it to `chain.otherKinds` — the week's reader saw it only inside the total on the chain line, and the `EVENT_LABEL` entry for the kind was unreachable through the only path that uses `eventLabel`.
+
+Four places in `docs/17` said the wrong thing and now say the right one, each with the correction marked.
+
+## "Shown elsewhere" was a promise the elsewhere did not keep
+
+The set's own comment says these kinds are *"counted from their own tables or from the chain but shown elsewhere; not listed twice."* For a release attestation the elsewhere was the **month-end package** — which, until Increment 1.97, showed a bare count per channel, and which is in any case a month away from the week a practice is reading.
+
+So a release that left the practice by a channel this build cannot enforce, in the week just gone, appeared in exactly one figure: the total number of events on the chain.
+
+## What the week now says
+
+`alerts` gains two counts:
+
+- **`releasesAttested`** — releases recorded on a channel the ledger does not carry. `control.release_attested` moves into `EVENT_FIELDS`, which is the same mechanism `control.channel_attested` has used since Increment 1.53, and leaves `EVENT_KINDS_SHOWN_ELSEWHERE` because the set is never consulted for a kind with a field and leaving it there would read as a claim that the week hides it.
+- **`releasesNeedingSecond`** — how many of them this practice's own policy asked two people for. A second query rather than a second group, because the loop above groups by kind alone and this asks about one kind's payload. It matches the package's `requiredSecond` from Increment 1.97, so the week's reader and the month's reader cannot disagree.
+
+Neither is a count of failures, for the reason Increment 1.97 recorded: the act records one person attesting what the policy said and cannot record a second person's own act. It is what the practice still owes evidence for.
+
+## The rule this increment had to obey
+
+`digest.test.ts` asserts the `alerts` block's exact key list, and its comment says why: the digest states its **seven days** and nothing about where the practice stands now, because the month-end package folds the whole digest into its own hash. A standing figure here would move every closed month's hash the moment somebody attested anything, and make a given acknowledgment read as stale.
+
+Both new keys are counts of what happened **in those seven days**. The shape guard is extended, not relaxed, and its comment now says that a standing figure is still forbidden.
+
+## Tests
+
+- **Unit.** The shape guard carries the two new keys and states the rule they obey; the digest and package fixtures carry them.
+- **Live (1).** A payroll release is attested and the week's digest moves by one on both counts, with the kind asserted **absent** from `chain.otherKinds` — the place a reader would look for it and, before this, not find it.
+
+**Red-before, measured.** With `digest.ts` reverted the live case fails on `expected undefined to be NaN`: the fields are not there.
+
+## Not in Increment 1.100
+
+**A digest schema version.** The digest has none — the package carries the version that a digest shape change rides on (Increment 1.43), and Increment 1.97 already moved it to `package-v8` for the figure this increment mirrors. A second bump for the same fact would say the package changed shape twice.
+
+**The other kinds in `EVENT_KINDS_SHOWN_ELSEWHERE`.** `reconciliation.cleared`, `control.decision`, `statement.drafted` and `deposit.staged_applied` each genuinely are shown elsewhere in the digest, from their own tables. Only the release attestation's elsewhere was a month away.
+
+**A day-sheet charge that cannot be imported.** Recorded in Increment 1.95; it wants the question of an unknown procedure code settled first.
+
 ## Increment 1.99
 
 Every increment since 1.88 has carried the same line in its *Not in* paragraph: **the stale comment in `regainAccess.ts`** — "nothing writes `users.role`", which Increment 1.78 made false — *recorded, still not this increment's subject.* Eleven increments. This is its subject.
@@ -1010,7 +1054,7 @@ The *Not in* lines in Increments 1.88 through 1.98 are left exactly as they were
 
 **Any change to the rule itself.** The ceremony still needs two administrators, still offers no exception, and still says so in the words Increment 1.48 fixed for every refusal in this product. This increment changes what the codebase *says about why*, and nothing about what it does.
 
-**The digest's flat "Release attested" label.** Recorded in Increments 1.97 and 1.98, still the smaller separate edit.
+**The digest, which shows a release attestation nowhere by name.** Recorded in Increments 1.97 and 1.98, still the smaller separate edit. *(Corrected in Increment 1.100: those records called it a flat label, and there was no label.)*
 
 **A day-sheet charge that cannot be imported.** Recorded in Increment 1.95; it wants the question of an unknown procedure code settled first.
 
@@ -1061,7 +1105,7 @@ Nothing 1.97 built is wrong — the figure, the schema bump and the live asserti
 
 **A list of what has been attested.** The screen records and says what the policy asked; the month-end package is where the month's attestations are read, and the digest counts the week's. A third list would be a third place to disagree.
 
-**The digest's flat label.** It still reads *"Release attested"* for every one. Recorded in Increment 1.97 and still the smaller, separate edit.
+**The digest.** It shows a release attestation nowhere by name. Recorded in Increment 1.97 and still the smaller, separate edit. *(Corrected in Increment 1.100: "flat label" described a label the digest never applied.)*
 
 **The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
 
@@ -1069,7 +1113,7 @@ Nothing 1.97 built is wrong — the figure, the schema bump and the live asserti
 
 `attestChannelRelease` has recorded `dualRequired` on every per-release attestation since Increment 1.12. **Nothing read it.**
 
-The month-end package counted attested releases per channel — `{ channel, count }` — so a release the policy said needed two people and one it did not read exactly alike. The digest labels them all *"Release attested"*. An accountant reading the month saw a number and no way to tell which of it the practice still owed evidence for.
+The month-end package counted attested releases per channel — `{ channel, count }` — so a release the policy said needed two people and one it did not read exactly alike. The digest showed them nowhere by name. *(Corrected in Increment 1.100: this first read "The digest labels them all \"Release attested\"", which is false — `control.release_attested` sat in `EVENT_KINDS_SHOWN_ELSEWHERE`, so it was counted only inside the chain total and never labelled. The `EVENT_LABEL` entry for it was unreachable.)* An accountant reading the month saw a number and no way to tell which of it the practice still owed evidence for.
 
 ## What it is, and what it is not
 
@@ -1108,7 +1152,7 @@ The figure separates them in a practice that sets a threshold. Here it reports t
 
 **Recording the second person's act.** It would need the second person's own sign-in and their own press, which is the shape of the recovery ceremony rather than of an attestation. Worth building; not worth faking.
 
-**The digest.** It still labels every one *"Release attested"*. The package is where an accountant reads the month, so that is where the figure went first; the digest is a smaller, separate edit.
+**The digest.** It shows them nowhere by name. The package is where an accountant reads the month, so that is where the figure went first; the digest is a smaller, separate edit. *(Corrected in Increment 1.100: this first said the digest "still labels every one", which it never did.)*
 
 **The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
 
