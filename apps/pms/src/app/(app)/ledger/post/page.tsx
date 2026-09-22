@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { formatCents, formatLedgerKind } from "@/lib/ledger/format";
 import { reasonOptionsForPosting, type ReasonCodeRow } from "@/lib/ledger/reasons";
+import { DEMO_EFFECTIVE_DATE } from "@/lib/demo/dates";
 
 import {
   POSTABLE_KINDS,
@@ -37,7 +38,7 @@ type Outcome =
   | { type: "needs_second"; approvalRequestId: string; why: string }
   | { type: "refused"; why: string; verb?: string };
 
-const DEMO_DATE = "2026-09-19";
+const DEMO_DATE = DEMO_EFFECTIVE_DATE;
 
 export default function LedgerPostPage() {
   const [accounts, setAccounts] = useState<LedgerAccountSummary[]>([]);

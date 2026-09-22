@@ -1,5 +1,5 @@
 import type { Queryable } from "./migrate";
-import { SEED_LEDGER } from "./seed-data";
+import { SEED_LEDGER, SEED_STORY_WEEK } from "./seed-data";
 
 /**
  * Issued Jane Doe statement for Ridgeview. Totals match the demo ledger
@@ -8,7 +8,7 @@ import { SEED_LEDGER } from "./seed-data";
 export async function seedStatementsDemo(db: Queryable, now: Date): Promise<void> {
   const snapshot = {
     displayName: "Jane Doe",
-    asOf: "2026-09-21",
+    asOf: SEED_STORY_WEEK.issued,
     patients: [
       {
         patientId: SEED_LEDGER.patientJaneId,
@@ -26,7 +26,7 @@ export async function seedStatementsDemo(db: Queryable, now: Date): Promise<void
         patientId: SEED_LEDGER.patientJaneId,
         kind: "charge",
         amountCents: 24500,
-        effectiveDate: "2026-09-19",
+        effectiveDate: SEED_STORY_WEEK.effective,
         postedAt: now.toISOString(),
         reasonCode: null,
         reasonLabel: null,
@@ -38,7 +38,7 @@ export async function seedStatementsDemo(db: Queryable, now: Date): Promise<void
         patientId: SEED_LEDGER.patientJaneId,
         kind: "patient_payment",
         amountCents: -10000,
-        effectiveDate: "2026-09-19",
+        effectiveDate: SEED_STORY_WEEK.effective,
         postedAt: now.toISOString(),
         reasonCode: null,
         reasonLabel: null,
@@ -59,7 +59,7 @@ export async function seedStatementsDemo(db: Queryable, now: Date): Promise<void
        patient_due_cents, insurance_pending_cents, credit_cents,
        snapshot, issued_at, issued_by_id, issued_by_name, created_at
      ) VALUES (
-       $1, $2, $3, $4, '2026-09-21', 'issued',
+       $1, $2, $3, $4, $8, 'issued',
        4500, 10000, 0, $5::jsonb, $6, $7, 'Riley Owner', $6
      )
      ON CONFLICT (id) DO NOTHING`,
@@ -71,6 +71,7 @@ export async function seedStatementsDemo(db: Queryable, now: Date): Promise<void
       JSON.stringify(snapshot),
       now,
       SEED_LEDGER.ownerId,
+      SEED_STORY_WEEK.issued,
     ]
   );
 }

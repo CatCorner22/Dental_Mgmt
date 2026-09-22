@@ -1,5 +1,5 @@
 import type { Queryable } from "./migrate";
-import { SEED_APPROVAL, SEED_LEDGER } from "./seed-data";
+import { SEED_APPROVAL, SEED_LEDGER, SEED_STORY_WEEK } from "./seed-data";
 
 /** Pending dual-release request for the approvals inbox demo. */
 export async function seedApprovalsDemo(db: Queryable, now: Date): Promise<void> {
@@ -13,7 +13,7 @@ export async function seedApprovalsDemo(db: Queryable, now: Date): Promise<void>
     glBucket: "patient_ar",
     amountCents: -7500,
     reasonCode: "courtesy",
-    effectiveDate: "2026-09-19",
+    effectiveDate: SEED_STORY_WEEK.effective,
     createdById: frontDeskId,
     createdByName: "Finn Front",
     memo: "Courtesy adjustment — demo inbox item",

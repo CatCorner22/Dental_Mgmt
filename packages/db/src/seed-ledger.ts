@@ -1,36 +1,15 @@
 import type { Queryable } from "./migrate";
-import { SEED_LEDGER } from "./seed-data";
+import { SEED_LEDGER, SEED_STORY_WEEK } from "./seed-data";
 
 /**
  * Idempotent demo ledger for Ridgeview: dual-coverage-style charge with partial
  * patient payment so the three labeled balance numbers are non-zero in the UI.
  */
 /**
- * THE SEED'S STORY WEEK IS A LITERAL, AND IT EXPIRES ON 2026-09-27.
- *
- * These rows carry `effective_date` as a written date while `posted_at` is the
- * moment the seed runs, so the gap between them belongs to the wall clock and
- * not to the fixture. `BACKDATE_DAYS = 7` in
- * `apps/pms/src/lib/controls/detectors.ts`, read by `alerts/hardEvents.ts`,
- * raises a `retroactive_entry` once that gap passes seven days — and the owner
- * board and weekly digest cases assert that ordinary seeded rows raise no such
- * thing. On 2026-09-22 the old week (2026-09-14) went eight days stale and
- * turned `main` red.
- *
- * Increment 1.84 moved it to 2026-09-19, five days rather than the six that
- * would have been possible, for a reason worth recording: the money-desk suite
- * imports its deposits at `daysAgo(2)`, so a week anchored on 2026-09-20 would
- * have collided with them on 2026-09-22 and put four rows on a day close that
- * expects two. Five days clears that collision for every day this week survives.
- *
- * The arithmetic is unforgiving. `today - effective` must stay at or under
- * seven, and an effective date may not run ahead of the clock, so **any written
- * date buys at most seven days**. This one buys five, and fails again on
- * 2026-09-27.
- *
- * Moving it again is a stopgap, chosen deliberately over anchoring these dates
- * to the seed run — which would end the drift for good and move every assertion
- * that quotes them. When this next fails, that is the decision waiting.
+ * The rows below are effective on `SEED_STORY_WEEK.effective`, a written date
+ * that expires: see the note on that constant in `seed-data.ts` for the
+ * arithmetic, and `apps/pms/src/lib/controls/seedWindow.ts` for the gate that
+ * says so on the day it does.
  */
 export async function seedLedgerDemo(db: Queryable, now: Date = new Date()): Promise<void> {
   const {
@@ -110,11 +89,11 @@ export async function seedLedgerDemo(db: Queryable, now: Date = new Date()): Pro
        effective_date, posted_at, created_by_id, created_by_name, procedure_id,
        insurance_expected_cents, idempotency_key, created_at
      ) VALUES
-       ($1, $2, $3, $4, $5, 'charge', 'patient_ar', 24500, '2026-09-19', $6, $7, 'Finn Front',
+       ($1, $2, $3, $4, $5, 'charge', 'patient_ar', 24500, $14, $6, $7, 'Finn Front',
         $8, 10000, 'seed-charge-jane', $6),
-       ($9, $2, $10, $11, $5, 'charge', 'patient_ar', 8900, '2026-09-19', $6, $7, 'Finn Front',
+       ($9, $2, $10, $11, $5, 'charge', 'patient_ar', 8900, $14, $6, $7, 'Finn Front',
         $12, NULL, 'seed-charge-john', $6),
-       ($13, $2, $3, $4, $5, 'patient_payment', 'patient_ar', -10000, '2026-09-19', $6, $7,
+       ($13, $2, $3, $4, $5, 'patient_payment', 'patient_ar', -10000, $14, $6, $7,
         'Finn Front', NULL, NULL, 'seed-pay-jane', $6)
      ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`,
     [
@@ -131,6 +110,7 @@ export async function seedLedgerDemo(db: Queryable, now: Date = new Date()): Pro
       patientJohnId,
       procedureJohnId,
       paymentJaneId,
+      SEED_STORY_WEEK.effective,
     ]
   );
 

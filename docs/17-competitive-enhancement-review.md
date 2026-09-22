@@ -964,6 +964,50 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.85
+
+Increment 1.84 wrote the expiry date into a comment. This increment gives that sentence a reader.
+
+The fixture that expires is now one constant. `SEED_STORY_WEEK` in `packages/db/src/seed-data.ts` holds `effective` (2026-09-19) and `issued` (2026-09-21), and the four seed modules, the three demonstration defaults and the seven money-desk assertions all read it rather than repeating it. Moving the week is one edit where it was eight, and the arithmetic note moved with the value — it sits on the constant now rather than in `seed-ledger.ts`, which keeps a four-line pointer to it. Increment 1.84's record says that note is in `seed-ledger.ts`; it was, for one increment.
+
+**The gate now fails by name.** `apps/pms/src/lib/controls/seedWindow.ts` holds the three rules as one function, and `seedWindow.test.ts` runs it against the real clock. On 2026-09-27 the suite will say this, before the owner-board cases reach their assertions:
+
+```
+The seed's story week expired on 2026-09-27.
+
+SEED_STORY_WEEK.effective is 2026-09-19 and today is 2026-09-27, which is
+8 days. BACKDATE_DAYS is 7, so every seeded ledger row now raises a
+`retroactive_entry`, and the owner board and weekly digest cases that assert
+those rows raise nothing will fail too. This case fails first so that the
+reason is not left to be inferred from them.
+
+Two ways forward, as Increment 1.84 recorded:
+  1. Anchor the seeded dates to the seed run. This ends the drift for good and
+     moves every assertion that quotes them.
+  2. Move SEED_STORY_WEEK forward in packages/db/src/seed-data.ts. An effective
+     date may not run ahead of today and may not sit more than 7 days back, so
+     any written date buys at most seven days; it also may not sit exactly
+     2 days back, which is the day the money-desk suite banks its deposits.
+```
+
+## The third rule, which cost a run to find
+
+`readSeedWindow` refuses three states, not one, and the third is the one worth recording. A week is wrong when it runs **ahead of the clock**, because no posted row may be effective on a day that has not happened. It is wrong when it sits **more than `BACKDATE_DAYS` back**, which is the expiry. And it is wrong when it sits **exactly two days back**, because that is the offset `money-desk.e2e.test.ts` banks its deposits at: the seeded day close already holds two, so the sealed day holds four and every case that pins the count fails.
+
+That third rule is not a deduction. Increment 1.84 hit it on its first attempt, at a week six days back, and read it off four failures. `DEPOSIT_DAYS_AGO` now lives beside the other two rules and the money-desk suite imports it, so the guard follows the suite rather than quoting a number at it.
+
+The collision is a single day, and it moves. Whoever next picks a date will reach for the maximum the arithmetic allows — today's date, seven days of life — and the collision will land two days later, on a day nothing else explains. The guard names it on the day it lands.
+
+## What the guard does not do
+
+It does not stop the owner-board cases going red on 2026-09-27; nothing short of moving the date or anchoring it does that. It fails alongside them, with the sentence. The value is the sentence, and the measure of it is what 1.84 cost: a morning spent reading two board assertions about retroactive entries to arrive at a constant neither of them names.
+
+The three demonstration defaults are checked rather than shared. `apps/pms/src/lib/demo/dates.ts` holds the days the day-close, ledger-posting and statement forms offer, and `seedWindow.test.ts` asserts both against `SEED_STORY_WEEK`. They are not read from `@pms/db/seed-data` directly because that module also carries `DEV_PASSWORD` and `DEV_MFA_SECRET`, and a client component that imports it puts both inside the bundler's reach — not a thing to depend on tree-shaking for, when an asserted copy costs two lines.
+
+## Not in Increment 1.85
+
+Anchoring the seeded dates to the seed run, which remains option 1 and remains the durable answer whenever it is wanted. This increment makes that decision cheaper to take and impossible to miss; it does not take it. Nothing here changes `BACKDATE_DAYS`, the detector that reads it, or what a real practice sees — no screen imports `seedWindow.ts`. Nothing here moves the week again: it still expires on 2026-09-27, and five days of it remain.
+
 ## Increment 1.84
 
 On 2026-09-22 the repository's own test suite began failing, on `main`, for nobody's change. Two money-desk cases went red:

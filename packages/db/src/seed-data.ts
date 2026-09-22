@@ -41,6 +41,48 @@ export const SEED_LEDGER = {
   statementJaneId: "0196b0a0-0000-7000-8000-000000000701",
 } as const;
 
+/**
+ * THE SEED'S STORY WEEK, AND THE DAY IT EXPIRES.
+ *
+ * The demo rows carry `effective_date` as a written date while `posted_at` is
+ * the moment the seed runs, so the gap between them belongs to the wall clock
+ * and not to the fixture. `BACKDATE_DAYS = 7` in
+ * `apps/pms/src/lib/controls/detectors.ts`, read by `alerts/hardEvents.ts`,
+ * raises a `retroactive_entry` once that gap passes seven days — and the owner
+ * board and weekly digest cases assert that ordinary seeded rows raise no such
+ * thing. On 2026-09-22 the old week (2026-09-14) went eight days stale and
+ * turned `main` red.
+ *
+ * Increment 1.84 moved it to 2026-09-19, five days rather than the six that
+ * would have been possible, for a reason worth recording: the money-desk suite
+ * imports its deposits at `daysAgo(2)`, so a week anchored on 2026-09-20 would
+ * have collided with them on 2026-09-22 and put four rows on a day close that
+ * expects two. Five days clears that collision for every day this week survives.
+ *
+ * The arithmetic is unforgiving. `today - effective` must stay at or under
+ * seven, and an effective date may not run ahead of the clock, so **any written
+ * date buys at most seven days**. This one buys five, and fails again on
+ * 2026-09-27.
+ *
+ * Increment 1.85 gave that sentence a reader, and moved it here from
+ * `seed-ledger.ts` because the value moved here first.
+ * `apps/pms/src/lib/controls/seedWindow.ts` holds the three rules above as one
+ * function and `seedWindow.test.ts` runs it against the real clock, so on the
+ * day this expires the gate names the constant, the arithmetic and the two ways
+ * forward — rather than leaving them to be inferred from two board assertions
+ * about retroactive entries.
+ *
+ * Moving it again is a stopgap, chosen deliberately over anchoring these dates
+ * to the seed run — which would end the drift for good and move every assertion
+ * that quotes them. When this next fails, that is the decision waiting.
+ */
+export const SEED_STORY_WEEK = {
+  /** The day the demo ledger, day close, approval and statement lines are effective. */
+  effective: "2026-09-19",
+  /** The day the demo statement is as-of and was issued. It may not precede the week or run ahead of the clock. */
+  issued: "2026-09-21",
+} as const;
+
 export const DEV_LOCATIONS = [
   {
     id: "0196b0a0-0000-7000-8000-000000000101",
