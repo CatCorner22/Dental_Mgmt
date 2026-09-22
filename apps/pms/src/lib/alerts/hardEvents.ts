@@ -63,6 +63,12 @@ export type HardEvent = {
   subjectId: string;
   sentence: string;
   href: string | null;
+  /**
+   * The person the event is about, when the board can offer an act against
+   * them (Increment 1.88). Only `new_device_financial_role` carries one: its
+   * subject is the session, and ending a person's sign-ins needs the person.
+   */
+  personId?: string;
 };
 
 /**
@@ -302,7 +308,14 @@ export async function listHardEvents(db: AppDb, tenantId: string, opts: { since:
         subjectKind: "session",
         subjectId: s.id,
         sentence: `A holder of ${duties.join(" and ")} signed in from a browser not seen before for that account, at ${s.createdAt.toISOString().replace("T", " ").slice(0, 16)} UTC.`,
-        href: "/risk",
+        /**
+         * No link (Increment 1.88). This pointed at Practice Risk, which
+         * renders no hard events and carried nothing to do about this one — a
+         * link out of the board and away from the alarm. The act now sits
+         * beside the alarm instead, so there is nowhere else to send anybody.
+         */
+        href: null,
+        personId: s.userId,
       });
     }
   }

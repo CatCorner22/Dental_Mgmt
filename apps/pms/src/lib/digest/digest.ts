@@ -114,6 +114,8 @@ const EVENT_FIELDS: Record<string, string> = {
   "auth.signin": "access.signIns",
   "auth.mfa_enrolled": "access.mfaEnrolled",
   "auth.sessions_revoked_all": "access.sessionsRevoked",
+  /** One person's sessions, ended from the owner's board (Increment 1.88). Counted beside the tenant-wide act. */
+  "auth.sessions_ended": "access.sessionsRevoked",
   "role.granted": "access.granted",
   "role.revoked": "access.revoked",
   "control.policy_changed": "access.policyChanges",
@@ -139,6 +141,7 @@ export const EVENT_LABEL: Record<string, string> = {
   "gl_mapping.proposed": "GL mapping proposed",
   "gl_mapping.decided": "GL mapping decided",
   "month.closed": "Month closed for the accountant",
+  "auth.sessions_ended": "Sessions ended for one person",
 };
 
 export function eventLabel(kind: string): string {
