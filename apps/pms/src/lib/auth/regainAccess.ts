@@ -30,11 +30,31 @@ import { meetsRole, type Role } from "./roles";
  *
  * Nor does a weaker rule work. "One administrator may bring back somebody who
  * ranks below them" sounds safe on the reasoning that an administrator already
- * holds power over that account — but they do not. Today the only route an
- * administrator has against another account revokes its sessions
- * (`api/admin/revoke-all-sessions`); nothing deactivates a user, nothing sets
- * another person's password, and nothing writes `users.role`. Entering a
- * clinician's account would be a new power, not an existing one.
+ * holds power over that account. They do hold some, and more than they did:
+ * one administrator, alone, can end that person's sign-ins (Increment 1.90),
+ * stand them down and take their grants with them (Increment 1.79), and change
+ * their rank (Increment 1.78).
+ *
+ * Every one of those acts takes something away. **None of them is becoming
+ * that person**, and that is the power this rule withholds — posting as them,
+ * approving as them, being both halves of every maker-checker rule this
+ * product has.
+ *
+ * Becoming them needs their password, and **the only thing in this codebase
+ * that sets another person's password is the recovery ceremony itself**, which
+ * needs two administrators. (`claimSeat` sets a password too, and it is the
+ * claimant setting their own, from a link only they hold.) So the rule rests
+ * on one premise rather than three, and that premise is the one still true:
+ * `regainAccess.test.ts` reads the source and fails if a second caller of
+ * `setPassword` appears, because a one-administrator password reset anywhere
+ * would make this whole argument false.
+ *
+ * This paragraph is rewritten in Increment 1.99. It used to say that nothing
+ * deactivates a user and nothing writes `users.role` — both true when it was
+ * written and both made false by Increments 1.79 and 1.78. An argument for a
+ * security rule that rests on lapsed facts invites the next reader to conclude
+ * the rule is unfounded, which is a worse failure than the rule being
+ * inconvenient.
  *
  * So a practice with one administrator cannot do this, and the honest thing is
  * to say so and name what would change it. User administration — the root

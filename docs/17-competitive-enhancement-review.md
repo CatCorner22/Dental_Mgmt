@@ -910,7 +910,7 @@ The product already held the answer to that, and had held it since Increment 0.6
 - **The ceremony gets its screens.** Practice Risk gains "Getting somebody back in": a manager reads it and an administrator acts on it, which is the split the rest of that page holds. `GET /api/recovery-ceremony` answers what this practice can do; the approver receives one link, once, and this product keeps only a SHA-256 of it. `/regain/[ref]` is the third page outside a session, and borrows the shape Increments 1.67 and 1.71 settled: it reads and does not act, it answers a link that ran out and a link that was never ours in the same words, and it offers nothing else.
 - **`POST /api/recovery-ceremony/reset` is deleted.** It had no caller, it duplicated the new server action, and it was the one route under `/api` that did not pass through `withGuard`. Its entry in `check-route-guards.mjs` goes with it, leaving that allowlist holding only the two transport exemptions — so the invariant is restored rather than merely tidied.
 
-**Two administrators, and no exception.** Increment 1.75 met the same shape and answered it with a governed exception; this one gets none, and the refusal says so out loud so that a practice which has met the GL mapping exception is not left expecting one. The GL mapping control protects a figure. This one protects every account in the practice: one administrator who can clear somebody's second factor and set their password can post as them and approve as them, which is the whole of what maker-checker prevents. Nor does a weaker rule work — "one administrator may bring back somebody ranked below them" rests on the claim that an administrator already holds power over that account, and they do not. The only route an administrator has against another account revokes its sessions; nothing deactivates a user, nothing sets another person's password, and nothing writes `users.role`.
+**Two administrators, and no exception.** Increment 1.75 met the same shape and answered it with a governed exception; this one gets none, and the refusal says so out loud so that a practice which has met the GL mapping exception is not left expecting one. The GL mapping control protects a figure. This one protects every account in the practice: one administrator who can clear somebody's second factor and set their password can post as them and approve as them, which is the whole of what maker-checker prevents. Nor does a weaker rule work — "one administrator may bring back somebody ranked below them" rests on the claim that an administrator already holds power over that account. *(Corrected in Increment 1.99: when this was written the only such route revoked sessions, and nothing deactivated a user or wrote `users.role`. Increments 1.78, 1.79 and 1.90 made all three false — one administrator can now change a rank, stand somebody down and end their sign-ins. Every one of those takes something away; none is **becoming** that person, which is what the rule withholds. Becoming them needs their password, and the only thing that sets another person's password is the recovery ceremony itself, which needs two administrators. The rule rests on that one premise now, and a test reads the source to keep it true.)*
 
 So a practice with one administrator cannot do this, and the honest thing is to refuse before a ceremony exists — `approveRecoveryCeremony` has always refused the initiator, so without that check a single-administrator practice would open ceremonies nobody alive could approve. **User administration, the root cause Increment 1.75 also named, now blocks two controls rather than one.**
 
@@ -963,6 +963,56 @@ The browser case also caught a defect in its own first draft: it matched the row
 
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
+
+## Increment 1.99
+
+Every increment since 1.88 has carried the same line in its *Not in* paragraph: **the stale comment in `regainAccess.ts`** — "nothing writes `users.role`", which Increment 1.78 made false — *recorded, still not this increment's subject.* Eleven increments. This is its subject.
+
+And reading it properly showed it was never only a comment.
+
+## It is the argument for a security rule, and two of its three premises had lapsed
+
+`regainAccess.ts` explains why the two-administrator recovery ceremony gets **no governed exception**, where Increment 1.75's GL-mapping control got one. The paragraph then answers the obvious weaker rule — *"one administrator may bring back somebody who ranks below them"* — by arguing that an administrator does **not** already hold power over that account, and resting that on three facts:
+
+| Claim | Then | Now |
+|---|---|---|
+| "nothing deactivates a user" | true | **false** — Increment 1.79 built `setPersonActive`, with a screen |
+| "nothing sets another person's password" | true | **true**, and verified here |
+| "nothing writes `users.role`" | true | **false** — Increment 1.78 built rank administration |
+
+An argument for a security rule resting on lapsed facts is worse than an inconvenient rule: it invites the next reader to check the premises, find two of them false, and conclude the rule is unfounded.
+
+## The conclusion stands, and is better supported than it was
+
+One administrator, alone, **can** now end another person's sign-ins (Increment 1.90), stand them down and take their grants with them (Increment 1.79), and change their rank (Increment 1.78).
+
+Every one of those acts **takes something away**. None of them is *becoming* that person — posting as them, approving as them, being both halves of every maker-checker rule this product has. That is the power the rule withholds, and it is untouched by any of the three.
+
+Becoming them needs their password. **The only thing in this codebase that sets another person's password is the recovery ceremony itself**, which needs two administrators. `claimSeat` writes a password too, and it is the claimant setting their own from a link only they hold.
+
+So the rule now rests on one premise instead of three, and that premise is the one still true.
+
+## A test keeps it true
+
+`regainAccess.test.ts` reads every `.ts`/`.tsx` file under `apps/pms/src`, excluding tests, for callers of `.setPassword(` — and asserts the list is exactly `["lib/auth/recoveryCeremony.ts"]`. A second caller anywhere makes the whole argument false, so the test fails by path and name rather than letting a comment quietly stop being true again.
+
+A second case names `claimSeat`'s direct write of `password_hash`, so the omission from the first list reads as known rather than missed.
+
+**Red-before, measured.** With one probe call to `store.setPassword` added to an unrelated module, the test fails: *expected `['lib/auth/endSessions.ts', …(1)]` to deeply equal `['lib/auth/recoveryCeremony.ts']`*.
+
+## The same argument in docs/17
+
+Increment 1.77's record repeats the three-premise version. It is corrected in place, with the correction marked, rather than rewritten as though it had always said the true thing.
+
+The *Not in* lines in Increments 1.88 through 1.98 are left exactly as they were. Each was true when written, and a record of what an increment deliberately left undone is worth more intact than tidied.
+
+## Not in Increment 1.99
+
+**Any change to the rule itself.** The ceremony still needs two administrators, still offers no exception, and still says so in the words Increment 1.48 fixed for every refusal in this product. This increment changes what the codebase *says about why*, and nothing about what it does.
+
+**The digest's flat "Release attested" label.** Recorded in Increments 1.97 and 1.98, still the smaller separate edit.
+
+**A day-sheet charge that cannot be imported.** Recorded in Increment 1.95; it wants the question of an unknown procedure code settled first.
 
 ## Increment 1.98
 
