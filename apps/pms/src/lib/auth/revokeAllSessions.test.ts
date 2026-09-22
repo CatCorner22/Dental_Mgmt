@@ -1,44 +1,75 @@
-import { describe, expect, it } from "vitest";
-import { createMemoryStore } from "./memoryStore";
-import { revokeAllSessionsForTenant } from "./revokeAllSessions";
-import { DEV_USERS } from "./devSeed";
+import { describe, expect, it, vi } from "vitest";
+import {
+  everybodySignedOutSentence,
+  revokeAllSessionsForTenant,
+  revokeReasonProblem,
+} from "./revokeAllSessions";
+import type { AuthStore } from "./store";
 
-const now = new Date("2026-09-15T12:00:00.000Z");
+const AT = new Date("2026-09-22T13:00:00.000Z");
+
+describe("revokeReasonProblem", () => {
+  it("accepts a sentence", () => {
+    expect(revokeReasonProblem("Lost phone reported by the front desk")).toBeNull();
+  });
+
+  /** The same floor a hard-event acknowledgement uses: a sentence, not a keystroke. */
+  it("refuses anything under ten characters, trimmed", () => {
+    expect(revokeReasonProblem("lost")).toContain("at least ten characters");
+    expect(revokeReasonProblem("         ")).toContain("at least ten characters");
+    expect(revokeReasonProblem("  lost it  ")).toContain("at least ten characters");
+  });
+
+  it("accepts exactly ten", () => {
+    expect(revokeReasonProblem("0123456789")).toBeNull();
+  });
+
+  it("refuses an essay", () => {
+    expect(revokeReasonProblem("x".repeat(201))).toContain("under two hundred characters");
+    expect(revokeReasonProblem("x".repeat(200))).toBeNull();
+  });
+});
+
+describe("everybodySignedOutSentence", () => {
+  /** The administrator's own sign-in is one of the ones that ended; the sentence says so. */
+  it("says the reader's own sign-in ended too", () => {
+    expect(everybodySignedOutSentence(4)).toContain("including your own");
+    expect(everybodySignedOutSentence(4)).toContain("Ended 4 sign-ins");
+  });
+
+  it("counts one in the singular", () => {
+    expect(everybodySignedOutSentence(1)).toContain("Ended 1 sign-in across");
+  });
+
+  it("says plainly when nobody was signed in", () => {
+    const said = everybodySignedOutSentence(0);
+    expect(said).toContain("Nobody was signed in");
+    expect(said).not.toContain("Ended 0");
+  });
+});
 
 describe("revokeAllSessionsForTenant", () => {
-  it("revokes every live session and appends an audit event", async () => {
-    const store = await createMemoryStore({ now });
-    const owner = DEV_USERS[0];
-    await store.createSession({
-      tenantId: owner.tenantId,
-      userId: owner.id,
-      deviceProfile: "desk",
-      userAgent: "test",
-      now,
-    });
-    // Named rather than indexed: the seed gains users, and what this case
-    // needs is a session in a different tenant, not the fourth row.
-    const otherTenant = DEV_USERS.find((u) => u.tenantId !== owner.tenantId)!;
-    await store.createSession({
-      tenantId: otherTenant.tenantId,
-      userId: otherTenant.id,
-      deviceProfile: "desk",
-      userAgent: "test",
-      now,
-    });
+  it("records the reason the administrator typed, not a constant", async () => {
+    const appendDomainEvent = vi.fn(async () => {});
+    const store = {
+      revokeSessionsForTenant: async () => 3,
+      appendDomainEvent,
+    } as unknown as AuthStore;
 
     const result = await revokeAllSessionsForTenant(store, {
-      tenantId: owner.tenantId,
-      actorUserId: owner.id,
-      reason: "incident_response",
-      at: now,
+      tenantId: "tenant-a",
+      actorUserId: "user-1",
+      reason: "Lost phone reported by the front desk",
+      at: AT,
     });
-    expect(result.revoked).toBe(1);
-    expect(store.events).toEqual([
-      {
-        kind: "auth.sessions_revoked_all",
-        payload: { reason: "incident_response", revoked: 1 },
-      },
-    ]);
+
+    expect(result).toEqual({ revoked: 3 });
+    expect(appendDomainEvent).toHaveBeenCalledWith({
+      tenantId: "tenant-a",
+      actorUserId: "user-1",
+      kind: "auth.sessions_revoked_all",
+      payload: { reason: "Lost phone reported by the front desk", revoked: 3 },
+      at: AT,
+    });
   });
 });

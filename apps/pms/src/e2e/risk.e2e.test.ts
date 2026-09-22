@@ -1030,6 +1030,49 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     );
   }, 120_000);
 
+  /**
+   * Increment 1.90. The route has existed since Increment 0.8 and no screen
+   * ever called it. This drives the whole act, including the half that makes
+   * it different from Increment 1.88's: the administrator pressing it signs
+   * themselves out, and the panel says so rather than leaving it to be met.
+   *
+   * Placement: before the case that pairs a new authenticator for the owner,
+   * which leaves `DEV_MFA_SECRET` no longer that account's secret — the trap
+   * Increment 1.89 recorded, and walked into again while writing this. Ending
+   * every session is safe for the cases that follow, because each signs in for
+   * itself.
+   */
+  it("ends every sign-in in the practice, including the administrator's own", async () => {
+    await b.signIn("ridgeview-owner", "/risk");
+    await page().getByRole("heading", { name: "End every sign-in in the practice" }).waitFor({ timeout: 60_000 });
+
+    const press = page().getByRole("button", { name: "End every sign-in" });
+    // A reason is the guard: the act cannot be pressed without one.
+    expect(await press.isDisabled()).toBe(true);
+
+    await page().fill('input[name="revoke-reason"]', "Lost phone reported by the front desk");
+    expect(await press.isDisabled()).toBe(false);
+    await press.click();
+
+    await page().getByText(/including your own/).waitFor({ timeout: 30_000 });
+    await page().getByRole("link", { name: "Sign in again" }).waitFor({ timeout: 10_000 });
+
+    const { rows } = await app.db.admin.query(
+      "SELECT count(*)::int AS live FROM sessions WHERE tenant_id = $1 AND revoked_at IS NULL",
+      [DEV_TENANTS[0]!.id]
+    );
+    expect(rows[0].live).toBe(0);
+
+    // The reason is on the chain, not a constant.
+    const { rows: events } = await app.db.admin.query(
+      "SELECT payload->>'reason' AS why FROM domain_event WHERE tenant_id = $1 AND kind = 'auth.sessions_revoked_all'",
+      [DEV_TENANTS[0]!.id]
+    );
+    expect(events).toEqual([{ why: "Lost phone reported by the front desk" }]);
+
+    await b.audit("practice risk, every sign-in ended");
+  }, 120_000);
+
   it("lets an enrolled person pair a new authenticator, and signs them in on it", async () => {
     // Increment 1.76. A second factor was a one-way door: `mfa_enrolled_at` is
     // written once and cleared nowhere, both enrolment functions refused an
