@@ -1,7 +1,7 @@
 "use client";
 
 import { SessionEnded, loadFailure } from "../session-ended";
-import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useEffect, useState } from "react";
 import { formatCents, formatLedgerKind } from "@/lib/ledger/format";
 
@@ -86,6 +86,11 @@ export default function ApprovalsPage() {
       setMessage(`Request ${decision}.`);
       setDeclineReason("");
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "Decision failed.");
     } finally {
       setBusyId(null);

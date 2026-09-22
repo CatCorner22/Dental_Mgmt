@@ -1,6 +1,6 @@
 "use client";
 
-import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
 import { readViewer } from "@/lib/auth/viewer";
@@ -101,6 +101,11 @@ export function ReasonCodesView() {
       setDraft({ code: "", kind: "write_off", label: "" });
       setReload((n) => n + 1);
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setNotice(err instanceof Error ? err.message : `${label} failed.`);
     } finally {
       setBusy(null);

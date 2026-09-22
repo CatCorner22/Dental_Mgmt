@@ -1353,4 +1353,63 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().click('button[type="submit"]');
     await page().waitForURL((url) => url.pathname === "/approvals", { timeout: 60_000 });
   }, 150_000);
+  it("says the same thing when the sign-in ends under a button rather than under a load", async () => {
+    /**
+     * Increment 1.83. Increments 1.81 and 1.82 gave every screen one answer for
+     * a sign-in that has ended, on the way in. Pressing a button was still the
+     * old shape: the act's `catch` wrote `err.message` into the screen's
+     * message line, so a 401 mid-press produced one sentence and nothing to
+     * press.
+     *
+     * Increment 1.82 also changed which sentence, and this case pins the
+     * outcome rather than the history: before it, the line read
+     * `requireAccess`'s own words — "This session timed out. Sign in again." —
+     * and after it, the words of the error class 1.82 introduced. Both were
+     * link-less, and the second had lost the one instruction the first
+     * carried.
+     *
+     * The half-finished edit goes with the screen, deliberately. The session
+     * is gone, so nothing on it can succeed; and the typing could not survive
+     * the sign-in either way, which is a thing Increment 1.82 put out of scope
+     * on its own merits. Offering the way back beats keeping a form that
+     * cannot be submitted.
+     */
+    await b.signIn("ridgeview-owner", "/locations");
+    const main = page().locator("section", { has: page().getByRole("heading", { name: "Main", exact: true }) });
+    await main.waitFor({ timeout: 60_000 });
+
+    // A real edit, typed before the sign-in ends, so the press is one a person
+    // would actually make.
+    await main.getByLabel("Main Friday closes").fill("19:30");
+
+    await b.signedOut(async () => {
+      await app.db.admin.query(
+        "UPDATE sessions SET revoked_at = now() WHERE revoked_at IS NULL AND user_id = (SELECT id FROM users WHERE username = $1)",
+        ["ridgeview-owner"]
+      );
+      await main.getByRole("button", { name: "Save Main" }).click();
+      await expect
+        .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
+        .toMatch(/Your sign-in has ended/);
+      const said = await page().locator("main").innerText();
+      expect(said).toMatch(/your seat has not changed/);
+      expect(said).toMatch(/Sign in again to carry on from the same screen/);
+      expect(await page().locator("#session-ended-signin").getAttribute("href")).toBe(
+        `/signin?callbackUrl=${encodeURIComponent("/locations")}`
+      );
+      await b.audit("locations, sign-in ended under a button");
+    });
+
+    // Back in, on the screen they were on, with the practice's own hours —
+    // the edit that could not be saved was not saved.
+    await page().locator("#session-ended-signin").click();
+    await page().waitForURL((url) => url.pathname === "/signin", { timeout: 60_000 });
+    await page().fill('input[name="username"]', "ridgeview-owner");
+    await page().fill('input[name="password"]', DEV_PASSWORD);
+    await page().fill('input[name="totp"]', currentCodeForTest("ridgeview-owner", DEV_MFA_SECRET, Date.now()));
+    await page().click('button[type="submit"]');
+    await page().waitForURL((url) => url.pathname === "/locations", { timeout: 60_000 });
+    await main.waitFor({ timeout: 60_000 });
+    expect(await main.getByLabel("Main Friday closes").inputValue()).not.toBe("19:30");
+  }, 150_000);
 });

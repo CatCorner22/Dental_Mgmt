@@ -1,7 +1,7 @@
 "use client";
 
 import { loadFailure } from "../session-ended";
-import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useCallback, useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
 import { readViewer } from "@/lib/auth/viewer";
@@ -217,6 +217,10 @@ export function PackageView() {
         body: JSON.stringify({ month }),
       });
       const body = (await res.json().catch(() => ({}))) as { why?: string; verb?: string };
+      if (res.status === 401) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       if (!res.ok) {
         setMessage(`${body.verb ?? "Not recorded"}: ${body.why ?? "The baseline was not recorded."}`);
         return;
@@ -240,6 +244,10 @@ export function PackageView() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ month, format }),
       });
+      if (res.status === 401) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? "The package was not exported.");
@@ -259,6 +267,11 @@ export function PackageView() {
       setState({ ...state, data });
       setMessage(`Exported as ${format.toUpperCase()}: ${rows} rows, package hash ${hash.slice(0, 12)}…, recorded on the chain.`);
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The package was not exported.");
     } finally {
       setBusy(null);
@@ -285,6 +298,11 @@ export function PackageView() {
       setMessage(`Closed ${month}. The package hash is frozen; a correction now posts today with reason prior_period.`);
     } catch (err: unknown) {
       setConfirmClose(null);
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The month was not closed.");
     } finally {
       setBusy(null);
@@ -310,6 +328,11 @@ export function PackageView() {
       setState({ ...state, data, mappings });
       setMessage("Proposed. A different person approves it before the journal reads it.");
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The mapping was not proposed.");
     } finally {
       setBusy(null);
@@ -340,6 +363,11 @@ export function PackageView() {
       setState((s) => (s.status === "ready" ? { ...s, delivery } : s));
       setMessage(note);
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : `${label} failed.`);
     } finally {
       setBusy(null);
@@ -357,6 +385,10 @@ export function PackageView() {
         body: JSON.stringify({ mappingId: mapping.id, decision }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      if (res.status === 401) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       if (!res.ok) {
         // A practice with nobody else to decide is refused in more than one
         // sentence, and the last of them names an act. Flattening that into
@@ -372,6 +404,11 @@ export function PackageView() {
       setState({ ...state, data, mappings });
       setMessage(`${decision === "approved" ? "Approved" : "Rejected"}: ${mapping.glBucket} · ${mapping.kind} → ${mapping.accountCode}.`);
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The mapping was not decided.");
     } finally {
       setBusy(null);
@@ -411,6 +448,11 @@ export function PackageView() {
       setState((st) => (st.status === "ready" ? { ...st, soleDecider } : st));
       setMessage("Recorded. You may now decide your own proposals, and every mapping so decided is named in the month-end package.");
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The decision was not recorded.");
     } finally {
       setBusy(null);

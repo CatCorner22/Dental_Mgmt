@@ -1,5 +1,6 @@
 "use client";
 
+import { isSignInEnded } from "@/lib/auth/guardedFetch";
 import { SessionEnded, loadFailure } from "../../session-ended";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -67,6 +68,11 @@ export default function StatementPreviewPage() {
       setState({ status: "ready", statement: payload.statement });
       setMessage(payload.statement.status === "issued" ? "Statement issued." : "Statement held.");
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "Action failed.");
     } finally {
       setBusy(false);

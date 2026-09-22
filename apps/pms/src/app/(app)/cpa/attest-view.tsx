@@ -65,6 +65,10 @@ export function AttestView({ month }: { month: string }) {
         body: JSON.stringify({ month, channel, note: note.trim() }),
       });
       const body = (await res.json().catch(() => ({}))) as { why?: string; verb?: string };
+      if (res.status === 401) {
+        setSignInEnded(true);
+        return;
+      }
       if (!res.ok) {
         setNotice(`${body.verb ?? "Not recorded"}: ${body.why ?? "The attestation was not recorded."}`);
         return;

@@ -1,7 +1,7 @@
 "use client";
 
 import { SessionEnded, loadFailure } from "../session-ended";
-import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -84,6 +84,11 @@ export default function StatementsPage() {
       if (!res.ok || !body.statement) throw new Error(body.error ?? "Could not create statement.");
       router.push(`/statements/${body.statement.id}`);
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "Could not create statement.");
     } finally {
       setBusy(false);
