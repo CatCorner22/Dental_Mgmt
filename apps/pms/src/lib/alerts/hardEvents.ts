@@ -69,6 +69,13 @@ export type HardEvent = {
    * subject is the session, and ending a person's sign-ins needs the person.
    */
   personId?: string;
+  /**
+   * The event names the person reading it (Increment 1.89). `listHardEvents`
+   * cannot know that — it has no viewer — so the alerts route decides it and
+   * clears `personId` in the same breath: the act on this alarm is somebody
+   * else's sessions, and your own are a sign-out rather than an ending.
+   */
+  aboutViewer?: boolean;
 };
 
 /**
