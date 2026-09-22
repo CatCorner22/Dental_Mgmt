@@ -964,6 +964,68 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.94
+
+A sweep of every route under `src/app/api` against the rest of the app's source found **four whose path appears nowhere else**: `/api/controls/policy`, `/api/controls/release/evaluate`, and the pair this increment is about — `POST /api/import/curve` and `POST /api/import/curve/apply`.
+
+The Curve Hero import is how a practice's own day sheets reach this ledger. It has existed since Increment 1.3 and **no screen ever called it**. The bank statement import has one — `/reconciliation` posts to it — and this did not.
+
+## A correction to Increment 1.91's record
+
+Increment 1.91 wrote that a practice which could not grant `run_import` could import nothing, and called that *"the two screens that bring outside evidence in were dead."* **The bank statement screen exists.** What was dead was one screen and one pair of routes with no screen at all. The finding about `run_import` stands unchanged; the sentence describing its reach was wrong, and this says so rather than leaving it to be read.
+
+## Building the screen found a second defect
+
+Checking a file works. **Applying one never has.**
+
+`POST /api/import/curve/apply` runs inside `withTenantAppendTransaction`, so everything it touches it touches as `app_append`. It reads, in order:
+
+| Table | Grant to `app_append` before this increment |
+|---|---|
+| `import_runs` | none — `permission denied` (SQLSTATE 42501) |
+| `import_staged_rows` | none |
+| `patients`, `account_members` | none |
+
+Migration 0015 granted the two import tables to `app_rw` alone. `withGuard` carries no try/catch, so the failure reached the caller as a bare 500 with no `error` field — which is exactly what the new screen showed, and how this was found.
+
+**This is the third time this codebase has met the same species of defect.** Migration 0055 recorded it for `auth_lookup_recovery_ceremony` (Increment 1.77): the routes had no caller anywhere in the app, and the unit tests run against the memory store, which has no grants to get wrong. Increment 1.90 found the same shape on the tenant-wide session revoke. **A route with no screen is a route nobody has run.**
+
+## What this increment fixes, and what it deliberately does not
+
+**Migration 0056** grants `app_append` SELECT and UPDATE on `import_runs` and SELECT on `import_staged_rows`. UPDATE on the run and not on the rows, because applying stamps the run `applied` with the moment it completed and leaves the staged rows as they were. The isolation policies on both tables name no role — they compare `tenant_id` to `app.tenant_id` — so a GRANT is all that is needed, exactly as migration 0029 did when the posting path had to read `month_closes`.
+
+**The patient tables are left alone, on purpose.** Resolving a day-sheet row to an account reads `patients` and `account_members`. Granting the append role SELECT on those would let the role that exists to write chain rows read patient records, in a product whose thesis is a narrow, auditable role model under FORCE RLS everywhere. That is a decision about who may read a patient, and it is not one to settle on the way past a screen.
+
+**Two ways out, and which I would take.** Widen the append role by grant, or split `applyCurveHeroImport` into a resolution that runs as `app_rw` and a write that runs as `app_append`, passing the resolved ids across. **The split is the better answer**: it keeps the append role exactly as narrow as it was designed to be, and resolution is a read that has no business inside the transaction that writes the chain. It is a change to the import kernel with its own tests, and it belongs in its own increment rather than as a tail on this one.
+
+## So the screen offers no act it cannot finish
+
+There is no *Post it to the ledger* button. After a successful check the screen says:
+
+> Posting an import to the ledger is not built yet. The act reads patient records under a database role that holds no grant on them, and widening that role is a decision about who may read a patient — not a thing to settle on the way past. The check above is recorded either way.
+
+Offering the press would have been offering an act that can only fail, which is the one shape Increments 1.88, 1.89 and 1.93 exist to remove. Shipping it would have been the same mistake three increments in a row have been spent undoing.
+
+## The screen, and the link that reaches it
+
+`/import` sits behind `{ entitlement: "run_import" }` in `NAV_LINKS`, gated on `api/import/curve/route.ts` — which `seats.test.ts` reads back and checks. That link is possible **because of Increment 1.91**: before the duty was in the rulebook there was nothing to hang a link on, and the seeded owner and front desk both hold it, so the header offers them both the screen.
+
+**The page imports nothing from `@pms/import`.** Its entry point reaches `node:crypto` through the bank-statement validator, and webpack refuses that in a client component — which is how this was caught rather than shipped. The report kinds are declared app-side, as Increment 1.85 declared the demo dates rather than importing `@pms/db/seed-data`, and a unit test pins the two lists to each other because it runs in node and can import the package.
+
+## Tests
+
+- **Unit (6).** The app-side kind list equals the package's exactly; every kind has a label; the check sentence's singular and plural and its refusal wording; and the applied sentence, which stays and stays tested because the next increment posts.
+- **Database (3).** Migration 0056 grants exactly what applying needs and nothing more — no INSERT, no DELETE, no `TO PUBLIC`, no policy touched, no other role named — and says in its own text why nothing had caught it.
+- **Browser (1).** The owner opens `/import`, cannot press Check on nothing, pastes a three-row day sheet, and reads *"Read 3 rows, none of them refused."* No post button exists, the sentence explaining that is on the screen, and the chain carries `import.curve_hero.staged` and nothing else.
+
+## Not in Increment 1.94
+
+**The other two unreferenced routes**, `/api/controls/policy` and `/api/controls/release/evaluate`. Each is either a capability with no screen or a surface something outside the app uses, and each deserves reading before it is judged.
+
+**Listing import runs.** No route does, so a reload loses the staged run from the screen; the check itself survives on the chain. A list is worth building when there is an act to offer on a listed run.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
 ## Increment 1.93
 
 `NAV_LINKS` offers `/day-close` and `/statements` at **`user` rank**. Every act on both opens on a **duty**:
@@ -1081,7 +1143,7 @@ Three routes have been guarded by a duty the control rulebook does not carry, fo
 
 - **The practice could not grant it.** `grantEntitlement` refuses an unknown entitlement 400 before it does anything else. So no administrator, on any screen, could give anybody the duty that opens the import routes.
 - **The practice could revoke it.** `revokeEntitlement` never asks whether the string it was handed is a duty — it matches live rows and stamps `effective_to`. A one-way door, of the shape Increment 1.76 closed for the authenticator: the practice could end an import grant and never make another.
-- **Nobody could be given it in the first place.** The only writer was `pnpm db:seed`, inserting the row directly. In a practice this product set up rather than seeded, **nobody could import a bank statement or a Curve Hero file at all** — the two screens that bring outside evidence in were dead.
+- **Nobody could be given it in the first place.** The only writer was `pnpm db:seed`, inserting the row directly. In a practice this product set up rather than seeded, **nobody could import a bank statement or a Curve Hero file at all**. *(Corrected in Increment 1.94: this first read "the two screens that bring outside evidence in were dead". The bank statement screen exists; the Curve Hero import had no screen at all.)*
 - **The rulebook scored nobody who held it.** `assignmentsFromGrants` puts a grant naming an unknown duty into `unknownEntitlements` and leaves it out of the assignment, so the duty-family matrix had no row for it and no person's combination could include it.
 
 ## The screen was already saying so

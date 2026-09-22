@@ -1254,6 +1254,56 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     expect(await asked.innerText()).toMatch(closedNote);
     await b.audit("home board, a question about a closed month");
   }, 150_000);
+  /**
+   * Increment 1.94. `POST /api/import/curve` and `POST /api/import/curve/apply`
+   * have existed since Increment 1.3 and nothing ever called them: a search of
+   * the whole repository for either path finds the route files and nothing
+   * else. The bank statement import has a screen — `/reconciliation` posts to
+   * it — and this one, which is how the practice's own day sheets reach the
+   * ledger, did not.
+   *
+   * Building the screen found what that cost. The check works; applying does
+   * not, and never has — the apply path reads `import_runs`, then `patients`
+   * and `account_members`, as the append role, which held a grant on none of
+   * them. Migration 0056 clears the first wall. The patient tables are a
+   * decision about who may read a patient record, so this screen offers no
+   * post act and says why, rather than offering a press that can only fail.
+   */
+  it("reads a Curve Hero day sheet, says what it found, and offers no act it cannot finish", async () => {
+    await b.signIn("ridgeview-owner", "/import");
+    await page().getByRole("heading", { name: "Bring in a Curve Hero report" }).waitFor({ timeout: 60_000 });
+
+    // The check cannot be pressed on nothing.
+    const check = page().getByRole("button", { name: "Check this file" });
+    expect(await check.isDisabled()).toBe(true);
+
+    const daySheet = [
+      "Date,Location,Patient MRN,Patient Name,Transaction Type,Amount,Provider,Description",
+      "09/14/2026,MAIN,CH-10042,Jane Doe,Charge,245.00,DR-SMITH,D2391 composite",
+      "09/14/2026,MAIN,CH-10042,Jane Doe,Payment,-100.00,,Patient copay",
+      "09/14/2026,MAIN,CH-10088,John Smith,Charge,89.00,DR-LEE,D0120 periodic exam",
+    ].join("\n");
+    await page().fill("#import-content", daySheet);
+    await page().fill("#import-file-name", "day-sheet-2026-09-14.csv");
+    expect(await check.isDisabled()).toBe(false);
+
+    await check.click();
+    await page().getByText(/^Read 3 rows, none of them refused\./).waitFor({ timeout: 30_000 });
+    expect(await page().getByText(/Nothing has reached the ledger/).count()).toBe(1);
+    // No act that could only fail, and the reason in words rather than a
+    // button that refuses.
+    expect(await page().getByRole("button", { name: "Post it to the ledger" }).count()).toBe(0);
+    expect(await page().getByText(/Posting an import to the ledger is not built yet/).count()).toBe(1);
+    await b.audit("import, a day sheet read and the post act honestly absent");
+
+    // The check is on the chain, which is what makes it an act rather than a
+    // page view.
+    const { rows } = await app.db.admin.query(
+      "SELECT DISTINCT kind FROM domain_event WHERE kind LIKE 'import.curve_hero.%' ORDER BY kind"
+    );
+    expect(rows.map((r: { kind: string }) => r.kind)).toEqual(["import.curve_hero.staged"]);
+  }, 180_000);
+
   it("says a sign-in has ended rather than telling somebody their seat is the wrong one", async () => {
     /**
      * Increment 1.81. Four screens tested `!meRes.ok` on `/api/me`, which is

@@ -63,6 +63,7 @@ const newestWinsSql = readFileSync(join(here, "../migrations/0052_seat_invitatio
 const soleDeciderSql = readFileSync(join(here, "../migrations/0053_gl_mappings_sole_decider.sql"), "utf8");
 const pendingSecretSql = readFileSync(join(here, "../migrations/0054_mfa_pending_secret.sql"), "utf8");
 const ceremonyGrantSql = readFileSync(join(here, "../migrations/0055_recovery_ceremony_lookup_grant.sql"), "utf8");
+const importApplyGrantSql = readFileSync(join(here, "../migrations/0056_import_apply_append_grants.sql"), "utf8");
 /**
  * The statements of a migration, without its prose.
  *
@@ -1286,6 +1287,39 @@ describe("migration 0054: an authenticator being paired does not displace the on
   });
 });
 
+
+describe("migration 0056: the import apply path can read the rows it applies", () => {
+  it("grants the append role exactly what applying a run needs, and nothing else", () => {
+    // `POST /api/import/curve/apply` runs inside `withTenantAppendTransaction`,
+    // so both the eligibility read and the apply itself reach `import_runs` and
+    // `import_staged_rows` as `app_append`. Migration 0015 granted those two
+    // tables to `app_rw` alone, so every call answered "permission denied for
+    // table import_runs" — which nothing caught, because no screen called the
+    // route until Increment 1.94 built one.
+    const statements = statementsOf(importApplyGrantSql);
+    expect(statements).toMatch(/GRANT SELECT, UPDATE ON import_runs TO app_append;/);
+    expect(statements).toMatch(/GRANT SELECT ON import_staged_rows TO app_append;/);
+    // UPDATE on the run and not on the rows: applying stamps the run
+    // `applied`, and the staged rows are read and left as they were.
+    expect(statements).not.toMatch(/UPDATE ON import_staged_rows/);
+  });
+
+  it("widens nothing else and touches no policy", () => {
+    const statements = statementsOf(importApplyGrantSql);
+    expect(statements).not.toMatch(/TO PUBLIC/);
+    expect(statements).not.toMatch(/GRANT (INSERT|DELETE|ALL)/);
+    expect(statements).not.toMatch(/DISABLE ROW LEVEL SECURITY/);
+    expect(statements).not.toMatch(/(CREATE|DROP) POLICY/);
+    // The isolation policies on both tables name no role, so the GRANT is all
+    // the append role needs and the practice boundary is untouched.
+    expect(statements).not.toMatch(/app_rw|app_verify|app_auth_lookup/);
+  });
+
+  it("says in the migration why nothing had caught it", () => {
+    expect(importApplyGrantSql).toMatch(/nothing caught it because nothing called it/i);
+    expect(importApplyGrantSql).toMatch(/A route with no screen is a route nobody has run/);
+  });
+});
 
 describe("migration 0055: the recovery ceremony lookup can read the table it selects from", () => {
   it("admits the role the SECURITY DEFINER function runs as, with both halves the rule needs", () => {

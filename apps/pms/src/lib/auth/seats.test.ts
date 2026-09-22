@@ -60,6 +60,9 @@ describe("the links a viewer is offered", () => {
       "/home",
       "/ledger",
       "/reconciliation",
+      // Increment 1.94 gave the import routes a screen, and the seeded owner
+      // holds `run_import`, so the link is theirs.
+      "/import",
       "/day-close",
       "/statements",
       "/approvals",
@@ -71,6 +74,7 @@ describe("the links a viewer is offered", () => {
     expect(navLinksFor(front).map((l) => l.href)).toEqual([
       "/ledger",
       "/ledger/post",
+      "/import",
       "/day-close",
       "/statements",
     ]);

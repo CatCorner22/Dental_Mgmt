@@ -1,0 +1,27 @@
+-- Increment 1.94. The Curve Hero apply route has never worked against a real
+-- database, and nothing caught it because nothing called it.
+--
+-- `POST /api/import/curve/apply` runs inside `withTenantAppendTransaction`,
+-- so `hasValidatedCurveImportRun` and `applyCurveHeroImport` both read
+-- `import_runs` and `import_staged_rows` as `app_append`. Migration 0015
+-- granted those two tables to `app_rw` alone, so every call has failed with
+-- "permission denied for table import_runs" (SQLSTATE 42501). `withGuard`
+-- carries no try/catch, so it reached the caller as a bare 500.
+--
+-- This is the third time this codebase has met the same species of defect,
+-- and the second time a migration has had to say so. Migration 0055 recorded
+-- it for `auth_lookup_recovery_ceremony`: the routes had no caller anywhere in
+-- the app, and the unit tests run against the memory store, which has no
+-- grants to get wrong. Increment 1.90 found the same shape on the tenant-wide
+-- session revoke. A route with no screen is a route nobody has run.
+--
+-- The isolation policies on both tables are role-agnostic — they compare
+-- `tenant_id` to `app.tenant_id` and name no role — so a GRANT is all that is
+-- needed, exactly as migration 0029 did when the posting path had to read
+-- `month_closes` as `app_append`.
+--
+-- UPDATE on `import_runs` as well as SELECT: applying a run stamps it
+-- `status = 'applied'` with the moment it completed, and that write belongs in
+-- the same transaction as the ledger rows it describes.
+GRANT SELECT, UPDATE ON import_runs TO app_append;
+GRANT SELECT ON import_staged_rows TO app_append;

@@ -59,6 +59,7 @@ export const NAV_LINKS: NavLink[] = [
   { href: "/ledger", label: "Ledger", minRank: "user", gate: "api/ledger/accounts/route.ts" },
   { href: "/ledger/post", label: "Post", entitlement: "post_payments", gate: "api/ledger/post/route.ts" },
   { href: "/reconciliation", label: "Reconciliation", entitlement: "bank_reconcile", gate: "api/reconciliation/runs/route.ts" },
+  { href: "/import", label: "Import", entitlement: "run_import", gate: "api/import/curve/route.ts" },
   { href: "/day-close", label: "Day close", minRank: "user", gate: "api/day-close/route.ts" },
   { href: "/statements", label: "Statements", minRank: "user", gate: "api/statements/route.ts" },
   { href: "/approvals", label: "Approvals", entitlement: "approve_writeoffs", gate: "api/approvals/inbox/route.ts" },
