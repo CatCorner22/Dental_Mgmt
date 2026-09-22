@@ -2814,3 +2814,58 @@ The same four surfaces — the two API routes, the sign-in eyebrow, the page des
 
 **The `increment` field on `/api/me`.** It is odd there — that route answers who the caller is, and the build it is running is not part of that. Removing it is a change to a response shape that screens read, and this increment's job was to stop the number being wrong, not to redesign where it appears.
 
+## Increment 1.106
+
+Increment 1.105 found a claim about protected health information that had quietly stopped being true. This is the same sweep run against the other one — the argument that lets an outside firm hold a seat in this product at all.
+
+`seats.ts` has carried it since Increment 1.49:
+
+> "The package is aggregate and names no patient, so an accountant reading it receives no protected health information."
+
+**That argument is about what the seat reads, and the set of things it reads has grown three times since it was written.**
+
+| Increment | What it opened to the seat |
+|---|---|
+| 1.50 | The question threads about a month's lines — **both halves, free text** |
+| 1.51 | The channel attestations, each with **the note whoever attested it wrote** |
+| 1.74 | Where the seat's own notices go |
+
+Increment 1.49's live case is a good one: it reads the practice's own `patients` and `guarantor_accounts` rows and searches the package and its CSV for any of their names, record numbers or ids, and it asserts that both haystacks contain a string that *is* there, so an empty result is an absence rather than a search that could never have found anything. **It proves what the product derives names no patient.** It can prove nothing about a sentence somebody typed, and nothing in 1.50's or 1.51's record mentions the question.
+
+## Two legs rather than one
+
+The argument is restated where it is made, in the manner of Increment 1.99.
+
+- **Everything the product computes for this seat** is proved to name no patient, by that live case.
+- **Everything a person writes to it** is the practice's own to keep clean — and the product now says so where the writing happens rather than in a comment nobody reading the screen will see.
+
+`outsideReaderSentence()` sits above both boxes: the accountant's question and the practice's answer.
+
+> "This goes to the outside accountant, who holds no agreement to receive patient information. Name the line and the figure, never the patient."
+
+Both halves, because a question naming a patient puts one in the record as surely as an answer would. This is Increment 1.90's reasoning about the sign-out reason applied to a different field: the product cannot stop the typing, a check that pretended to would be worse than none, and a sentence beside the field is what it can honestly do.
+
+## The gate
+
+`cpaSurfaces.test.ts` reads **every route file** under `src/app/api` for the seat's entitlement and fails when the set disagrees with `CPA_SURFACES`, which says of each what the seat receives there and whether it can carry words a person typed. A fourth surface cannot open to this seat until somebody has written that down.
+
+That is the whole of what a check can do here. **Whether a practice is content to have a free-text channel to an outside firm at all is the practice's decision**, and `docs/05` is where it belongs — this increment makes the channel visible and says who reads it, rather than settling a question that is not the product's to settle.
+
+**Red-before, measured, both halves.** Adding the seat's entitlement to an eighth route fails the gate with `expected [ …(8) ] to deeply equal [ …(7) ]`. Without the sentences the browser case fails on `expected +0 to be 1`.
+
+**Tests.** App unit (3): the set read from the guards against the written one; a note of real length on every entry; and the two free-text surfaces named, so losing that distinction fails rather than passes quietly. Browser (2 assertions added to Increment 1.50's own case): the sentence above the accountant's question box and above the practice's answer box.
+
+## What the browser suite caught in the first draft
+
+Both sentences sat **inside** the `<label>`. That made each one part of the field's accessible name, so a screen reader would have announced *"Question This goes to the outside accountant, who holds no agreement…"* every time the field took focus, in place of the one word the field is called. The suite found it by no longer being able to reach the field by its name — a timeout on `getByLabel("Question", { exact: true })`, two cases red.
+
+It is a description, not a name, and `aria-describedby` is what descriptions are for: announced after the label, on focus, and never in place of it. The sentence now sits beside the field with an id, the field points at it, and the label is the one word again. Worth recording because the failure looked like a test breaking and was not: **the assertion that broke was the accessible name, which is the thing that mattered.**
+
+## Not in Increment 1.106
+
+**Scanning what somebody typed.** A check for patient names in a message body would need the practice's patient rows on the path of every send, would refuse legitimate words (a practice may have a patient named Marsh and a bank line about a marsh), and would put the product in the position of promising something it cannot deliver. The sentence says who reads this; the practice decides what to write.
+
+**The attestation note.** It is the second free-text surface and it carries the same exposure — but it is written *by* the accountant rather than to them, so the practice is not the one who could put a patient in it. Naming it in the register is the right amount for now; a sentence on that box belongs with whatever increment next touches the attestation screen.
+
+**A decision row for the practice.** The honest end of this is a recorded decision — the practice reading what the seat reaches and saying it is content, the way Increments 1.31 and 1.47 record a control decision. That is a screen and a table, and it should be built once somebody has decided it is the right shape, not bolted onto a sweep.
+

@@ -9,12 +9,29 @@ import { meetsRole, type Role } from "./roles";
  * seat that is nothing but a grant: the lowest rank the product has, holding
  * one entitlement, reaching the month-end package and no other screen.
  *
- * That shape is what lets the seat exist without a BAA. The package is
- * aggregate and names no patient (Increment 1.34, proved by a live test since
- * this increment), so an accountant reading it receives no protected health
- * information; a seat that could reach the account ledger would receive it on
- * the first click, and would need the countersigned BAA docs/05 describes
- * before the practice could grant it at all.
+ * That shape is what the argument for the seat rests on. The package is
+ * aggregate and names no patient (Increment 1.34), and since Increment 1.49 a
+ * live case proves it rather than asserting it: it reads the practice's own
+ * patient and guarantor rows and looks for any of their names, record numbers
+ * or ids in the package and in its export. A seat that could reach the
+ * account ledger would receive protected health information on the first
+ * click, and would need the countersigned agreement docs/05 describes before
+ * the practice could grant it at all.
+ *
+ * **Restated on what is still true (Increment 1.106.)** That argument is about
+ * what the seat *reads*, and the set has grown three times since it was
+ * written — the question threads (1.50), the channel attestations (1.51), and
+ * where the seat's own notices go (1.74). Two of those carry words a person
+ * typed, and the live case can prove nothing about those: it proves what the
+ * product **derives** names no patient, which is a different claim.
+ *
+ * So the argument now stands on two legs rather than one. Everything the
+ * product computes for this seat is proved to name no patient. Everything a
+ * person writes to it is the practice's own to keep clean, and the product
+ * says so where the writing happens (`outsideReaderSentence`) rather than
+ * leaving it to a comment nobody reading the screen will see.
+ * `cpaSurfaces.test.ts` reads every route file for the seat's entitlement, so
+ * a fourth surface cannot open without somebody writing down what it gives.
  */
 
 /** The entitlement the outside accountant's seat carries. */

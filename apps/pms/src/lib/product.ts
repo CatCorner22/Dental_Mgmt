@@ -14,7 +14,7 @@
  * remains, because somebody has to say which increment this is — but it is
  * one edit, in one place, that a check keeps honest.
  */
-export const APP_INCREMENT = "1.105";
+export const APP_INCREMENT = "1.106";
 
 /**
  * Whether this product stores rows about patients.

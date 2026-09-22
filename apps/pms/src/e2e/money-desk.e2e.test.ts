@@ -1075,6 +1075,14 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     // By role: the section's own heading reads "Questions about this month", so
     // a label match on "About" reaches the region as well as the control.
     await questions.getByRole("combobox").selectOption("journal|total");
+    /**
+     * Who reads this, said where it is written (Increment 1.106). Both halves
+     * of the thread leave the practice, so both boxes carry the sentence: the
+     * live case behind the seat's argument proves that what the product
+     * *derives* names no patient, and can prove nothing about a sentence
+     * somebody types.
+     */
+    expect(await questions.getByText(/holds no agreement to receive patient information/).count()).toBe(1);
     await questions.getByLabel("Question", { exact: true }).fill("The journal total sits under the deposits for the month. What am I missing?");
     await questions.getByRole("button", { name: "Ask", exact: true }).click();
     await page().getByText(/^Asked\. The practice sees it on the home board\.$/).waitFor({ timeout: 30_000 });
@@ -1091,6 +1099,8 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await card.getByRole("button", { name: "Answer this" }).click();
     const answer = page().getByLabel("Your answer");
     await answer.waitFor({ timeout: 30_000 });
+    // The same sentence on the practice's side of the thread (Increment 1.106).
+    expect(await card.getByText(/Name the line and the figure, never the patient/).count()).toBe(1);
     // An answer says something: the button holds until it does.
     await answer.fill("too short");
     expect(await card.getByRole("button", { name: "Answer", exact: true }).isDisabled()).toBe(true);
