@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import { formatCents } from "@/lib/ledger/format";
 import type { DayCloseSnapshot, LatePostingRow } from "@/lib/day-close/types";
 import { DEMO_EFFECTIVE_DATE } from "@/lib/demo/dates";
+import { dutyNeededSentence, holdsDuty } from "@/lib/auth/heldDuty";
+import { readViewer, type Viewer } from "@/lib/auth/viewer";
 
 const DEMO_LOCATION = "0196b0a0-0000-7000-8000-000000000101";
 const DEMO_DATE = DEMO_EFFECTIVE_DATE;
@@ -41,6 +43,14 @@ export default function DayClosePage() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * Who is reading (Increment 1.93). This screen opens at `user` rank and its
+   * two acts open on duties: applying staged deposits needs `post_payments`
+   * and freezing the close needs `bank_reconcile`. The seeded practice holds
+   * both halves of the point — the owner can freeze and cannot apply, and the
+   * front desk can apply and cannot freeze.
+   */
+  const [me, setMe] = useState<Viewer | null>(null);
 
   async function loadSnapshot() {
     const res = await fetch(
@@ -56,6 +66,16 @@ export default function DayClosePage() {
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading" });
+    void fetch("/api/me")
+      .then(async (res) => readViewer(res.status, await res.json().catch(() => ({}))))
+      .then((viewer) => {
+        if (!cancelled) setMe(viewer);
+      })
+      .catch(() => {
+        // Unreadable is treated as holding nothing: the act is not offered,
+        // and the route would refuse it in any case.
+        if (!cancelled) setMe({ state: "unknown", why: "Could not read who is signed in." });
+      });
     loadSnapshot()
       .then((snapshot) => {
         if (!cancelled) setState({ status: "ready", snapshot });
@@ -190,23 +210,41 @@ export default function DayClosePage() {
           </p>
 
           <div className="mb-8 flex flex-wrap gap-3">
-            <button
-              type="button"
-              className="rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
-              disabled={busy || state.snapshot.status === "frozen"}
-              onClick={() => void runAction("/api/deposits/apply-staged", "Apply staged deposits")}
-            >
-              Apply staged deposits
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-[var(--line-strong)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
-              disabled={busy || state.snapshot.status === "frozen" || state.snapshot.deposits.length === 0}
-              onClick={() => void runAction("/api/day-close/freeze", "Freeze day close")}
-            >
-              Freeze day close
-            </button>
+            {me !== null && !holdsDuty(me, "post_payments") ? null : (
+              <button
+                type="button"
+                className="rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                disabled={busy || state.snapshot.status === "frozen"}
+                onClick={() => void runAction("/api/deposits/apply-staged", "Apply staged deposits")}
+              >
+                Apply staged deposits
+              </button>
+            )}
+            {me !== null && !holdsDuty(me, "bank_reconcile") ? null : (
+              <button
+                type="button"
+                className="rounded-md border border-[var(--line-strong)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                disabled={busy || state.snapshot.status === "frozen" || state.snapshot.deposits.length === 0}
+                onClick={() => void runAction("/api/day-close/freeze", "Freeze day close")}
+              >
+                Freeze day close
+              </button>
+            )}
           </div>
+          {/*
+            One sentence per duty the reader does not hold, in the acts' place
+            rather than after a press (Increment 1.93).
+          */}
+          {me !== null && !holdsDuty(me, "post_payments") && (
+            <p className="mb-2 max-w-prose text-sm text-[var(--ink-2)]">
+              {dutyNeededSentence("Applying staged deposits", "post_payments")}
+            </p>
+          )}
+          {me !== null && !holdsDuty(me, "bank_reconcile") && (
+            <p className="mb-6 max-w-prose text-sm text-[var(--ink-2)]">
+              {dutyNeededSentence("Freezing the day close", "bank_reconcile")}
+            </p>
+          )}
           {actionMessage && <p className="mb-6 text-sm text-[var(--ink-2)]">{actionMessage}</p>}
 
           <div className="overflow-x-auto rounded-lg border border-[var(--line)] bg-[var(--surface)]">

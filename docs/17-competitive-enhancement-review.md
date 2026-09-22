@@ -964,6 +964,65 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.93
+
+`NAV_LINKS` offers `/day-close` and `/statements` at **`user` rank**. Every act on both opens on a **duty**:
+
+| Act | Route | What it needs |
+|---|---|---|
+| Create draft | `POST /api/statements` | `post_payments` |
+| Apply staged deposits | `POST /api/deposits/apply-staged` | `post_payments` |
+| Freeze day close | `POST /api/day-close/freeze` | `bank_reconcile` |
+
+Neither screen read the viewer's duties. All three buttons rendered for anybody who could open the screen, and for anybody without the duty each one could only refuse.
+
+## The seeded practice carries both halves of it
+
+**Riley Owner is an administrator who does not hold `post_payments`.** The seed gives the owner `approve_writeoffs`, `run_import` and `bank_reconcile`. So the practice owner — the highest rank this product has — was offered *Create draft* on Statements and *Apply staged deposits* on Day close, and both refused every time.
+
+**Finn Front holds `post_payments` and not `bank_reconcile`**, so the front desk met the mirror: *Freeze day close* could only refuse.
+
+A rank is not a duty, and this product has always said so at the routes. The screens had not caught up.
+
+## Why the check that exists did not catch it
+
+`seats.test.ts` reads each nav link's declared `gate` file and asserts the link and the route still agree — the comment beside `NAV_LINKS` says exactly that, and it is a good check. But a `gate` names **the route that serves the screen's read**: `api/statements/route.ts` for Statements, `api/day-close/route.ts` for Day close. Both open at `user` rank, so both links agree with their gates and always did.
+
+The write half is on the same route file or a different one, and nothing compared it to anything. The check was answering a narrower question than its name suggests, which is worth recording: a screen can agree with its gate and still invite an act it cannot do.
+
+## What it does now
+
+One helper, `lib/auth/heldDuty.ts`, over the entitlements `readViewer` already returns:
+
+- `holdsDuty(viewer, entitlement)` — true only for a `present` viewer holding it. An `ended` or `unknown` viewer holds nothing, which is the safe way round: the act is not offered, and the route would refuse it anyway.
+- `dutyLabel(entitlement)` — the catalog's own words for the duty, falling back to the id rather than inventing a name.
+- `dutyNeededSentence(act, entitlement)` — *"Creating a statement needs the “Post payments in PMS” duty, which you do not hold. An administrator grants it on Practice Risk."*
+
+The sentence names the duty rather than the entitlement id, and says who grants it **and where**, because the person reading it cannot grant it to themselves and the next thing they need is whom to ask.
+
+Both screens read `/api/me` as Practice Risk does, and render each act only for a holder, with the sentence in its place otherwise. **The screen is the courtesy and the route is the control**: every one of these routes still refuses a request that reaches it, exactly as before.
+
+## Saying it before the press
+
+This is Increment 1.90's reasoning applied to three more acts. The refusal is the same sentence either way; it is worth more arriving before the press than after it. And an act offered where it can only refuse is the shape Increments 1.88 and 1.89 named on the owner board — found there on an alarm, found here on two ordinary screens.
+
+## Tests
+
+- **Unit (6).** Holding and not holding; that rank is not read as a duty, pinned on the seeded owner's exact grant list; that an ended or unknown viewer holds nothing; the two duty labels the screens use; the fallback for an id the catalog does not carry; and that the sentence names the act, the duty and who grants it.
+- **Browser (1).** The whole matrix in one case: as the owner, *Apply staged deposits* is absent and *Freeze day close* is present on Day close, and *Create draft* is absent on Statements, each with its sentence; then as the front desk, the mirror on Day close.
+
+**A first draft of that case failed on its own timing.** It waited for the screen's heading, which renders before the screen is ready and before `/api/me` has answered, then counted buttons — and read zero of a button that was about to be there. Each wait is on the sentence now, which appears only once the viewer has been read, with the reason in a comment.
+
+**Red-before, measured.** With both pages reverted and rebuilt, the case fails on the first wait: the sentence never appears.
+
+## Not in Increment 1.93
+
+**A check that compares a screen's acts to its routes' guards.** Increment 1.91 added one for a guard naming a duty that does not exist, which is a textual question. This one is not: it needs to know which button calls which route, and the honest way to hold it is the browser case above rather than a script that guesses from source.
+
+**The other screens.** `/ledger` is offered at `user` rank and renders no act. The manager-rank screens gate their acts on rank, which they already read. This increment is the two screens where a rank opens the screen and a duty opens the act.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
 ## Increment 1.92
 
 A seat whose invitation link was reissued, and whose holder then opened the link that replaced it, is listed as **"Invited, not yet opened" forever**. The one act the practice is offered on that row refuses every time it is pressed.

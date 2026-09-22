@@ -257,6 +257,52 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await b.audit("practice risk, detector findings open and closed");
   }, 120_000);
 
+  /**
+   * Increment 1.93. `/day-close` and `/statements` are offered at `user` rank
+   * and every act on them opens on a duty: applying staged deposits and
+   * creating a statement need `post_payments`, freezing the close needs
+   * `bank_reconcile`. Neither screen read the viewer's duties, so all three
+   * buttons rendered for anybody who could open the screen — and the seeded
+   * practice carries both halves of the point, because the owner holds
+   * `bank_reconcile` and not `post_payments` while the front desk holds the
+   * reverse.
+   *
+   * `seats.test.ts` checks each header link against the route that serves the
+   * screen's read. Nothing checked the write half, which is stricter.
+   */
+  it("offers each of the day close and statement acts only to the duty that opens it", async () => {
+    // Still the owner, from the cases above: bank_reconcile, not post_payments.
+    /**
+     * Each wait is on the sentence rather than on the heading. The heading
+     * renders before the screen is ready and before `/api/me` has answered,
+     * so counting buttons at that point counts a screen that has not decided
+     * what to show — which is how this case first failed, reading zero of a
+     * button that was about to be there.
+     */
+    await page().goto(`${app.base}/day-close`);
+    await page().getByText(/Applying staged deposits needs/).waitFor({ timeout: 60_000 });
+    expect(await page().getByRole("button", { name: "Apply staged deposits" }).count()).toBe(0);
+    expect(await page().getByRole("button", { name: "Freeze day close" }).count()).toBe(1);
+    expect(await page().getByText(/Applying staged deposits needs/).innerText()).toMatch(/Post payments in PMS/);
+    await b.audit("day close, an act the reader's duties do not open");
+
+    await page().goto(`${app.base}/statements`);
+    await page().getByText(/Creating a statement needs/).waitFor({ timeout: 60_000 });
+    expect(await page().getByRole("button", { name: "Create draft" }).count()).toBe(0);
+    expect(await page().getByText(/Creating a statement needs/).innerText()).toMatch(
+      /Post payments in PMS[\s\S]*administrator grants it on Practice Risk/
+    );
+    await b.audit("statements, the draft act the owner's duties do not open");
+
+    // The mirror: the front desk can apply and cannot freeze.
+    await b.signIn("ridgeview-front", "/day-close");
+    await page().getByText(/Freezing the day close needs/).waitFor({ timeout: 60_000 });
+    expect(await page().getByRole("button", { name: "Apply staged deposits" }).count()).toBe(1);
+    expect(await page().getByRole("button", { name: "Freeze day close" }).count()).toBe(0);
+    expect(await page().getByText(/Freezing the day close needs/).innerText()).toMatch(/Reconcile bank to PMS/);
+    await b.audit("day close, the front desk's half of the same split");
+  }, 120_000);
+
   it("lets the front desk draft and issue a statement from the same balances", async () => {
     await b.signIn("ridgeview-front", "/statements");
     await page().getByRole("heading", { name: "Statements" }).waitFor({ timeout: 60_000 });
