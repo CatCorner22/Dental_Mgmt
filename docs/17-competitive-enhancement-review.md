@@ -964,6 +964,56 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.92
+
+A seat whose invitation link was reissued, and whose holder then opened the link that replaced it, is listed as **"Invited, not yet opened" forever**. The one act the practice is offered on that row refuses every time it is pressed.
+
+## Why, exactly
+
+`unclaimedInvitations` asked its question of the **invitation row**:
+
+```
+.leftJoin(seatInvitationClaims, eq(seatInvitationClaims.invitationId, seatInvitations.id))
+.where(and(eq(seatInvitations.tenantId, tenantId), isNull(seatInvitationClaims.id), …))
+```
+
+A reissued seat has two invitation rows: the superseded one and the one in force (Increment 1.73). The accountant can open only the one in force, because `lookUpInvite` refuses a superseded link — which is the whole point of reissuing. So claiming attaches a claim to the newer row and leaves the older one unclaimed, permanently.
+
+The SQL then filters out the claimed row and keeps the unclaimed one. The dedupe by seat that follows, which exists to show one link per seat rather than three, has only that row to pick. The practice reads that somebody who has set a password has not opened their seat.
+
+**And the row carries a button that can only refuse.** `reinviteSeat` reads `newestInvitation` — the invitation *in force*, the claimed one — and returns 409 `claimed`: *"has already opened this seat and set a password. Somebody who cannot sign in needs their password recovered, not a new invitation."* Correct in itself, and unreachable as advice, because it arrives only after a press on a row that should not be there.
+
+This is the shape Increment 1.89 named on the owner board: an act offered where it can only refuse.
+
+## The fix
+
+The claim belongs to the **seat**, not to the invitation. The read now excludes a person who has claimed *any* of their invitations, with a `notExists` over an alias of `seat_invitations` joined to the claims — `seat_invitation_claims` carries `invitation_id` and no `user_id`, so the join is how the question reaches the person.
+
+The exclusion is permanent, and it is right that it is: `reinviteSeat` refuses once the in-force invitation is claimed, so no later invitation can follow a claim. A seat that has been opened is opened for good.
+
+Nothing else changes. A genuinely unclaimed seat reissued three times still appears once, as the newest row, which the case from Increment 1.73 still pins.
+
+## Where the test was, and why it passed
+
+Two tests were within one line of this and neither reached it.
+
+The live case **"refuses to reissue for a seat that has already been opened"** invites once, claims, and reinvites. One invitation row, one claim, no superseded row — the defect needs a reissue before the claim.
+
+The browser case **"sends another link to a seat whose first one went astray, and the old link then opens nothing"** builds the exact state: it invites `firm-mislaid`, reissues, proves the stale link opens nothing, and opens the seat on the fresh one. Then it stops. The panel that had just been telling the truth was never read again.
+
+Both now go one step further:
+
+- **Live (1).** Invite, reissue, assert the seat is listed once while nobody has opened either link, claim the link in force, assert the seat is gone, and assert that the act the row used to offer refuses. Red-before, measured: without the fix the seat is still listed after the claim.
+- **Browser (extended).** After `firm-mislaid` sets a password, sign back in as the owner and assert the invite panel carries no row for that seat.
+
+## Not in Increment 1.92
+
+**A record of who opened which link.** The claim names the invitation it was made against, which is enough for this list and for the refusal; a practice asking *which of three links was used* has a question this product has not been asked.
+
+**Telling the practice that a seat was opened.** The row leaves the list, which is the product's usual way of saying a thing is done; a positive notice is a different feature with a different reader.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
 ## Increment 1.91
 
 Three routes have been guarded by a duty the control rulebook does not carry, for the whole life of this product.

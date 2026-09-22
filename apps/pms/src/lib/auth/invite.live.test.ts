@@ -342,6 +342,48 @@ describe.skipIf(!adminUrl)("inviting the outside accountant's seat (live)", () =
     expect(refused.why).toContain("recovered");
   });
 
+  /**
+   * Increment 1.92. The case above invites once and never reissues, which is
+   * why it passed while this path was broken: a reissued seat has two
+   * invitation rows, the accountant can only open the one in force, and
+   * `unclaimedInvitations` asked its question of the row rather than the seat.
+   * So the superseded row stayed unclaimed, the list kept the seat forever,
+   * and the only act on that row could only refuse.
+   */
+  it("drops a reissued seat from the unopened list once its holder opens the link in force", async () => {
+    const seat = await asUser(owner.id, (d) =>
+      inviteAccountant(d, tenantId, { id: owner.id, name: owner.displayName }, { username: "firm-reissued", displayName: "Reissued & Co" }, at)
+    );
+    expect(seat.ok).toBe(true);
+    if (!seat.ok) return;
+
+    const again = await asUser(owner.id, (d) =>
+      reinviteSeat(d, tenantId, { id: owner.id, name: owner.displayName }, seat.seat.userId, later(1))
+    );
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+
+    // Listed once while nobody has opened either link, which is right.
+    const before = await asUser(owner.id, (d) => unclaimedInvitations(d, tenantId));
+    expect(before.filter((i) => i.userId === seat.seat.userId)).toHaveLength(1);
+
+    const claimed = await asNobody((d) => claimSeat(d, tenantId, again.seat.secret, "a-long-enough-password", later(2)));
+    expect(claimed.ok).toBe(true);
+
+    // Gone, although the first invitation's row is still unclaimed and always
+    // will be: the link it names stopped working when the second was issued.
+    const after = await asUser(owner.id, (d) => unclaimedInvitations(d, tenantId));
+    expect(after.filter((i) => i.userId === seat.seat.userId)).toHaveLength(0);
+
+    // And the act that row used to offer is the one that could only refuse.
+    const refused = await asUser(owner.id, (d) =>
+      reinviteSeat(d, tenantId, { id: owner.id, name: owner.displayName }, seat.seat.userId, later(3))
+    );
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.code).toBe("claimed");
+  });
+
   it("refuses to reissue for somebody who was never an invited seat", async () => {
     // The owner has a password of their own. A link that let its holder set
     // one would be the practice handing out an account it does not own.

@@ -747,6 +747,26 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await expect
       .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
       .toMatch(/Sign in as firm-mislaid/);
+
+    /**
+     * And the panel stops saying the seat is waiting (Increment 1.92). This
+     * case built the exact state that was broken — invited, reissued, then
+     * opened on the link in force — and stopped at the claim, so the defect
+     * sat under a passing test: the superseded invitation row is unclaimed
+     * and always will be, and the list read that row rather than the seat.
+     * The practice was told for good that somebody who had set a password had
+     * not opened their seat, and the one act offered on the row refused every
+     * time it was pressed.
+     */
+    await b.signIn("ridgeview-owner", "/risk");
+    const seatPanel = page().locator("section[aria-labelledby=invite-seat]");
+    await seatPanel.waitFor({ timeout: 60_000 });
+    await expect
+      .poll(async () => await seatPanel.getByRole("listitem").filter({ hasText: "firm-mislaid" }).count(), {
+        timeout: 60_000,
+      })
+      .toBe(0);
+    await b.audit("practice risk, a reissued seat gone from the unopened list");
   }, 180_000);
 
   it("takes the invited seat through its first sign-in with no authenticator, and into the month-end screen", async () => {
