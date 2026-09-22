@@ -964,6 +964,52 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.86
+
+The owner opens Practice Risk, finds the departing hygienist's card, and presses **Revoke** beside `bank_reconcile`. The screen says the duty is gone. The SoD finding closes. The `role.revoked` domain event is written. The person keeps the duty — on the session they are sitting in, and on every session after it, permanently.
+
+## Why a control could report success and do nothing
+
+`revokeEntitlement` ends a grant the way this product ends every row: it stamps `effective_to` rather than deleting (`apps/pms/src/lib/controls/grants.ts:283`). It does not end the person's sessions. Eight readers honour that convention — `staff.ts`'s `isLive`, `roster.ts:210`, `findingSubjects.ts:41`, `hardEvents.ts:288`, `round.ts:394`, `grants.ts:260`, the partial unique index in migration `0013`, and `controls-engine`'s own `isActive`.
+
+The authorization path honoured neither half of it:
+
+```
+apps/pms/src/lib/auth/postgresStore.ts (before)
+  .from(userEntitlements)
+  .where(eq(userEntitlements.userId, userId));
+```
+
+That function feeds `getUserById` and `getUserByUsername`, which are the two reads `requireAccess` makes on **every guarded request**. `requireAccess` then evaluates both the `entitlements` requirement and the `orEntitlement` opening against a list of every duty the user has ever been granted.
+
+## The rule, written once
+
+`packages/db/src/liveGrants.ts` now holds it: a grant is live when it has begun and has not yet ended. `isLiveGrant` is the in-memory form, `liveGrantAt` and `liveGrantsForUser` the Postgres predicates. `entitlementsFor` uses it, and `staff.ts` borrows it rather than restating it — because restating it is exactly how the auth path came to state it nowhere.
+
+The comparison against the end is strict. `revokeEntitlement` stamps `effective_to` with the instant of the revoke, so a duty revoked at `now` is not live at `now`; a duty is gone the moment it ends, not one tick later.
+
+**Which clock, and what it costs.** `now` is the caller's, matching `revokeEntitlement` and the in-memory readers that already take one. Some rows are written with the database's `now()` instead. On a deployment whose database clock runs ahead of its application clock, a grant written that instant reads as not yet begun for the length of the skew. That fails closed, which is the safe direction for an authorization predicate, and the alternative — moving `revokeEntitlement` to the database clock as well — is a larger change than this defect warrants. The note sits on the constant.
+
+## One correction to the finding that produced this
+
+The audit that surfaced it also claimed a **future-dated grant opens its routes early**. The missing `effective_from` predicate is real, and no product path reaches it: every writer stamps `now` (`grants.ts:194`, `invite.ts:153`, `policy.ts:95`). That half is a hazard the predicate closes, not a defect anybody met, and it is recorded as such rather than counted as a second live bug. It still earns a case, because the column exists, is `NOT NULL`, and is the half a reader adding a scheduled grant would otherwise rediscover.
+
+## Why nothing caught it
+
+`controls.live.test.ts:303-318` asserted the finding closes and that a second revoke answers 404. It never asked what the person could now do. `postgresStore.live.test.ts:112` asserted a user's entitlements equal the three the seed granted — and no seeded row has ever been revoked, so the missing filter would not have moved that assertion by a character.
+
+Both now ask. The proof is red-before and green-after, measured rather than reasoned: with the one-line predicate reverted, `requireAccess` returns `ok: true` on a revoked duty and the new case fails with `expected true to be false`. The assertion that was missing sits where the audit said it was missing, in the revoke case itself.
+
+## Not in Increment 1.86
+
+**The other six `effective_to IS NULL` sites.** They read correctly today, and several deliberately ask "any row ever" rather than "live now" — `loadStaff` hands the engine every row and lets it filter by date. Rewriting them would widen this change well past the defect.
+
+**The in-memory dev store.** `memoryStore.ts` holds entitlements as a plain array with no effective dates and no revoke path, so there is nothing there to filter; `AUTH_DEV_MEMORY` is a development convenience, not a seat any practice sits in.
+
+**Ending the revoked person's sessions.** A revoke now closes the routes on the session they are sitting in, which is the control; whether it should also sign them out is a separate question about what a revoke means, and it is the owner's to answer.
+
+**The rest of the seat audit.** It ran against `2dab1b5` on 2026-09-20, before Increments 1.74 through 1.85, and is substantially stale — its top three findings are Increment 1.74. This one was verified against the working tree before any of it was built, which is the only reason it is here.
+
 ## Increment 1.85
 
 Increment 1.84 wrote the expiry date into a comment. This increment gives that sentence a reader.

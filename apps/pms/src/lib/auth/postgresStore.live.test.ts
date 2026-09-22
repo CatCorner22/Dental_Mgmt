@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
+import { uuidv7 } from "@pms/db";
 import { encryptSecret } from "@pms/db/crypto";
 import { createLiveDatabase, liveAdminUrl, type LiveDatabase } from "@pms/db/testing";
 import { verifyDatabaseChains } from "@pms/verifier";
@@ -142,6 +143,88 @@ describe.skipIf(!adminUrl)("Postgres auth store (live)", () => {
     expect(after.ok).toBe(false);
 
     await db.admin.query("UPDATE users SET active = true WHERE id = $1", [owner.id]);
+  });
+
+  /**
+   * Increment 1.86. `revokeEntitlement` ends a grant by stamping
+   * `effective_to`, the way this product ends every row, and it does not end
+   * the person's sessions. The authorization path read every row the user had
+   * ever held, so the duty went on opening its routes: the owner pressed
+   * Revoke, the screen said the duty was gone, the SoD finding closed, the
+   * `role.revoked` event was written, and nothing changed for the person
+   * holding it.
+   *
+   * The revoke is written here as the SQL `revokeEntitlement` writes, rather
+   * than through that function, because the claim under test belongs to the
+   * store: given a row stamped this way, what does `requireAccess` see.
+   */
+  it("stops opening a route on a duty that has been revoked", async () => {
+    const store = createPostgresStore(env);
+    const code = currentCodeForTest(owner.username, DEV_MFA_SECRET, now.getTime());
+    const result = await authorizeCredentials(
+      store,
+      { username: owner.username, password: DEV_PASSWORD, totp: code },
+      loginReq(),
+      now,
+      env
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const ports = storePorts(store, async () => result.user.sessionId);
+    const req = new Request("http://localhost/api/reconciliation", { headers: { origin: "http://localhost" } });
+    const opts = { entitlements: ["bank_reconcile"] };
+
+    const held = await requireAccess(req, opts, ports);
+    expect(held.ok).toBe(true);
+
+    await db.admin.query(
+      "UPDATE user_entitlements SET effective_to = now() WHERE user_id = $1 AND entitlement = 'bank_reconcile' AND effective_to IS NULL",
+      [owner.id]
+    );
+
+    try {
+      // The same session, the same request, one revoked row.
+      const revoked = await requireAccess(req, opts, ports);
+      expect(revoked.ok).toBe(false);
+      if (!revoked.ok) expect(revoked.response.status).toBe(403);
+
+      const user = await store.getUserById(owner.id);
+      expect(user?.entitlements).toEqual(["approve_writeoffs", "run_import"]);
+    } finally {
+      // Later cases read the seeded picture, so restore it even on a failure.
+      await db.admin.query(
+        "UPDATE user_entitlements SET effective_to = NULL WHERE user_id = $1 AND entitlement = 'bank_reconcile'",
+        [owner.id]
+      );
+    }
+  });
+
+  /**
+   * The other half of the same rule (Increment 1.86). No product path writes a
+   * future `effective_from` today — every writer stamps `now` — so this is a
+   * hazard the predicate closes rather than a defect anybody met. It is worth
+   * a case because the column exists, is `NOT NULL`, and is the half a reader
+   * adding a scheduled grant would otherwise have to rediscover.
+   */
+  it("does not open a route on a grant that has not begun", async () => {
+    const store = createPostgresStore(env);
+    const front = DEV_USERS[1];
+    await db.admin.query(
+      `INSERT INTO user_entitlements (id, tenant_id, user_id, entitlement, effective_from)
+       VALUES ($1, $2, $3, 'bank_reconcile', now() + interval '1 hour')`,
+      [uuidv7(), front.tenantId, front.id]
+    );
+
+    try {
+      const user = await store.getUserByUsername(front.username);
+      expect(user?.entitlements).not.toContain("bank_reconcile");
+    } finally {
+      await db.admin.query(
+        "DELETE FROM user_entitlements WHERE user_id = $1 AND entitlement = 'bank_reconcile'",
+        [front.id]
+      );
+    }
   });
 
   it("charges a failed attempt to the throttle table with no tenant bound", async () => {

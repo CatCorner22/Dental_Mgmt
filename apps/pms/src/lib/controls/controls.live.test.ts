@@ -5,6 +5,7 @@ import { uuidv7 } from "@pms/db";
 import { verifyDatabaseChains } from "@pms/verifier";
 import { evaluateRelease } from "@pms/controls-engine";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
+import { createPostgresStore } from "../auth/postgresStore";
 import { createApprovalRequest, getApprovalRequest } from "./approvals";
 import { approveAndPost } from "./decideAndPost";
 import { recordDecision } from "./decisions";
@@ -308,6 +309,17 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     expect(revoked.ok).toBe(true);
     if (!revoked.ok) return;
     expect(revoked.findings.closed).toBeGreaterThan(0);
+
+    /**
+     * What the person can now do, which this case never asked (Increment
+     * 1.86). The revoke stamps `effective_to` and leaves the row and the
+     * person's sessions in place, so until 1.86 the authorization path — which
+     * read every row the user had ever held — went on opening the duty's
+     * routes. Closing the finding is the paperwork; this is the control.
+     */
+    const seenByAuth = await createPostgresStore(env).getUserById(om.id);
+    expect(seenByAuth?.entitlements).not.toContain("bank_reconcile");
+
     let findings = await tx((d) => listFindings(d, tenant.id));
     let custodyRec = findings.find((f) => f.ruleId === "rule-custody-rec" && f.personId === om.id)!;
     expect(custodyRec.status).toBe("closed");
