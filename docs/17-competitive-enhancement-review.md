@@ -964,6 +964,61 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.91
+
+Three routes have been guarded by a duty the control rulebook does not carry, for the whole life of this product.
+
+`POST /api/import/bank-statement`, `POST /api/import/curve` and `POST /api/import/curve/apply` each declare `{ entitlements: ["run_import"] }`. `run_import` is not a member of `EntitlementId` and has no row in `ENTITLEMENTS`, which is what `isEntitlementId` tests. Four consequences follow, and each one was live:
+
+- **The practice could not grant it.** `grantEntitlement` refuses an unknown entitlement 400 before it does anything else. So no administrator, on any screen, could give anybody the duty that opens the import routes.
+- **The practice could revoke it.** `revokeEntitlement` never asks whether the string it was handed is a duty — it matches live rows and stamps `effective_to`. A one-way door, of the shape Increment 1.76 closed for the authenticator: the practice could end an import grant and never make another.
+- **Nobody could be given it in the first place.** The only writer was `pnpm db:seed`, inserting the row directly. In a practice this product set up rather than seeded, **nobody could import a bank statement or a Curve Hero file at all** — the two screens that bring outside evidence in were dead.
+- **The rulebook scored nobody who held it.** `assignmentsFromGrants` puts a grant naming an unknown duty into `unknownEntitlements` and leaves it out of the assignment, so the duty-family matrix had no row for it and no person's combination could include it.
+
+## The screen was already saying so
+
+Practice Risk renders, under the duty combinations: *"N grant row(s) name a duty outside the rulebook and are listed, not scored."* In the seeded practice N was **2** — the owner's `run_import` and the front desk's — and the browser suite has asserted that figure since Increment 1.17.
+
+So a test has been pinning, all along, the product's own statement that it enforces a duty it cannot score. The suite now asserts that the notice does not render, which is the same fact read the other way round.
+
+## What the duty is
+
+`run_import` joins the catalog as **recording** — importing writes somebody else's record into this practice's books — at **risk weight 4**. Four rather than five is deliberate: `CRITICAL_DUTIES` is the weight-5 set that the sole-holder detector and the new-device alarm read, and a duty that stages a file for somebody else to post is not the custody of cash. Nothing in those detectors moves.
+
+## What the practice sees that it did not
+
+The duty-family matrix gains a row and a column, so the seeded owner — who holds `run_import`, `bank_reconcile` and `approve_writeoffs` — now carries **two open combinations**: recording beside reconciliation, and recording beside authorization. The person who imports the bank statement also reconciles against it, and also approves the write-offs. Both were true from the first day and neither was scored.
+
+The browser suite's figures move with it, and the case that used to end at zero open conflicts now ends at two and names them. Segregation health for that practice reads 93 of 100 rather than 100.
+
+## The check that would have caught this on day one
+
+`scripts/check-route-guards.mjs` already fails a route exported without `withGuard`. It now also fails a guard naming an entitlement the rulebook does not carry — reading the catalog out of `conflict-rules.ts` as text, since the script is plain node, and resolving an `orEntitlement` written as a constant by finding its `export const NAME = "..."` under `src/lib`. A guard naming a duty nothing can confer is a route only the seed can open, and that is the shape the check refuses.
+
+Reverted against the catalog addition, the check fails and names all three import routes by path.
+
+## The rulebook version
+
+`CONTROL_RULEBOOK_VERSION` moves **0.2.0 → 0.3.0**. The version file's own instruction is to bump when SoD pairs change, and the golden fixtures say the same: *"Regenerate only with a deliberate scoring or rulebook change, alongside a version bump."* Adding a duty to the catalog adds a row and a column to every pair scan, so it is one.
+
+Three golden hashes moved, each traced rather than accepted:
+
+| Hash | Why it moved |
+|---|---|
+| `buildPracticeState` | the duty matrix gained a row and a column |
+| `evaluateGrant` | its result carries the state it evaluated against |
+| `takeControlSnapshot` | a snapshot stamps the rulebook version, now 0.3.0 |
+
+`channelCoverage` did not move, and of the ten hashes in the ridgeview golden only `detectSodConflicts` did. One app assertion pinned `"0.2.0"` and now pins `"0.3.0"`.
+
+## Not in Increment 1.91
+
+**A named conflict rule pairing import with reconciliation.** The duty-family matrix already registers that pair, at family severity, which is why the owner's combination shows up at all. Raising it to a named `critical` rule would change the residual score and would make `grantEntitlement` refuse the grant without a control decision — a calibration decision, and `version.ts` says in its own words that the weights are directional until a CPA calibrates them. The pair is visible and scored; what it is worth is a separate question with a separate bump.
+
+**The import screens themselves.** This increment makes the duty grantable; it does not change who is offered `/reconciliation` or what the import forms do.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
 ## Increment 1.90
 
 `POST /api/admin/revoke-all-sessions` has existed since **Increment 0.8**. Nothing ever called it.

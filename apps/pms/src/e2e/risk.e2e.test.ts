@@ -40,7 +40,15 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     expect(await page().locator("section[aria-labelledby=coverage] tbody tr").count()).toBe(6);
     expect(await page().getByText(/^Independent bank reconciliation:/).innerText()).toMatch(/stale import|not measured/);
     expect(await page().getByText(/^Bank matching:/).innerText()).toMatch(/no rate yet[\s\S]*nothing to measure/);
-    expect(await page().getByText(/outside the rulebook/).innerText()).toMatch(/2 grant row/);
+    /**
+     * This line used to read "2 grant row(s) name a duty outside the rulebook
+     * and are listed, not scored", and the two rows were the owner's and the
+     * front desk's `run_import` (Increment 1.91). The screen was telling its
+     * reader that the product enforced a duty it could not score, and that
+     * nothing here could grant or revoke. There is no such row now, so the
+     * notice does not render.
+     */
+    expect(await page().getByText(/outside the rulebook/).count()).toBe(0);
     expect(app.serverLog()).toMatch(/\[boot\] database role .*not superuser, not BYPASSRLS, owns no tables/);
     await b.audit("practice risk (owner)");
   }, 90_000);
@@ -149,9 +157,35 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await page().getByRole("button", { name: "Revoke Collect patient payments / cash drawer from Finn Front" }).click();
     await flash(/^Revoked Collect patient payments/).waitFor({ timeout: 30_000 });
     const tiles = await page().locator("section[aria-labelledby=headline] .grid > div").allInnerTexts();
+    /**
+     * Two, not none (Increment 1.91). Finn Front's duties are back, and what
+     * is left is the owner's own: the import duty entered the rulebook, and
+     * the owner holds it alongside reconciliation and write-off approval.
+     * Both combinations were true of the seeded practice from the first day
+     * and neither was scored, because the duty belonged to no catalog and the
+     * duty-family matrix had no row for it.
+     */
     expect(tiles.map((t) => t.replace(/\s+/g, " "))).toEqual(
-      expect.arrayContaining([expect.stringMatching(/OPEN CONFLICTS 0/), expect.stringMatching(/WITHOUT A DECISION 0/)])
+      expect.arrayContaining([expect.stringMatching(/OPEN CONFLICTS 2/), expect.stringMatching(/WITHOUT A DECISION 2/)])
     );
+    // Same-family rows are folded away by default, so the two are named on the
+    // checkbox before they are read in the table.
+    const conflicts = page().locator("section[aria-labelledby=conflicts]");
+    expect(await conflicts.getByText(/^Show same-family combinations/).innerText()).toMatch(/\(2\)/);
+    await conflicts.locator("input[type=checkbox]").check();
+    // A family row is titled by the two duty families rather than the two
+    // duties, so the pairs are read that way: the owner's import duty records,
+    // and it sits beside their reconciliation and their write-off approval.
+    const familyRows = conflicts.locator("tbody tr").filter({ hasText: "combination" });
+    await familyRows.first().waitFor({ timeout: 30_000 });
+    const familyTexts = await familyRows.allInnerTexts();
+    expect(familyTexts.length).toBe(2);
+    for (const text of familyTexts) {
+      expect(text).toMatch(/Riley Owner/);
+      expect(text).toMatch(/recording/);
+    }
+    expect(familyTexts.some((t) => /reconciliation/.test(t))).toBe(true);
+    expect(familyTexts.some((t) => /authorization/.test(t))).toBe(true);
   }, 120_000);
 
   it("brings decisions due to the home board with what happened since, and lets the owner keep one and retire one", async () => {
@@ -1028,6 +1062,52 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
       "DELETE FROM user_entitlements WHERE user_id = $1 AND entitlement = 'bank_reconcile'",
       [front.id]
     );
+  }, 120_000);
+
+  /**
+   * Increment 1.91. The duty that guarded three import routes and belonged to
+   * no catalog. Before this increment the dropdown did not offer it, because
+   * the dropdown is the catalog, and the route behind it refused it as
+   * unknown — so the only holders were the two the seed wrote rows for, and
+   * the screen said as much in the line this suite's first case now asserts
+   * the absence of.
+   *
+   * It sits before the case that ends every sign-in and the one that re-pairs
+   * the owner's authenticator, both of which leave the session or the secret
+   * somewhere a later sign-in cannot follow.
+   */
+  it("shows the import duty on the person who holds it, revokes it, and grants it back", async () => {
+    // The case before this one reads the owner board, so this comes back to
+    // Practice Risk rather than assuming where the suite left the browser.
+    await b.signIn("ridgeview-owner", "/risk");
+    await page().getByRole("heading", { name: "Who holds which duties" }).waitFor({ timeout: 60_000 });
+
+    /**
+     * Finn Front has held `run_import` since the seed wrote the row, and until
+     * this increment the screen did not show it: `assignmentsFromGrants` put
+     * the row in `unknownEntitlements`, which the duties section never reads.
+     * So the practice could not see the duty, and had no button to take it
+     * back.
+     */
+    const revoke = page().getByRole("button", {
+      name: "Revoke Import bank and practice-management files from Finn Front",
+    });
+    await revoke.waitFor({ timeout: 30_000 });
+    await revoke.click();
+    await flash(/^Revoked Import bank and practice-management files/).waitFor({ timeout: 30_000 });
+
+    /**
+     * And back again, which is the half that was impossible: `revokeEntitlement`
+     * took any string it was handed while `grantEntitlement` refused anything
+     * outside the catalog, so ending an import grant ended it for good.
+     */
+    const finn = await grantSelects().nth(0).locator("option", { hasText: "Finn Front" }).getAttribute("value");
+    await grantSelects().nth(0).selectOption(finn!);
+    await grantSelects().nth(1).selectOption("run_import");
+    await page().getByRole("button", { name: "Grant", exact: true }).click();
+    await flash(/^Granted Import bank and practice-management files/).waitFor({ timeout: 30_000 });
+    await revoke.waitFor({ timeout: 30_000 });
+    await b.audit("practice risk, the import duty revoked and granted back");
   }, 120_000);
 
   /**
