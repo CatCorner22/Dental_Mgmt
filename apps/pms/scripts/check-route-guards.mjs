@@ -74,6 +74,43 @@ for (const file of files) {
  * read: `isEntitlementId` tests membership of `ENTITLEMENTS`, so the catalog
  * is what decides at run time whether a duty can be granted.
  */
+/** Every route in this app, as the URL it serves and the file that serves it. */
+const routes = files
+  .filter((f) => path.basename(f) === "route.ts")
+  .map((f) => ["/" + path.relative(APP, path.dirname(f)).split(path.sep).join("/"), f]);
+
+/**
+ * Every other .ts/.tsx file in the app, comments stripped, tests left out.
+ *
+ * Both exclusions are the check (Increment 1.96). A path named in a doc
+ * comment is prose, and a gate prose can satisfy is not a gate — the first
+ * draft of this check passed because Increments 1.94 and 1.95 had written
+ * these very paths into comments explaining that nothing called them. And a
+ * route only a test calls is precisely the defect: the recovery ceremony, the
+ * tenant-wide revoke and the Curve Hero import each had tests and no screen,
+ * and each was broken in a way only a real caller could show.
+ */
+function stripComments(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+}
+function readAll(dir) {
+  let out = "";
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, ent.name);
+    if (ent.isDirectory()) {
+      if (ent.name === "e2e") continue;
+      out += readAll(full);
+      continue;
+    }
+    if (!ent.name.endsWith(".ts") && !ent.name.endsWith(".tsx")) continue;
+    if (ent.name === "route.ts") continue;
+    if (/\.test\.tsx?$/.test(ent.name)) continue;
+    out += stripComments(fs.readFileSync(full, "utf8"));
+  }
+  return out;
+}
+const SOURCE = readAll(path.join(ROOT, "src"));
+
 const CATALOG_FILE = path.join(
   ROOT,
   "../../packages/controls-engine/src/sod/conflict-rules.ts"
@@ -132,6 +169,63 @@ if (failures.length) {
   process.exit(1);
 }
 
+/**
+ * A route nothing calls must say why (Increment 1.96).
+ *
+ * Three increments in a row found the same defect and each found it the same
+ * way. Increment 1.90: the tenant-wide session revoke had existed since 0.8
+ * and no screen called it. Increment 1.94: the Curve Hero import had no screen
+ * since 1.3, and giving it one showed that applying had never worked at all —
+ * the append role held a grant on none of the tables it read. Migration 0055
+ * had already written the lesson down for the recovery ceremony: **nothing
+ * caught it because nothing called it.**
+ *
+ * So the sweep those increments ran by hand runs here. A route whose path
+ * appears nowhere else in the app's own source is either a defect or a
+ * decision, and this makes the difference a line somebody had to write.
+ *
+ * The allowlist is the same device the transport exemptions above are: an
+ * entry is a claim, and a route that leaves the list takes its claim with it.
+ */
+const UNCALLED = new Map([
+  [
+    "/api/controls/policy",
+    "Reads the active control policy. Practice Risk reads the same material through /api/controls/risk, so no screen needs this one; it is kept as the plain read of a policy by version, and Increment 1.96 raised it from `user` to `manager` to match the screen rather than sit a rank below it.",
+  ],
+  [
+    "/api/controls/release/evaluate",
+    "Attests a release on a channel the ledger does not carry — a deposit bag, a new vendor, a payroll file — and answers whether a second person is needed and who may second. A capability with no screen, recorded here rather than hidden: the act is real and exercised by live cases, and it wants a surface of its own.",
+  ],
+]);
+
+const uncalled = [];
+for (const [url, file] of routes) {
+  if (url.startsWith("/api/auth") || url === "/api/health") continue;
+  const staticPrefix = url.split("/[")[0];
+  if (SOURCE.includes(staticPrefix)) continue;
+  const why = UNCALLED.get(url);
+  if (why === undefined) {
+    uncalled.push(
+      `${path.relative(ROOT, file)}: nothing in this app names ${url}. A route with no caller is a route nobody has run — give it a screen, or name it in UNCALLED with the reason it has none.`
+    );
+  } else if (why.length < 40) {
+    uncalled.push(`${url}: its UNCALLED entry says too little to be a reason.`);
+  }
+}
+for (const url of UNCALLED.keys()) {
+  const known = routes.some(([u]) => u === url);
+  if (!known) uncalled.push(`${url} is named in UNCALLED and is not a route in this app.`);
+  else if (SOURCE.includes(url.split("/[")[0])) {
+    uncalled.push(`${url} is named in UNCALLED and something now calls it. Take it off the list.`);
+  }
+}
+failures.push(...uncalled);
+
+if (failures.length) {
+  console.error("Route guard coverage failed:\n" + failures.map((f) => `  ${f}`).join("\n"));
+  process.exit(1);
+}
+
 console.log(
-  `Route guard coverage ok (${files.length} files; every guarded entitlement is one of the rulebook's ${CATALOG.size}).`
+  `Route guard coverage ok (${files.length} files; every guarded entitlement is one of the rulebook's ${CATALOG.size}; ${UNCALLED.size} routes nothing calls, each with its reason).`
 );

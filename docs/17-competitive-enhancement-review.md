@@ -964,6 +964,51 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.96
+
+Three increments in a row found the same defect, and each found it the same way.
+
+- **Increment 1.90:** the tenant-wide session revoke had existed since Increment 0.8, and no screen called it.
+- **Increment 1.94:** the Curve Hero import had no screen since Increment 1.3 — and giving it one showed that applying had *never worked at all*, because the append role held a grant on none of the tables the apply read.
+- **Migration 0055**, from Increment 1.77, had already written the lesson down for the recovery ceremony: **"nothing caught it because nothing called it."**
+
+Increment 1.94 ran the sweep by hand. This makes it a gate.
+
+## A route nothing calls must say why
+
+`scripts/check-route-guards.mjs` already fails a route exported without `withGuard`, and since Increment 1.91 a guard naming an entitlement the rulebook does not carry. It now also fails **a route whose path appears nowhere else in the app's own source**, unless that route is named in an `UNCALLED` allowlist with a written reason — the same device the two transport exemptions at the top of the file already are. An entry is a claim, and a route that leaves the list takes its claim with it: the check fails on an allowlisted path that something has since started calling, and on an entry naming a route this app does not have.
+
+## The first draft of this check was worthless, and said so
+
+It passed. It should not have.
+
+Removing the import screen — reproducing exactly the state Increment 1.94 found — left the check green, because Increments 1.94 and 1.95 had written those very paths into **doc comments** explaining that nothing called them. **A gate that prose can satisfy is not a gate.**
+
+Two exclusions fix it, and both are the check rather than tidiness:
+
+- **Comments are stripped before the search.** A path named in a comment is prose.
+- **Test files and `src/e2e` are left out.** A route only a test calls is precisely the defect: the recovery ceremony, the tenant-wide revoke and the Curve Hero import each had tests and no screen, and each was broken in a way only a real caller could show.
+
+**Measured.** With the import screen moved aside, the tightened check names `/api/import/curve` and `/api/import/curve/apply` by path — it would have caught Increment 1.94's defect on the day the routes were written. With the allowlist emptied, it names the two routes below.
+
+## The two routes on the list, and what the sweep found in one of them
+
+**`GET /api/controls/policy`** answers with the practice's control policy — the dual-release thresholds among it — and stood at **`user` rank**, while `GET /api/controls/risk`, which puts the same material on a screen, has always needed **`manager`**.
+
+The figure a control enforces is exactly what somebody structuring payments beneath it would want, and where one thing has two doors, the looser one decides. It is `manager` now. A unit test reads both route files and pins them together, rather than asserting about a guard it does not read — the same discipline the nav gates follow, for the same reason: a claim that does not read the thing goes stale in silence.
+
+**`POST /api/controls/release/evaluate`** attests a release on a channel the ledger does not carry — a deposit bag, a new vendor, a payroll file — and answers whether a second person is needed and who may second. It is a real capability with no screen, exercised by live cases and by nothing a person can reach. Its allowlist entry says so, which is the point: recorded rather than hidden, and a surface of its own is worth an increment.
+
+## Not in Increment 1.96
+
+**A screen for the release attestation.** Naming it on the list is not the same as building it, and this increment deliberately does the naming: three increments spent finding routes with no screens have earned a gate before they earn another screen.
+
+**Deleting `/api/controls/policy`.** Nothing calls it, and Increment 1.77 deleted a route whose purpose had moved, so the precedent exists. But a route that might have a caller outside this repository is safer tightened than removed, and tightening is the control-correct move in any case.
+
+**A check on which route a button calls.** Increment 1.93 recorded why: it needs to know which press reaches which path, and the honest way to hold that is a browser case, not a script guessing from source.
+
+**The stale comment in `regainAccess.ts`** ("nothing writes `users.role`", which Increment 1.78 made false). Recorded since Increment 1.88, still not this increment's subject.
+
 ## Increment 1.95
 
 Increment 1.94 found that applying a Curve Hero import had never worked, granted the append role the two staging tables it needed, and stopped — because the next thing the apply reads is `patients` and `account_members`, and letting the role that writes the chain read patient records is a decision about who may read a patient. It recommended the split rather than the grant. This is the split.
