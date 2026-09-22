@@ -1,5 +1,7 @@
 "use client";
 
+import { SessionEnded, loadFailure } from "../session-ended";
+import { refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -9,6 +11,8 @@ import type { StatementRecord } from "@/lib/statements/snapshot";
 
 type LoadState =
   | { status: "loading" }
+  /** The sign-in behind this screen has ended (Increment 1.82). */
+  | { status: "sign_in_ended" }
   | { status: "error"; message: string }
   | { status: "ready"; statements: StatementRecord[]; accounts: LedgerAccountSummary[] };
 
@@ -40,11 +44,13 @@ export default function StatementsPage() {
     Promise.all([
       fetch("/api/statements").then(async (res) => {
         const body = (await res.json()) as { statements?: StatementRecord[]; error?: string };
+        refuseIfSignInEnded(res);
         if (!res.ok) throw new Error(body.error ?? "Could not load statements.");
         return body.statements ?? [];
       }),
       fetch("/api/ledger/accounts").then(async (res) => {
         const body = (await res.json()) as { accounts?: LedgerAccountSummary[]; error?: string };
+        refuseIfSignInEnded(res);
         if (!res.ok) throw new Error(body.error ?? "Could not load accounts.");
         return body.accounts ?? [];
       }),
@@ -57,10 +63,7 @@ export default function StatementsPage() {
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setState({
-            status: "error",
-            message: err instanceof Error ? err.message : "Could not load statements.",
-          });
+          setState(loadFailure(err, "Could not load statements."));
         }
       });
     return () => {
@@ -98,6 +101,7 @@ export default function StatementsPage() {
       </p>
 
       {state.status === "loading" && <p className="text-sm text-[var(--ink-2)]">Loading statements…</p>}
+      {state.status === "sign_in_ended" && <SessionEnded />}
       {state.status === "error" && <p className="text-sm text-[var(--ink-2)]">{state.message}</p>}
       {state.status === "ready" && (
         <>

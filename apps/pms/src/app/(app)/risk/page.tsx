@@ -32,6 +32,7 @@ import { DecisionForm, type DecisionDraft } from "../decision-form";
 import { Refusal, type RefusalContent } from "../refusal";
 import { SessionEnded } from "../session-ended";
 import { readViewer } from "@/lib/auth/viewer";
+import { getGuarded, isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { RanksPanel } from "./ranks-panel";
 import { RegainPanel } from "./regain-panel";
 import { DeliveryPanel, type AddressFormState, type AddressResponse } from "../delivery-panel";
@@ -135,27 +136,21 @@ type Loaded = {
 type LoadState =
   | { status: "loading" }
   /** The sign-in is over (Increment 1.81), which is not a load that failed. */
-  | { status: "signed_out" }
+  | { status: "sign_in_ended" }
   | { status: "error"; message: string }
   | { status: "ready"; data: Loaded };
 
 /**
- * Thrown when a guarded route answers 401 (Increment 1.81).
- *
- * This screen reads ten routes at once, so classifying the 401 where it happens
+ * This screen reads ten routes at once, so classifying a 401 where it happens
  * is what keeps the answer out of a race with the `/api/me` read beside it:
  * whichever finishes first, one `catch` decides, and it decides on the status
  * rather than on a sentence it would have to match by its words.
+ *
+ * Written here for this screen in Increment 1.81 and moved to
+ * `lib/auth/guardedFetch` in Increment 1.82, once nine more screens turned out
+ * to need the same reading and to have none.
  */
-class SessionOver extends Error {}
-
-async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  const body = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (res.status === 401) throw new SessionOver("The sign-in is over.");
-  if (!res.ok) throw new Error(body.error ?? `Could not load ${url}.`);
-  return body;
-}
+const getJson = getGuarded;
 
 const ENTITLEMENT_LABEL = new Map(ENTITLEMENTS.map((e) => [e.id as string, e.label]));
 
@@ -231,7 +226,7 @@ export default function PracticeRiskPage() {
         // This screen used to read the body and never the status, so an ended
         // session produced no role, and the administrator controls simply
         // vanished with nothing said (Increment 1.81).
-        if (viewer.state === "ended") setState({ status: "signed_out" });
+        if (viewer.state === "ended") setState({ status: "sign_in_ended" });
         else if (viewer.state === "present") setMe({ ok: true, role: viewer.role, displayName: viewer.displayName });
         else setMe({ ok: false });
       })
@@ -240,16 +235,16 @@ export default function PracticeRiskPage() {
       });
     load()
       .then((data) => {
-        if (!cancelled) setState((s) => (s.status === "signed_out" ? s : { status: "ready", data }));
+        if (!cancelled) setState((s) => (s.status === "sign_in_ended" ? s : { status: "ready", data }));
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        if (err instanceof SessionOver) {
-          setState({ status: "signed_out" });
+        if (isSignInEnded(err)) {
+          setState({ status: "sign_in_ended" });
           return;
         }
         setState((s) =>
-          s.status === "signed_out"
+          s.status === "sign_in_ended"
             ? s
             : { status: "error", message: err instanceof Error ? err.message : "Could not load Practice Risk." }
         );
@@ -333,6 +328,7 @@ export default function PracticeRiskPage() {
         body: "{}",
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error(body.error ?? "The snapshot was not frozen.");
       return "Snapshot frozen. The findings table was refreshed to match.";
     }, false);
@@ -353,6 +349,7 @@ export default function PracticeRiskPage() {
         }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       setDecidingId(null);
       return `${DECISION_KIND_LABEL[draft.kind]} recorded for ${conflict.title}.`;
@@ -374,6 +371,7 @@ export default function PracticeRiskPage() {
         }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       setDecidingId(null);
       return `${DECISION_KIND_LABEL[draft.kind]} recorded for the finding "${finding.kindLabel}". The row stays open until the detector sees the condition clear.`;
@@ -496,6 +494,7 @@ export default function PracticeRiskPage() {
         }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       setSwitchingId(null);
       return `Switched off: ${exception.label}. Review due ${draft.reviewBy}; the home board says so until it is back on.`;
@@ -510,6 +509,7 @@ export default function PracticeRiskPage() {
         body: JSON.stringify({ exceptionId: exception.id }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       return `Switched on: ${exception.label}. The decision that switched it off is retired.`;
     });
@@ -524,6 +524,7 @@ export default function PracticeRiskPage() {
         body: JSON.stringify({ exceptionId: exception.id, reason: "Retired from Practice Risk." }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       return `Retired: ${exception.label}. The control it loosened stands again.`;
     });
@@ -537,6 +538,7 @@ export default function PracticeRiskPage() {
         body: JSON.stringify({ targetUserId: person.personId, entitlement }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error(body.error ?? "The grant was not revoked.");
       return `Revoked ${entitlementLabel(entitlement)} from ${person.personName}. The finding, if any, is closed, not deleted.`;
     });
@@ -552,7 +554,7 @@ export default function PracticeRiskPage() {
       </p>
 
       {state.status === "loading" && <p className="text-sm text-[var(--ink-2)]">Loading…</p>}
-      {state.status === "signed_out" && <SessionEnded />}
+      {state.status === "sign_in_ended" && <SessionEnded />}
       {state.status === "error" && (
         <Refusal
           refusal={{

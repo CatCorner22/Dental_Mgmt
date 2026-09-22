@@ -1291,4 +1291,66 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().waitForURL((url) => url.pathname === "/locations", { timeout: 60_000 });
     await page().getByRole("heading", { name: "Business hours" }).waitFor({ timeout: 60_000 });
   }, 150_000);
+  it("says the same thing on a screen that never asked who was reading it", async () => {
+    /**
+     * Increment 1.82. Increment 1.81 taught the seven screens that pre-read
+     * `/api/me` to tell a sign-in that ended from a seat that lacks rank. Nine
+     * more never read a viewer at all — the ledger and an account, posting a
+     * payment, the approvals inbox, the day close, reconciliation and a run,
+     * statements and a statement — and each loaded straight from a guarded
+     * route with the same line:
+     *
+     *     if (!res.ok) throw new Error(body.error ?? "Could not load ...");
+     *
+     * So a person whose sign-in ended there met `requireAccess`'s own sentence
+     * as a bare paragraph: true, and with nothing to press, under a header the
+     * same fact had emptied.
+     *
+     * The ledger is driven here because it is the plainest of the nine: one
+     * route, one load, and the screen a front desk sits on all day.
+     */
+    await b.signIn("ridgeview-owner", "/ledger");
+    await page().getByRole("heading", { name: "Ledger" }).waitFor({ timeout: 60_000 });
+    const held = await page().locator("main").innerText();
+    expect(held).not.toMatch(/Your sign-in has ended/);
+
+    await b.signedOut(async () => {
+      await app.db.admin.query(
+        "UPDATE sessions SET revoked_at = now() WHERE revoked_at IS NULL AND user_id = (SELECT id FROM users WHERE username = $1)",
+        ["ridgeview-owner"]
+      );
+      await page().reload({ waitUntil: "networkidle" });
+      await expect
+        .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
+        .toMatch(/Your sign-in has ended/);
+      const said = await page().locator("main").innerText();
+      // The route's own sentence is what used to stand here alone.
+      expect(said).not.toMatch(/Sign in again\.$/m);
+      expect(said).toMatch(/your seat has not changed/);
+      expect(await page().locator("#session-ended-signin").getAttribute("href")).toBe(
+        `/signin?callbackUrl=${encodeURIComponent("/ledger")}`
+      );
+      await b.audit("ledger, sign-in ended");
+
+      // And on a second of the nine, reached with the same dead session, so
+      // this is one shape rather than one screen's shape.
+      await page().goto(`${app.base}/approvals`, { waitUntil: "networkidle" });
+      await expect
+        .poll(async () => await page().locator("main").innerText(), { timeout: 60_000 })
+        .toMatch(/Your sign-in has ended/);
+      expect(await page().locator("#session-ended-signin").getAttribute("href")).toBe(
+        `/signin?callbackUrl=${encodeURIComponent("/approvals")}`
+      );
+      await b.audit("approvals, sign-in ended");
+    });
+
+    // The way back lands them on the screen they lost, not on the practice home.
+    await page().locator("#session-ended-signin").click();
+    await page().waitForURL((url) => url.pathname === "/signin", { timeout: 60_000 });
+    await page().fill('input[name="username"]', "ridgeview-owner");
+    await page().fill('input[name="password"]', DEV_PASSWORD);
+    await page().fill('input[name="totp"]', currentCodeForTest("ridgeview-owner", DEV_MFA_SECRET, Date.now()));
+    await page().click('button[type="submit"]');
+    await page().waitForURL((url) => url.pathname === "/approvals", { timeout: 60_000 });
+  }, 150_000);
 });

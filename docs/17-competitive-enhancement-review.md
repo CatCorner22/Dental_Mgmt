@@ -964,6 +964,45 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.82
+
+Increment 1.81 drew the line between a sign-in that has ended and a seat that lacks rank, and taught the seven screens that pre-read `/api/me` to respect it. Its own "Not in" paragraph described what was left as a narrow race — a session dying *after* the seat check. Reading the rest of the product found something wider.
+
+**Nine screens never read a viewer at all.** The ledger and an account's explanation, posting a payment, the approvals inbox, the day close, bank reconciliation and a run, statements and a statement. Every one loads straight from a guarded route with the same line:
+
+```ts
+if (!res.ok) throw new Error(body.error ?? "Could not load ...");
+```
+
+So a person whose sign-in ended on any of them — after a lunch break, or because an administrator stood them down — met `requireAccess`'s own sentence as a bare paragraph:
+
+> This session timed out. Sign in again.
+
+True, and a dead end. No link, no control, and a header `navLinksFor(null)` had emptied for the same reason. Seventeen files held forty-two such lines.
+
+## The reading moves out of the screens
+
+The correct version already existed, in exactly one place. Practice Risk got it in Increment 1.81 because that screen reads ten routes at once and needed a classification that would survive a race with the `/api/me` read beside it. It was written for one screen, and nothing else could reach it. `lib/auth/guardedFetch.ts` is that code, moved.
+
+- **`getGuarded`** is how a screen reads a guarded route: a 401 raises `SignInEnded`, everything else raises an ordinary `Error` carrying the route's own words.
+- **`refuseIfSignInEnded(res)`** does the same for a fetch a screen makes its own way, and it is what the forty-two sites got — **one line inserted ahead of each existing throw**. Nothing was restructured and no message changed: the 401 is lifted out in front, and every other failure falls through exactly as it did. A rewrite of forty-two loaders would have been a much larger diff with much more to get wrong.
+- **`loadFailure(err, fallback)`** is the four lines every screen held in its `catch`, made once. The fallback stays the caller's, because only the screen knows what it was trying to read.
+
+**Classified on the status, never on the sentence.** `requireAccess` has four sentences for a 401 and may gain a fifth; a screen that matched words would be tied to strings it does not own, and would quietly stop working the day one is reworded. A unit case pins all four, and an empty body besides.
+
+## One concept, one word
+
+Increment 1.81 named the state `signed_out` while the copy the reader sees says "Your sign-in has ended". Both files were in this diff anyway, so the state is now `sign_in_ended` throughout, and the error class is `SignInEnded`. One concept, one word, in the code and on the screen.
+
+Three screens — posting a payment, the attestation view, the questions view — keep their errors as a `string | null` rather than a discriminated state. They get a flag of their own rather than being folded into a sentence, because the one state that is not an error must not be reported as one. That is the same rule this pair of increments is about, applied to the shape those screens happen to have.
+
+- **Tests.** Unit (9): the answer returned; a 401 raising `SignInEnded`; **the four `requireAccess` sentences and an empty body all classified the same way**, which is what keeps this off strings it does not own; a 403 left exactly where it was, raising an ordinary error with the route's words and not a sign-in that ended; the caller's fallback used when the route gave none, and the route named when nobody gave any; the status still read when the body is not JSON; `refuseIfSignInEnded` silent on every status but 401; and the two kinds told apart. Browser (1): the owner reads the ledger, the session row is revoked underneath them, and the reload says the sign-in ended rather than showing the route's sentence alone — with the link carrying `/ledger`, the same reading on the approvals inbox reached with the same dead session, and the way back followed through a real sign-in onto the screen they lost.
+
+**Not in Increment 1.82.** Acts. A person who presses Approve, or Post, or Close the month, and meets a 401 mid-press still gets the route's sentence in the screen's message line — true, and link-less, exactly as the loads were. The classification now reaches those throws too, because it was inserted at every site, but each screen's act handler still writes a string rather than reaching for the panel, and converting them would have doubled a diff that is already seventeen files. It is the obvious next increment and the shape is now in place for it.
+
+Also out: anything about how long a session lives, or a warning before an idle window closes; a per-practice choice of that window; and re-running what the person was doing after they sign back in, which would mean holding a half-finished act across a sign-in and is a different question with its own control implications.
+
+
 ## Increment 1.81
 
 Increment 1.80 ended by naming what it left: a general answer for a session revoked underneath somebody **elsewhere** in the product. Reading the code to build it turned up something sharper than the rough edge that was described.
