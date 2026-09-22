@@ -997,7 +997,17 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     await expect
       .poll(async () => await roster.innerText(), { timeout: 60_000 })
       .toMatch(/their grants were not restored/i);
-    expect(await row("Nora Newhire").innerText()).not.toMatch(/stood down/);
+    /**
+     * Polled, not read once. The sentence above is the flash, which the act
+     * sets as soon as the route answers; the row is redrawn from the refetch
+     * that follows it. Reading the row the moment the flash lands assumes
+     * those two happen together, and on a slower machine they do not — this
+     * assertion passed here and failed in CI, which is the shape of a race
+     * rather than of a defect. The assertion itself is unchanged.
+     */
+    await expect
+      .poll(async () => await row("Nora Newhire").innerText(), { timeout: 60_000 })
+      .not.toMatch(/stood down/);
   }, 180_000);
 
   it("answers a recovery link that opens nothing in one sentence, and offers no way around it", async () => {
