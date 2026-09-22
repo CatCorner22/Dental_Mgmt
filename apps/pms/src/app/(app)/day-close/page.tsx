@@ -5,9 +5,10 @@ import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useEffect, useState } from "react";
 import { formatCents } from "@/lib/ledger/format";
 import type { DayCloseSnapshot, LatePostingRow } from "@/lib/day-close/types";
+import { DEMO_EFFECTIVE_DATE } from "@/lib/demo/dates";
 
 const DEMO_LOCATION = "0196b0a0-0000-7000-8000-000000000101";
-const DEMO_DATE = "2026-09-14";
+const DEMO_DATE = DEMO_EFFECTIVE_DATE;
 
 /**
  * What one late row is, in words (Increment 1.40). A correction announces

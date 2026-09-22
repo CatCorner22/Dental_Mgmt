@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { formatCents } from "@/lib/ledger/format";
 import type { LedgerAccountSummary } from "@/lib/ledger/types";
 import type { StatementRecord } from "@/lib/statements/snapshot";
+import { DEMO_AS_OF_DATE } from "@/lib/demo/dates";
 
 type LoadState =
   | { status: "loading" }
@@ -35,7 +36,7 @@ export default function StatementsPage() {
   const router = useRouter();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [accountId, setAccountId] = useState("");
-  const [asOf, setAsOf] = useState("2026-09-16");
+  const [asOf, setAsOf] = useState(DEMO_AS_OF_DATE);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 

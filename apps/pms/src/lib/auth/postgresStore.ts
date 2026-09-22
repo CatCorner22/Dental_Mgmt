@@ -5,6 +5,7 @@ import {
   domainEvent,
   GENESIS_HASH,
   hashDomainEvent,
+  liveGrantsForUser,
   phiAccessLog,
   recoveryCeremonies,
   sessions,
@@ -39,10 +40,22 @@ interface LookupUserRow {
   password_changed_at: Date;
 }
 
+/**
+ * The duties this person holds right now (Increment 1.86).
+ *
+ * `requireAccess` reads this list on every guarded request, for both the
+ * `entitlements` requirement and the `orEntitlement` opening, so the predicate
+ * here is what a revoke actually revokes. It used to select every row the user
+ * had ever held: `revokeEntitlement` stamps `effective_to` rather than
+ * deleting, so a revoked duty went on opening its routes — on the person's
+ * current session, which the revoke does not end, and on every session after
+ * it. `liveGrantsForUser` is the rule the rest of the product already applies.
+ */
 async function entitlementsFor(
   userId: string,
   tenantId: string,
-  env: Record<string, string | undefined>
+  env: Record<string, string | undefined>,
+  now: Date = new Date()
 ): Promise<string[]> {
   return withTenantTransaction(
     tenantId,
@@ -51,7 +64,7 @@ async function entitlementsFor(
       const rows = await db
         .select({ entitlement: userEntitlements.entitlement })
         .from(userEntitlements)
-        .where(eq(userEntitlements.userId, userId));
+        .where(liveGrantsForUser(userId, now));
       return rows.map((r) => r.entitlement);
     },
     env

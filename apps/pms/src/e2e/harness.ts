@@ -303,6 +303,13 @@ export async function openBrowser(app: E2eApp): Promise<E2eBrowser> {
       }
     },
     async signIn(username, callbackPath) {
+      // End the previous case's document before its cookies go (Increment
+      // 1.84). Clearing cookies under a live screen lets whatever it still has
+      // in flight come back 401 — a console error belonging to no case, raised
+      // at the end of the suite by `assertNoProblems`, naming a route the
+      // failing case never touched. `about:blank` unloads that screen first, so
+      // there is nothing left to answer.
+      await page.goto("about:blank");
       await page.context().clearCookies();
       await page.goto(`${app.base}/signin?callbackUrl=${encodeURIComponent(callbackPath)}`, { waitUntil: "networkidle" });
       await page.fill('input[name="username"]', username);

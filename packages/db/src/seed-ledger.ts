@@ -1,9 +1,15 @@
 import type { Queryable } from "./migrate";
-import { SEED_LEDGER } from "./seed-data";
+import { SEED_LEDGER, SEED_STORY_WEEK } from "./seed-data";
 
 /**
  * Idempotent demo ledger for Ridgeview: dual-coverage-style charge with partial
  * patient payment so the three labeled balance numbers are non-zero in the UI.
+ */
+/**
+ * The rows below are effective on `SEED_STORY_WEEK.effective`, a written date
+ * that expires: see the note on that constant in `seed-data.ts` for the
+ * arithmetic, and `apps/pms/src/lib/controls/seedWindow.ts` for the gate that
+ * says so on the day it does.
  */
 export async function seedLedgerDemo(db: Queryable, now: Date = new Date()): Promise<void> {
   const {
@@ -83,11 +89,11 @@ export async function seedLedgerDemo(db: Queryable, now: Date = new Date()): Pro
        effective_date, posted_at, created_by_id, created_by_name, procedure_id,
        insurance_expected_cents, idempotency_key, created_at
      ) VALUES
-       ($1, $2, $3, $4, $5, 'charge', 'patient_ar', 24500, '2026-09-14', $6, $7, 'Finn Front',
+       ($1, $2, $3, $4, $5, 'charge', 'patient_ar', 24500, $14, $6, $7, 'Finn Front',
         $8, 10000, 'seed-charge-jane', $6),
-       ($9, $2, $10, $11, $5, 'charge', 'patient_ar', 8900, '2026-09-14', $6, $7, 'Finn Front',
+       ($9, $2, $10, $11, $5, 'charge', 'patient_ar', 8900, $14, $6, $7, 'Finn Front',
         $12, NULL, 'seed-charge-john', $6),
-       ($13, $2, $3, $4, $5, 'patient_payment', 'patient_ar', -10000, '2026-09-14', $6, $7,
+       ($13, $2, $3, $4, $5, 'patient_payment', 'patient_ar', -10000, $14, $6, $7,
         'Finn Front', NULL, NULL, 'seed-pay-jane', $6)
      ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`,
     [
@@ -104,6 +110,7 @@ export async function seedLedgerDemo(db: Queryable, now: Date = new Date()): Pro
       patientJohnId,
       procedureJohnId,
       paymentJaneId,
+      SEED_STORY_WEEK.effective,
     ]
   );
 

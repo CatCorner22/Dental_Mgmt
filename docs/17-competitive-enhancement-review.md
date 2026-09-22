@@ -964,6 +964,164 @@ The browser case also caught a defect in its own first draft: it matched the row
 **Not in Increment 1.78.** Inviting a *new* person at a rank: `inviteAccountant` rests on the seat being the lowest rank with one reporting grant and therefore needing no business-associate agreement, and generalising it would need that question answered for a clinical seat, which `docs/05` leaves with the owner. Also out: deactivating somebody, which the store can do (`deactivateUser`) and no route calls; reactivating; a second administrator's approval for a demotion, which would reintroduce a deadlock for no gain while the self-change refusal already prevents the unrecoverable state; and changing a person's clinical role.
 
 
+## Increment 1.86
+
+The owner opens Practice Risk, finds the departing hygienist's card, and presses **Revoke** beside `bank_reconcile`. The screen says the duty is gone. The SoD finding closes. The `role.revoked` domain event is written. The person keeps the duty — on the session they are sitting in, and on every session after it, permanently.
+
+## Why a control could report success and do nothing
+
+`revokeEntitlement` ends a grant the way this product ends every row: it stamps `effective_to` rather than deleting (`apps/pms/src/lib/controls/grants.ts:283`). It does not end the person's sessions. Eight readers honour that convention — `staff.ts`'s `isLive`, `roster.ts:210`, `findingSubjects.ts:41`, `hardEvents.ts:288`, `round.ts:394`, `grants.ts:260`, the partial unique index in migration `0013`, and `controls-engine`'s own `isActive`.
+
+The authorization path honoured neither half of it:
+
+```
+apps/pms/src/lib/auth/postgresStore.ts (before)
+  .from(userEntitlements)
+  .where(eq(userEntitlements.userId, userId));
+```
+
+That function feeds `getUserById` and `getUserByUsername`, which are the two reads `requireAccess` makes on **every guarded request**. `requireAccess` then evaluates both the `entitlements` requirement and the `orEntitlement` opening against a list of every duty the user has ever been granted.
+
+## The rule, written once
+
+`packages/db/src/liveGrants.ts` now holds it: a grant is live when it has begun and has not yet ended. `isLiveGrant` is the in-memory form, `liveGrantAt` and `liveGrantsForUser` the Postgres predicates. `entitlementsFor` uses it, and `staff.ts` borrows it rather than restating it — because restating it is exactly how the auth path came to state it nowhere.
+
+The comparison against the end is strict. `revokeEntitlement` stamps `effective_to` with the instant of the revoke, so a duty revoked at `now` is not live at `now`; a duty is gone the moment it ends, not one tick later.
+
+**Which clock, and what it costs.** `now` is the caller's, matching `revokeEntitlement` and the in-memory readers that already take one. Some rows are written with the database's `now()` instead. On a deployment whose database clock runs ahead of its application clock, a grant written that instant reads as not yet begun for the length of the skew. That fails closed, which is the safe direction for an authorization predicate, and the alternative — moving `revokeEntitlement` to the database clock as well — is a larger change than this defect warrants. The note sits on the constant.
+
+## One correction to the finding that produced this
+
+The audit that surfaced it also claimed a **future-dated grant opens its routes early**. The missing `effective_from` predicate is real, and no product path reaches it: every writer stamps `now` (`grants.ts:194`, `invite.ts:153`, `policy.ts:95`). That half is a hazard the predicate closes, not a defect anybody met, and it is recorded as such rather than counted as a second live bug. It still earns a case, because the column exists, is `NOT NULL`, and is the half a reader adding a scheduled grant would otherwise rediscover.
+
+## Why nothing caught it
+
+`controls.live.test.ts:303-318` asserted the finding closes and that a second revoke answers 404. It never asked what the person could now do. `postgresStore.live.test.ts:112` asserted a user's entitlements equal the three the seed granted — and no seeded row has ever been revoked, so the missing filter would not have moved that assertion by a character.
+
+Both now ask. The proof is red-before and green-after, measured rather than reasoned: with the one-line predicate reverted, `requireAccess` returns `ok: true` on a revoked duty and the new case fails with `expected true to be false`. The assertion that was missing sits where the audit said it was missing, in the revoke case itself.
+
+## Not in Increment 1.86
+
+**The other six `effective_to IS NULL` sites.** They read correctly today, and several deliberately ask "any row ever" rather than "live now" — `loadStaff` hands the engine every row and lets it filter by date. Rewriting them would widen this change well past the defect.
+
+**The in-memory dev store.** `memoryStore.ts` holds entitlements as a plain array with no effective dates and no revoke path, so there is nothing there to filter; `AUTH_DEV_MEMORY` is a development convenience, not a seat any practice sits in.
+
+**Ending the revoked person's sessions.** A revoke now closes the routes on the session they are sitting in, which is the control; whether it should also sign them out is a separate question about what a revoke means, and it is the owner's to answer.
+
+**The rest of the seat audit.** It ran against `2dab1b5` on 2026-09-20, before Increments 1.74 through 1.85, and is substantially stale — its top three findings are Increment 1.74. This one was verified against the working tree before any of it was built, which is the only reason it is here.
+
+## Increment 1.85
+
+Increment 1.84 wrote the expiry date into a comment. This increment gives that sentence a reader.
+
+The fixture that expires is now one constant. `SEED_STORY_WEEK` in `packages/db/src/seed-data.ts` holds `effective` (2026-09-19) and `issued` (2026-09-21), and the four seed modules, the three demonstration defaults and the seven money-desk assertions all read it rather than repeating it. Moving the week is one edit where it was eight, and the arithmetic note moved with the value — it sits on the constant now rather than in `seed-ledger.ts`, which keeps a four-line pointer to it. Increment 1.84's record says that note is in `seed-ledger.ts`; it was, for one increment.
+
+**The gate now fails by name.** `apps/pms/src/lib/controls/seedWindow.ts` holds the three rules as one function, and `seedWindow.test.ts` runs it against the real clock. On 2026-09-27 the suite will say this, before the owner-board cases reach their assertions:
+
+```
+The seed's story week expired on 2026-09-27.
+
+SEED_STORY_WEEK.effective is 2026-09-19 and today is 2026-09-27, which is
+8 days. BACKDATE_DAYS is 7, so every seeded ledger row now raises a
+`retroactive_entry`, and the owner board and weekly digest cases that assert
+those rows raise nothing will fail too. This case fails first so that the
+reason is not left to be inferred from them.
+
+Two ways forward, as Increment 1.84 recorded:
+  1. Anchor the seeded dates to the seed run. This ends the drift for good and
+     moves every assertion that quotes them.
+  2. Move SEED_STORY_WEEK forward in packages/db/src/seed-data.ts. An effective
+     date may not run ahead of today and may not sit more than 7 days back, so
+     any written date buys at most seven days; it also may not sit exactly
+     2 days back, which is the day the money-desk suite banks its deposits.
+```
+
+## The third rule, which cost a run to find
+
+`readSeedWindow` refuses three states, not one, and the third is the one worth recording. A week is wrong when it runs **ahead of the clock**, because no posted row may be effective on a day that has not happened. It is wrong when it sits **more than `BACKDATE_DAYS` back**, which is the expiry. And it is wrong when it sits **exactly two days back**, because that is the offset `money-desk.e2e.test.ts` banks its deposits at: the seeded day close already holds two, so the sealed day holds four and every case that pins the count fails.
+
+That third rule is not a deduction. Increment 1.84 hit it on its first attempt, at a week six days back, and read it off four failures. `DEPOSIT_DAYS_AGO` now lives beside the other two rules and the money-desk suite imports it, so the guard follows the suite rather than quoting a number at it.
+
+The collision is a single day, and it moves. Whoever next picks a date will reach for the maximum the arithmetic allows — today's date, seven days of life — and the collision will land two days later, on a day nothing else explains. The guard names it on the day it lands.
+
+## What the guard does not do
+
+It does not stop the owner-board cases going red on 2026-09-27; nothing short of moving the date or anchoring it does that. It fails alongside them, with the sentence. The value is the sentence, and the measure of it is what 1.84 cost: a morning spent reading two board assertions about retroactive entries to arrive at a constant neither of them names.
+
+The three demonstration defaults are checked rather than shared. `apps/pms/src/lib/demo/dates.ts` holds the days the day-close, ledger-posting and statement forms offer, and `seedWindow.test.ts` asserts both against `SEED_STORY_WEEK`. They are not read from `@pms/db/seed-data` directly because that module also carries `DEV_PASSWORD` and `DEV_MFA_SECRET`, and a client component that imports it puts both inside the bundler's reach — not a thing to depend on tree-shaking for, when an asserted copy costs two lines.
+
+## Not in Increment 1.85
+
+Anchoring the seeded dates to the seed run, which remains option 1 and remains the durable answer whenever it is wanted. This increment makes that decision cheaper to take and impossible to miss; it does not take it. Nothing here changes `BACKDATE_DAYS`, the detector that reads it, or what a real practice sees — no screen imports `seedWindow.ts`. Nothing here moves the week again: it still expires on 2026-09-27, and five days of it remain.
+
+## Increment 1.84
+
+On 2026-09-22 the repository's own test suite began failing, on `main`, for nobody's change. Two money-desk cases went red:
+
+- `shows the front desk the links only, and the owner a board that reflects the day`
+- `counts the week for the owner in the digest, stamps it once, and refuses the front desk`
+
+The seed writes `effective_date` as a written date — `2026-09-14` — and `posted_at` as the moment the seed runs. The gap between them therefore belongs to the wall clock and not to the fixture. `BACKDATE_DAYS = 7` in `controls/detectors.ts`, read by `alerts/hardEvents.ts`, raises a `retroactive_entry` once that gap passes seven days. On 2026-09-21 the gap was seven; on 2026-09-22 it was eight, and seven ordinary seeded rows became retroactive-dated entries on the owner's board — where one case asserts that kind is absent, and the other pins a count the first case's acknowledgment feeds.
+
+Nothing was wrong with the rule. The rule is right: a charge effective on the 14th and posted on the 22nd **is** eight days retroactive. What was wrong was a fixture that describes "last week" with a date that stops being last week.
+
+## The choice, and who made it
+
+Three ways forward were put to the owner, with the recommendation named:
+
+| | | |
+|---|---|---|
+| 1 | Anchor the seed's dates to the seed run | Ends the drift; moves every assertion that quotes them |
+| 2 | Move the written dates forward | Smallest; the same failure re-armed for a later date |
+| 3 | Rewrite the two cases to assert the rule | Honest about today; leaves the drift |
+
+**The owner chose 2**, and this increment is that choice carried out rather than argued with. What the record owes in return is the arithmetic, stated where the next person will meet it.
+
+## What a written date buys, exactly
+
+Two constraints bound it. `today - effective` must stay at or under seven, or the rule fires. And `effective` may not run ahead of the clock, or the fixture describes a practice posting next week's work. Between them, **any written date buys at most seven days**.
+
+This one buys five. The week moved from 2026-09-14 to 2026-09-19, not to the 2026-09-20 that six days would have allowed, because the money-desk suite imports its deposits at `daysAgo(2)` — which on 2026-09-22 *is* the 20th. A week anchored there put four rows on a day close that expects two, and the suite said so on the first run. Five days clears that collision for every day this week survives.
+
+**It fails again on 2026-09-27.** That sentence is in `seed-ledger.ts`, above the rows it governs, with the arithmetic and the decision that is waiting — so that the next failure arrives as a dated note rather than as a mystery about why `main` went red overnight.
+
+- **What moved.** Three ledger effective dates, the day-close business date, the approvals effective date and two statement effective dates, 2026-09-14 → 2026-09-19; the statements' as-of and issued dates, 2026-09-16 → 2026-09-21. Three demonstration defaults on the screens that offer a date moved with them. Seven assertions in the money-desk suite that name the sealed day moved with them.
+- **What did not.** `account_members.effective_from` at 2026-09-01, which is a membership start that no window rule reads. And every self-contained unit fixture that passes its own `now` — the great majority of the forty-odd files holding these dates — because those never drift and moving them would have been churn dressed as a fix.
+## A 401 belonging to no case
+
+The first CI run of this increment failed with every one of its twenty-six money-desk cases passing. `assertNoProblems`, which runs once the suite is over, reported a single console error:
+
+```
+Failed to load resource: the server responded with a status of 401 @ /api/approvals/inbox
+```
+
+A 401 attributed to nobody, on a route the last case never touched, raised after the last assertion had already passed.
+
+`b.signIn` opened each case by clearing the context's cookies and then navigating. The previous case's screen was still the live document at that moment, so whatever it still had in flight came back unauthorised — a console error from a page no case was looking at any more. Increment 1.82's case had just begun ending on `/approvals`, which is a screen that loads, and the case after it is the first thing to clear cookies underneath it.
+
+`signIn` now unloads the document before the cookies go. That is hygiene between cases rather than a softening of the rule: a 401 outside a `signedOut` window still fails a suite, exactly as strictly as before.
+
+**The record should say what it can and cannot claim.** The race never reproduced locally, across four full runs of the suite before and after the change. The evidence for the cause is the mechanism and CI's own log, not a reproduction — which is why the fix is the one that removes the race rather than one that makes a symptom quieter.
+
+- **Method.** The seed and the three defaults changed first, then the full gate ran and the failures named the rest. Predicting which of forty files cared would have been guesswork; four failures on the first run, and none on the second, is the measurement.
+
+## Increment 1.83
+
+Increments 1.81 and 1.82 gave every screen one answer for a sign-in that has ended, on the way in. Pressing a button was still the old shape: the act's `catch` wrote `err.message` into the screen's message line, so a 401 mid-press produced one sentence and nothing to press.
+
+26 act sites across 12 screens now show the `SessionEnded` panel instead. 19 catches that write `set<X>(err instanceof Error ? err.message : ...)` gained a two-line guard ahead of that line. Seven act blocks that handle a refusal **without throwing** set the state directly on `res.status === 401` — those sit in `try/finally` with no `catch`, so a thrown `SignInEnded` would have been an unhandled rejection saying nothing to anybody.
+
+**The half-finished edit goes with the screen, deliberately.** The session is gone, so nothing on that screen can succeed; and the typing could not survive the sign-in either way, which Increment 1.82 put out of scope on its own merits. Offering the way back beats keeping a form that cannot be submitted.
+
+## A correction to Increment 1.82's record
+
+That increment's "Not in" paragraph said acts "still get the route's sentence". Once it inserted `refuseIfSignInEnded` at all forty-two sites, that stopped being true: a 401 mid-press began printing the message of the error class 1.82 introduced, rather than `requireAccess`'s "This session timed out. Sign in again." Both were link-less, and the second had lost the one instruction the first carried. The sentence was accurate when written and wrong by the time that increment merged, which is the kind of drift a "Not in" paragraph is most prone to.
+
+- **Tests.** Browser (1): the owner opens the Locations screen, types a real edit into the Friday closing time, the session row is revoked underneath them, and pressing **Save Main** shows the panel rather than a sentence — with the link carrying `/locations`, the way back followed through a real sign-in, and the practice's own hours unchanged, because the edit that could not be saved was not saved.
+
+**Not in Increments 1.83 and 1.84.** Anchoring the seed's dates to the seed run, which is option 1 above and remains the durable answer whenever the owner wants it. Anything about how long a session lives, or a warning before an idle window closes. A per-practice choice of that window. Re-running what a person was doing after they sign back in, which would mean holding a half-finished act across a sign-in and carries its own control implications. And a guard that would fail the suite loudly on the day the written week expires — worth having, and a different question from moving the date.
+
+
 ## Increment 1.82
 
 Increment 1.81 drew the line between a sign-in that has ended and a seat that lacks rank, and taught the seven screens that pre-read `/api/me` to respect it. Its own "Not in" paragraph described what was left as a narrow race — a session dying *after* the seat check. Reading the rest of the product found something wider.
