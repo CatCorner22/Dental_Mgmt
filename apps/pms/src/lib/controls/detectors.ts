@@ -425,7 +425,7 @@ export function severityForOverdue(daysOverdue: number): FindingSeverity {
 }
 
 export function overdueDecisionSentence(d: OverdueDecision): string {
-  return `A "${DECISION_KIND_LABEL[d.kind]}" decision on ${d.subjectKind.replace(/_/g, " ")} ${d.subjectId} was due for review on ${d.reviewBy} and has been past that date for ${d.daysOverdue} day${d.daysOverdue === 1 ? "" : "s"}. It still governs until a new decision supersedes it.`;
+  return `A "${DECISION_KIND_LABEL[d.kind]}" decision on ${d.subjectKind.replace(/_/g, " ")} ${d.subjectId} was due for review on ${d.reviewBy} and has been past that date for ${d.daysOverdue} day${d.daysOverdue === 1 ? "" : "s"}. It no longer governs: the subject reads as undecided until a new decision is recorded.`;
 }
 
 export function overdueDecisionCandidate(d: OverdueDecision): FindingCandidate {
