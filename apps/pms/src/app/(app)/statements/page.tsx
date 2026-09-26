@@ -1,14 +1,21 @@
 "use client";
 
+import { SessionEnded, loadFailure } from "../session-ended";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { formatCents } from "@/lib/ledger/format";
 import type { LedgerAccountSummary } from "@/lib/ledger/types";
 import type { StatementRecord } from "@/lib/statements/snapshot";
+import { DEMO_AS_OF_DATE } from "@/lib/demo/dates";
+import { dutyNeededSentence, holdsDuty } from "@/lib/auth/heldDuty";
+import { readViewer, type Viewer } from "@/lib/auth/viewer";
 
 type LoadState =
   | { status: "loading" }
+  /** The sign-in behind this screen has ended (Increment 1.82). */
+  | { status: "sign_in_ended" }
   | { status: "error"; message: string }
   | { status: "ready"; statements: StatementRecord[]; accounts: LedgerAccountSummary[] };
 
@@ -31,20 +38,40 @@ export default function StatementsPage() {
   const router = useRouter();
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [accountId, setAccountId] = useState("");
-  const [asOf, setAsOf] = useState("2026-09-16");
+  const [asOf, setAsOf] = useState(DEMO_AS_OF_DATE);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  /**
+   * Who is reading, for the one question this screen asks of them: do they
+   * hold the duty the draft route needs (Increment 1.93). Read from `/api/me`
+   * as Practice Risk reads it, rather than inferred from the rank — the rank
+   * opens this screen and does not open the act.
+   */
+  const [me, setMe] = useState<Viewer | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    void fetch("/api/me")
+      .then(async (res) => readViewer(res.status, await res.json().catch(() => ({}))))
+      .then((viewer) => {
+        if (!cancelled) setMe(viewer);
+      })
+      .catch(() => {
+        // A viewer this screen could not read holds no duty as far as it is
+        // concerned, which is the safe way round: the act is not offered, and
+        // the route would refuse it anyway.
+        if (!cancelled) setMe({ state: "unknown", why: "Could not read who is signed in." });
+      });
     Promise.all([
       fetch("/api/statements").then(async (res) => {
         const body = (await res.json()) as { statements?: StatementRecord[]; error?: string };
+        refuseIfSignInEnded(res);
         if (!res.ok) throw new Error(body.error ?? "Could not load statements.");
         return body.statements ?? [];
       }),
       fetch("/api/ledger/accounts").then(async (res) => {
         const body = (await res.json()) as { accounts?: LedgerAccountSummary[]; error?: string };
+        refuseIfSignInEnded(res);
         if (!res.ok) throw new Error(body.error ?? "Could not load accounts.");
         return body.accounts ?? [];
       }),
@@ -57,10 +84,7 @@ export default function StatementsPage() {
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setState({
-            status: "error",
-            message: err instanceof Error ? err.message : "Could not load statements.",
-          });
+          setState(loadFailure(err, "Could not load statements."));
         }
       });
     return () => {
@@ -81,6 +105,11 @@ export default function StatementsPage() {
       if (!res.ok || !body.statement) throw new Error(body.error ?? "Could not create statement.");
       router.push(`/statements/${body.statement.id}`);
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "Could not create statement.");
     } finally {
       setBusy(false);
@@ -98,9 +127,15 @@ export default function StatementsPage() {
       </p>
 
       {state.status === "loading" && <p className="text-sm text-[var(--ink-2)]">Loading statements…</p>}
+      {state.status === "sign_in_ended" && <SessionEnded />}
       {state.status === "error" && <p className="text-sm text-[var(--ink-2)]">{state.message}</p>}
       {state.status === "ready" && (
         <>
+          {me !== null && !holdsDuty(me, "post_payments") ? (
+            <p className="mb-8 max-w-prose text-sm text-[var(--ink-2)]">
+              {dutyNeededSentence("Creating a statement", "post_payments")}
+            </p>
+          ) : (
           <form
             className="mb-8 flex flex-wrap items-end gap-4"
             onSubmit={(event) => {
@@ -139,6 +174,7 @@ export default function StatementsPage() {
               Create draft
             </button>
           </form>
+          )}
           {message && <p className="mb-6 text-sm text-[var(--ink-2)]">{message}</p>}
 
           {state.statements.length === 0 ? (

@@ -12,6 +12,8 @@ import {
   type ThresholdException,
 } from "@pms/controls-engine";
 import type { AppDb } from "../db/client";
+import { readReach, type ReachReading } from "../notices/reach";
+import { readSetup, type SetupReading } from "../notices/setup";
 import { listInboxApprovals } from "../controls/approvals";
 import { listControlFindings, summarizeFindings } from "../controls/detectors";
 import { matchingSummary } from "../controls/matchingMeasure";
@@ -19,6 +21,10 @@ import { measurementSummary } from "../controls/reconciliationMeasure";
 import { computeSnapshot } from "../controls/snapshots";
 import { getDayCloseSnapshot } from "../day-close/service";
 import { listReconciliationRuns } from "../reconciliation/queries";
+import { afterCloseCard, countPostingsAfterClose, type AfterCloseCard } from "./afterClose";
+import { threadsAwaitingPractice, type Thread } from "../cpa/questions";
+import { ATTESTABLE_CHANNELS, listMonthAttestations } from "../controls/attestations";
+import { attestationCoverage, lastCompleteMonth, type AttestationCoverage } from "../controls/attestationCoverage";
 import { measuredEffectSentence, measuredEffectSince } from "./measuredEffect";
 
 /**
@@ -283,6 +289,41 @@ export type OwnerBoard = {
   detectorFindingsUndecided: number;
   reconciliation: ReconciliationMeasurementSummary;
   matching: MatchingMeasurementSummary;
+  /** What has posted into days the practice had already sealed (Increment 1.41). */
+  afterClose: AfterCloseCard;
+  /**
+   * Threads the outside accountant opened on a month-end package line and the
+   * practice has not answered yet (Increment 1.50). Read without computing any
+   * month's package, so the board costs nothing extra: the question's own words
+   * carry the meaning and `/cpa` is where the line reads in full.
+   */
+  accountantAsked: Thread[];
+  /**
+   * Whether anybody has vouched for the channels this build cannot enforce, for
+   * the month that has ended (Increment 1.52). Read for the last complete month
+   * rather than the one running: "reviewed this month" means a month somebody
+   * could have reviewed.
+   */
+  attestations: AttestationCoverage;
+  /**
+   * Who the practice believes it is notifying and is not (Increment 1.69).
+   *
+   * Read here because the board is where the practice looks to see what needs
+   * it, and because the only telling before this went to the mailbox that was
+   * failing. It names people and never addresses: where somebody is reachable
+   * is theirs (Increment 1.58).
+   */
+  reach: ReachReading;
+  /**
+   * Who the practice was never set up to reach (Increment 1.70).
+   *
+   * Beside the card above because the two answer halves of one question, and
+   * neither is worth much alone: that one reports an address that does not
+   * work, and this one reports a person who never gave one. It is scoped to
+   * the people who could act on what a notice says, so it is a card and not a
+   * roster, and it names people and never addresses for the same reason.
+   */
+  setup: SetupReading;
 };
 
 /**
@@ -293,6 +334,8 @@ export type OwnerBoard = {
  */
 export async function buildOwnerBoard(db: AppDb, tenantId: string, viewerId: string, now: Date = new Date()): Promise<OwnerBoard> {
   const asOf = now.toISOString().slice(0, 10);
+  // The month that has ended, for the attestation card below.
+  const lastComplete = lastCompleteMonth(asOf);
   const { ctx, snapshot } = await computeSnapshot(db, tenantId, now);
 
   const runs = (await listReconciliationRuns(db, tenantId)).map<RunForBoard>((r) => ({
@@ -343,5 +386,16 @@ export async function buildOwnerBoard(db: AppDb, tenantId: string, viewerId: str
     detectorFindingsUndecided: findings.undecided,
     reconciliation: measurementSummary(ctx.reconciliation),
     matching: matchingSummary(ctx.matching),
+    afterClose: afterCloseCard(await countPostingsAfterClose(db, tenantId, asOf, yesterday)),
+    accountantAsked: await threadsAwaitingPractice(db, tenantId),
+    reach: await readReach(db, tenantId, now),
+    setup: await readSetup(db, tenantId, now),
+    attestations: attestationCoverage({
+      month: lastComplete,
+      channels: ATTESTABLE_CHANNELS,
+      attested: (await listMonthAttestations(db, tenantId, lastComplete))
+        .filter((r) => r.attestation !== null)
+        .map((r) => ({ channel: r.channel, seat: r.attestation!.seat as string, byName: r.attestation!.byName })),
+    }),
   };
 }

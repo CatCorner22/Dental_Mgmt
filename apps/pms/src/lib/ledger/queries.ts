@@ -151,22 +151,26 @@ export async function getLedgerAccountDetail(
     ORDER BY p.last_name, p.first_name
   `);
 
+  // The correction link comes from the table beside the view, so the view keeps its shape.
   const entriesResult = await db.execute(sql`
     SELECT
-      entry_id,
-      patient_id,
-      kind,
-      amount_cents,
-      effective_date,
-      posted_at,
-      reason_code,
-      reason_label,
-      poster_name,
-      memo
-    FROM ledger_explanations
-    WHERE tenant_id = ${tenantId}
-      AND account_id = ${accountId}
-    ORDER BY effective_date DESC, posted_at DESC
+      x.entry_id,
+      x.patient_id,
+      x.kind,
+      x.amount_cents,
+      x.effective_date,
+      x.posted_at,
+      x.reason_code,
+      x.reason_label,
+      x.poster_name,
+      x.memo,
+      e.corrects_entry_id,
+      e.reverses_entry_id
+    FROM ledger_explanations x
+    JOIN ledger_entries e ON e.id = x.entry_id AND e.tenant_id = x.tenant_id
+    WHERE x.tenant_id = ${tenantId}
+      AND x.account_id = ${accountId}
+    ORDER BY x.effective_date DESC, x.posted_at DESC
   `);
 
   const rawEntries = await db.execute(sql`
@@ -221,6 +225,8 @@ export async function getLedgerAccountDetail(
       reasonLabel: r.reason_label ? String(r.reason_label) : null,
       posterName: String(r.poster_name),
       memo: r.memo ? String(r.memo) : null,
+      correctsEntryId: r.corrects_entry_id ? String(r.corrects_entry_id) : null,
+      reversesEntryId: r.reverses_entry_id ? String(r.reverses_entry_id) : null,
     };
   });
 

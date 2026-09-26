@@ -1,7 +1,17 @@
 import { withGuard } from "@/lib/auth/withGuard";
 import { approveRecoveryCeremony } from "@/lib/auth/recoveryCeremony";
+import { regainUrl } from "@/lib/auth/regainLink";
 import { getAuthStore } from "@/lib/auth/resolveStore";
 
+/**
+ * The second administrator approves, and receives the one link that opens the
+ * account (Increment 1.77 gave that link a page).
+ *
+ * The link is handed back once, by this call, and never again: the row keeps a
+ * SHA-256 of the token, so a practice that mislaid a link starts the ceremony
+ * again rather than asking this product to repeat a secret it does not hold.
+ * That is the same rule the invitation link has held since Increment 1.73.
+ */
 export const POST = withGuard(
   async (req, ctx) => {
     const store = await getAuthStore();
@@ -22,7 +32,7 @@ export const POST = withGuard(
     if (!result.ok) {
       return Response.json({ error: "Could not approve recovery." }, { status: 400 });
     }
-    return Response.json({ ok: true, resetToken: result.resetToken });
+    return Response.json({ ok: true, link: regainUrl(new URL(req.url).origin, result.resetToken) });
   },
   { minRank: "admin" }
 );

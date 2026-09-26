@@ -273,5 +273,55 @@ if os.path.exists('docs/16-ux-review.md'):
         report('docs/16 UX review: registration', probs)
 else:
     print('SKIP UX review check (no docs/16 yet)')
+
+# ---- Increment 1.105: the increment this product says it is ----------------
+# Four places carried the number and every one said 0.11, ninety-three
+# increments stale, while the signed-in footer was right only because somebody
+# edited it by hand. One constant now, read here against the last increment
+# docs/17 records, with no other literal allowed under apps/pms/src.
+probs = []
+vp = 'apps/pms/src/lib/product.ts'
+d17 = 'docs/17-competitive-enhancement-review.md'
+if os.path.exists(vp) and os.path.exists(d17):
+    m = re.search(r'APP_INCREMENT\s*=\s*"([0-9]+\.[0-9]+)"', open(vp).read())
+    stamped = m.group(1) if m else None
+    if stamped is None:
+        probs.append('apps/pms/src/lib/product.ts declares no APP_INCREMENT')
+    recorded = re.findall(r'^## Increment ([0-9]+\.[0-9]+)$', open(d17).read(), re.M)
+    if not recorded:
+        probs.append('docs/17 records no "## Increment N.M" heading')
+    else:
+        last = max(recorded, key=lambda v: tuple(int(x) for x in v.split('.')))
+        if stamped is not None and stamped != last:
+            probs.append(f'APP_INCREMENT is {stamped}; the last increment docs/17 records is {last}')
+    # No other file may write an increment number as a literal.
+    strays = []
+    for root, dirs, files in os.walk('apps/pms/src'):
+        dirs[:] = [d for d in dirs if d not in ('node_modules', '.next')]
+        for f in files:
+            if not f.endswith(('.ts', '.tsx')):
+                continue
+            path = os.path.join(root, f)
+            if path == vp or f.endswith('.test.ts') or f.endswith('.test.tsx') or os.sep + 'e2e' + os.sep in path:
+                continue
+            body = open(path).read()
+            # Comments are stripped first, and that is the check rather than
+            # tidiness: this file's own doc comment quotes the old literal it
+            # exists to describe, and a check that counted it would fail on a
+            # correct file. Increment 1.96 learned the same thing from the
+            # other side — a gate prose can satisfy is not a gate.
+            body = re.sub(r'/\*[\s\S]*?\*/', '', body)
+            body = re.sub(r'(?m)^\s*//.*$', '', body)
+            # Only a rendered or returned literal counts, so look for one in
+            # JSX or as a value.
+            for hit in re.findall(r'(?:>|:\s*|\{"|\s)Increment [0-9]+\.[0-9]+(?:<|"|\})', body):
+                strays.append(f'{path}: {hit.strip()}')
+            for hit in re.findall(r'increment:\s*"[0-9]+\.[0-9]+"', body):
+                strays.append(f'{path}: {hit}')
+    probs.extend(sorted(set(strays))[:10])
+    report('the increment this product says it is matches the last one docs/17 records, and no other file writes it', probs, f'stamped {stamped}')
+else:
+    print('SKIP increment stamp check (no product.ts or docs/17 yet)')
+
 sys.exit(1 if fails else 0)
 PY

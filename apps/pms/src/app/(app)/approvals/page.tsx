@@ -1,7 +1,9 @@
 "use client";
 
+import { SessionEnded, loadFailure } from "../session-ended";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useEffect, useState } from "react";
-import { formatCents } from "@/lib/ledger/format";
+import { formatCents, formatLedgerKind } from "@/lib/ledger/format";
 
 type InboxItem = {
   id: string;
@@ -16,10 +18,21 @@ type InboxItem = {
   why?: string | null;
   /** For an after-hours hold: the clock and the location's window at posting. */
   afterHours?: string | null;
+  /** Set when the request holds a correction pair rather than one posting (Increment 1.39). */
+  correction?: {
+    correctsEntryId: string;
+    repostKind: string;
+    /** What the entry being corrected carries now. */
+    fromCents: number;
+    /** What the correction proposes it should carry. */
+    toCents: number;
+  } | null;
 };
 
 type LoadState =
   | { status: "loading" }
+  /** The sign-in behind this screen has ended (Increment 1.82). */
+  | { status: "sign_in_ended" }
   | { status: "error"; message: string }
   | { status: "ready"; items: InboxItem[] };
 
@@ -32,6 +45,7 @@ export default function ApprovalsPage() {
   async function loadInbox() {
     const res = await fetch("/api/approvals/inbox");
     const body = (await res.json()) as { items?: InboxItem[]; error?: string };
+    refuseIfSignInEnded(res);
     if (!res.ok) throw new Error(body.error ?? "Could not load approvals inbox.");
     return body.items ?? [];
   }
@@ -44,10 +58,7 @@ export default function ApprovalsPage() {
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setState({
-            status: "error",
-            message: err instanceof Error ? err.message : "Could not load approvals inbox.",
-          });
+          setState(loadFailure(err, "Could not load approvals inbox."));
         }
       });
     return () => {
@@ -68,12 +79,18 @@ export default function ApprovalsPage() {
         }),
       });
       const body = (await res.json()) as { error?: string; status?: string };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error(body.error ?? "Decision failed.");
       const items = await loadInbox();
       setState({ status: "ready", items });
       setMessage(`Request ${decision}.`);
       setDeclineReason("");
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "Decision failed.");
     } finally {
       setBusyId(null);
@@ -85,10 +102,12 @@ export default function ApprovalsPage() {
       <p className="mb-2 text-sm font-semibold tracking-wide text-teal">Money Desk</p>
       <h1 className="mb-2">Approvals inbox</h1>
       <p className="mb-8 max-w-prose text-[var(--ink-2)]">
-        Pending dual-release requests you can approve. The requester never sees their own item here.
+        Pending dual-release requests you can approve. The requester never sees their own item here. A correction
+        holds both of its rows together: approving writes the pair, declining writes neither.
       </p>
 
       {state.status === "loading" && <p className="text-sm text-[var(--ink-2)]">Loading inbox…</p>}
+      {state.status === "sign_in_ended" && <SessionEnded />}
       {state.status === "error" && <p className="text-sm text-[var(--ink-2)]">{state.message}</p>}
       {message && <p className="mb-4 text-sm text-[var(--ink-2)]">{message}</p>}
 
@@ -104,13 +123,25 @@ export default function ApprovalsPage() {
               className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-5"
             >
               <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="text-lg font-semibold capitalize">{item.channel.replace(/_/g, " ")}</h2>
+                <h2 className="text-lg font-semibold capitalize">
+                  {item.correction ? "Correction" : item.channel.replace(/_/g, " ")}
+                </h2>
                 <p className="text-lg font-semibold tabular-nums">{formatCents(item.amountCents)}</p>
               </div>
               <p className="mb-1 text-sm text-[var(--ink-2)]">
                 Requested by {item.requesterName} · {new Date(item.requestedAt).toLocaleString()}
                 {item.kind ? ` · ${item.kind.replace(/_/g, " ")}` : ""}
               </p>
+              {item.correction && (
+                <p className="mb-1 max-w-prose text-sm text-[var(--ink-2)]">
+                  <span className="font-semibold">What changes:</span> the{" "}
+                  {formatLedgerKind(item.correction.repostKind).toLowerCase()} carries{" "}
+                  <span className="tabular-nums">{formatCents(item.correction.fromCents)}</span> and would carry{" "}
+                  <span className="tabular-nums">{formatCents(item.correction.toCents)}</span>. Approving writes both
+                  rows, the reversal that clears it and the repost that replaces it, in one transaction. Declining
+                  writes neither.
+                </p>
+              )}
               {(item.why || item.afterHours) && (
                 <p className="mb-4 max-w-prose text-sm text-[var(--ink-2)]">
                   <span className="font-semibold">Why held:</span> {item.why}

@@ -103,6 +103,11 @@ export async function startProductionApp(): Promise<E2eApp> {
     BACKUP_TARGET: "file:///tmp/pms-e2e-backups",
     OBJECT_STORAGE_URL: "file:///tmp/pms-e2e-heads",
     BCRYPT_COST: "4",
+    // A transport that reaches no network (Increment 1.59), so the browser can
+    // drive delivery end to end without a message escaping to a real person.
+    // Unset, the product refuses to send and says so, which the unit and live
+    // suites cover; here the working path is what needs proving.
+    PMS_NOTICE_TRANSPORT: "memory",
   };
   // The test runner sets development shortcuts that production refuses.
   delete env.DEV_MFA_KEY;
@@ -158,9 +163,28 @@ export type E2eBrowser = {
   problems: string[];
   /** Distinct axe violations seen so far, one per rule and first target. */
   a11y: AxeViolation[];
-  /** One row per audited state: how many rules passed, failed, or need review, so a silent no-op cannot pass. */
-  audits: { state: string; passes: number; violations: number; incomplete: number }[];
+  /**
+   * One row per audited state: the document title the audit saw, and how many rules
+   * passed, failed, or need review, so a silent no-op cannot pass. The title is
+   * recorded because a document sampled mid-update reads differently from the same
+   * screen at rest, and the next such failure should say so rather than be guessed at.
+   */
+  audits: { state: string; title: string; passes: number; violations: number; incomplete: number }[];
   signIn(username: string, callbackPath: string): Promise<void>;
+  /**
+   * Runs `fn` with a 401 on `/api/` tolerated, because the case is driving a
+   * sign-in that has ended on purpose (Increment 1.81). It is scoped rather
+   * than standing: outside this window a 401 still fails the suite, which is
+   * the check that catches a session the product lost track of.
+   */
+  signedOut<T>(fn: () => Promise<T>): Promise<T>;
+  /**
+   * The document title once the head has settled, which is the only moment a
+   * title assertion can be about the screen rather than about the frame. Reading
+   * `page.title()` raw samples an instant that may fall inside a head swap; see
+   * the comment on the implementation for what was measured there.
+   */
+  titleAtRest(): Promise<string>;
   /** Runs axe on the page as it stands and records the violations under `state`. Returns the serious and critical ones. */
   audit(state: string): Promise<AxeViolation[]>;
   close(): Promise<void>;
@@ -185,11 +209,21 @@ export async function openBrowser(app: E2eApp): Promise<E2eBrowser> {
   );
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
   const problems: string[] = [];
+  /** Open while a case is deliberately driving a sign-in that has ended. */
+  let signedOutWindow = false;
   page.on("console", (m) => {
     if (m.type() !== "error") return;
     const url = m.location().url ?? "";
     // A refusal answers 403 or 409 and the browser logs it; that is the product working.
     if (/status of (403|409)/.test(m.text()) && url.includes("/api/")) return;
+    // A sign-in that has ended answers 401, and a case may drive one on
+    // purpose — finishing an enrolment revokes the session that reached the
+    // screen (Increment 1.80), and a session can end under a person anywhere
+    // in the product (Increment 1.81). The window is opened by the case, for
+    // as long as it is driving that state, rather than standing open on a
+    // route: a 401 outside it is a session the product lost track of, and that
+    // must still fail a suite.
+    if (/status of 401/.test(m.text()) && url.includes("/api/") && signedOutWindow) return;
     if (url.endsWith("/favicon.ico")) return;
     problems.push(`console: ${m.text()} @ ${url}`);
   });
@@ -202,13 +236,43 @@ export async function openBrowser(app: E2eApp): Promise<E2eBrowser> {
   const audits: E2eBrowser["audits"] = [];
   const axeSource = readFileSync(AXE_PATH, "utf8");
 
+  /** See the E2eBrowser declaration. */
+  const titleAtRest = async (): Promise<string> => {
+    // Read the title at rest, never mid-update. Every route here declares
+    // metadata, so an empty document.title is always a document caught between
+    // renders -- the head swapped by a client navigation or a refresh -- and
+    // never a screen a person can be on.
+    //
+    // The window is real and was measured, not assumed. Patching the four
+    // mutators on document.head and recording document.title synchronously
+    // after each call, a link navigation from /ledger to an account shows the
+    // old <title> removed, two unrelated nodes inserted, and the new <title>
+    // inserted about 0.1 ms later: for that span the head holds no title
+    // element at all and document.title reads "". React reconciles the head
+    // that way, so no route or layout here can close the window. It is also
+    // narrower than a frame, which is why sampling every animation frame --
+    // 25 frames at full speed and 58 under 20x CPU throttling -- never caught
+    // it, while CI, which samples on its own clock, caught it twice.
+    //
+    // This settles the sample; it excuses nothing. A screen that genuinely
+    // carries no title never settles, so this wait times out and the suite
+    // fails, which is how the missing titles of Increment 1.49 were found.
+    // The value comes back from the predicate that passed, so the title
+    // asserted on is the title that was seen, not a second read of a document
+    // that may have moved on.
+    const settled = await page.waitForFunction(() => document.title || false, undefined, { timeout: 30_000 });
+    return (await settled.jsonValue()) as string;
+  };
+
   return {
     browser,
     page,
     problems,
     a11y,
     audits,
+    titleAtRest,
     async audit(state) {
+      const title = await titleAtRest();
       const loaded = await page.evaluate(() => typeof (window as unknown as { axe?: unknown }).axe !== "undefined");
       if (!loaded) await page.addScriptTag({ content: axeSource });
       const raw = (await page.evaluate(async (tags) => {
@@ -228,7 +292,7 @@ export async function openBrowser(app: E2eApp): Promise<E2eBrowser> {
           })),
         };
       }, AXE_TAGS)) as RawAxeResult;
-      audits.push({ state, passes: raw.passes, violations: raw.violations.length, incomplete: raw.incomplete.length });
+      audits.push({ state, title, passes: raw.passes, violations: raw.violations.length, incomplete: raw.incomplete.length });
       const found: AxeViolation[] = [];
       for (const v of raw.violations) {
         const first = v.nodes[0]?.target.join(" ") ?? "";
@@ -251,7 +315,22 @@ export async function openBrowser(app: E2eApp): Promise<E2eBrowser> {
       }
       return found.filter((v) => v.impact === "critical" || v.impact === "serious");
     },
+    async signedOut(fn) {
+      signedOutWindow = true;
+      try {
+        return await fn();
+      } finally {
+        signedOutWindow = false;
+      }
+    },
     async signIn(username, callbackPath) {
+      // End the previous case's document before its cookies go (Increment
+      // 1.84). Clearing cookies under a live screen lets whatever it still has
+      // in flight come back 401 — a console error belonging to no case, raised
+      // at the end of the suite by `assertNoProblems`, naming a route the
+      // failing case never touched. `about:blank` unloads that screen first, so
+      // there is nothing left to answer.
+      await page.goto("about:blank");
       await page.context().clearCookies();
       await page.goto(`${app.base}/signin?callbackUrl=${encodeURIComponent(callbackPath)}`, { waitUntil: "networkidle" });
       await page.fill('input[name="username"]', username);

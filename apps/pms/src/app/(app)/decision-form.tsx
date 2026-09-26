@@ -9,6 +9,13 @@ export type DecisionDraft = { kind: DecisionKind; note: string; reviewBy: string
  * One decision, typed once. The note must say why (at least ten characters);
  * a review date is the day the decision is looked at again. The server is the
  * judge of both; this form only keeps the obvious mistakes from a round trip.
+ *
+ * Shared since Increment 1.75, which put a decision behind the chart of
+ * accounts on the month-end screen: a practice that has one administrator
+ * records here that it has one, and the same fields ask the same questions
+ * they ask on Practice Risk. Two copies of this form would be two ways to
+ * record one kind of act, and the wording of "why" and "review by" is the
+ * part a second copy would quietly drift on.
  */
 export function DecisionForm({
   kinds = FIRST_DECISION_KINDS,

@@ -68,6 +68,9 @@ export type WeeklyDigest = {
     variancesClearedWithReason: number;
     depositsPrepared: number;
     dayClosesFrozen: number;
+    /** Rows that landed behind a seal this week, and how many are first postings (Increment 1.43). */
+    postingsIntoSealedDays: number;
+    firstPostingsIntoSealedDays: number;
     statementsIssued: number;
     statementsHeld: number;
     statementsVoided: number;
@@ -80,8 +83,37 @@ export type WeeklyDigest = {
     snapshotsFrozen: number;
   };
   access: { signIns: number; mfaEnrolled: number; sessionsRevoked: number; granted: number; revoked: number; policyChanges: number };
-  /** The week's hard events (Increment 1.33): postings the after-hours hold caught, and events the owner acknowledged. */
-  alerts: { afterHoursHolds: number; hardEventsAcknowledged: number };
+  /**
+   * The week's hard events (Increment 1.33): postings the after-hours hold caught,
+   * and events the owner acknowledged. Since Increment 1.53 it also counts the
+   * channels somebody attested this week -- a fact about the week, which is the
+   * only kind of figure this object may carry, because the month-end package
+   * folds the digest in whole and hashes it.
+   */
+  alerts: {
+    afterHoursHolds: number;
+    hardEventsAcknowledged: number;
+    channelsAttested: number;
+    /**
+     * Releases the practice recorded on a channel this build cannot enforce,
+     * and how many of them its own policy required a second pair of hands for
+     * (Increment 1.100).
+     *
+     * `control.release_attested` used to sit in `EVENT_KINDS_SHOWN_ELSEWHERE`,
+     * so the week's reader saw it only inside the total on the chain line —
+     * and the "elsewhere" was the month-end package, which until Increment
+     * 1.97 showed a bare count per channel. A release whose policy asked for
+     * two people is a thing about *this week*, and the digest is where a
+     * practice reads its week.
+     *
+     * `needingSecond` counts what the practice still owes evidence for. It is
+     * not a count of failures: the act records one person attesting what the
+     * policy said and cannot record a second person's own act, deliberately.
+     * It matches the package's `requiredSecond` so the two readers agree.
+     */
+    releasesAttested: number;
+    releasesNeedingSecond: number;
+  };
   chain: { events: number; firstSeq: number | null; lastSeq: number | null; acknowledgments: number; otherKinds: CountRow[] };
   /** The sentence that says what these numbers are and are not. */
   scope: string;
@@ -105,6 +137,8 @@ const EVENT_FIELDS: Record<string, string> = {
   "auth.signin": "access.signIns",
   "auth.mfa_enrolled": "access.mfaEnrolled",
   "auth.sessions_revoked_all": "access.sessionsRevoked",
+  /** One person's sessions, ended from the owner's board (Increment 1.88). Counted beside the tenant-wide act. */
+  "auth.sessions_ended": "access.sessionsRevoked",
   "role.granted": "access.granted",
   "role.revoked": "access.revoked",
   "control.policy_changed": "access.policyChanges",
@@ -112,19 +146,94 @@ const EVENT_FIELDS: Record<string, string> = {
   "location.hours_changed": "access.policyChanges",
   "digest.acknowledged": "chain.acknowledgments",
   "hard_event.acknowledged": "alerts.hardEventsAcknowledged",
+  /** Somebody vouched for a channel the product cannot enforce (Increment 1.53). */
+  "control.channel_attested": "alerts.channelsAttested",
+  /** Money left by a channel this build cannot enforce (Increment 1.100). */
+  "control.release_attested": "alerts.releasesAttested",
 };
 
 /** Kinds counted from their own tables or from the chain but shown elsewhere; not listed twice. */
-const EVENT_KINDS_SHOWN_ELSEWHERE = new Set(["reconciliation.cleared", "control.decision", "statement.drafted", "deposit.staged_applied", "control.release_attested"]);
+/**
+ * Kinds counted from their own tables or from the chain but shown elsewhere;
+ * not listed twice. `control.release_attested` left this set in Increment
+ * 1.100: it has a field of its own now, so the set is never consulted for it,
+ * and leaving it here would read as a claim that the week hides it.
+ */
+const EVENT_KINDS_SHOWN_ELSEWHERE = new Set(["reconciliation.cleared", "control.decision", "statement.drafted", "deposit.staged_applied"]);
 
+/**
+ * What each kind is called, for a person (Increment 1.101).
+ *
+ * `chain.otherKinds` lists every kind the digest has no named field for, and
+ * `eventLabel` fell back to the identifier with its punctuation swapped — so
+ * **29 of the 57 kinds this app writes** reached the practice's weekly record
+ * as "auth signin pending mfa", "month rehash baseline", "import curve hero
+ * staged". Machine-speak, in the one artefact the owner stamps a hash of and
+ * the month-end package folds into its own.
+ *
+ * `import.applied` sat here and **nothing writes it**: the app writes
+ * `import.bank_statement.applied` and `import.curve_hero.applied`. A dead
+ * label beside twenty-nine missing ones, which is how a list drifts when
+ * nothing reads it back.
+ *
+ * `digest.test.ts` now reads the source for every kind the app writes and
+ * fails on one this file has no words for, and on a label naming a kind
+ * nothing writes. The fallback stays, because a kind can be written by a
+ * migration or by a future increment between edits — but it is no longer what
+ * most of the week looks like.
+ */
 export const EVENT_LABEL: Record<string, string> = {
   "reconciliation.cleared": "Bank run cleared",
   "control.decision": "Control decision recorded",
   "statement.drafted": "Statement drafted",
   "deposit.staged_applied": "Staged deposit applied",
   "control.release_attested": "Release attested",
-  "import.applied": "Import applied",
   "cpa.package_exported": "CPA month-end package exported",
+  "gl_mapping.proposed": "GL mapping proposed",
+  "gl_mapping.decided": "GL mapping decided",
+  "month.closed": "Month closed for the accountant",
+  "auth.sessions_ended": "Sessions ended for one person",
+
+  // Getting in, and getting back in.
+  "auth.mfa_repaired": "Somebody paired a new authenticator",
+  "auth.signin.pending_mfa": "A sign-in waited for a second factor",
+  "auth.recovery.initiated": "A recovery was started for somebody locked out",
+  "auth.recovery.approved": "A second administrator approved a recovery",
+  "auth.recovery.consumed": "Somebody used a recovery link to get back in",
+
+  // Who is on the practice.
+  "seat.invited": "An outside accountant's seat was invited",
+  "seat.reinvited": "A seat was sent another link",
+  "seat.claimed": "An invited seat was opened and its password set",
+  "role.rank_changed": "Somebody's rank changed",
+  "roster.reactivated": "Somebody stood down was brought back",
+
+  // The month, with the accountant.
+  "cpa.question_asked": "The accountant asked about a line of the month",
+  "cpa.question_answered": "The practice answered the accountant",
+  "cpa.answer_read": "An answer was marked read",
+  "month.rehash_baseline": "A closed month was re-baselined under a new package shape",
+
+  // Money and its record.
+  "ledger.corrected": "An entry was corrected by a reversal and a repost",
+  "import.bank_statement.applied": "A bank statement was imported",
+  "import.bank_statement.failed": "A bank statement was refused",
+  "import.curve_hero.staged": "A practice-management report was read and staged",
+  "import.curve_hero.applied": "A staged report was posted to the ledger",
+
+  // What the practice governs.
+  "reason_code.added": "A reason code was adopted",
+  "reason_code.relabelled": "A reason code was relabelled",
+  "reason_code.restored": "A retired reason code was restored",
+  "reason_code.threshold_changed": "A reason code's threshold changed",
+
+  // Reaching people.
+  "notice.sent": "A notice was sent",
+  "notice.round_ran": "The notice round ran",
+  "notice.address_code_sent": "A code was sent to prove an address",
+  "notice.address_proved": "An address was proved",
+  "notice.address_refused": "Somebody stopped a code they had not asked for",
+  "notice.address_withdrawn": "An address was withdrawn",
 };
 
 export function eventLabel(kind: string): string {
@@ -153,6 +262,8 @@ export async function computeDigest(db: AppDb, tenantId: string, period: DigestP
       variancesClearedWithReason: 0,
       depositsPrepared: 0,
       dayClosesFrozen: 0,
+      postingsIntoSealedDays: 0,
+      firstPostingsIntoSealedDays: 0,
       statementsIssued: 0,
       statementsHeld: 0,
       statementsVoided: 0,
@@ -160,7 +271,7 @@ export async function computeDigest(db: AppDb, tenantId: string, period: DigestP
     findings: { opened: [], closed: [], openNow: 0 },
     decisions: { recorded: [], reviews: { keep: 0, tighten: 0, retire: 0 }, overdueNow: 0, snapshotsFrozen: 0 },
     access: { signIns: 0, mfaEnrolled: 0, sessionsRevoked: 0, granted: 0, revoked: 0, policyChanges: 0 },
-    alerts: { afterHoursHolds: 0, hardEventsAcknowledged: 0 },
+    alerts: { afterHoursHolds: 0, hardEventsAcknowledged: 0, channelsAttested: 0, releasesAttested: 0, releasesNeedingSecond: 0 },
     chain: { events: 0, firstSeq: null, lastSeq: null, acknowledgments: 0, otherKinds: [] },
     scope: SCOPE_SENTENCE,
   };
@@ -191,6 +302,20 @@ export async function computeDigest(db: AppDb, tenantId: string, period: DigestP
     .from(approvalRequests)
     .where(and(inWindow(approvalRequests, approvalRequests.requestedAt), sql`${approvalRequests.heldPayload} -> 'afterHours' IS NOT NULL`));
   digest.alerts.afterHoursHolds = Number(afterHours?.n ?? 0);
+
+  // Rows that landed behind a day the practice had already sealed, from the stamps
+  // the database wrote at insert time (Increment 1.43). The split is the point: a
+  // correction names the entry it replaces, and a first posting names nothing.
+  // Adding these moved the package hash, which is why PACKAGE_SCHEMA_VERSION is v2.
+  const [sealed] = await db
+    .select({
+      n: sql<number>`count(*)::int`,
+      first: sql<number>`count(*) FILTER (WHERE ${ledgerEntries.correctsEntryId} IS NULL)::int`,
+    })
+    .from(ledgerEntries)
+    .where(and(inWindow(ledgerEntries, ledgerEntries.postedAt), eq(ledgerEntries.postedAfterClose, true)));
+  digest.bank.postingsIntoSealedDays = Number(sealed?.n ?? 0);
+  digest.bank.firstPostingsIntoSealedDays = Number(sealed?.first ?? 0);
   digest.money.guardedWithoutSecond = Number(withoutSecond?.n ?? 0);
 
   // Bank and close, from their tables.
@@ -272,6 +397,24 @@ export async function computeDigest(db: AppDb, tenantId: string, period: DigestP
     if (field) setPath(digest as unknown as Record<string, unknown>, field, count);
     else if (!EVENT_KINDS_SHOWN_ELSEWHERE.has(e.kind)) digest.chain.otherKinds.push({ key: e.kind, label: eventLabel(e.kind), count });
   }
+
+  /**
+   * How many of the week's attested releases the policy asked two people for
+   * (Increment 1.100). A second query rather than a second group, because the
+   * loop above groups by kind alone and this asks about one kind's payload.
+   * `dualRequired` is a JSON boolean, so it is compared as one.
+   */
+  const [needing] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(domainEvent)
+    .where(
+      and(
+        inWindow(domainEvent, domainEvent.occurredAt),
+        eq(domainEvent.kind, "control.release_attested"),
+        sql`${domainEvent.payload}->'dualRequired' = 'true'::jsonb`
+      )
+    );
+  digest.alerts.releasesNeedingSecond = Number(needing?.n ?? 0);
 
   return digest;
 }

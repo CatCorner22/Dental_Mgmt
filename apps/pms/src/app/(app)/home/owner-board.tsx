@@ -1,12 +1,15 @@
 "use client";
 
+import { loadFailure } from "../session-ended";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
+import { readViewer } from "@/lib/auth/viewer";
+import { SessionEnded } from "../session-ended";
 import { formatCents } from "@/lib/ledger/format";
 import type { OwnerBoard as Board, TileShape } from "@/lib/home/board";
-
-type Me = { ok: boolean; role?: string };
+import { outsideReaderSentence } from "@/lib/auth/cpaSurfaces";
 
 type HardEventItem = {
   kind: string;
@@ -16,6 +19,10 @@ type HardEventItem = {
   subjectId: string;
   sentence: string;
   href: string | null;
+  /** The person a hard event is about, when one can be acted on (Increment 1.88). */
+  personId?: string;
+  /** The event names the reader, so the act on it is a sign-out (Increment 1.89). */
+  aboutViewer?: boolean;
   /** The owner's acknowledgment, if recorded (Increment 1.33). */
   ack: { acknowledgedByName: string; acknowledgedAt: string; note: string } | null;
 };
@@ -29,6 +36,8 @@ type Alerts = {
 
 type LoadState =
   | { status: "loading" }
+  /** The sign-in is over (Increment 1.81). Not the same fact as the one below. */
+  | { status: "sign_in_ended" }
   | { status: "not_for_seat" }
   | { status: "error"; message: string }
   | { status: "ready"; board: Board; isAdmin: boolean; alerts: Alerts | null };
@@ -74,6 +83,7 @@ function Card({ id, title, children }: { id: string; title: string; children: Re
 async function loadBoard(): Promise<Board> {
   const res = await fetch("/api/home/board");
   const body = (await res.json().catch(() => ({}))) as Board & { error?: string };
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error(body.error ?? "Could not load the board.");
   return body;
 }
@@ -83,6 +93,7 @@ async function loadAlerts(isAdmin: boolean): Promise<Alerts | null> {
   if (!isAdmin) return null;
   const res = await fetch("/api/alerts");
   const body = (await res.json().catch(() => ({}))) as Alerts & { error?: string };
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error(body.error ?? "Could not load the hard events.");
   return body;
 }
@@ -90,6 +101,9 @@ async function loadAlerts(isAdmin: boolean): Promise<Alerts | null> {
 export function OwnerBoard() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [message, setMessage] = useState<string | null>(null);
+  // The thread the owner is answering, and what they have typed so far.
+  const [answering, setAnswering] = useState<string | null>(null);
+  const [answer, setAnswer] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   // The review being composed: which decision, which action, and the note so far.
   const [review, setReview] = useState<{ id: string; action: ReviewAction; note: string } | null>(null);
@@ -99,10 +113,20 @@ export function OwnerBoard() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // A 401 is the sign-in ending, never the seat lacking rank (Increment
+      // 1.81). The old test was `!meRes.ok`, which is true of both, and told a
+      // person whose session had timed out that this screen was not for their
+      // seat — pointing them at a header the same fact had just emptied.
       const meRes = await fetch("/api/me");
-      const me = (await meRes.json().catch(() => ({ ok: false }))) as Me;
-      const role = me.role && isRole(me.role) ? me.role : undefined;
-      if (!meRes.ok || !meetsRole(role, "manager")) {
+      const viewer = readViewer(meRes.status, await meRes.json().catch(() => ({})));
+      if (viewer.state !== "present") {
+        if (!cancelled) {
+          setState(viewer.state === "ended" ? { status: "sign_in_ended" } : { status: "error", message: viewer.why });
+        }
+        return;
+      }
+      const role = isRole(viewer.role) ? viewer.role : undefined;
+      if (!meetsRole(role, "manager")) {
         if (!cancelled) setState({ status: "not_for_seat" });
         return;
       }
@@ -110,7 +134,7 @@ export function OwnerBoard() {
       const [board, alerts] = await Promise.all([loadBoard(), loadAlerts(isAdmin)]);
       if (!cancelled) setState({ status: "ready", board, isAdmin, alerts });
     })().catch((err: unknown) => {
-      if (!cancelled) setState({ status: "error", message: err instanceof Error ? err.message : "Could not load the board." });
+      if (!cancelled) setState(loadFailure(err, "Could not load the board."));
     });
     return () => {
       cancelled = true;
@@ -129,12 +153,50 @@ export function OwnerBoard() {
         body: JSON.stringify({ decisionId: id, action, note: note || undefined }),
       });
       const body = (await res.json().catch(() => ({}))) as { sentence?: string; error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       setReview(null);
       setState({ ...state, board: await loadBoard() });
       setMessage(body.sentence ?? "Review recorded.");
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The review was not recorded.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * The practice's answer to the accountant (Increment 1.50). Append-only, like
+   * every other message in the thread; the card is re-read from rows afterwards.
+   */
+  async function answerAccountant(threadId: string, body: string) {
+    if (state.status !== "ready") return;
+    setBusy(threadId);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/cpa/questions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "reply", threadId, body }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { why?: string; verb?: string };
+      refuseIfSignInEnded(res);
+      if (!res.ok) throw new Error(`${payload.verb ?? "Not sent"}: ${payload.why ?? "The answer was not sent."}`);
+      setAnswering(null);
+      setState({ ...state, board: await loadBoard() });
+      setMessage("Answered. The accountant reads it on the month-end package.");
+    } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
+      setMessage(err instanceof Error ? err.message : "The answer was not sent.");
     } finally {
       setBusy(null);
     }
@@ -153,22 +215,63 @@ export function OwnerBoard() {
         body: JSON.stringify({ kind: item.kind, subjectKind: item.subjectKind, subjectId: item.subjectId, note }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       setAcking(null);
       setState({ ...state, alerts: await loadAlerts(state.isAdmin) });
       setMessage(`Acknowledged: ${item.label}. The note is on the chain beside it.`);
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The hard event was not acknowledged.");
     } finally {
       setBusy(null);
     }
   }
 
+  /**
+   * End one person's sign-ins, from beside the alarm that named them
+   * (Increment 1.88). Disruptive rather than destructive: they sign in again
+   * with the password and a code they already hold, and nothing they did is
+   * undone — which is why it asks nothing first beyond the press.
+   */
+  async function endSignIns(item: HardEventItem) {
+    if (state.status !== "ready" || !item.personId) return;
+    const key = `end|${item.subjectId}`;
+    setBusy(key);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/admin/end-sessions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: item.personId }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; sentence?: string };
+      refuseIfSignInEnded(res);
+      if (!res.ok) throw new Error(body.error ?? "Those sign-ins were not ended.");
+      setState({ ...state, alerts: await loadAlerts(state.isAdmin) });
+      setMessage(body.sentence ?? "Those sign-ins were ended.");
+    } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
+      setMessage(err instanceof Error ? err.message : "Those sign-ins were not ended.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   if (state.status === "loading") return <p className="text-sm text-[var(--ink-2)]">Reading yesterday's rows…</p>;
+  if (state.status === "sign_in_ended") return <SessionEnded />;
   if (state.status === "not_for_seat") {
     return (
       <p className="max-w-prose text-[var(--ink-2)]">
-        The board is for the manager and owner seats. Your seat works from the links below.
+        The board is for the manager and owner seats. Your seat works from the links in the header.
       </p>
     );
   }
@@ -210,6 +313,229 @@ export function OwnerBoard() {
           {b.matching.windowDays} days from the bank lines the practice holds.
         </p>
       </section>
+
+      {/* What has posted into days the practice already sealed (Increment 1.41).
+          Shown in every state: an owner who never sees this card cannot tell a
+          clean practice from a broken count. */}
+      <section aria-labelledby="after-close" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">
+          Sealed days · last {b.afterClose.windowDays} days
+        </p>
+        <p id="after-close" className="mt-1 font-semibold text-[var(--ink)]">
+          {b.afterClose.headline}
+        </p>
+        {b.afterClose.window.rows > 0 && (
+          <p className="mt-1 text-sm text-[var(--ink-2)]">
+            Together they move the sealed days by{" "}
+            <span className="font-semibold tabular-nums text-[var(--ink)]">
+              {formatCents(b.afterClose.window.netCents)}
+            </span>
+            . The sealed figures themselves stay as the practice counted them.
+          </p>
+        )}
+        <p className="mt-1 max-w-prose text-sm text-[var(--ink-2)]">{b.afterClose.why}</p>
+        {b.afterClose.action && (
+          <Link
+            className="mt-3 inline-flex min-h-[var(--target)] items-center rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold text-[var(--ink)]"
+            href={b.afterClose.action.href}
+          >
+            {b.afterClose.action.label}
+          </Link>
+        )}
+      </section>
+
+      {/* The channels this build cannot enforce, for the month that has ended
+          (Increment 1.52). Shown in every state, the quiet one included: an
+          owner who sees this card only when something is wrong cannot tell a
+          reviewed month from a month nobody looked at. */}
+      <section aria-labelledby="attested" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">
+          Channels the product cannot hold · {b.attestations.month}
+        </p>
+        <p id="attested" className="mt-1 font-semibold text-[var(--ink)]">
+          {b.attestations.complete
+            ? `Reviewed by somebody: ${b.attestations.attested.length} of ${b.attestations.channels.length}`
+            : `${b.attestations.unattested.length} of ${b.attestations.channels.length} reviewed by nobody`}
+        </p>
+        <p className="mt-1 max-w-prose text-sm text-[var(--ink-2)]">{b.attestations.sentence}</p>
+        {!b.attestations.complete && b.attestations.channels.length > 0 && (
+          <Link
+            className="mt-3 inline-flex min-h-[var(--target)] items-center rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold text-[var(--ink)]"
+            href="/cpa"
+          >
+            Attest them on the month-end package
+          </Link>
+        )}
+      </section>
+
+      {/* Who the practice believes it is notifying and is not (Increment 1.69).
+          Shown in every state, the quiet one included, for the same reason as
+          the card above: an owner who sees this only when something is wrong
+          cannot tell "everybody is reachable" from "this card broke". It names
+          people and never addresses — where somebody is reachable is theirs. */}
+      <section aria-labelledby="reach" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">Who the practice can reach</p>
+        <p id="reach" className="mt-1 font-semibold text-[var(--ink)]">
+          {b.reach.considered === 0
+            ? "Nobody has said where to send their notices"
+            : b.reach.unreachable.length === 0
+              ? `All ${b.reach.considered} reachable`
+              : `${b.reach.unreachable.length} of ${b.reach.considered} cannot be reached`}
+        </p>
+        {b.reach.unreachable.length === 0 ? (
+          <p className="mt-1 max-w-prose text-sm text-[var(--ink-2)]">
+            {b.reach.considered === 0
+              ? "Nothing is sent to anybody, so nothing here has failed. A person sets their own address on Practice Risk."
+              : "Every address on file has been proved to reach the person who saved it, so the notices go where the practice thinks they go."}
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {b.reach.unreachable.map((u) => (
+              <li key={u.userId} className="rounded-md border border-[var(--line)] p-3">
+                <p className="text-sm font-semibold text-[var(--ink)]">
+                  {u.name}
+                  <span className="ml-2 font-normal text-[var(--ink-3)]">
+                    {u.seat === "accountant" ? "the accountant" : "the practice"} · since {u.since.slice(0, 10)}
+                  </span>
+                </p>
+                <p className="mt-1 max-w-prose text-sm text-[var(--ink-2)]">{u.sentence}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Who the practice was never set up to reach (Increment 1.70). Beside the
+          card above because the two are halves of one question: that one reports
+          an address that does not work, and this one a person who never gave
+          one. Scoped to the people who could act on what a notice says, so it is
+          a card rather than the roster. */}
+      <section aria-labelledby="setup" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">Who was never set up</p>
+        <p id="setup" className="mt-1 font-semibold text-[var(--ink)]">
+          {b.setup.expected === 0
+            ? "Nobody here can act on a notice"
+            : b.setup.missing.length + b.setup.withdrawn.length === 0
+              ? `All ${b.setup.expected} can be told`
+              : `${b.setup.missing.length + b.setup.withdrawn.length} of ${b.setup.expected} cannot be told`}
+        </p>
+        {b.setup.missing.length + b.setup.withdrawn.length === 0 ? (
+          <p className="mt-1 max-w-prose text-sm text-[var(--ink-2)]">
+            {b.setup.expected === 0
+              ? "No seat here opens the screens a notice points at, so there is nobody the practice needs an address for."
+              : "Everybody who could act on what this practice is told has said where to send it."}
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {[...b.setup.missing, ...b.setup.withdrawn].map((p) => (
+              <li key={p.userId} className="rounded-md border border-[var(--line)] p-3">
+                <p className="text-sm font-semibold text-[var(--ink)]">
+                  {p.name}
+                  <span className="ml-2 font-normal text-[var(--ink-3)]">
+                    {p.seat === "accountant" ? "the accountant" : "the practice"}
+                  </span>
+                </p>
+                <p className="mt-1 max-w-prose text-sm text-[var(--ink-2)]">{p.sentence}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* What the outside accountant asked and the practice has not answered
+          (Increment 1.50). Shown only when something waits: unlike the sealed-days
+          card, silence here means nobody is owed anything, not that nothing was
+          measured. The line reads by its key; the question's own words carry it. */}
+      {b.accountantAsked.length > 0 && (
+        <section aria-labelledby="accountant-asked" className="rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">The accountant asked</p>
+          <p id="accountant-asked" className="mt-1 font-semibold text-[var(--ink)]">
+            {b.accountantAsked.length} question{b.accountantAsked.length === 1 ? "" : "s"} waiting on the practice
+          </p>
+          <ul className="mt-3 space-y-3">
+            {b.accountantAsked.map((t) => {
+              const asked = t.messages[0];
+              return (
+                <li key={t.id} className="rounded-md border border-[var(--line)] p-3">
+                  <p className="text-xs text-[var(--ink-3)]">
+                    {t.month} · {t.subjectKey} · asked {t.askedAt.slice(0, 10)} by {asked?.authorName}
+                  </p>
+                  <p className="mt-1 text-sm text-[var(--ink-2)]">{asked?.body}</p>
+                  {/* The owner needs this before they answer, not after
+                      (Increment 1.54): a month they have closed cannot simply
+                      be corrected, and an answer promising otherwise is wrong. */}
+                  {t.closedMonth && <p className="mt-1 max-w-prose text-xs text-[var(--ink-3)]">{t.closedMonth.sentence}</p>}
+                  {answering === t.id ? (
+                    <span className="mt-2 flex flex-wrap items-end gap-2">
+                      <span className="flex flex-col text-sm">
+                        {/*
+                         * Who reads this, said where it is written (Increment
+                         * 1.106). The seat's whole argument is that the
+                         * month-end package is aggregate and names no patient,
+                         * and a live case proves that of everything the product
+                         * derives. It can prove nothing about a sentence
+                         * somebody types, so the sentence is where the practice
+                         * is told.
+                         *
+                         * It is a description, not part of the label. Inside
+                         * the `<label>` it became the field's accessible name,
+                         * so a screen reader announced the whole paragraph in
+                         * place of "Your answer" — which the browser suite
+                         * caught by no longer finding the field by its name.
+                         */}
+                        <label className="mb-1 font-semibold" htmlFor={`answer-${t.id}`}>
+                          Your answer
+                        </label>
+                        <span id={`answer-note-${t.id}`} className="mb-1 max-w-prose text-xs text-[var(--ink-3)]">
+                          {outsideReaderSentence()}
+                        </span>
+                        <input
+                          id={`answer-${t.id}`}
+                          aria-describedby={`answer-note-${t.id}`}
+                          className="w-80 rounded-md border border-[var(--line)] bg-[var(--bg)] px-2 py-1"
+                          value={answer}
+                          onChange={(e) => setAnswer(e.target.value)}
+                        />
+                      </span>
+                      <button
+                        type="button"
+                        className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-3 py-1 text-sm font-semibold disabled:opacity-50"
+                        disabled={busy !== null || answer.trim().length < 10}
+                        onClick={() => void answerAccountant(t.id, answer.trim())}
+                      >
+                        {busy === t.id ? "Sending…" : "Answer"}
+                      </button>
+                      <button
+                        type="button"
+                        className="min-h-[var(--target)] rounded-md border border-[var(--line)] px-3 py-1 text-sm"
+                        onClick={() => setAnswering(null)}
+                      >
+                        Cancel
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="mt-2 min-h-[var(--target)] rounded-md border border-[var(--line)] px-3 py-1 text-sm"
+                      onClick={() => {
+                        setAnswering(t.id);
+                        setAnswer("");
+                        setMessage(null);
+                      }}
+                    >
+                      Answer this
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          <p className="mt-3 max-w-prose text-sm text-[var(--ink-2)]">
+            An answer is append-only and reaches the chain, so the month carries what was asked and what was said about
+            it. The figure itself reads in full on the month-end package.
+          </p>
+        </section>
+      )}
 
       {b.afterHoursHold && !b.afterHoursHold.on && (
         <section aria-labelledby="after-hours-hold" className="rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] p-4">
@@ -266,6 +592,26 @@ export function OwnerBoard() {
                         </>
                       )}
                     </p>
+                    {e.aboutViewer && (
+                      <p className="mt-1 text-xs text-[var(--ink-3)]">
+                        This names your own sign-in. To end it, sign out from the header — that needs no administrator.
+                      </p>
+                    )}
+                    {e.personId && (
+                      <p className="mt-1">
+                        <button
+                          type="button"
+                          className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-3 py-1 text-sm font-semibold text-[var(--ink)] disabled:opacity-50"
+                          disabled={busy !== null}
+                          onClick={() => void endSignIns(e)}
+                        >
+                          {busy === `end|${e.subjectId}` ? "Ending…" : "End their sign-ins"}
+                        </button>
+                        <span className="ml-2 text-xs text-[var(--ink-3)]">
+                          They sign in again with their password and a code. Nothing they did is undone.
+                        </span>
+                      </p>
+                    )}
                     {e.ack ? (
                       <p className="text-xs text-[var(--ink-3)]">
                         Seen by {e.ack.acknowledgedByName} on {e.ack.acknowledgedAt.slice(0, 10)}: {e.ack.note}

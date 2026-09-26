@@ -14,8 +14,18 @@ export const GET = withGuard(
     const user = ctx.access.user;
     const now = new Date();
     const since = new Date(now.getTime() - HARD_EVENT_DAYS * 86_400_000);
-    const items = await withTenantTransaction(user.tenantId, user.id, async (db) =>
+    const raw = await withTenantTransaction(user.tenantId, user.id, async (db) =>
       attachAcks(await listHardEvents(db, user.tenantId, { since, now }), await loadHardEventAcks(db, user.tenantId, since))
+    );
+    /**
+     * An alarm about the reader offers no act (Increment 1.89). The route is
+     * the only place that knows both who is asking and who the event names, so
+     * it answers the question here rather than shipping the reader's own id to
+     * the screen to be compared there. `endSessionsForPerson` refuses this case
+     * anyway; a button that can only refuse is worse than none.
+     */
+    const items = raw.map((item) =>
+      item.personId === user.id ? { ...item, personId: undefined, aboutViewer: true } : item
     );
     return Response.json({
       since: since.toISOString(),

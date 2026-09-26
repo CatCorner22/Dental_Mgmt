@@ -33,7 +33,13 @@ export function assertFlatPayload(payload: Record<string, unknown>): void {
 export async function appendControlEvent(
   db: AppDb,
   tenantId: string,
-  actorUserId: string,
+  /**
+   * Who did it, or null where nobody did — a scheduled round (Increment 1.62)
+   * acts for no person. The column has always admitted null; only this
+   * signature did not, which pushed background work into pretending it had an
+   * actor or into writing no event at all.
+   */
+  actorUserId: string | null,
   kind: string,
   payload: Record<string, unknown>,
   at: Date

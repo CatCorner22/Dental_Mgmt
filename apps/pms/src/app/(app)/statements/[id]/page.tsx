@@ -1,5 +1,7 @@
 "use client";
 
+import { isSignInEnded } from "@/lib/auth/guardedFetch";
+import { SessionEnded, loadFailure } from "../../session-ended";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -8,6 +10,8 @@ import type { StatementRecord } from "@/lib/statements/snapshot";
 
 type LoadState =
   | { status: "loading" }
+  /** The sign-in behind this screen has ended (Increment 1.82). */
+  | { status: "sign_in_ended" }
   | { status: "error"; message: string }
   | { status: "ready"; statement: StatementRecord };
 
@@ -42,10 +46,7 @@ export default function StatementPreviewPage() {
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setState({
-            status: "error",
-            message: err instanceof Error ? err.message : "Could not load statement.",
-          });
+          setState(loadFailure(err, "Could not load statement."));
         }
       });
     return () => {
@@ -67,6 +68,11 @@ export default function StatementPreviewPage() {
       setState({ status: "ready", statement: payload.statement });
       setMessage(payload.statement.status === "issued" ? "Statement issued." : "Statement held.");
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "Action failed.");
     } finally {
       setBusy(false);
@@ -87,6 +93,7 @@ export default function StatementPreviewPage() {
         </Link>
       </p>
       {state.status === "loading" && <p className="text-sm text-[var(--ink-2)]">Loading statement…</p>}
+      {state.status === "sign_in_ended" && <SessionEnded />}
       {state.status === "error" && <p className="text-sm text-[var(--ink-2)]">{state.message}</p>}
       {statement && (
         <>

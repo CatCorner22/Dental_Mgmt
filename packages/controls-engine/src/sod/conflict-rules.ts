@@ -27,6 +27,7 @@ export type EntitlementId =
   | "approve_payroll"
   | "enter_payroll"
   | "pms_admin_roles"
+  | "run_import"
   | "view_reports_only";
 
 export interface Entitlement {
@@ -140,6 +141,26 @@ export const ENTITLEMENTS: Entitlement[] = [
     label: "PMS admin / role assignment",
     family: "master_data",
     processIds: ["proc-claims", "proc-schedule"],
+    riskWeight: 4,
+  },
+  /**
+   * Increment 1.91. This duty guarded three routes before it was a duty:
+   * `POST /api/import/bank-statement`, `POST /api/import/curve` and
+   * `POST /api/import/curve/apply`. Outside it, `grantEntitlement` refused it
+   * as unknown while `revokeEntitlement` took it on sight, so a practice could
+   * end an import grant and never make another — and only the seed could hand
+   * one out, by writing the row directly.
+   *
+   * Recording, not custody: importing writes somebody else's record into this
+   * practice's books. Weight 4 rather than 5, deliberately — `CRITICAL_DUTIES`
+   * is the weight-5 set, and a duty that stages a file for a person who then
+   * posts it is not the custody of cash.
+   */
+  {
+    id: "run_import",
+    label: "Import bank and practice-management files",
+    family: "recording",
+    processIds: ["proc-cash", "proc-ar"],
     riskWeight: 4,
   },
   {

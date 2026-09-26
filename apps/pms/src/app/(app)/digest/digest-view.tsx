@@ -1,22 +1,33 @@
 "use client";
 
+import { loadFailure } from "../session-ended";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useCallback, useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
+import { readViewer } from "@/lib/auth/viewer";
+import { SessionEnded } from "../session-ended";
 import { formatCents } from "@/lib/ledger/format";
 import type { CountRow, DigestAck, WeeklyDigest } from "@/lib/digest/digest";
-
-type Me = { ok: boolean; role?: string };
+import type { AttestationCoverage } from "@/lib/controls/attestationCoverage";
+import type { ReachReading } from "@/lib/notices/reach";
+import type { SetupReading } from "@/lib/notices/setup";
 
 type DigestResponse = {
   digest: WeeklyDigest;
   summaryHash: string;
   ack: DigestAck | null;
+  attestations: AttestationCoverage;
+  /** Who the practice believes it is notifying and is not (Increment 1.69). */
+  reach: ReachReading;
+  setup: SetupReading;
   changedSinceAck: boolean;
   computedAt: string;
 };
 
 type LoadState =
   | { status: "loading" }
+  /** The sign-in is over (Increment 1.81). Not the same fact as the one below. */
+  | { status: "sign_in_ended" }
   | { status: "not_for_seat" }
   | { status: "error"; message: string }
   | { status: "ready"; data: DigestResponse; isAdmin: boolean };
@@ -28,6 +39,7 @@ function today(): string {
 async function loadDigest(ending: string): Promise<DigestResponse> {
   const res = await fetch(`/api/digest?ending=${encodeURIComponent(ending)}`);
   const body = (await res.json().catch(() => ({}))) as DigestResponse & { error?: string };
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error(body.error ?? "Could not load the digest.");
   return body;
 }
@@ -71,10 +83,18 @@ export function DigestView() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async (end: string) => {
+    // A 401 is the sign-in ending, never the seat lacking rank (Increment
+    // 1.81). The old test was `!meRes.ok`, which is true of both, and told a
+    // person whose session had timed out that this screen was not for their
+    // seat — pointing them at a header the same fact had just emptied.
     const meRes = await fetch("/api/me");
-    const me = (await meRes.json().catch(() => ({ ok: false }))) as Me;
-    const role = me.role && isRole(me.role) ? me.role : undefined;
-    if (!meRes.ok || !meetsRole(role, "manager")) {
+    const viewer = readViewer(meRes.status, await meRes.json().catch(() => ({})));
+    if (viewer.state !== "present") {
+      setState(viewer.state === "ended" ? { status: "sign_in_ended" } : { status: "error", message: viewer.why });
+      return;
+    }
+    const role = isRole(viewer.role) ? viewer.role : undefined;
+    if (!meetsRole(role, "manager")) {
       setState({ status: "not_for_seat" });
       return;
     }
@@ -85,7 +105,7 @@ export function DigestView() {
   useEffect(() => {
     let cancelled = false;
     load(ending).catch((err: unknown) => {
-      if (!cancelled) setState({ status: "error", message: err instanceof Error ? err.message : "Could not load the digest." });
+      if (!cancelled) setState(loadFailure(err, "Could not load the digest."));
     });
     return () => {
       cancelled = true;
@@ -103,18 +123,25 @@ export function DigestView() {
         body: JSON.stringify({ ending: state.data.digest.period.end, summaryHash: state.data.summaryHash }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       await load(ending);
       setMessage("Acknowledged. The stamp binds the digest as it read just now; if the rows change later, this page says so.");
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The digest was not acknowledged.");
     } finally {
       setBusy(false);
     }
   }
 
+  if (state.status === "sign_in_ended") return <SessionEnded />;
   if (state.status === "not_for_seat") {
-    return <p className="max-w-prose text-[var(--ink-2)]">The digest is for the manager and owner seats. Your seat works from the home links.</p>;
+    return <p className="max-w-prose text-[var(--ink-2)]">The digest is for the manager and owner seats. Your seat works from the links in the header.</p>;
   }
 
   return (
@@ -221,6 +248,8 @@ export function DigestView() {
                 ["Variances cleared with a reason", state.data.digest.bank.variancesClearedWithReason],
                 ["Deposits prepared", state.data.digest.bank.depositsPrepared],
                 ["Day closes frozen", state.data.digest.bank.dayClosesFrozen],
+                ["Postings into sealed days", state.data.digest.bank.postingsIntoSealedDays],
+                ["\u2026of those, first postings", state.data.digest.bank.firstPostingsIntoSealedDays],
                 ["Patient statements issued", state.data.digest.bank.statementsIssued],
                 ["Patient statements held", state.data.digest.bank.statementsHeld],
                 ["Patient statements voided", state.data.digest.bank.statementsVoided],
@@ -269,10 +298,92 @@ export function DigestView() {
               rows={pairs([
                 ["After-hours holds", state.data.digest.alerts.afterHoursHolds],
                 ["Hard events acknowledged", state.data.digest.alerts.hardEventsAcknowledged],
+                ["Channels attested", state.data.digest.alerts.channelsAttested],
+                // Increment 1.100. The week's reader saw these only inside the
+                // chain total; the "elsewhere" they were held for was the
+                // month-end package, which is a month away.
+                ["Releases recorded on a channel the ledger does not carry", state.data.digest.alerts.releasesAttested],
+                [
+                  "…of those, the ones this practice's policy asked two people for",
+                  state.data.digest.alerts.releasesNeedingSecond,
+                ],
               ])}
               empty="No hard events."
             />
           </div>
+
+          {/* What nobody has vouched for, for the month that has ended
+              (Increment 1.53). It sits apart from the counts above, and says so,
+              because those state the week and this states where the practice
+              stands today. The owner stamps the week, never this line: a debt
+              that is still owed is not something anybody can mark as read. */}
+          <section aria-labelledby="digest-attested" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+            <h2 id="digest-attested" className="mb-1 text-base font-semibold">
+              Standing, not this week &middot; channels the product cannot hold
+            </h2>
+            <p className="mb-2 text-xs text-[var(--ink-3)]">
+              Every count above is the week&apos;s. This one is where the practice stands today, for {state.data.attestations.month},
+              so it is outside the figures the acknowledgment stamps.
+            </p>
+            <p className="max-w-prose text-sm text-[var(--ink-2)]">{state.data.attestations.sentence}</p>
+          </section>
+
+          {/* Who the practice cannot reach (Increment 1.69). Beside the counts
+              for the same reason as the section above: the week's figures are
+              stamped, and this is where the practice stands today. Names appear
+              here and never in the digest message, which leaves the product. */}
+          <section aria-labelledby="digest-reach" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+            <h2 id="digest-reach" className="mb-1 text-base font-semibold">
+              Standing, not this week &middot; who the practice can reach
+            </h2>
+            <p className="mb-2 text-xs text-[var(--ink-3)]">
+              Where the practice stands today, so it is outside the figures the acknowledgment stamps. The message this
+              digest becomes names nobody; this screen does.
+            </p>
+            {state.data.reach.unreachable.length === 0 ? (
+              <p className="max-w-prose text-sm text-[var(--ink-2)]">
+                {state.data.reach.considered === 0
+                  ? "Nobody has said where to send their notices, so nothing is sent to anybody."
+                  : `Every one of the ${state.data.reach.considered} addresses on file has been proved to reach the person who saved it.`}
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {state.data.reach.unreachable.map((u) => (
+                  <li key={u.userId} className="max-w-prose text-sm text-[var(--ink-2)]">
+                    {u.sentence}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* Who the practice was never set up to reach (Increment 1.70). The
+              other half of the section above, on the same terms: a position
+              rather than a figure of these seven days, and a reading that names
+              people, which the message this digest becomes never does. */}
+          <section aria-labelledby="digest-setup" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+            <h2 id="digest-setup" className="mb-1 text-base font-semibold">
+              Standing, not this week &middot; who was never set up
+            </h2>
+            <p className="mb-2 text-xs text-[var(--ink-3)]">
+              The people who could act on what a notice says, and whether the practice can say it to them.
+            </p>
+            {state.data.setup.missing.length + state.data.setup.withdrawn.length === 0 ? (
+              <p className="max-w-prose text-sm text-[var(--ink-2)]">
+                {state.data.setup.expected === 0
+                  ? "No seat here opens the screens a notice points at, so there is nobody the practice needs an address for."
+                  : `All ${state.data.setup.expected} of the people who could act on a notice have said where to send it.`}
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {[...state.data.setup.missing, ...state.data.setup.withdrawn].map((p) => (
+                  <li key={p.userId} className="max-w-prose text-sm text-[var(--ink-2)]">
+                    {p.sentence}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
 
           <Rows
             id="digest-chain"

@@ -1,14 +1,40 @@
 "use client";
 
+import { SessionEnded, loadFailure } from "../session-ended";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useEffect, useState } from "react";
 import { formatCents } from "@/lib/ledger/format";
-import type { DayCloseSnapshot } from "@/lib/day-close/types";
+import type { DayCloseSnapshot, LatePostingRow } from "@/lib/day-close/types";
+import { DEMO_EFFECTIVE_DATE } from "@/lib/demo/dates";
+import { dutyNeededSentence, holdsDuty } from "@/lib/auth/heldDuty";
+import { readViewer, type Viewer } from "@/lib/auth/viewer";
 
 const DEMO_LOCATION = "0196b0a0-0000-7000-8000-000000000101";
-const DEMO_DATE = "2026-09-14";
+const DEMO_DATE = DEMO_EFFECTIVE_DATE;
+
+/**
+ * What one late row is, in words (Increment 1.40). A correction announces
+ * itself: it names the entry it replaces, and its two halves do different
+ * things. A first posting announces nothing, which is exactly why the seal has
+ * to.
+ */
+function lateRowKind(row: LatePostingRow): string {
+  if (row.correctsEntryId) {
+    return row.kind === "reversal"
+      ? "Correction: clears the earlier entry"
+      : "Correction: replaces it";
+  }
+  return `First posting: ${row.kind.replace(/_/g, " ")}`;
+}
+
+function lateRowWhen(row: LatePostingRow): string {
+  return new Date(row.postedAt).toLocaleString();
+}
 
 type LoadState =
   | { status: "loading" }
+  /** The sign-in behind this screen has ended (Increment 1.82). */
+  | { status: "sign_in_ended" }
   | { status: "error"; message: string }
   | { status: "ready"; snapshot: DayCloseSnapshot };
 
@@ -17,12 +43,21 @@ export default function DayClosePage() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /**
+   * Who is reading (Increment 1.93). This screen opens at `user` rank and its
+   * two acts open on duties: applying staged deposits needs `post_payments`
+   * and freezing the close needs `bank_reconcile`. The seeded practice holds
+   * both halves of the point — the owner can freeze and cannot apply, and the
+   * front desk can apply and cannot freeze.
+   */
+  const [me, setMe] = useState<Viewer | null>(null);
 
   async function loadSnapshot() {
     const res = await fetch(
       `/api/day-close?locationId=${DEMO_LOCATION}&businessDate=${businessDate}`
     );
     const body = (await res.json()) as { snapshot?: DayCloseSnapshot; error?: string };
+    refuseIfSignInEnded(res);
     if (!res.ok) throw new Error(body.error ?? "Could not load day close.");
     if (!body.snapshot) throw new Error("Missing snapshot.");
     return body.snapshot;
@@ -31,16 +66,23 @@ export default function DayClosePage() {
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading" });
+    void fetch("/api/me")
+      .then(async (res) => readViewer(res.status, await res.json().catch(() => ({}))))
+      .then((viewer) => {
+        if (!cancelled) setMe(viewer);
+      })
+      .catch(() => {
+        // Unreadable is treated as holding nothing: the act is not offered,
+        // and the route would refuse it in any case.
+        if (!cancelled) setMe({ state: "unknown", why: "Could not read who is signed in." });
+      });
     loadSnapshot()
       .then((snapshot) => {
         if (!cancelled) setState({ status: "ready", snapshot });
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setState({
-            status: "error",
-            message: err instanceof Error ? err.message : "Could not load day close.",
-          });
+          setState(loadFailure(err, "Could not load day close."));
         }
       });
     return () => {
@@ -80,6 +122,11 @@ export default function DayClosePage() {
         body.created !== undefined ? `Applied ${body.created} staged deposit(s).` : `${label} succeeded.`
       );
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setActionMessage(err instanceof Error ? err.message : `${label} failed.`);
     } finally {
       setBusy(false);
@@ -107,6 +154,7 @@ export default function DayClosePage() {
       </label>
 
       {state.status === "loading" && <p className="text-sm text-[var(--ink-2)]">Loading…</p>}
+      {state.status === "sign_in_ended" && <SessionEnded />}
       {state.status === "error" && <p className="text-sm text-[var(--ink-2)]">{state.message}</p>}
       {state.status === "ready" && (
         <>
@@ -140,7 +188,15 @@ export default function DayClosePage() {
           <p className="mb-4 text-sm text-[var(--ink-2)]">
             Status:{" "}
             <span className="font-semibold text-[var(--ink)]">
-              {state.snapshot.status === "frozen" ? "Frozen" : "Open"}
+              {state.snapshot.status === "frozen" ? (
+                <>
+                  {/* The glyph repeats the word rather than replacing it, so the state
+                      never rests on a symbol alone. */}
+                  <span aria-hidden="true">&#128274;</span> Frozen
+                </>
+              ) : (
+                "Open"
+              )}
             </span>
             {state.snapshot.frozenByName && (
               <> · frozen by {state.snapshot.frozenByName}</>
@@ -154,23 +210,41 @@ export default function DayClosePage() {
           </p>
 
           <div className="mb-8 flex flex-wrap gap-3">
-            <button
-              type="button"
-              className="rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
-              disabled={busy || state.snapshot.status === "frozen"}
-              onClick={() => void runAction("/api/deposits/apply-staged", "Apply staged deposits")}
-            >
-              Apply staged deposits
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-[var(--line-strong)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
-              disabled={busy || state.snapshot.status === "frozen" || state.snapshot.deposits.length === 0}
-              onClick={() => void runAction("/api/day-close/freeze", "Freeze day close")}
-            >
-              Freeze day close
-            </button>
+            {me !== null && !holdsDuty(me, "post_payments") ? null : (
+              <button
+                type="button"
+                className="rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                disabled={busy || state.snapshot.status === "frozen"}
+                onClick={() => void runAction("/api/deposits/apply-staged", "Apply staged deposits")}
+              >
+                Apply staged deposits
+              </button>
+            )}
+            {me !== null && !holdsDuty(me, "bank_reconcile") ? null : (
+              <button
+                type="button"
+                className="rounded-md border border-[var(--line-strong)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                disabled={busy || state.snapshot.status === "frozen" || state.snapshot.deposits.length === 0}
+                onClick={() => void runAction("/api/day-close/freeze", "Freeze day close")}
+              >
+                Freeze day close
+              </button>
+            )}
           </div>
+          {/*
+            One sentence per duty the reader does not hold, in the acts' place
+            rather than after a press (Increment 1.93).
+          */}
+          {me !== null && !holdsDuty(me, "post_payments") && (
+            <p className="mb-2 max-w-prose text-sm text-[var(--ink-2)]">
+              {dutyNeededSentence("Applying staged deposits", "post_payments")}
+            </p>
+          )}
+          {me !== null && !holdsDuty(me, "bank_reconcile") && (
+            <p className="mb-6 max-w-prose text-sm text-[var(--ink-2)]">
+              {dutyNeededSentence("Freezing the day close", "bank_reconcile")}
+            </p>
+          )}
           {actionMessage && <p className="mb-6 text-sm text-[var(--ink-2)]">{actionMessage}</p>}
 
           <div className="overflow-x-auto rounded-lg border border-[var(--line)] bg-[var(--surface)]">
@@ -204,6 +278,59 @@ export default function DayClosePage() {
               </tbody>
             </table>
           </div>
+
+          {state.snapshot.status === "frozen" && (
+            <section className="mt-8" aria-labelledby="since-the-seal">
+              <h2 id="since-the-seal" className="mb-2 text-lg font-semibold">
+                Since the seal
+              </h2>
+              {state.snapshot.latePostings.length === 0 ? (
+                <p className="max-w-prose text-sm text-[var(--ink-2)]">
+                  Nothing has posted against this day since it was frozen. The figures above are
+                  still the whole of it.
+                </p>
+              ) : (
+                <>
+                  <p className="mb-4 max-w-prose text-sm text-[var(--ink-2)]">
+                    {state.snapshot.latePostings.length === 1 ? "One row" : `${state.snapshot.latePostings.length} rows`}{" "}
+                    posted against this day after it was frozen, together{" "}
+                    <span className="font-semibold tabular-nums text-[var(--ink)]">
+                      {formatCents(state.snapshot.latePostingTotalCents)}
+                    </span>
+                    . The sealed figures above do not move, so the day now reads two ways: what the
+                    practice counted, and what the ledger holds.
+                  </p>
+                  <div className="overflow-x-auto rounded-lg border border-[var(--line)] bg-[var(--surface)]">
+                    <table className="min-w-full text-left text-sm">
+                      <caption className="sr-only">
+                        Ledger rows posted against this day after it was frozen
+                      </caption>
+                      <thead className="border-b border-[var(--line)] bg-[var(--cream)] text-[var(--ink-2)]">
+                        <tr>
+                          <th className="px-4 py-3 font-semibold">Posted</th>
+                          <th className="px-4 py-3 font-semibold">What</th>
+                          <th className="px-4 py-3 font-semibold">Who</th>
+                          <th className="px-4 py-3 font-semibold">Reason</th>
+                          <th className="px-4 py-3 font-semibold tabular-nums">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {state.snapshot.latePostings.map((row) => (
+                          <tr key={row.entryId} className="border-b border-[var(--line)] last:border-0">
+                            <td className="px-4 py-3">{lateRowWhen(row)}</td>
+                            <td className="px-4 py-3">{lateRowKind(row)}</td>
+                            <td className="px-4 py-3">{row.createdByName}</td>
+                            <td className="px-4 py-3">{row.reasonCode ?? "\u2014"}</td>
+                            <td className="px-4 py-3 tabular-nums">{formatCents(row.amountCents)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </section>
+          )}
         </>
       )}
     </main>

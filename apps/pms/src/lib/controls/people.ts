@@ -1,4 +1,6 @@
 import type { Person } from "@pms/controls-engine";
+import { CPA_SEAT_CONTROL_ROLE, isCpaSeat } from "../auth/seats";
+import { isRole } from "../auth/roles";
 
 export type StaffRow = {
   id: string;
@@ -36,6 +38,13 @@ export function staffToPeople(rows: StaffRow[], now: Date = new Date()): Person[
  * they may initiate or second.
  */
 export function precogRole(row: Pick<StaffRow, "role" | "entitlements">): string {
+  // The outside accountant first, because the fall-through below reads an
+  // ungranted row as "Front Desk Lead" — a role the write-off channel names as
+  // a first approver. The seat may neither initiate nor second a release, and
+  // no release rule names this label (Increment 1.49).
+  if (isRole(row.role) && isCpaSeat({ role: row.role, entitlements: row.entitlements })) {
+    return CPA_SEAT_CONTROL_ROLE;
+  }
   if (row.role === "admin") return "Owner / Dentist";
   if (row.entitlements.includes("approve_writeoffs")) return "Office Manager";
   if (row.entitlements.includes("post_payments")) return "Billing Specialist";

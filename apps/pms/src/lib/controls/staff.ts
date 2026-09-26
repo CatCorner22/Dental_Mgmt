@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { GrantRow, Person } from "@pms/controls-engine";
-import { userEntitlements, users } from "@pms/db";
+import { isLiveGrant, userEntitlements, users } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { precogRole, staffToPeople, type StaffRow } from "./people";
 
@@ -24,9 +24,8 @@ export type LoadedStaff = {
   grantRows: EntitlementGrant[];
 };
 
-function isLive(g: { effectiveFrom: Date; effectiveTo: Date | null }, now: Date): boolean {
-  return g.effectiveFrom.getTime() <= now.getTime() && (g.effectiveTo == null || g.effectiveTo.getTime() > now.getTime());
-}
+/** The same rule the authorization path applies (Increment 1.86), borrowed rather than restated. */
+const isLive = isLiveGrant;
 
 /** Two queries, joined in memory: users and their entitlement rows. */
 export async function loadStaff(db: AppDb, tenantId: string, now: Date = new Date()): Promise<LoadedStaff> {

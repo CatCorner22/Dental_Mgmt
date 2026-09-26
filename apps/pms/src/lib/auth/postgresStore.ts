@@ -5,6 +5,7 @@ import {
   domainEvent,
   GENESIS_HASH,
   hashDomainEvent,
+  liveGrantsForUser,
   phiAccessLog,
   recoveryCeremonies,
   sessions,
@@ -39,10 +40,22 @@ interface LookupUserRow {
   password_changed_at: Date;
 }
 
+/**
+ * The duties this person holds right now (Increment 1.86).
+ *
+ * `requireAccess` reads this list on every guarded request, for both the
+ * `entitlements` requirement and the `orEntitlement` opening, so the predicate
+ * here is what a revoke actually revokes. It used to select every row the user
+ * had ever held: `revokeEntitlement` stamps `effective_to` rather than
+ * deleting, so a revoked duty went on opening its routes — on the person's
+ * current session, which the revoke does not end, and on every session after
+ * it. `liveGrantsForUser` is the rule the rest of the product already applies.
+ */
 async function entitlementsFor(
   userId: string,
   tenantId: string,
-  env: Record<string, string | undefined>
+  env: Record<string, string | undefined>,
+  now: Date = new Date()
 ): Promise<string[]> {
   return withTenantTransaction(
     tenantId,
@@ -51,7 +64,7 @@ async function entitlementsFor(
       const rows = await db
         .select({ entitlement: userEntitlements.entitlement })
         .from(userEntitlements)
-        .where(eq(userEntitlements.userId, userId));
+        .where(liveGrantsForUser(userId, now));
       return rows.map((r) => r.entitlement);
     },
     env
@@ -203,11 +216,24 @@ export function createPostgresStore(
           .where(eq(users.id, userId));
       }, env);
     },
+    async getMfaPendingSecret(userId) {
+      const user = await this.getUserById(userId);
+      if (!user) return null;
+      return withTenantTransaction(user.tenantId, userId, async (db) => {
+        const rows = await db
+          .select({ pending: users.mfaPendingSecretEnc })
+          .from(users)
+          .where(eq(users.id, userId));
+        return (rows[0]?.pending as EncryptedBlob | null) ?? null;
+      }, env);
+    },
     async setMfaPendingSecret(userId, secretEnc) {
       const user = await this.getUserById(userId);
       if (!user) return;
       await withTenantTransaction(user.tenantId, userId, async (db) => {
-        await db.update(users).set({ mfaSecretEnc: secretEnc }).where(eq(users.id, userId));
+        // The live secret is untouched: a re-pair that is abandoned leaves the
+        // working factor exactly where it was (Increment 1.76).
+        await db.update(users).set({ mfaPendingSecretEnc: secretEnc }).where(eq(users.id, userId));
       }, env);
     },
     async completeMfaEnrollment(userId, input) {
@@ -218,10 +244,35 @@ export function createPostgresStore(
           .update(users)
           .set({
             mfaSecretEnc: input.secretEnc,
+            // A pairing is in progress or finished, never both.
+            mfaPendingSecretEnc: null,
             mfaEnrolledAt: input.enrolledAt,
             recoveryCodesHash: JSON.stringify(input.recoveryHashes),
           })
           .where(eq(users.id, userId));
+      }, env);
+    },
+    async clearMfaEnrollment(userId, at) {
+      const user = await this.getUserById(userId);
+      if (!user) return;
+      await withTenantTransaction(user.tenantId, userId, async (db) => {
+        // Every field of the factor, in one statement: see the contract note on
+        // why a half-cleared account is the one state worth refusing to reach.
+        await db
+          .update(users)
+          .set({
+            mfaSecretEnc: null,
+            mfaPendingSecretEnc: null,
+            mfaEnrolledAt: null,
+            recoveryCodesHash: JSON.stringify([]),
+          })
+          .where(eq(users.id, userId));
+        // The sessions go with it. A person whose factor was just removed by
+        // somebody else must not keep a session minted under the old one.
+        await db
+          .update(sessions)
+          .set({ revokedAt: at })
+          .where(and(eq(sessions.userId, userId), isNull(sessions.revokedAt)));
       }, env);
     },
     async logPhiAccess(input) {

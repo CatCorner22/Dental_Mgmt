@@ -1,16 +1,4 @@
-import {
-  bigint,
-  boolean,
-  date,
-  index,
-  integer,
-  jsonb,
-  pgTable,
-  text,
-  timestamp,
-  uniqueIndex,
-  uuid,
-} from "drizzle-orm/pg-core";
+import { bigint, boolean, date, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 /**
  * Increment 0.1 schema. No PHI patient rows.
@@ -65,6 +53,8 @@ export const users = pgTable(
     active: boolean("active").notNull().default(true),
     /** Envelope-encrypted TOTP secret. Null until MFA enrollment completes. */
     mfaSecretEnc: jsonb("mfa_secret_enc"),
+    /** An authenticator being paired, not yet proved (Increment 1.76). Never read for a sign-in. */
+    mfaPendingSecretEnc: jsonb("mfa_pending_secret_enc"),
     mfaEnrolledAt: timestamp("mfa_enrolled_at", { withTimezone: true }),
     recoveryCodesHash: text("recovery_codes_hash"),
     /** Last TOTP step that opened a session; an equal or earlier step is a replay. */
@@ -260,6 +250,35 @@ export const guarantorAccounts = pgTable(
   (t) => [index("guarantor_accounts_tenant_idx").on(t.tenantId)]
 );
 
+/**
+ * The reason codes one practice has adopted (migration 0010; governed from a
+ * screen since Increment 1.45). `ledger_entries.reason_code` is a foreign key
+ * into (tenant_id, code), so the code itself never changes and a code in use
+ * is never deleted: retiring one clears `active` and leaves history readable.
+ */
+export const reasonCodes = pgTable(
+  "reason_codes",
+  {
+    tenantId: uuid("tenant_id").notNull(),
+    code: text("code").notNull(),
+    kind: text("kind").notNull(),
+    label: text("label").notNull(),
+    /**
+     * The figure above which a posting under this reason waits for a second
+     * person (Increment 1.46). Null means the practice set no rule and the
+     * channel's threshold governs; 0 means every one of them waits. It only
+     * tightens: the effective threshold is the lesser of this and the channel's.
+     */
+    requiresApprovalOverCents: bigint("requires_approval_over_cents", { mode: "number" }),
+    active: boolean("active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.code] }),
+    index("reason_codes_tenant_kind_idx").on(t.tenantId, t.kind),
+  ]
+);
+
 export const ledgerEntries = pgTable(
   "ledger_entries",
   {
@@ -282,9 +301,15 @@ export const ledgerEntries = pgTable(
     claimId: uuid("claim_id"),
     coverageId: uuid("coverage_id"),
     reversesEntryId: uuid("reverses_entry_id"),
+    /** The entry this row corrects: set on a reversal and on the repost written with it (Increment 1.37). */
+    correctsEntryId: uuid("corrects_entry_id"),
     approvalRequestId: uuid("approval_request_id"),
     /** The policy exception that licensed a single release above threshold. */
     appliedExceptionId: text("applied_exception_id"),
+    /** True when this row landed against a day the practice had already frozen (Increment 1.40). */
+    postedAfterClose: boolean("posted_after_close").notNull().default(false),
+    /** The frozen day close this row landed behind; set by the database, never by the writer. */
+    closedDayId: uuid("closed_day_id"),
     tender: text("tender"),
     memo: text("memo"),
     idempotencyKey: text("idempotency_key").notNull(),
@@ -295,6 +320,7 @@ export const ledgerEntries = pgTable(
     index("ledger_entries_tenant_account_idx").on(t.tenantId, t.accountId, t.postedAt),
     index("ledger_entries_tenant_patient_idx").on(t.tenantId, t.patientId, t.effectiveDate),
     uniqueIndex("ledger_entries_tenant_idempotency_uidx").on(t.tenantId, t.idempotencyKey),
+    index("ledger_entries_closed_day_idx").on(t.tenantId, t.closedDayId),
   ]
 );
 
@@ -355,6 +381,8 @@ export const approvalRequests = pgTable(
     requestedAt: timestamp("requested_at", { withTimezone: true }).notNull(),
     decidedAt: timestamp("decided_at", { withTimezone: true }),
     resultingEntryId: uuid("resulting_entry_id"),
+    /** Set when this approval releases a correction pair for that entry (Increment 1.38). */
+    correctsEntryId: uuid("corrects_entry_id"),
   },
   (t) => [index("approval_requests_tenant_status_idx").on(t.tenantId, t.status, t.requestedAt)]
 );
@@ -733,8 +761,341 @@ export const hardEventAcks = pgTable(
   (t) => [uniqueIndex("hard_event_acks_event_uidx").on(t.tenantId, t.kind, t.subjectKind, t.subjectId)]
 );
 
+/**
+ * The tenant's chart-of-accounts mapping under maker-checker (Increment 1.35):
+ * one row per proposal, decided by someone other than the proposer.
+ */
+export const glMappings = pgTable(
+  "gl_mappings",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    glBucket: text("gl_bucket").notNull(),
+    kind: text("kind").notNull(),
+    /** The reason code, or "*" for every reason code on that bucket and kind. */
+    reasonCode: text("reason_code").notNull().default("*"),
+    accountCode: text("account_code").notNull(),
+    accountName: text("account_name").notNull(),
+    side: text("side").notNull(),
+    note: text("note").notNull().default(""),
+    status: text("status").notNull().default("proposed"),
+    proposedById: uuid("proposed_by_id").notNull(),
+    proposedByName: text("proposed_by_name").notNull(),
+    proposedAt: timestamp("proposed_at", { withTimezone: true }).notNull(),
+    decidedById: uuid("decided_by_id"),
+    decidedByName: text("decided_by_name"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    supersedesId: uuid("supersedes_id"),
+  },
+  (t) => [index("gl_mappings_tenant_key_idx").on(t.tenantId, t.glBucket, t.kind, t.reasonCode)]
+);
+
+/**
+ * A frozen month (Increment 1.36): what the practice told its accountant,
+ * with the package hash at the moment of closing. One per month; append-only.
+ */
+export const monthCloses = pgTable(
+  "month_closes",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    month: text("month").notNull(),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    packageHash: text("package_hash").notNull(),
+    /** The package shape the hash was computed under (Increment 1.43); hashes compare only within one. */
+    packageSchema: text("package_schema").notNull(),
+    entryCount: integer("entry_count").notNull(),
+    totalCents: bigint("total_cents", { mode: "number" }).notNull(),
+    closedById: uuid("closed_by_id").notNull(),
+    closedByName: text("closed_by_name").notNull(),
+    closedAt: timestamp("closed_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [uniqueIndex("month_closes_tenant_month_uidx").on(t.tenantId, t.month)]
+);
+
+/**
+ * One baseline per practice, month and package shape (Increment 1.56): under
+ * this shape, as of this moment, this closed month hashed to this.
+ *
+ * It never replaces the close's own frozen hash, which records what the
+ * accountant received and which `month_closes` refuses to change. It gives
+ * "has a figure moved since?" something to compare against again for a month
+ * closed under an older shape, and names the date that claim runs from.
+ */
+export const monthCloseRehashes = pgTable(
+  "month_close_rehashes",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    month: text("month").notNull(),
+    /** The shape this baseline was computed under; never the close's own. */
+    packageSchema: text("package_schema").notNull(),
+    packageHash: text("package_hash").notNull(),
+    entryCount: integer("entry_count").notNull(),
+    totalCents: bigint("total_cents", { mode: "number" }).notNull(),
+    computedById: uuid("computed_by_id").notNull(),
+    computedByName: text("computed_by_name").notNull(),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [uniqueIndex("month_close_rehashes_month_schema_uidx").on(t.tenantId, t.month, t.packageSchema)]
+);
+
+/**
+ * Where one person's notices would go (Increment 1.58). Append-only, newest
+ * row in force: after a message goes out, "what address was on file that day"
+ * is the question an audit asks, and an update would destroy the answer. A
+ * null address is a withdrawal, recorded rather than deleted. The database
+ * refuses a row whose acting user is not the user it names, so nobody
+ * redirects anybody else's notices.
+ */
+export const noticeAddresses = pgTable(
+  "notice_addresses",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    /** Null means "nowhere, and that was a decision". */
+    address: text("address"),
+    setAt: timestamp("set_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("notice_addresses_user_idx").on(t.tenantId, t.userId, t.setAt)]
+);
+
+/**
+ * One attempt to send a person their notices (Increment 1.59). Append-only: an
+ * attempt is never rewritten, and a later attempt is another row. A failure is
+ * a row like any other, because a send that failed silently is worse than one
+ * that never happened — the reader would believe they had been told. Nothing
+ * owed writes no row at all, since that is not an act.
+ */
+export const noticeSends = pgTable(
+  "notice_sends",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    seat: text("seat").notNull(),
+    recipientId: uuid("recipient_id").notNull(),
+    recipientName: text("recipient_name").notNull(),
+    /** Where it went, as of this attempt. Null exactly when the outcome is unreachable. */
+    address: text("address"),
+    /** 'sent' | 'failed' | 'unreachable'. */
+    outcome: text("outcome").notNull(),
+    /** The transport's own words on a failure, or why there was nowhere to send. */
+    detail: text("detail"),
+    /**
+     * 'transient' | 'permanent' on a failure (Increment 1.60). Null on any
+     * other outcome, and on a failure recorded before the distinction existed.
+     */
+    failureKind: text("failure_kind"),
+    /** 'notices' | 'proof_code' | 'digest' (Increment 1.64): what this message was, said rather than inferred. */
+    kind: text("kind").notNull(),
+    subject: text("subject"),
+    body: text("body"),
+    noticeCount: integer("notice_count").notNull(),
+    attemptedAt: timestamp("attempted_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("notice_sends_recipient_idx").on(t.tenantId, t.recipientId, t.attemptedAt)]
+);
+
+/**
+ * One run of the scheduled sender (Increment 1.62), including the quiet ones.
+ *
+ * Written even when the round had nothing to do, which is the opposite of this
+ * codebase's usual rule, and deliberately: a round that wrote nothing when
+ * nothing happened would make a scheduler that died look exactly like a
+ * practice that owes nothing, and telling those apart is the whole job.
+ */
+export const noticeRounds = pgTable(
+  "notice_rounds",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    ranAt: timestamp("ran_at", { withTimezone: true }).notNull(),
+    considered: integer("considered").notNull(),
+    sent: integer("sent").notNull(),
+    failed: integer("failed").notNull(),
+    unchanged: integer("unchanged").notNull(),
+    nothingOwed: integer("nothing_owed").notNull(),
+    unreachable: integer("unreachable").notNull(),
+    /** A second axis over the same people (Increment 1.64), counted beside the sum rather than folded into it. */
+    digestsSent: integer("digests_sent").notNull(),
+    digestsFailed: integer("digests_failed").notNull(),
+    /** A third axis (Increment 1.66): the month-end package told to the accountant. */
+    packagesSent: integer("packages_sent").notNull(),
+    packagesFailed: integer("packages_failed").notNull(),
+  },
+  (t) => [index("notice_rounds_latest_idx").on(t.tenantId, t.ranAt)]
+);
+
+/**
+ * One code sent to an address so the person can prove it reaches them
+ * (Increment 1.61). The code itself lives only in the message; this row keeps
+ * its SHA-256 so the database can recognise the right one and not produce one.
+ */
+export const noticeAddressChallenges = pgTable(
+  "notice_address_challenges",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    userId: uuid("user_id").notNull(),
+    /** The exact address row the code went to, so a later address is not proved by an earlier code. */
+    addressId: uuid("address_id").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    /**
+     * SHA-256 of the stop secret this message carried (Increment 1.67). A
+     * second token with the opposite power: the code proves an address, this
+     * one can only stop it. Null on a challenge issued before the link
+     * existed, which is a fact about that message rather than an exemption.
+     */
+    stopHash: text("stop_hash"),
+  },
+  (t) => [index("notice_address_challenges_lookup_idx").on(t.tenantId, t.userId, t.tokenHash)]
+);
+
+/**
+ * That somebody reading a mailbox said they did not ask for this practice's
+ * messages (Increment 1.67).
+ *
+ * The one row here written by nobody: the person who refuses has no account
+ * and never will, and what authorises the row is the secret the message
+ * carried rather than a session. It names the mailbox and not a user, because
+ * the person who refused is not the person who typed the address in.
+ *
+ * Keyed by the address text rather than by the address row, so changing one
+ * character and saving again does not hand the practice a fresh start.
+ */
+export const noticeAddressRefusals = pgTable("notice_address_refusals", {
+  id: uuid("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull(),
+  /** The message that provoked this, so "how do we know they were asked" has an answer. */
+  challengeId: uuid("challenge_id").notNull(),
+  address: text("address").notNull(),
+  refusedAt: timestamp("refused_at", { withTimezone: true }).notNull(),
+});
+
+/**
+ * That one address row was proved to reach the person it names (Increment
+ * 1.61). One row per address, forever: changing an address writes a new
+ * address row, which no proof points at, so a changed address is unproved by
+ * the shape rather than by anything remembering to clear a flag.
+ */
+export const noticeAddressProofs = pgTable("notice_address_proofs", {
+  id: uuid("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  addressId: uuid("address_id").notNull(),
+  /** Which code proved it, so "how do we know" has an answer rather than a date. */
+  challengeId: uuid("challenge_id").notNull(),
+  provedAt: timestamp("proved_at", { withTimezone: true }).notNull(),
+});
+
+/**
+ * One append-only message in a thread the accountant and the practice hold
+ * about one month-end package line (Increment 1.50). The message that opened a
+ * thread carries its own id in `threadId`; a reply carries the opener's, and
+ * the database refuses a reply whose thread does not open in this practice or
+ * whose month and subject differ from it.
+ */
+export const cpaThreadMessages = pgTable(
+  "cpa_thread_messages",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    /** The opening message's id; the opener carries its own. */
+    threadId: uuid("thread_id").notNull(),
+    month: text("month").notNull(),
+    /** The package line it hangs on: the section and key `packageRows` gives every row. */
+    subjectKey: text("subject_key").notNull(),
+    /** What was asked or answered; at least ten characters. */
+    body: text("body").notNull(),
+    /** Which side spoke: 'accountant' or 'practice'. A seat, not a rank. */
+    authorSeat: text("author_seat").notNull(),
+    authorId: uuid("author_id").notNull(),
+    authorName: text("author_name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("cpa_thread_messages_thread_idx").on(t.tenantId, t.threadId, t.createdAt)]
+);
+
+/**
+ * One dated assertion that somebody reviewed one external channel's month
+ * (Increment 1.51). One row per practice, month and channel; append-only, so a
+ * later opinion is a later month's row rather than an edit of this one.
+ */
+export const channelAttestations = pgTable(
+  "channel_attestations",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    month: text("month").notNull(),
+    channel: text("channel").notNull(),
+    /** What was reviewed and against what; at least ten characters. */
+    note: text("note").notNull(),
+    /** Whether the outside accountant or the practice itself reviewed it. */
+    attestedSeat: text("attested_seat").notNull(),
+    attestedById: uuid("attested_by_id").notNull(),
+    attestedByName: text("attested_by_name").notNull(),
+    attestedAt: timestamp("attested_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [uniqueIndex("channel_attestations_month_channel_uidx").on(t.tenantId, t.month, t.channel)]
+);
+
+/**
+ * One append-only record that a seat read a thread up to a given message
+ * (Increment 1.55). Deliberately not unique: a thread is read again whenever it
+ * grows, so a seat has many rows over a thread's life and the latest one wins.
+ * A later message therefore re-opens the signal without any row being rewritten.
+ */
+export const cpaThreadReads = pgTable("cpa_thread_reads", {
+  id: uuid("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull(),
+  threadId: uuid("thread_id").notNull(),
+  /** Which side read it; not a rank. */
+  seat: text("seat").notNull(),
+  /** The last message the reader had in front of them. */
+  upToMessageId: uuid("up_to_message_id").notNull(),
+  readerId: uuid("reader_id").notNull(),
+  readerName: text("reader_name").notNull(),
+  readAt: timestamp("read_at", { withTimezone: true }).notNull(),
+});
+
+/**
+ * The practice's invitations to a seat, and the claims that spent them
+ * (Increment 1.71; newest-row-in-force since 1.73).
+ *
+ * Two tables rather than one with a `claimed_at`, for the reason a proof is a
+ * table and not a column on a challenge: a status column would be an UPDATE on
+ * an otherwise append-only row, and a fact that could be rewritten.
+ */
+export const seatInvitations = pgTable(
+  "seat_invitations",
+  {
+    id: uuid("id").primaryKey(),
+    tenantId: uuid("tenant_id").notNull(),
+    /** The seat this invitation was created alongside. */
+    userId: uuid("user_id").notNull(),
+    /** sha256 of the secret the link carries; the secret itself is never stored. */
+    tokenHash: text("token_hash").notNull(),
+    invitedBy: uuid("invited_by").notNull(),
+    invitedAt: timestamp("invited_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (t) => [index("seat_invitations_newest_idx").on(t.tenantId, t.userId, t.invitedAt)]
+);
+
+export const seatInvitationClaims = pgTable("seat_invitation_claims", {
+  id: uuid("id").primaryKey(),
+  tenantId: uuid("tenant_id").notNull(),
+  invitationId: uuid("invitation_id").notNull(),
+  claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull(),
+});
+
 export const TENANT_SCOPED_TABLES = [
   "locations",
+  "reason_codes",
   "users",
   "sessions",
   "user_entitlements",
@@ -767,4 +1128,18 @@ export const TENANT_SCOPED_TABLES = [
   "control_findings",
   "digest_acks",
   "hard_event_acks",
+  "gl_mappings",
+  "month_closes",
+  "cpa_thread_messages",
+  "channel_attestations",
+  "cpa_thread_reads",
+  "month_close_rehashes",
+  "notice_addresses",
+  "notice_address_challenges",
+  "notice_address_proofs",
+  "notice_address_refusals",
+  "notice_rounds",
+  "notice_sends",
+  "seat_invitations",
+  "seat_invitation_claims",
 ] as const;

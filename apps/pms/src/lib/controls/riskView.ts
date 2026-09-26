@@ -1,10 +1,13 @@
 import {
   DECISION_KIND_LABEL,
   governingDecision,
+  latestDecisionFor,
   type ControlDecision,
   type CoverageStatus,
   type DetectedConflict,
 } from "@pms/controls-engine";
+import type { ReasonCodeRow, ReasonKind } from "../ledger/reasons";
+import { CHANNEL_FOR_REASON_KIND, effectiveThresholdCents } from "../ledger/reasonThreshold";
 
 /**
  * Pure view helpers for the Practice Risk page. Everything here is a
@@ -121,4 +124,106 @@ export function dutiesByPerson<T extends { personId: string; personName: string;
   assignments: T[]
 ): T[] {
   return [...assignments].sort((a, b) => a.personName.localeCompare(b.personName));
+}
+
+// ---------------------------------------------------------------------------
+// Reason thresholds beside the channel coverage they tighten (Increment 1.48)
+// ---------------------------------------------------------------------------
+
+/**
+ * One reason code's own dual-release threshold, read against the channel figure
+ * it tightens.
+ *
+ * The coverage table says what a channel holds. A reason code may hold a
+ * channel to less than that (Increment 1.46), and the practice may loosen what
+ * it holds only under a decision (Increment 1.47) — so a reader of the coverage
+ * table who cannot see the reasons is reading a figure that no longer governs
+ * every posting on that channel. That is the same fault the table's own
+ * sentence disclaims: it must not show a green it does not have.
+ */
+export type ReasonTightening = {
+  code: string;
+  label: string;
+  /** The reason's own figure in cents. A reason holding no figure tightens nothing and never appears here. */
+  cents: number;
+  /** What governs a posting under this reason: the lesser of the reason's figure and the channel's. */
+  effectiveCents: number;
+  /** True where the reason's figure is not below the channel's, so it changes nothing today. */
+  redundant: boolean;
+  /** The decision standing on this reason, where the practice loosened it and the decision still stands. */
+  decision: ControlDecision | null;
+};
+
+/**
+ * The reason codes that hold one channel to less than its own figure, loosest
+ * first. Retired codes are left out: they reach no form, so they hold nothing.
+ */
+export function reasonTighteningsForChannel(input: {
+  channel: string;
+  channelThresholdUsd: number;
+  rows: ReasonCodeRow[];
+  decisions: ControlDecision[];
+}): ReasonTightening[] {
+  const channelCents = Math.round(input.channelThresholdUsd * 100);
+  return input.rows
+    .filter(
+      (r) =>
+        r.active &&
+        r.requiresApprovalOverCents !== null &&
+        CHANNEL_FOR_REASON_KIND[r.kind as ReasonKind] === input.channel
+    )
+    .map((r) => {
+      const cents = r.requiresApprovalOverCents as number;
+      const effectiveCents = effectiveThresholdCents(channelCents, cents);
+      return {
+        code: r.code,
+        label: r.label,
+        cents,
+        effectiveCents,
+        redundant: effectiveCents === channelCents,
+        decision: latestDecisionFor(input.decisions, "reason_code", r.code) ?? null,
+      };
+    })
+    .sort((a, b) => b.cents - a.cents || a.label.localeCompare(b.label));
+}
+
+/** A figure in cents as the page writes money: `$150`, `$1,250.50`, `every one`. */
+export function centsPhrase(cents: number): string {
+  if (cents === 0) return "every one";
+  const usd = cents / 100;
+  return `$${usd.toLocaleString(undefined, {
+    minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+/** What one reason holds this channel to, in a sentence the coverage row can carry. */
+export function reasonTighteningSentence(t: ReasonTightening): string {
+  const head = t.redundant
+    ? `${t.label}: ${centsPhrase(t.cents)} — not below the channel, so it holds nothing extra today`
+    : `${t.label}: ${centsPhrase(t.cents)}`;
+  if (!t.decision) return head;
+  const review = t.decision.reviewBy ? `, review by ${t.decision.reviewBy}` : "";
+  return `${head} · loosened under ${DECISION_KIND_LABEL[t.decision.kind]} by ${t.decision.decidedByName}${review}`;
+}
+
+/**
+ * The month the coverage table names an attestation for: the last one that has
+ * ended (Increment 1.51). Re-exported from the pure module the owner board also
+ * reads (Increment 1.52), so the two surfaces cannot disagree about January.
+ */
+export { lastCompleteMonth } from "./attestationCoverage";
+
+/**
+ * What the coverage table says about a channel the product cannot enforce.
+ * Where nobody has said anything, it says that rather than leaving the row to
+ * read as though "attested" meant somebody had.
+ */
+export function attestationSentence(
+  attestation: { byName: string; seat: string; at: string } | null,
+  month: string
+): string {
+  if (!attestation) return `Nobody has reviewed ${month}.`;
+  const who = attestation.seat === "accountant" ? "the accountant" : "the practice itself";
+  return `Reviewed for ${month} by ${attestation.byName} (${who}) on ${attestation.at.slice(0, 10)}.`;
 }

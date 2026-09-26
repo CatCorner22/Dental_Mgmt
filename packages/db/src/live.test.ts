@@ -141,7 +141,36 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
         [25, "locations_hours", "app_migrate"],
         [26, "after_hours_hold", "app_migrate"],
         [27, "hard_event_acks", "app_migrate"],
-        [28, "bank_account_tenancy_audit_immutability", "app_migrate"],
+        [28, "gl_mappings", "app_migrate"],
+        [29, "month_closes", "app_migrate"],
+        [30, "correction_pairs", "app_migrate"],
+        [31, "correction_holds", "app_migrate"],
+        [32, "late_postings", "app_migrate"],
+        [33, "finding_sealed_day_posting", "app_migrate"],
+        [34, "package_schema_version", "app_migrate"],
+        [35, "reason_thresholds", "app_migrate"],
+        [36, "decision_on_reason_code", "app_migrate"],
+        [37, "cpa_questions", "app_migrate"],
+        [38, "channel_attestations", "app_migrate"],
+        [39, "cpa_thread_reads", "app_migrate"],
+        [40, "month_close_rehashes", "app_migrate"],
+        [41, "notice_addresses", "app_migrate"],
+        [42, "notice_sends", "app_migrate"],
+        [43, "notice_send_failure_kind", "app_migrate"],
+        [44, "notice_address_proofs", "app_migrate"],
+        [45, "notice_rounds", "app_migrate"],
+        [46, "notice_send_kind", "app_migrate"],
+        [47, "proof_is_per_code", "app_migrate"],
+        [48, "round_may_send_a_code", "app_migrate"],
+        [49, "notice_package_kind", "app_migrate"],
+        [50, "notice_address_refusals", "app_migrate"],
+        [51, "seat_invitations", "app_migrate"],
+        [52, "seat_invitations_newest_wins", "app_migrate"],
+        [53, "gl_mappings_sole_decider", "app_migrate"],
+        [54, "mfa_pending_secret", "app_migrate"],
+        [55, "recovery_ceremony_lookup_grant", "app_migrate"],
+        [56, "import_apply_append_grants", "app_migrate"],
+        [57, "bank_account_tenancy_audit_immutability", "app_migrate"],
       ]);
       const owners = await db.admin.query(
         "SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'"
@@ -152,7 +181,7 @@ describe.skipIf(!adminUrl)("live Postgres", () => {
     it("is a no-op the second time", async () => {
       const result = await applyMigrations(db.admin);
       expect(result.applied).toEqual([]);
-      expect(result.alreadyApplied).toBe(28);
+      expect(result.alreadyApplied).toBe(57);
     });
 
     it("left domain_event with RLS forced after the seq backfill", async () => {

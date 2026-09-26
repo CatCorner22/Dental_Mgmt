@@ -20,10 +20,31 @@ import {
   decisionStateLabel,
   dutiesByPerson,
   grantRefusal,
+  attestationSentence,
+  lastCompleteMonth,
   provenanceSentence,
+  reasonTighteningSentence,
+  reasonTighteningsForChannel,
 } from "@/lib/controls/riskView";
-import { DecisionForm, type DecisionDraft } from "./decision-form";
-import { Refusal, type RefusalContent } from "./refusal";
+import type { ReasonCodeRow } from "@/lib/ledger/reasons";
+import type { AttestationRow } from "@/lib/controls/attestations";
+import { DecisionForm, type DecisionDraft } from "../decision-form";
+import { Refusal, type RefusalContent } from "../refusal";
+import { SessionEnded } from "../session-ended";
+import { readViewer } from "@/lib/auth/viewer";
+import { getGuarded, isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
+import { RanksPanel } from "./ranks-panel";
+import { SignOutEverybodyPanel } from "./sign-out-everybody-panel";
+import { RegainPanel } from "./regain-panel";
+import { DeliveryPanel, type AddressFormState, type AddressResponse } from "../delivery-panel";
+import {
+  askForCode as askForCodeAct,
+  proveAddress as proveAddressAct,
+  readDelivery,
+  saveAddress as saveAddressAct,
+  saveAddressLabel,
+  sendNoticesNow as sendNoticesNowAct,
+} from "../delivery-acts";
 
 type RiskResponse = {
   source: "stored" | "live";
@@ -53,6 +74,13 @@ type ExceptionsResponse = {
   summary: { total: number; raises: number; forceDual: number; waives: number; expiringSoon: number };
 };
 
+type ReasonCodesResponse = { items: ReasonCodeRow[] };
+
+import type { Notice, NoticeSeat } from "@/lib/notices/outstanding";
+
+type AttestationsResponse = { month: string; items: AttestationRow[] };
+
+type OutstandingResponse = { notices: Notice[]; counts: Record<NoticeSeat, number>; computedAt: string };
 type Me = { ok: boolean; role?: string; displayName?: string };
 
 type FindingItem = {
@@ -88,25 +116,42 @@ type FindingsResponse = {
   summary: { open: number; closed: number; high: number; medium: number; low: number; decided: number; undecided: number };
 };
 
+/** Seats this practice invited that nobody has opened yet (Increments 1.71, 1.73). */
+type SeatsResponse = {
+  invitations: { userId: string; username: string; displayName: string; invitedAt: string; expiresAt: string }[];
+};
+
 type Loaded = {
   risk: RiskResponse;
   sod: SodResponse;
   decisions: DecisionsResponse;
   exceptions: ExceptionsResponse;
   findings: FindingsResponse;
+  reasonCodes: ReasonCodesResponse;
+  attestations: AttestationsResponse;
+  outstanding: OutstandingResponse;
+  delivery: AddressResponse;
+  seats: SeatsResponse;
 };
 
 type LoadState =
   | { status: "loading" }
+  /** The sign-in is over (Increment 1.81), which is not a load that failed. */
+  | { status: "sign_in_ended" }
   | { status: "error"; message: string }
   | { status: "ready"; data: Loaded };
 
-async function getJson<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  const body = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(body.error ?? `Could not load ${url}.`);
-  return body;
-}
+/**
+ * This screen reads ten routes at once, so classifying a 401 where it happens
+ * is what keeps the answer out of a race with the `/api/me` read beside it:
+ * whichever finishes first, one `catch` decides, and it decides on the status
+ * rather than on a sentence it would have to match by its words.
+ *
+ * Written here for this screen in Increment 1.81 and moved to
+ * `lib/auth/guardedFetch` in Increment 1.82, once nine more screens turned out
+ * to need the same reading and to have none.
+ */
+const getJson = getGuarded;
 
 const ENTITLEMENT_LABEL = new Map(ENTITLEMENTS.map((e) => [e.id as string, e.label]));
 
@@ -128,41 +173,82 @@ export default function PracticeRiskPage() {
   // The tightening exception being switched off; the decision form is open for it.
   const [switchingId, setSwitchingId] = useState<string | null>(null);
 
+  // Where my own notices would go (Increment 1.58). Nothing is sent.
+  const [addressDraft, setAddressDraft] = useState<string | null>(null);
+  const [codeDraft, setCodeDraft] = useState("");
+
   // Grant form
   const [grantPerson, setGrantPerson] = useState("");
   const [grantEntitlement, setGrantEntitlement] = useState<string>(ENTITLEMENTS[0]?.id ?? "");
   const [grantReason, setGrantReason] = useState("");
   const [grantRefused, setGrantRefused] = useState<(RefusalContent & { canLicense: boolean }) | null>(null);
+  // Inviting the outside accountant's seat (Increment 1.71). The link comes
+  // back once and is held only in this render: the rows keep a hash, so a
+  // practice that loses it invites again rather than asking for a repeat.
+  const [seatUsername, setSeatUsername] = useState("");
+  const [seatName, setSeatName] = useState("");
+  const [seatLink, setSeatLink] = useState<{ username: string; link: string; expiresAt: string } | null>(null);
+  const [seatRefusal, setSeatRefusal] = useState<string | null>(null);
 
   const load = useCallback(async (fresh = false) => {
-    const [risk, sod, decisions, exceptions, findings] = await Promise.all([
+    const [risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding, delivery, seats] = await Promise.all([
       getJson<RiskResponse>(`/api/controls/risk${fresh ? "?fresh=1" : ""}`),
       getJson<SodResponse>("/api/controls/sod"),
       getJson<DecisionsResponse>("/api/controls/decisions"),
       getJson<ExceptionsResponse>("/api/controls/exceptions"),
       getJson<FindingsResponse>("/api/controls/findings"),
+      getJson<ReasonCodesResponse>("/api/reason-codes"),
+      // The month that has ended: "reviewed this month" means a month somebody
+      // could have reviewed, and the one still filling is not one.
+      getJson<AttestationsResponse>(
+        `/api/controls/attestations?month=${lastCompleteMonth(new Date().toISOString().slice(0, 10))}`
+      ),
+      // What each seat owes right now (Increment 1.57): its own route, because
+      // the snapshot above may be the frozen one and this is always the
+      // practice's position now.
+      getJson<OutstandingResponse>("/api/controls/outstanding"),
+      // Where this viewer's own notices would go, and the message that would go
+      // there (Increment 1.58). Nothing is sent.
+      readDelivery(),
+      // Seats invited and not yet opened (Increment 1.73), so a practice whose
+      // accountant lost the link can send another rather than being stuck with
+      // an account nobody can ever sign into.
+      getJson<SeatsResponse>("/api/controls/seats"),
     ]);
-    return { risk, sod, decisions, exceptions, findings };
+    return { risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding, delivery, seats };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     fetch("/api/me")
-      .then(async (res) => (await res.json()) as Me)
-      .then((body) => {
-        if (!cancelled) setMe(body);
+      .then(async (res) => readViewer(res.status, await res.json().catch(() => ({}))))
+      .then((viewer) => {
+        if (cancelled) return;
+        // This screen used to read the body and never the status, so an ended
+        // session produced no role, and the administrator controls simply
+        // vanished with nothing said (Increment 1.81).
+        if (viewer.state === "ended") setState({ status: "sign_in_ended" });
+        else if (viewer.state === "present") setMe({ ok: true, role: viewer.role, displayName: viewer.displayName });
+        else setMe({ ok: false });
       })
       .catch(() => {
         if (!cancelled) setMe({ ok: false });
       });
     load()
       .then((data) => {
-        if (!cancelled) setState({ status: "ready", data });
+        if (!cancelled) setState((s) => (s.status === "sign_in_ended" ? s : { status: "ready", data }));
       })
       .catch((err: unknown) => {
-        if (!cancelled) {
-          setState({ status: "error", message: err instanceof Error ? err.message : "Could not load Practice Risk." });
+        if (cancelled) return;
+        if (isSignInEnded(err)) {
+          setState({ status: "sign_in_ended" });
+          return;
         }
+        setState((s) =>
+          s.status === "sign_in_ended"
+            ? s
+            : { status: "error", message: err instanceof Error ? err.message : "Could not load Practice Risk." }
+        );
       });
     return () => {
       cancelled = true;
@@ -190,10 +276,53 @@ export default function PracticeRiskPage() {
       const note = await fn();
       await refresh(fresh, note ?? undefined);
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : `${label} failed.`);
     } finally {
       setBusy(null);
     }
+  }
+
+  /**
+   * The four delivery acts, each in the words `delivery-acts` gives it
+   * (shared since Increment 1.74). What stays here is what belongs to this
+   * screen: which control is busy, where the sentence goes, and the draft the
+   * saved value replaces.
+   */
+  async function saveAddress(address: string) {
+    await run(
+      saveAddressLabel(address),
+      async () => {
+        const note = await saveAddressAct(address);
+        setAddressDraft(null);
+        return note;
+      },
+      false
+    );
+  }
+
+  async function sendNoticesNow() {
+    await run("Send this to me now", () => sendNoticesNowAct(), false);
+  }
+
+  async function askForCode() {
+    await run("Send me a code", () => askForCodeAct(), false);
+  }
+
+  async function proveAddressNow(code: string) {
+    await run(
+      "Prove this address",
+      async () => {
+        const note = await proveAddressAct(code);
+        setCodeDraft("");
+        return note;
+      },
+      false
+    );
   }
 
   async function freezeSnapshot() {
@@ -205,6 +334,7 @@ export default function PracticeRiskPage() {
         body: "{}",
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error(body.error ?? "The snapshot was not frozen.");
       return "Snapshot frozen. The findings table was refreshed to match.";
     }, false);
@@ -225,6 +355,7 @@ export default function PracticeRiskPage() {
         }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       setDecidingId(null);
       return `${DECISION_KIND_LABEL[draft.kind]} recorded for ${conflict.title}.`;
@@ -246,10 +377,99 @@ export default function PracticeRiskPage() {
         }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       setDecidingId(null);
       return `${DECISION_KIND_LABEL[draft.kind]} recorded for the finding "${finding.kindLabel}". The row stays open until the detector sees the condition clear.`;
     });
+  }
+
+  /**
+   * Invites the outside accountant's seat (Increment 1.71).
+   *
+   * The practice names the seat and never its password: what comes back is a
+   * link to hand over, and the person on the other end chooses the secret.
+   */
+  async function inviteAccountantSeat() {
+    setBusy("Invite");
+    setMessage(null);
+    setSeatRefusal(null);
+    try {
+      const res = await fetch("/api/controls/seats", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: seatUsername, displayName: seatName }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        username?: string;
+        link?: string;
+        expiresAt?: string;
+      };
+      if (res.status === 401) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
+      if (!res.ok) {
+        setSeatRefusal(body.error ?? "The invitation failed.");
+        return;
+      }
+      setSeatLink({ username: body.username ?? seatUsername, link: body.link ?? "", expiresAt: body.expiresAt ?? "" });
+      setSeatUsername("");
+      setSeatName("");
+      // Re-read, so the seat just invited appears among those waiting to be
+      // opened (Increment 1.73). Without this the panel showed the link once
+      // and then nothing, and a practice that mislaid it had no row to act on.
+      await refresh(false);
+    } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
+      setSeatRefusal(err instanceof Error ? err.message : "The invitation failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * Sends another link to a seat whose first one went astray
+   * (Increment 1.73). The seat itself is untouched: same person, same
+   * username, same grant — only the secret is new, and the older link stops
+   * working because the read requires the invitation in force.
+   */
+  async function reinvite(userId: string, name: string) {
+    setBusy("Invite");
+    setMessage(null);
+    setSeatRefusal(null);
+    try {
+      const res = await fetch("/api/controls/seats", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; username?: string; link?: string; expiresAt?: string };
+      if (res.status === 401) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
+      if (!res.ok) {
+        setSeatRefusal(body.error ?? "The new link could not be sent.");
+        return;
+      }
+      setSeatLink({ username: body.username ?? name, link: body.link ?? "", expiresAt: body.expiresAt ?? "" });
+      await refresh(false, `Sent a new link for ${name}. The old one no longer works.`);
+    } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
+      setSeatRefusal(err instanceof Error ? err.message : "The new link could not be sent.");
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function grant(decision?: DecisionDraft) {
@@ -269,6 +489,10 @@ export default function PracticeRiskPage() {
         }),
       });
       const body = (await res.json().catch(() => ({}))) as Parameters<typeof grantRefusal>[0];
+      if (res.status === 401) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       if (!res.ok) {
         setGrantRefused(grantRefusal(body, res.status));
         return;
@@ -276,6 +500,11 @@ export default function PracticeRiskPage() {
       setGrantReason("");
       await refresh(false, `Granted ${entitlementLabel(grantEntitlement)}.`);
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The grant failed.");
     } finally {
       setBusy(null);
@@ -298,6 +527,7 @@ export default function PracticeRiskPage() {
         }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       setSwitchingId(null);
       return `Switched off: ${exception.label}. Review due ${draft.reviewBy}; the home board says so until it is back on.`;
@@ -312,6 +542,7 @@ export default function PracticeRiskPage() {
         body: JSON.stringify({ exceptionId: exception.id }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       return `Switched on: ${exception.label}. The decision that switched it off is retired.`;
     });
@@ -326,6 +557,7 @@ export default function PracticeRiskPage() {
         body: JSON.stringify({ exceptionId: exception.id, reason: "Retired from Practice Risk." }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       return `Retired: ${exception.label}. The control it loosened stands again.`;
     });
@@ -339,6 +571,7 @@ export default function PracticeRiskPage() {
         body: JSON.stringify({ targetUserId: person.personId, entitlement }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error(body.error ?? "The grant was not revoked.");
       return `Revoked ${entitlementLabel(entitlement)} from ${person.personName}. The finding, if any, is closed, not deleted.`;
     });
@@ -354,6 +587,7 @@ export default function PracticeRiskPage() {
       </p>
 
       {state.status === "loading" && <p className="text-sm text-[var(--ink-2)]">Loading…</p>}
+      {state.status === "sign_in_ended" && <SessionEnded />}
       {state.status === "error" && (
         <Refusal
           refusal={{
@@ -382,6 +616,16 @@ export default function PracticeRiskPage() {
           onFreeze={() => void freezeSnapshot()}
           onDecide={(c, d) => void recordDecision(c, d)}
           onDecideFinding={(f, d) => void recordFindingDecision(f, d)}
+          addressForm={{
+            draft: addressDraft,
+            setDraft: setAddressDraft,
+            save: (address) => void saveAddress(address),
+            sendNow: () => void sendNoticesNow(),
+            codeDraft,
+            setCodeDraft,
+            askForCode: () => void askForCode(),
+            prove: (code: string) => void proveAddressNow(code),
+          }}
           grantForm={{
             person: grantPerson,
             setPerson: setGrantPerson,
@@ -392,6 +636,17 @@ export default function PracticeRiskPage() {
             refused: grantRefused,
             clearRefusal: () => setGrantRefused(null),
             submit: (d?: DecisionDraft) => void grant(d),
+          }}
+          seatForm={{
+            username: seatUsername,
+            setUsername: setSeatUsername,
+            name: seatName,
+            setName: setSeatName,
+            link: seatLink,
+            refusal: seatRefusal,
+            submit: () => void inviteAccountantSeat(),
+            open: state.data.seats.invitations,
+            reinvite: (id, name) => void reinvite(id, name),
           }}
           onRevoke={(p, e) => void revoke(p, e)}
           exceptionControls={{
@@ -427,6 +682,25 @@ type GrantFormState = {
   submit: (decision?: DecisionDraft) => void;
 };
 
+/** The one address this viewer may set: their own (Increment 1.58). */
+/**
+ * Inviting the outside accountant's seat (Increment 1.71). The link comes back
+ * once and lives only in this render: the rows keep a hash of it, so a practice
+ * that loses it invites again rather than asking for a repeat.
+ */
+type SeatFormState = {
+  username: string;
+  setUsername: (v: string) => void;
+  name: string;
+  setName: (v: string) => void;
+  link: { username: string; link: string; expiresAt: string } | null;
+  refusal: string | null;
+  submit: () => void;
+  /** Seats invited and not yet opened, one live link each (Increment 1.73). */
+  open: SeatsResponse["invitations"];
+  reinvite: (userId: string, name: string) => void;
+};
+
 function RiskBody({
   data,
   isAdmin,
@@ -440,6 +714,8 @@ function RiskBody({
   onDecide,
   onDecideFinding,
   grantForm,
+  addressForm,
+  seatForm,
   onRevoke,
   exceptionControls,
 }: {
@@ -455,10 +731,12 @@ function RiskBody({
   onDecide: (conflict: DetectedConflict, draft: DecisionDraft) => void;
   onDecideFinding: (finding: FindingItem, draft: DecisionDraft) => void;
   grantForm: GrantFormState;
+  addressForm: AddressFormState;
+  seatForm: SeatFormState;
   onRevoke: (person: RoleAssignment, entitlement: string) => void;
   exceptionControls: ExceptionControls;
 }) {
-  const { risk, sod, decisions, exceptions, findings } = data;
+  const { risk, sod, decisions, exceptions, findings, reasonCodes, attestations, outstanding, delivery } = data;
   const s = risk.snapshot;
   const conflicts = [...sod.conflicts]
     .filter((c) => showFamily || c.severity !== "family")
@@ -559,7 +837,9 @@ function RiskBody({
         </h2>
         <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
           Only an enforced or recorded channel may lower a score. A channel whose data the product does
-          not hold is shown as attested, never as enforced, so this table cannot show a false green.
+          not hold is shown as attested, never as enforced, so this table cannot show a false green. A
+          reason code may hold a channel to less than its own figure; where one does, it is named under
+          the figure it tightens, with the decision that licensed any loosening.
         </p>
         <div className="overflow-x-auto rounded-lg border border-[var(--line)] bg-[var(--surface)]">
           <table className="min-w-full text-left text-sm">
@@ -581,9 +861,28 @@ function RiskBody({
                   </td>
                   <td className="px-4 py-3">
                     <StatusChip status={row.status} />
+                    {/* What stands behind the word on a channel the product
+                        cannot hold (Increment 1.51). Without it the row reads
+                        as though "attested" meant somebody had said something. */}
+                    {row.status === "external" && (
+                      <p className="mt-1 text-xs font-normal text-[var(--ink-3)]">
+                        {attestationSentence(
+                          attestations.items.find((a) => a.channel === row.channel)?.attestation ?? null,
+                          attestations.month
+                        )}
+                      </p>
+                    )}
                   </td>
                   <td className="px-4 py-3 tabular-nums">
                     {row.policyEnabled ? `$${row.thresholdUsd.toLocaleString()}` : "—"}
+                    {row.policyEnabled && (
+                      <ReasonTightenings
+                        channel={row.channel}
+                        thresholdUsd={row.thresholdUsd}
+                        rows={reasonCodes.items}
+                        decisions={decisions.items}
+                      />
+                    )}
                   </td>
                   <td className="px-4 py-3">{row.countsTowardScores ? "Yes" : "No"}</td>
                   <td className="px-4 py-3 tabular-nums">{row.activeExceptions}</td>
@@ -999,6 +1298,168 @@ function RiskBody({
           })()}
       </section>
 
+      {/* What each seat owes right now (Increment 1.57), folded from the same
+          readings the other screens use and stored nowhere: a notices table
+          would be a status column that can disagree with the rows under it.
+          Each entry carries the sentence its own surface already writes. */}
+      <section aria-labelledby="outstanding" className="mb-10">
+        <h2 id="outstanding" className="mb-3 text-lg font-semibold">
+          What people owe
+        </h2>
+        {outstanding.notices.length === 0 ? (
+          <p className="max-w-prose text-[var(--ink-2)]">
+            Nobody owes anything the product can see: every channel the practice cannot enforce carries an attestation for
+            the month that has ended, no question is waiting on an answer, no answer is waiting to be read, and no decision
+            is past its review date.
+          </p>
+        ) : (
+          <>
+            <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
+              {outstanding.counts.owner} on the practice, {outstanding.counts.accountant} on the accountant. Read from rows
+              on every load and recorded nowhere, so nothing here can outlive the thing it reports. Oldest first.
+            </p>
+            <ul className="space-y-3">
+              {outstanding.notices.map((n) => (
+                <li key={n.key} className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">
+                    {n.seat === "owner" ? "The practice" : "The accountant"}
+                    {n.since ? ` \u00b7 since ${n.since}` : ""}
+                  </p>
+                  <p className="mt-1 text-sm font-semibold">{n.subject}</p>
+                  <p className="mt-1 max-w-prose text-sm text-[var(--ink-2)]">{n.sentence}</p>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </section>
+
+      {/* Where this viewer's own notices would go, and what would go there
+          (Increment 1.58). Nothing is sent. The message is shown beside the
+          address because a person deciding whether to receive these is
+          entitled to read, first, what receiving them would mean — and because
+          it is the only way the rule about what a message may carry is visible
+          to the person it protects. */}
+      {/* Inviting the seat the practice cannot otherwise create (Increment 1.71).
+          `users` was written by the seed and by nothing else, so a practice
+          that wanted an outside accountant could not have one — and the reading
+          below would report an accountant who never said where to send their
+          messages without offering any way to add one. Only this seat, and only
+          the owner: it pairs with no duty in the SoD rulebook (1.49), so
+          inviting it creates no conflict, while a general invite would be a
+          grant path around `evaluateGrant`. */}
+      {isAdmin ? (
+        <section aria-labelledby="invite-seat" className="mb-10">
+          <h2 id="invite-seat" className="mb-1 text-lg font-semibold">
+            Invite the outside accountant
+          </h2>
+          <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
+            The seat reaches the month-end package and no other screen, and it holds no patient record. You name it; the
+            person you name sets their own password, which this practice never learns and cannot set for them. A firm&rsquo;s
+            shared mailbox holds the seat the same way a person does.
+          </p>
+          <div className="grid gap-3 rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4 sm:max-w-xl">
+            <label htmlFor="seat-username" className="text-sm font-semibold text-[var(--ink)]">
+              Username they will sign in with
+            </label>
+            <input
+              id="seat-username"
+              value={seatForm.username}
+              onChange={(e) => seatForm.setUsername(e.target.value)}
+              placeholder="firm-accounting"
+              className="rounded-[var(--radius)] border border-[var(--line)] px-3 py-2"
+            />
+            <label htmlFor="seat-name" className="text-sm font-semibold text-[var(--ink)]">
+              What this practice&rsquo;s screens will call them
+            </label>
+            <input
+              id="seat-name"
+              value={seatForm.name}
+              onChange={(e) => seatForm.setName(e.target.value)}
+              placeholder="Prentice &amp; Co"
+              className="rounded-[var(--radius)] border border-[var(--line)] px-3 py-2"
+            />
+            <button
+              id="invite-seat-submit"
+              type="button"
+              disabled={busy !== null || seatForm.username.trim() === "" || seatForm.name.trim() === ""}
+              onClick={seatForm.submit}
+              className="justify-self-start rounded-[var(--radius)] bg-navy px-4 py-2 font-semibold text-white disabled:opacity-60"
+            >
+              {busy === "Invite" ? "Inviting…" : "Invite this seat"}
+            </button>
+            {seatForm.refusal ? (
+              <p aria-live="polite" className="max-w-prose text-sm text-[var(--ink-2)]">
+                {seatForm.refusal}
+              </p>
+            ) : null}
+            {seatForm.open.length > 0 ? (
+              <div className="grid gap-2 rounded-md border border-[var(--line)] p-3">
+                <p className="text-sm font-semibold text-[var(--ink)]">Invited, not yet opened</p>
+                <p className="max-w-prose text-sm text-[var(--ink-2)]">
+                  A link works for a week and only once. If one went astray, send another — the seat keeps its
+                  username and its place, and the older link stops working.
+                </p>
+                <ul className="grid gap-2">
+                  {seatForm.open.map((seat) => (
+                    <li key={seat.userId} className="flex flex-wrap items-center justify-between gap-3">
+                      <span className="text-sm text-[var(--ink-2)]">
+                        {seat.displayName}{" "}
+                        <span className="text-[var(--ink-3)]">
+                          ({seat.username}) &middot; link works until {seat.expiresAt.slice(0, 10)}
+                        </span>
+                      </span>
+                      <button
+                        id={`reinvite-${seat.userId}`}
+                        type="button"
+                        disabled={busy !== null}
+                        onClick={() => seatForm.reinvite(seat.userId, seat.displayName)}
+                        className="rounded-[var(--radius)] border border-[var(--line-strong)] px-3 py-1 text-sm font-semibold text-[var(--link)] disabled:opacity-60"
+                      >
+                        Send a new link
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+                        {seatForm.link ? (
+              <div aria-live="polite" className="grid gap-2 rounded-md border border-[var(--line)] p-3">
+                <p className="max-w-prose text-sm text-[var(--ink-2)]">
+                  Send this link to {seatForm.link.username}. It works until {seatForm.link.expiresAt.slice(0, 10)}, once only, and
+                  this screen is the only place it appears — the practice keeps a hash of it and cannot show it again.
+                </p>
+                <code className="break-all rounded bg-[var(--surface-2,transparent)] p-2 text-xs">{seatForm.link.link}</code>
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      {/* Increment 1.78. Nothing in this product wrote `users.role` until now,
+          so a practice kept the ranks it was seeded with forever — which is
+          what made Increment 1.75 need a governed exception and left
+          Increment 1.77's refusal naming a remedy nobody could take. The
+          panel sits above the recovery one because appointing a second
+          administrator is what makes that one usable. */}
+      <RanksPanel isAdmin={isAdmin} />
+
+      {/* Increment 1.77. A person whose authenticator is gone cannot reach the
+          screen Increment 1.76 built, because that screen needs a session they
+          cannot get. Two administrators can. A manager reads this and an
+          administrator acts on it, which is how a practice learns whom to ask
+          — and, where it has one administrator, why nobody can. */}
+      <RegainPanel isAdmin={isAdmin} />
+
+      {/* Increment 1.90. The blunt act beside Increment 1.88's proportionate
+          one, and the route Increment 0.8 built that no screen ever called.
+          It sits below the recovery panel because it is what a practice
+          reaches for when it does not yet know whose account is the problem —
+          after the ones that assume it does. */}
+      <SignOutEverybodyPanel isAdmin={isAdmin} />
+
+      <DeliveryPanel delivery={delivery} form={addressForm} busy={busy} />
+
       <section aria-labelledby="assumptions" className="mb-6">
         <h2 id="assumptions" className="mb-1 text-lg font-semibold">
           What these numbers assume
@@ -1019,6 +1480,33 @@ function Tile({ label, value }: { label: string; value: string }) {
       <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ink-3)]">{label}</p>
       <p className="mt-1 text-xl font-semibold tabular-nums">{value}</p>
     </div>
+  );
+}
+
+/**
+ * The reason codes holding one channel to less than its own figure
+ * (Increment 1.48). A reader of this table who could not see them would read a
+ * figure that no longer governs every posting on the channel.
+ */
+function ReasonTightenings({
+  channel,
+  thresholdUsd,
+  rows,
+  decisions,
+}: {
+  channel: string;
+  thresholdUsd: number;
+  rows: ReasonCodeRow[];
+  decisions: ControlDecision[];
+}) {
+  const tightenings = reasonTighteningsForChannel({ channel, channelThresholdUsd: thresholdUsd, rows, decisions });
+  if (tightenings.length === 0) return null;
+  return (
+    <ul className="mt-1 space-y-0.5 text-xs font-normal tabular-nums text-[var(--ink-3)]">
+      {tightenings.map((t) => (
+        <li key={t.code}>{reasonTighteningSentence(t)}</li>
+      ))}
+    </ul>
   );
 }
 

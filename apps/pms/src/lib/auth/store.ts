@@ -44,11 +44,46 @@ export interface AuthStore {
   revokeSessionsForTenant(tenantId: string, at: Date): Promise<number>;
   deactivateUser(userId: string, at: Date): Promise<void>;
   replaceRecoveryHashes(userId: string, hashes: string[]): Promise<void>;
+  /**
+   * Stages an authenticator being paired. It goes to `mfaPendingSecretEnc` and
+   * never to the live secret (Increment 1.76): a person re-pairing must keep
+   * the factor that works until the new one proves itself, or merely opening
+   * the screen would lock them out.
+   */
   setMfaPendingSecret(userId: string, secretEnc: EncryptedBlob): Promise<void>;
+  /**
+   * The authenticator being paired, if one is. Deliberately not a field on
+   * `StoredUser`: neither auth lookup returns the column, so the paths that
+   * resolve a person for a sign-in or a guard cannot hand a pairing in
+   * progress to anybody, and only the enrolment path asks for it.
+   */
+  getMfaPendingSecret(userId: string): Promise<EncryptedBlob | null>;
+  /**
+   * Promotes the staged authenticator and replaces the recovery codes. Clears
+   * the pending column in the same write, so a pairing is either in progress
+   * or finished and never both.
+   */
   completeMfaEnrollment(
     userId: string,
     input: { secretEnc: EncryptedBlob; recoveryHashes: string[]; enrolledAt: Date }
   ): Promise<void>;
+  /**
+   * Puts an account back to having no second factor at all (Increment 1.77):
+   * no live secret, no pairing in progress, no enrolment date, no recovery
+   * codes. One write, because a half-cleared account is worse than either end
+   * of it — an enrolment date with no secret makes `needsMfaEnrollment` false
+   * and every code refused, so the person can neither pass the factor nor be
+   * sent to set a new one.
+   *
+   * The account's sessions go with it: a person whose factor was just removed
+   * by somebody else must not keep a session minted under the old one. That is
+   * part of this rather than a second call beside it, so the two cannot drift
+   * and, against Postgres, so both land in one transaction.
+   *
+   * Only the two-administrator recovery ceremony calls this. Nothing a single
+   * person can reach clears somebody else's factor.
+   */
+  clearMfaEnrollment(userId: string, at: Date): Promise<void>;
   logPhiAccess(input: {
     tenantId: string;
     userId: string;

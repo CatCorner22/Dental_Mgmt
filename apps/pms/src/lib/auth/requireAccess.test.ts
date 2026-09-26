@@ -68,6 +68,37 @@ describe("requireAccess", () => {
     }
   });
 
+  it("lets a grant open a route in the rank's place, and refuses without it (Increment 1.49)", async () => {
+    const seat: FreshUser = { ...user, role: "readonly", entitlements: ["view_reports_only"] };
+    const opened = await requireAccess(
+      req(),
+      { minRank: "manager", orEntitlement: "view_reports_only" },
+      memoryPorts({ session, user: seat, sessionId: "s1" }),
+      now
+    );
+    expect(opened.ok).toBe(true);
+
+    // The same seat without the grant is refused, so the rank is still the rule.
+    const bare = await requireAccess(
+      req(),
+      { minRank: "manager", orEntitlement: "view_reports_only" },
+      memoryPorts({ session, user: { ...seat, entitlements: [] }, sessionId: "s1" }),
+      now
+    );
+    expect(bare.ok).toBe(false);
+    if (!bare.ok) expect(bare.response.status).toBe(403);
+
+    // It relaxes the rank alone: a declared entitlement still has to be held.
+    const andList = await requireAccess(
+      req(),
+      { minRank: "manager", orEntitlement: "view_reports_only", entitlements: ["approve_writeoffs"] },
+      memoryPorts({ session, user: seat, sessionId: "s1" }),
+      now
+    );
+    expect(andList.ok).toBe(false);
+    if (!andList.ok) expect(andList.response.status).toBe(403);
+  });
+
   it("sets tenant context and logs a PHI read", async () => {
     const ports = memoryPorts({ session, user, sessionId: "s1" });
     const result = await requireAccess(

@@ -35,6 +35,52 @@ const digestAcksSql = readFileSync(join(here, "../migrations/0024_digest_acks.sq
 const locationHoursSql = readFileSync(join(here, "../migrations/0025_locations_hours.sql"), "utf8");
 const afterHoursHoldSql = readFileSync(join(here, "../migrations/0026_after_hours_hold.sql"), "utf8");
 const hardEventAcksSql = readFileSync(join(here, "../migrations/0027_hard_event_acks.sql"), "utf8");
+const glMappingsSql = readFileSync(join(here, "../migrations/0028_gl_mappings.sql"), "utf8");
+const monthClosesSql = readFileSync(join(here, "../migrations/0029_month_closes.sql"), "utf8");
+const correctionPairsSql = readFileSync(join(here, "../migrations/0030_correction_pairs.sql"), "utf8");
+const correctionHoldsSql = readFileSync(join(here, "../migrations/0031_correction_holds.sql"), "utf8");
+const latePostingsSql = readFileSync(join(here, "../migrations/0032_late_postings.sql"), "utf8");
+const sealedDayFindingSql = readFileSync(join(here, "../migrations/0033_finding_sealed_day_posting.sql"), "utf8");
+const packageSchemaSql = readFileSync(join(here, "../migrations/0034_package_schema_version.sql"), "utf8");
+const reasonThresholdSql = readFileSync(join(here, "../migrations/0035_reason_thresholds.sql"), "utf8");
+const reasonDecisionSql = readFileSync(join(here, "../migrations/0036_decision_on_reason_code.sql"), "utf8");
+const cpaQuestionsSql = readFileSync(join(here, "../migrations/0037_cpa_questions.sql"), "utf8");
+const attestationsSql = readFileSync(join(here, "../migrations/0038_channel_attestations.sql"), "utf8");
+const threadReadsSql = readFileSync(join(here, "../migrations/0039_cpa_thread_reads.sql"), "utf8");
+const rehashSql = readFileSync(join(here, "../migrations/0040_month_close_rehashes.sql"), "utf8");
+const addressesSql = readFileSync(join(here, "../migrations/0041_notice_addresses.sql"), "utf8");
+const sendsSql = readFileSync(join(here, "../migrations/0042_notice_sends.sql"), "utf8");
+const failureKindSql = readFileSync(join(here, "../migrations/0043_notice_send_failure_kind.sql"), "utf8");
+const proofsSql = readFileSync(join(here, "../migrations/0044_notice_address_proofs.sql"), "utf8");
+const roundsSql = readFileSync(join(here, "../migrations/0045_notice_rounds.sql"), "utf8");
+const kindSql = readFileSync(join(here, "../migrations/0046_notice_send_kind.sql"), "utf8");
+const perCodeSql = readFileSync(join(here, "../migrations/0047_proof_is_per_code.sql"), "utf8");
+const roundCodeSql = readFileSync(join(here, "../migrations/0048_round_may_send_a_code.sql"), "utf8");
+const packageKindSql = readFileSync(join(here, "../migrations/0049_notice_package_kind.sql"), "utf8");
+const refusalsSql = readFileSync(join(here, "../migrations/0050_notice_address_refusals.sql"), "utf8");
+const invitationsSql = readFileSync(join(here, "../migrations/0051_seat_invitations.sql"), "utf8");
+const newestWinsSql = readFileSync(join(here, "../migrations/0052_seat_invitations_newest_wins.sql"), "utf8");
+const soleDeciderSql = readFileSync(join(here, "../migrations/0053_gl_mappings_sole_decider.sql"), "utf8");
+const pendingSecretSql = readFileSync(join(here, "../migrations/0054_mfa_pending_secret.sql"), "utf8");
+const ceremonyGrantSql = readFileSync(join(here, "../migrations/0055_recovery_ceremony_lookup_grant.sql"), "utf8");
+const importApplyGrantSql = readFileSync(join(here, "../migrations/0056_import_apply_append_grants.sql"), "utf8");
+/**
+ * The statements of a migration, without its prose.
+ *
+ * A negative assertion over a file whose comments argue about the thing being
+ * ruled out fails on the argument rather than on the code — which is a test
+ * passing or failing for a reason other than its own name.
+ */
+const statementsOf = (sql: string): string =>
+  sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
+/** One CREATE TABLE body, so a check about its columns reads only its columns. */
+const columnsOf = (sql: string, table: string): string => {
+  const start = sql.indexOf(`CREATE TABLE ${table} (`);
+  if (start < 0) throw new Error(`no CREATE TABLE ${table} in this migration`);
+  const end = sql.indexOf("\n);", start);
+  if (end < 0) throw new Error(`CREATE TABLE ${table} is not closed`);
+  return statementsOf(sql.slice(start, end));
+};
 const increment01TenantTables = [
   "locations",
   "users",
@@ -236,6 +282,662 @@ describe("Increment 1.33 hard-event acknowledgments", () => {
   });
 });
 
+describe("Increment 1.35 GL mappings under maker-checker", () => {
+  it("keys a mapping by bucket, kind, and reason code, and lets only a different person decide it", () => {
+    expect(glMappingsSql).toMatch(/CREATE TABLE gl_mappings\b/);
+    expect(glMappingsSql).toMatch(/reason_code text NOT NULL DEFAULT '\*'/);
+    expect(glMappingsSql).toMatch(/side text NOT NULL CHECK \(side IN \('debit', 'credit'\)\)/);
+    expect(glMappingsSql).toMatch(/status text NOT NULL DEFAULT 'proposed' CHECK \(status IN \('proposed', 'approved', 'rejected'\)\)/);
+    expect(glMappingsSql).toMatch(/CONSTRAINT gl_mappings_maker_ne_checker CHECK \(decided_by_id IS NULL OR decided_by_id <> proposed_by_id\)/);
+    expect(glMappingsSql).toMatch(/CONSTRAINT gl_mappings_decision_complete/);
+    expect(glMappingsSql).toMatch(/CREATE UNIQUE INDEX gl_mappings_pending_uidx[\s\S]*WHERE status = 'proposed'/);
+    expect(glMappingsSql).toMatch(/gl_mappings_no_delete/);
+    expect(glMappingsSql).toMatch(/gl_mappings_decide_only/);
+    expect(glMappingsSql).toMatch(/ALTER TABLE gl_mappings FORCE ROW LEVEL SECURITY/);
+    expect(glMappingsSql).toMatch(/CREATE POLICY gl_mappings_isolation ON gl_mappings/);
+    expect(glMappingsSql).toMatch(/GRANT SELECT, INSERT, UPDATE ON gl_mappings TO app_rw/);
+    expect(glMappingsSql).not.toMatch(/GRANT[^\n]*DELETE[^\n]*gl_mappings/);
+    expect(TENANT_SCOPED_TABLES).toContain("gl_mappings");
+  });
+});
+
+describe("Increment 1.36 month close and the prior-period refusal", () => {
+  it("freezes one close per month, append-only, and refuses a back-dated entry without reason prior_period", () => {
+    expect(monthClosesSql).toMatch(/CREATE TABLE month_closes\b/);
+    expect(monthClosesSql).toMatch(/month text NOT NULL CHECK \(month ~ '\^\[0-9\]\{4\}-\(0\[1-9\]\|1\[0-2\]\)\$'\)/);
+    expect(monthClosesSql).toMatch(/package_hash text NOT NULL CHECK \(length\(package_hash\) = 64\)/);
+    expect(monthClosesSql).toMatch(/UNIQUE \(tenant_id, month\)/);
+    expect(monthClosesSql).toMatch(/month_closes_no_update/);
+    expect(monthClosesSql).toMatch(/month_closes_no_delete/);
+    expect(monthClosesSql).toMatch(/ALTER TABLE month_closes FORCE ROW LEVEL SECURITY/);
+    expect(monthClosesSql).toMatch(/CREATE POLICY month_closes_isolation ON month_closes/);
+    expect(monthClosesSql).toMatch(/GRANT SELECT, INSERT ON month_closes TO app_rw/);
+    expect(monthClosesSql).toMatch(/GRANT SELECT ON month_closes TO app_append/);
+    expect(monthClosesSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*month_closes/);
+    // The refusal itself: a trigger on the posting path, with the one way through.
+    expect(monthClosesSql).toMatch(/CREATE OR REPLACE FUNCTION ledger_entries_month_not_closed/);
+    expect(monthClosesSql).toMatch(/NEW\.reason_code IS DISTINCT FROM 'prior_period'/);
+    expect(monthClosesSql).toMatch(/RAISE EXCEPTION\s+'month_closed:/);
+    expect(monthClosesSql).toMatch(/CREATE TRIGGER ledger_entries_month_not_closed\s+BEFORE INSERT ON ledger_entries/);
+    expect(TENANT_SCOPED_TABLES).toContain("month_closes");
+  });
+});
+
+describe("Increment 1.37 the reversal-and-repost correction pair", () => {
+  it("links a correction to the entry it replaces and mirrors the amount", () => {
+    expect(correctionPairsSql).toMatch(/ALTER TABLE ledger_entries ADD COLUMN corrects_entry_id uuid REFERENCES ledger_entries\(id\)/);
+    // A reversal that corrects an entry reverses that same entry; nothing else may claim to.
+    expect(correctionPairsSql).toMatch(/CONSTRAINT ledger_entries_reversal_corrects_its_original/);
+    expect(correctionPairsSql).toMatch(/reverses_entry_id = corrects_entry_id/);
+    expect(correctionPairsSql).toMatch(/CREATE OR REPLACE FUNCTION ledger_entries_correction_pair/);
+    expect(correctionPairsSql).toMatch(/CREATE TRIGGER ledger_entries_correction_pair\s+BEFORE INSERT ON ledger_entries/);
+  });
+
+  it("refuses a reversal of a reversal, a second reversal of one entry, an unmirrored amount, and an unbacked repost", () => {
+    expect(correctionPairsSql).toMatch(/RAISE EXCEPTION\s+'reversal_original_missing:/);
+    expect(correctionPairsSql).toMatch(/RAISE EXCEPTION\s+'reversal_of_reversal:/);
+    expect(correctionPairsSql).toMatch(/RAISE EXCEPTION\s+'already_reversed:/);
+    expect(correctionPairsSql).toMatch(/RAISE EXCEPTION\s+'reversal_not_mirrored:/);
+    expect(correctionPairsSql).toMatch(/NEW\.amount_cents <> -original\.amount_cents/);
+    expect(correctionPairsSql).toMatch(/RAISE EXCEPTION\s+'repost_without_reversal:/);
+  });
+
+  it("tightens the closed-month refusal from a label to the pair itself", () => {
+    expect(correctionPairsSql).toMatch(/CREATE OR REPLACE FUNCTION ledger_entries_month_not_closed/);
+    expect(correctionPairsSql).toMatch(/NEW\.reason_code IS DISTINCT FROM 'prior_period' OR NEW\.corrects_entry_id IS NULL/);
+    expect(correctionPairsSql).toMatch(/RAISE EXCEPTION\s+'month_closed:/);
+    // The trigger itself is not re-created: migration 0029 already attached it to the same function.
+    expect(correctionPairsSql).not.toMatch(/CREATE TRIGGER ledger_entries_month_not_closed/);
+    expect(correctionPairsSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
+  });
+});
+
+describe("Increment 1.38 one approval releases a correction pair", () => {
+  it("lets an approval name the entry being corrected", () => {
+    expect(correctionHoldsSql).toMatch(/ALTER TABLE approval_requests ADD COLUMN corrects_entry_id uuid REFERENCES ledger_entries\(id\)/);
+    expect(correctionHoldsSql).toMatch(/CREATE OR REPLACE FUNCTION ledger_entries_requires_approval/);
+    expect(correctionHoldsSql).toMatch(/req\.corrects_entry_id IS NOT NULL/);
+    expect(correctionHoldsSql).toMatch(/NEW\.corrects_entry_id IS DISTINCT FROM req\.corrects_entry_id/);
+    // Neither half may exceed the figure the second person approved.
+    expect(correctionHoldsSql).toMatch(/amount_cents > abs\(req\.amount_cents\)/);
+    expect(correctionHoldsSql).toMatch(/RAISE EXCEPTION 'dual_release_required: approval request % approved up to % cents/);
+  });
+
+  it("carries the whole trigger forward, after-hours hold included, rather than reverting it", () => {
+    // Rebuilding this function from an older migration's text would silently drop the
+    // after-hours hold that migration 0026 added to it. These lines are that guarantee.
+    expect(correctionHoldsSql).toMatch(/after_hours_hold boolean := false;/);
+    expect(correctionHoldsSql).toMatch(/ledger_posted_outside_hours\(NEW\.tenant_id, NEW\.location_id, NEW\.posted_at\)/);
+    expect(correctionHoldsSql).toMatch(/IF amount_cents <= threshold_cents AND NOT after_hours_hold THEN/);
+    expect(correctionHoldsSql).toMatch(/was posted outside the location''s business hours \(after-hours hold\)/);
+    // And the ordinary rules still stand for an ordinary approval.
+    expect(correctionHoldsSql).toMatch(/abs\(req\.amount_cents\) <> amount_cents/);
+    expect(correctionHoldsSql).toMatch(/req\.resulting_entry_id IS NOT NULL AND req\.resulting_entry_id <> NEW\.id/);
+  });
+
+  it("restates one-row-per-approval as one row per kind for a correction", () => {
+    expect(correctionHoldsSql).toMatch(/DROP INDEX ledger_entries_approval_request_uidx/);
+    expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_approval_request_uidx\s+ON ledger_entries \(approval_request_id\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NULL/);
+    expect(correctionHoldsSql).toMatch(/CREATE UNIQUE INDEX ledger_entries_correction_approval_uidx\s+ON ledger_entries \(approval_request_id, kind\)\s+WHERE approval_request_id IS NOT NULL AND corrects_entry_id IS NOT NULL/);
+    expect(correctionHoldsSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
+  });
+});
+
+describe("Increment 1.51 attesting a channel the product cannot enforce", () => {
+  it("holds one dated assertion per practice, month and channel", () => {
+    expect(attestationsSql).toMatch(/CREATE TABLE channel_attestations/);
+    expect(attestationsSql).toMatch(/month text NOT NULL CHECK \(month ~ '\^\[0-9\]\{4\}-\[0-9\]\{2\}\$'\)/);
+    expect(attestationsSql).toMatch(/note text NOT NULL CHECK \(length\(btrim\(note\)\) >= 10\)/);
+    // Whether an independent reader or the practice itself said it.
+    expect(attestationsSql).toMatch(/attested_seat text NOT NULL CHECK \(attested_seat IN \('accountant', 'practice'\)\)/);
+    // Named, so the constraint the schema declares and the one the database holds agree.
+    expect(attestationsSql).toMatch(
+      /CREATE UNIQUE INDEX channel_attestations_month_channel_uidx[\s\S]*\(tenant_id, month, channel\)/
+    );
+  });
+
+  it("is append-only, tenant-isolated under FORCE RLS, and never granted an update or a delete", () => {
+    expect(attestationsSql).toMatch(/channel_attestations is append-only/);
+    expect(attestationsSql).toMatch(/TRIGGER channel_attestations_no_update[\s\S]*BEFORE UPDATE/);
+    expect(attestationsSql).toMatch(/TRIGGER channel_attestations_no_delete[\s\S]*BEFORE DELETE/);
+    expect(attestationsSql).toMatch(/ALTER TABLE channel_attestations FORCE ROW LEVEL SECURITY/);
+    expect(attestationsSql).toMatch(/CREATE POLICY channel_attestations_isolation/);
+    expect(attestationsSql).toMatch(/GRANT SELECT, INSERT ON channel_attestations TO app_rw;/);
+    expect(attestationsSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON channel_attestations/);
+    expect(attestationsSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON channel_attestations/);
+  });
+});
+
+describe("Increment 1.59 sending, and failing to send", () => {
+  it("records one row per attempt, append-only", () => {
+    expect(sendsSql).toMatch(/CREATE TABLE notice_sends/);
+    expect(sendsSql).toMatch(/notice_sends is append-only/);
+    expect(sendsSql).toMatch(/TRIGGER notice_sends_no_update[\s\S]*BEFORE UPDATE/);
+    expect(sendsSql).toMatch(/TRIGGER notice_sends_no_delete[\s\S]*BEFORE DELETE/);
+  });
+
+  it("admits three outcomes and no fourth", () => {
+    // A send that "maybe" went is the silence this table exists to prevent.
+    expect(sendsSql).toMatch(/outcome text NOT NULL CHECK \(outcome IN \('sent', 'failed', 'unreachable'\)\)/);
+  });
+
+  it("refuses a failure that does not say what failed", () => {
+    expect(sendsSql).toMatch(/notice_sends_failure_says_why CHECK \(outcome <> 'failed' OR detail IS NOT NULL\)/);
+    // And an unreachable row has no address and says why in words.
+    expect(sendsSql).toMatch(/notice_sends_unreachable_has_no_address/);
+  });
+
+  it("refuses a send that claims to have gone nowhere, or to have said nothing", () => {
+    expect(sendsSql).toMatch(/notice_sends_sent_is_complete/);
+    expect(sendsSql).toMatch(/address IS NOT NULL AND subject IS NOT NULL AND body IS NOT NULL AND detail IS NULL/);
+  });
+
+  it("is tenant-isolated under FORCE RLS and never granted an update or a delete", () => {
+    expect(sendsSql).toMatch(/TRIGGER notice_sends_match_their_tenant[\s\S]*BEFORE INSERT/);
+    expect(sendsSql).toMatch(/ALTER TABLE notice_sends FORCE ROW LEVEL SECURITY/);
+    expect(sendsSql).toMatch(/CREATE POLICY notice_sends_isolation/);
+    expect(sendsSql).toMatch(/GRANT SELECT, INSERT ON notice_sends TO app_rw;/);
+    expect(sendsSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON notice_sends/);
+    expect(sendsSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON notice_sends/);
+  });
+});
+
+describe("Increment 1.60 a refusal that can pass, and one that cannot", () => {
+  it("admits two kinds of refusal and no third", () => {
+    expect(failureKindSql).toMatch(/ALTER TABLE notice_sends ADD COLUMN failure_kind text;/);
+    expect(failureKindSql).toMatch(
+      /notice_sends_failure_kind_is_one_of[\s\S]*failure_kind IN \('transient', 'permanent'\)/
+    );
+  });
+
+  it("gives a kind only to a refusal, because only a refusal has one to give", () => {
+    expect(failureKindSql).toMatch(
+      /notice_sends_only_a_failure_has_a_kind[\s\S]*failure_kind IS NULL OR outcome = 'failed'/
+    );
+  });
+
+  it("binds every later failure to say which kind, and invents nothing about the earlier ones", () => {
+    // NOT VALID is the whole point: a failure recorded before this migration
+    // does not know its kind, and filling one in would be advice to a reader on
+    // evidence nobody ever had.
+    expect(failureKindSql).toMatch(
+      /notice_sends_failure_says_which_kind[\s\S]*outcome <> 'failed' OR failure_kind IS NOT NULL\) NOT VALID;/
+    );
+    expect(failureKindSql).not.toMatch(/UPDATE notice_sends/);
+    expect(failureKindSql).not.toMatch(/DEFAULT '(transient|permanent)'/);
+  });
+
+  it("adds no counter beside the rows", () => {
+    // How many times the practice tried is answered by counting attempts. A
+    // number stored next to them is a status the rows can contradict.
+    expect(failureKindSql).not.toMatch(/attempt_count|retries|retry_count|tries/);
+  });
+});
+
+describe("Increment 1.66 a fourth kind of message", () => {
+  it("admits four kinds and still refuses a fifth", () => {
+    expect(packageKindSql).toMatch(/ALTER TABLE notice_sends DROP CONSTRAINT notice_sends_kind_is_one_of;/);
+    expect(packageKindSql).toMatch(
+      /notice_sends_kind_is_one_of[\s\S]*kind IN \('notices', 'proof_code', 'digest', 'package'\)/
+    );
+  });
+
+  it("counts the package beside the sum that must add up, as the digest is", () => {
+    expect(packageKindSql).toMatch(/ALTER TABLE notice_rounds ADD COLUMN packages_sent integer NOT NULL DEFAULT 0/);
+    expect(packageKindSql).toMatch(/ALTER TABLE notice_rounds ALTER COLUMN packages_sent DROP DEFAULT;/);
+    expect(packageKindSql).toMatch(/ALTER TABLE notice_rounds ALTER COLUMN packages_failed DROP DEFAULT;/);
+    expect(packageKindSql).not.toMatch(/notice_rounds_counts_add_up/);
+  });
+});
+
+describe("Increment 1.67 a stranger stops a code they did not ask for", () => {
+  it("keys the refusal to the mailbox and not to a person or an address row", () => {
+    // The person who refuses has no account, and is not the person the
+    // practice typed the address for. A user id on this row would name the
+    // wrong person, and a row id would be escaped by changing one character.
+    expect(refusalsSql).toMatch(/CREATE TABLE notice_address_refusals[\s\S]*address text NOT NULL/);
+    expect(columnsOf(refusalsSql, "notice_address_refusals")).not.toMatch(/user_id/);
+    expect(refusalsSql).toMatch(
+      /CREATE UNIQUE INDEX notice_address_refusals_one_per_address\s*\n\s*ON notice_address_refusals \(tenant_id, lower\(address\)\);/
+    );
+  });
+
+  it("carries the stop secret as a hash on the challenge whose message held it", () => {
+    // A second token with the opposite power: the code proves an address, this
+    // one can only stop it. Nullable, because a challenge issued before this
+    // increment carried no link and no value written now could change that.
+    expect(refusalsSql).toMatch(/ADD COLUMN stop_hash text/);
+    expect(refusalsSql).toMatch(/CHECK \(stop_hash IS NULL OR stop_hash ~ '\^\[0-9a-f\]\{64\}\$'\)/);
+    expect(refusalsSql).not.toMatch(/stop_hash text NOT NULL/);
+    expect(statementsOf(refusalsSql)).not.toMatch(/UPDATE notice_address_challenges/);
+  });
+
+  it("refuses a refusal that names a mailbox the message never reached", () => {
+    expect(refusalsSql).toMatch(/FUNCTION notice_address_refusals_name_where_it_went/);
+    expect(refusalsSql).toMatch(/that code went to a different address/);
+  });
+
+  it("refuses a new address row naming a refused mailbox", () => {
+    // The refusal has to bite where the row is written, not only where a
+    // message would leave, or the practice keeps a destination on file that
+    // nothing will ever send to.
+    expect(refusalsSql).toMatch(/CREATE TRIGGER notice_addresses_not_refused\s*\n\s*BEFORE INSERT ON notice_addresses/);
+    expect(refusalsSql).toMatch(/lower\(address\) = lower\(btrim\(NEW\.address\)\)/);
+  });
+
+  it("is append-only and never asks who was signed in", () => {
+    // Nobody signs in to refuse. What authorises the row is a secret the
+    // database cannot see, so no trigger here pretends to check a session.
+    expect(refusalsSql).toMatch(/notice_address_refusals_no_update/);
+    expect(refusalsSql).toMatch(/notice_address_refusals_no_delete/);
+    expect(statementsOf(refusalsSql)).not.toMatch(/current_setting\('app\.user_id'/);
+    expect(refusalsSql).toMatch(/ALTER TABLE notice_address_refusals FORCE ROW LEVEL SECURITY;/);
+    expect(refusalsSql).toMatch(/GRANT SELECT, INSERT ON notice_address_refusals TO app_rw;/);
+    expect(refusalsSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*notice_address_refusals/);
+  });
+});
+
+describe("Increment 1.65 single use belongs to the code", () => {
+  it("moves the guarantee off the address and onto the code it is true of", () => {
+    // One proof per address meant "a code is used once" only while a proof was
+    // forever. Once a proof can lapse it means "an address can never be proved
+    // twice", which is a different and wrong rule.
+    expect(perCodeSql).toMatch(/DROP INDEX notice_address_proofs_one_per_address;/);
+    expect(perCodeSql).toMatch(
+      /CREATE UNIQUE INDEX notice_address_proofs_one_per_challenge ON notice_address_proofs \(challenge_id\);/
+    );
+  });
+
+  it("indexes the newest proof per address, which is the only read it has", () => {
+    expect(perCodeSql).toMatch(/notice_address_proofs_latest_idx ON notice_address_proofs \(tenant_id, address_id, proved_at DESC\)/);
+  });
+
+  it("lets the product ask for a code, and still only a person prove", () => {
+    // The round acts for nobody. Borrowing somebody's identity to send them a
+    // code would put a lie in the one column the rule is enforced against.
+    expect(roundCodeSql).toMatch(/IF actor IS NULL THEN RETURN NEW; END IF;/);
+    expect(roundCodeSql).toMatch(/a person asks only for their own address/);
+    // Only the challenge trigger is replaced; the proof's stays strict.
+    expect(roundCodeSql).toMatch(/DROP TRIGGER notice_address_challenges_are_ones_own ON notice_address_challenges;/);
+    expect(roundCodeSql).not.toMatch(/notice_address_proofs_are_ones_own/);
+    expect(roundCodeSql).not.toMatch(/notice_address_checks_are_ones_own\(\)\s*RETURNS/);
+  });
+
+  it("stores no expiry, because a dated append-only row already says when one lapses", () => {
+    expect(perCodeSql).not.toMatch(/expires|lapses|valid_until/);
+  });
+});
+
+describe("Increment 1.64 what a message was, said rather than inferred", () => {
+  it("admits three kinds and no fourth", () => {
+    expect(kindSql).toMatch(/notice_sends_kind_is_one_of[\s\S]*kind IN \('notices', 'proof_code', 'digest'\)/);
+  });
+
+  it("recovers the kind of every earlier row rather than guessing it", () => {
+    // Increment 1.60 grandfathered its column under NOT VALID because the fact
+    // was unknowable. Here it is knowable — nothing owed writes no row, so a
+    // zero count names the proof code — so it is read back rather than left
+    // null, and the two migrations differ because the evidence differs.
+    expect(kindSql).toMatch(/UPDATE notice_sends SET kind = CASE WHEN notice_count = 0 THEN 'proof_code' ELSE 'notices' END;/);
+    expect(kindSql).toMatch(/ALTER TABLE notice_sends ALTER COLUMN kind SET NOT NULL;/);
+    expect(kindSql).not.toMatch(/ADD COLUMN kind text NOT NULL DEFAULT/);
+  });
+
+  it("holds the rule the backfill read, so a later writer cannot quietly break it", () => {
+    expect(kindSql).toMatch(
+      /notice_sends_only_a_code_carries_nothing[\s\S]*CHECK \(\(kind = 'proof_code'\) = \(notice_count = 0\)\)/
+    );
+  });
+
+  it("counts the digest beside the sum that must add up, never inside it", () => {
+    // considered = sent + failed + unchanged + nothing_owed + unreachable says
+    // every person became exactly one notices outcome. A digest is a second
+    // message to the same person; folding it in would make the invariant say
+    // nothing.
+    expect(kindSql).toMatch(/ALTER TABLE notice_rounds ADD COLUMN digests_sent integer NOT NULL DEFAULT 0/);
+    expect(kindSql).toMatch(/ALTER TABLE notice_rounds ALTER COLUMN digests_sent DROP DEFAULT;/);
+    expect(kindSql).toMatch(/ALTER TABLE notice_rounds ALTER COLUMN digests_failed DROP DEFAULT;/);
+    expect(kindSql).not.toMatch(/notice_rounds_counts_add_up/);
+  });
+});
+
+describe("Increment 1.62 the round that runs without anybody pressing anything", () => {
+  it("writes a row for every round, including the quiet ones", () => {
+    // The one place this codebase writes a row saying nothing happened, and
+    // the reason is the whole increment: a scheduler that died must not look
+    // like a practice that owes nothing.
+    expect(roundsSql).toMatch(/CREATE TABLE notice_rounds/);
+    expect(roundsSql).toMatch(/indistinguishable from a practice that owes\s*--\s*nothing/);
+  });
+
+  it("refuses counts that do not account for everybody considered", () => {
+    expect(roundsSql).toMatch(
+      /notice_rounds_counts_add_up[\s\S]*CHECK \(considered = sent \+ failed \+ unchanged \+ nothing_owed \+ unreachable\)/
+    );
+  });
+
+  it("is append-only, tenant-isolated, and never granted an update or a delete", () => {
+    expect(roundsSql).toMatch(/TRIGGER notice_rounds_no_update[\s\S]*BEFORE UPDATE/);
+    expect(roundsSql).toMatch(/TRIGGER notice_rounds_no_delete[\s\S]*BEFORE DELETE/);
+    expect(roundsSql).toMatch(/ALTER TABLE notice_rounds FORCE ROW LEVEL SECURITY/);
+    expect(roundsSql).toMatch(/CREATE POLICY notice_rounds_isolation/);
+    expect(roundsSql).toMatch(/GRANT SELECT, INSERT ON notice_rounds TO app_rw;/);
+    expect(roundsSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON notice_rounds/);
+    expect(roundsSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON notice_rounds/);
+  });
+
+  it("asks for no acting user, because a round runs with nobody signed in", () => {
+    expect(roundsSql).not.toMatch(/app\.user_id/);
+  });
+});
+
+describe("Increment 1.61 proving an address reaches its person", () => {
+  it("keeps the code as a hash and never in the clear", () => {
+    expect(proofsSql).toMatch(/token_hash text NOT NULL CHECK \(token_hash ~ '\^\[0-9a-f\]\{64\}\$'\)/);
+    expect(proofsSql).not.toMatch(/token text|code text/);
+  });
+
+  it("ties a proof to one address row and to the code that answered it", () => {
+    // The proof points at the address row, not at the person: a changed
+    // address is a new row, which no proof names.
+    expect(proofsSql).toMatch(
+      /notice_address_proofs_address_is_theirs[\s\S]*FOREIGN KEY \(address_id, user_id\) REFERENCES notice_addresses \(id, user_id\)/
+    );
+    expect(proofsSql).toMatch(
+      /notice_address_proofs_answers_its_own_challenge[\s\S]*FOREIGN KEY \(challenge_id, address_id\) REFERENCES notice_address_challenges \(id, address_id\)/
+    );
+  });
+
+  it("admits one proof per address, which is what makes a code single-use", () => {
+    expect(proofsSql).toMatch(/CREATE UNIQUE INDEX notice_address_proofs_one_per_address ON notice_address_proofs \(address_id\)/);
+  });
+
+  it("refuses a proof stamped after its code expired, reading the proof's own stamp", () => {
+    expect(proofsSql).toMatch(/NEW\.proved_at > window_ends/);
+    expect(proofsSql).toMatch(/notice_address_challenges_expires_after_issue CHECK \(expires_at > issued_at\)/);
+  });
+
+  it("lets a person act only for themselves, and holds both tables append-only", () => {
+    expect(proofsSql).toMatch(/a person proves only their own address/);
+    for (const t of ["notice_address_challenges", "notice_address_proofs"]) {
+      expect(proofsSql).toMatch(new RegExp(`TRIGGER ${t}_no_update[\\s\\S]*BEFORE UPDATE`));
+      expect(proofsSql).toMatch(new RegExp(`TRIGGER ${t}_no_delete[\\s\\S]*BEFORE DELETE`));
+      expect(proofsSql).toMatch(new RegExp(`ALTER TABLE ${t} FORCE ROW LEVEL SECURITY`));
+      expect(proofsSql).toMatch(new RegExp(`CREATE POLICY ${t}_isolation`));
+      expect(proofsSql).toMatch(new RegExp(`GRANT SELECT, INSERT ON ${t} TO app_rw;`));
+      expect(proofsSql).not.toMatch(new RegExp(`GRANT[^;]*UPDATE[^;]*ON ${t}`));
+      expect(proofsSql).not.toMatch(new RegExp(`GRANT[^;]*DELETE[^;]*ON ${t}`));
+    }
+  });
+});
+
+describe("Increment 1.58 where a notice would go", () => {
+  it("holds an address per person, append-only, with a null address as a recorded withdrawal", () => {
+    expect(addressesSql).toMatch(/CREATE TABLE notice_addresses/);
+    // Nullable on purpose: withdrawing is an act, recorded rather than a row removed.
+    expect(addressesSql).toMatch(/address text CHECK \(address IS NULL OR address ~ /);
+    expect(addressesSql).toMatch(/notice_addresses is append-only/);
+    expect(addressesSql).toMatch(/TRIGGER notice_addresses_no_update[\s\S]*BEFORE UPDATE/);
+    expect(addressesSql).toMatch(/TRIGGER notice_addresses_no_delete[\s\S]*BEFORE DELETE/);
+  });
+
+  it("stores no seat, because a seat is derived from rank and grants", () => {
+    // A stored seat is a status column that can disagree with the rows under
+    // it: a person's rank or grant changes and the copy does not.
+    expect(addressesSql).not.toMatch(/seat text/);
+  });
+
+  it("refuses an address set by anybody but the person it belongs to", () => {
+    // The one act whose whole risk is being done on somebody else's behalf: an
+    // administrator who could write another person's address could redirect
+    // that person's notices, silently.
+    expect(addressesSql).toMatch(/TRIGGER notice_addresses_are_ones_own[\s\S]*BEFORE INSERT/);
+    expect(addressesSql).toMatch(/current_setting\('app\.user_id', true\)/);
+    expect(addressesSql).toMatch(/a person sets only their own/);
+    // And no acting user at all is a refusal rather than a row nobody owns.
+    expect(addressesSql).toMatch(/no acting user in this transaction/);
+  });
+
+  it("is tenant-isolated under FORCE RLS and never granted an update or a delete", () => {
+    expect(addressesSql).toMatch(/TRIGGER notice_addresses_match_their_tenant[\s\S]*BEFORE INSERT/);
+    expect(addressesSql).toMatch(/ALTER TABLE notice_addresses FORCE ROW LEVEL SECURITY/);
+    expect(addressesSql).toMatch(/CREATE POLICY notice_addresses_isolation/);
+    expect(addressesSql).toMatch(/GRANT SELECT, INSERT ON notice_addresses TO app_rw;/);
+    expect(addressesSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON notice_addresses/);
+    expect(addressesSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON notice_addresses/);
+  });
+});
+
+describe("Increment 1.56 a baseline for a month closed under an older shape", () => {
+  it("adds a baseline rather than rewriting the close, and only for a month that was closed", () => {
+    expect(rehashSql).toMatch(/CREATE TABLE month_close_rehashes/);
+    // The frozen hash records what the accountant received; month_closes refuses
+    // every update, and this migration must not reach for one either.
+    expect(rehashSql).not.toMatch(/UPDATE month_closes/);
+    expect(rehashSql).not.toMatch(/ALTER TABLE month_closes/);
+    expect(rehashSql).toMatch(/FOREIGN KEY \(tenant_id, month\) REFERENCES month_closes \(tenant_id, month\)/);
+    expect(rehashSql).toMatch(/package_hash text NOT NULL CHECK \(package_hash ~ '\^\[0-9a-f\]\{64\}\$'\)/);
+  });
+
+  it("takes one baseline per shape, and never under the shape the close already froze", () => {
+    // The first reading under a shape is the baseline; a second would move the
+    // line a later comparison is drawn from and hide a move in between.
+    expect(rehashSql).toMatch(
+      /CREATE UNIQUE INDEX month_close_rehashes_month_schema_uidx[\s\S]*\(tenant_id, month, package_schema\)/
+    );
+    expect(rehashSql).toMatch(/TRIGGER month_close_rehashes_is_a_later_shape[\s\S]*BEFORE INSERT/);
+    expect(rehashSql).toMatch(/which is already its baseline/);
+  });
+
+  it("is append-only, tenant-isolated under FORCE RLS, and never granted an update or a delete", () => {
+    expect(rehashSql).toMatch(/month_close_rehashes is append-only/);
+    expect(rehashSql).toMatch(/TRIGGER month_close_rehashes_no_update[\s\S]*BEFORE UPDATE/);
+    expect(rehashSql).toMatch(/TRIGGER month_close_rehashes_no_delete[\s\S]*BEFORE DELETE/);
+    expect(rehashSql).toMatch(/ALTER TABLE month_close_rehashes FORCE ROW LEVEL SECURITY/);
+    expect(rehashSql).toMatch(/CREATE POLICY month_close_rehashes_isolation/);
+    expect(rehashSql).toMatch(/GRANT SELECT, INSERT ON month_close_rehashes TO app_rw;/);
+    expect(rehashSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON month_close_rehashes/);
+    expect(rehashSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON month_close_rehashes/);
+  });
+});
+
+describe("Increment 1.55 the accountant reads the answer", () => {
+  it("records one read per act, with the message the reader had in front of them", () => {
+    expect(threadReadsSql).toMatch(/CREATE TABLE cpa_thread_reads/);
+    expect(threadReadsSql).toMatch(/seat text NOT NULL CHECK \(seat IN \('accountant', 'practice'\)\)/);
+    expect(threadReadsSql).toMatch(/up_to_message_id uuid NOT NULL REFERENCES cpa_thread_messages\(id\)/);
+    // Deliberately NOT unique per thread and seat: a thread is read again
+    // whenever it grows, and the latest row wins. A unique key here would force
+    // the row to be rewritten, which is exactly what the append-only rule forbids.
+    expect(threadReadsSql).not.toMatch(/UNIQUE[\s\S]*cpa_thread_reads/);
+    expect(threadReadsSql).not.toMatch(/CREATE UNIQUE INDEX[^;]*cpa_thread_reads/);
+  });
+
+  it("refuses a read that names a message of another thread, so a signal clears only for what was seen", () => {
+    expect(threadReadsSql).toMatch(/TRIGGER cpa_thread_reads_match_their_thread[\s\S]*BEFORE INSERT/);
+    expect(threadReadsSql).toMatch(/is not this practice/);
+    expect(threadReadsSql).toMatch(/belongs to thread/);
+  });
+
+  it("is append-only, tenant-isolated under FORCE RLS, and never granted an update or a delete", () => {
+    expect(threadReadsSql).toMatch(/cpa_thread_reads is append-only/);
+    expect(threadReadsSql).toMatch(/TRIGGER cpa_thread_reads_no_update[\s\S]*BEFORE UPDATE/);
+    expect(threadReadsSql).toMatch(/TRIGGER cpa_thread_reads_no_delete[\s\S]*BEFORE DELETE/);
+    expect(threadReadsSql).toMatch(/ALTER TABLE cpa_thread_reads FORCE ROW LEVEL SECURITY/);
+    expect(threadReadsSql).toMatch(/CREATE POLICY cpa_thread_reads_isolation/);
+    expect(threadReadsSql).toMatch(/GRANT SELECT, INSERT ON cpa_thread_reads TO app_rw;/);
+    expect(threadReadsSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON cpa_thread_reads/);
+    expect(threadReadsSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON cpa_thread_reads/);
+  });
+});
+
+describe("Increment 1.50 the accountant's question and the practice's answer", () => {
+  it("holds a thread in one append-only table, keyed to the package line it is about", () => {
+    expect(cpaQuestionsSql).toMatch(/CREATE TABLE cpa_thread_messages/);
+    // The opener carries its own id, so a thread is one indexed read.
+    expect(cpaQuestionsSql).toMatch(/thread_id uuid NOT NULL/);
+    expect(cpaQuestionsSql).toMatch(/CREATE INDEX cpa_thread_messages_thread_idx ON cpa_thread_messages \(tenant_id, thread_id, created_at\)/);
+    // A month, a package line, and a body that says something.
+    expect(cpaQuestionsSql).toMatch(/month text NOT NULL CHECK \(month ~ '\^\[0-9\]\{4\}-\[0-9\]\{2\}\$'\)/);
+    expect(cpaQuestionsSql).toMatch(/subject_key text NOT NULL CHECK \(length\(btrim\(subject_key\)\) > 0\)/);
+    expect(cpaQuestionsSql).toMatch(/body text NOT NULL CHECK \(length\(btrim\(body\)\) >= 10\)/);
+    // Which side spoke, which is what decides whether an answer is still owed.
+    expect(cpaQuestionsSql).toMatch(/author_seat text NOT NULL CHECK \(author_seat IN \('accountant', 'practice'\)\)/);
+  });
+
+  it("is append-only, and a reply joins a thread that opens in the same practice", () => {
+    expect(cpaQuestionsSql).toMatch(/cpa_thread_messages is append-only/);
+    expect(cpaQuestionsSql).toMatch(/TRIGGER cpa_thread_messages_no_update[\s\S]*BEFORE UPDATE/);
+    expect(cpaQuestionsSql).toMatch(/TRIGGER cpa_thread_messages_no_delete[\s\S]*BEFORE DELETE/);
+    expect(cpaQuestionsSql).toMatch(/TRIGGER cpa_thread_messages_joins_its_thread[\s\S]*BEFORE INSERT/);
+    expect(cpaQuestionsSql).toMatch(/does not open in this practice/);
+    expect(cpaQuestionsSql).toMatch(/a reply carries its thread''s month and subject/);
+  });
+
+  it("is tenant-isolated under FORCE RLS and readable and writable by app_rw alone", () => {
+    expect(cpaQuestionsSql).toMatch(/ALTER TABLE cpa_thread_messages ENABLE ROW LEVEL SECURITY/);
+    expect(cpaQuestionsSql).toMatch(/ALTER TABLE cpa_thread_messages FORCE ROW LEVEL SECURITY/);
+    expect(cpaQuestionsSql).toMatch(/CREATE POLICY cpa_thread_messages_isolation/);
+    expect(cpaQuestionsSql).toMatch(/GRANT SELECT, INSERT ON cpa_thread_messages TO app_rw;/);
+    // No UPDATE or DELETE is granted to anyone: the triggers are the second lock, not the only one.
+    expect(cpaQuestionsSql).not.toMatch(/GRANT[^;]*UPDATE[^;]*ON cpa_thread_messages/);
+    expect(cpaQuestionsSql).not.toMatch(/GRANT[^;]*DELETE[^;]*ON cpa_thread_messages/);
+  });
+});
+
+describe("Increment 1.47 a decision about a reason code", () => {
+  it("widens the decision subjects by one and carries every one already in use forward", () => {
+    expect(reasonDecisionSql).toMatch(/'reason_code'/);
+    for (const subject of [
+      "sod_finding",
+      "grant",
+      "control",
+      "exception",
+      "scenario",
+      "knowledge",
+      "detector_finding",
+    ]) {
+      expect(reasonDecisionSql).toContain(`'${subject}'`);
+    }
+    expect(reasonDecisionSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
+  });
+});
+
+describe("Increment 1.46 a reason may tighten the threshold", () => {
+  it("makes the three states distinguishable, and backfills the rows that never meant anything", () => {
+    expect(reasonThresholdSql).toMatch(/ALTER TABLE reason_codes ALTER COLUMN requires_approval_over_cents DROP NOT NULL/);
+    expect(reasonThresholdSql).toMatch(/ALTER TABLE reason_codes ALTER COLUMN requires_approval_over_cents DROP DEFAULT/);
+    // Every existing row carries 0 because nothing ever read the column, so NULL
+    // is the truth about them: no practice expressed a rule through it.
+    expect(reasonThresholdSql).toMatch(/UPDATE reason_codes SET requires_approval_over_cents = NULL WHERE requires_approval_over_cents = 0/);
+    expect(reasonThresholdSql).toMatch(/CHECK \(requires_approval_over_cents IS NULL OR requires_approval_over_cents >= 0\)/);
+  });
+
+  it("tightens and never loosens, and lets the append role read the reasons", () => {
+    expect(reasonThresholdSql).toMatch(/threshold_cents := least\(threshold_cents, reason_threshold_cents\)/);
+    expect(reasonThresholdSql).toMatch(/SELECT requires_approval_over_cents INTO reason_threshold_cents/);
+    expect(reasonThresholdSql).toMatch(/GRANT SELECT ON reason_codes TO app_append;/);
+    expect(reasonThresholdSql).not.toMatch(/GRANT (INSERT|UPDATE|DELETE)[^;]*TO app_append/);
+  });
+
+  it("carries the whole trigger forward, the after-hours hold and the correction branch included", () => {
+    // Rebuilding this function from an older migration's text would silently
+    // revert both, as it nearly did in Increment 1.38. These lines are that guarantee.
+    expect(reasonThresholdSql).toMatch(/CREATE OR REPLACE FUNCTION ledger_entries_requires_approval/);
+    expect(reasonThresholdSql).toMatch(/after_hours_hold boolean := false;/);
+    expect(reasonThresholdSql).toMatch(/ledger_posted_outside_hours\(NEW\.tenant_id, NEW\.location_id, NEW\.posted_at\)/);
+    expect(reasonThresholdSql).toMatch(/was posted outside the location''s business hours \(after-hours hold\)/);
+    expect(reasonThresholdSql).toMatch(/req\.corrects_entry_id IS NOT NULL/);
+    expect(reasonThresholdSql).toMatch(/amount_cents > abs\(req\.amount_cents\)/);
+    // And the exception path is untouched: a governed decision still licenses its figure.
+    expect(reasonThresholdSql).toMatch(/exception % raises the threshold only to % cents/);
+  });
+});
+
+describe("Increment 1.45 the practice's reason codes", () => {
+  it("names reason_codes among the tenant-scoped tables it has always been", () => {
+    // The table has carried FORCE RLS and a tenant policy since migration 0010;
+    // the list that names the tenant-scoped tables had simply never said so.
+    expect(TENANT_SCOPED_TABLES).toContain("reason_codes");
+    expect(ledgerSql).toMatch(/ALTER TABLE reason_codes FORCE ROW LEVEL SECURITY/);
+    expect(ledgerSql).toMatch(/CREATE POLICY reason_codes_isolation ON reason_codes/);
+  });
+
+  it("keys entries to the code, which is why the code never changes and a used one is never deleted", () => {
+    expect(ledgerSql).toMatch(/PRIMARY KEY \(tenant_id, code\)/);
+    expect(ledgerSql).toMatch(/CONSTRAINT ledger_entries_reason_fk\s+FOREIGN KEY \(tenant_id, reason_code\) REFERENCES reason_codes \(tenant_id, code\)/);
+    // Retiring is a flag the table has always had, so Increment 1.45 needed no migration.
+    expect(ledgerSql).toMatch(/active boolean NOT NULL DEFAULT true/);
+  });
+});
+
+describe("Increment 1.43 the package schema version", () => {
+  it("backfills the months already closed, then makes a close state its own schema", () => {
+    expect(packageSchemaSql).toMatch(/ALTER TABLE month_closes ADD COLUMN package_schema text NOT NULL DEFAULT 'package-v1'/);
+    // Dropping the default is the point: a close records the shape it used rather
+    // than inheriting whichever one the column was created with.
+    expect(packageSchemaSql).toMatch(/ALTER COLUMN package_schema DROP DEFAULT/);
+    expect(packageSchemaSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM|UPDATE month_closes/);
+  });
+});
+
+describe("Increment 1.42 the sealed-day posting finding", () => {
+  it("widens the finding kinds by one and keeps every kind already in use", () => {
+    expect(sealedDayFindingSql).toMatch(/ALTER TABLE control_findings DROP CONSTRAINT control_findings_kind_check/);
+    expect(sealedDayFindingSql).toMatch(/'posting_into_sealed_day'/);
+    // Dropping and restating the list is how this table widens, so the restatement
+    // must carry every kind forward; a detector whose kind vanished would fail at
+    // insert time, long after the migration ran.
+    for (const kind of [
+      "unmatched_bank_line_48h",
+      "degraded_owner_clearance",
+      "decision_unreviewed",
+      "release_without_approval",
+      "backdated_posting",
+      "duplicate_patient_payment",
+      "deposit_not_banked",
+      "sole_holder_critical_duty",
+    ]) {
+      expect(sealedDayFindingSql).toContain(`'${kind}'`);
+    }
+    // The subject is a ledger entry, which the constraint already admits.
+    expect(sealedDayFindingSql).not.toMatch(/control_findings_subject_kind_check/);
+    expect(sealedDayFindingSql).not.toMatch(/GRANT|DROP TABLE|DELETE FROM/);
+  });
+});
+
+describe("Increment 1.40 the late posting into a sealed day", () => {
+  it("carries the flag and the day it landed behind as one fact", () => {
+    expect(latePostingsSql).toMatch(/ALTER TABLE ledger_entries ADD COLUMN posted_after_close boolean NOT NULL DEFAULT false/);
+    expect(latePostingsSql).toMatch(/ALTER TABLE ledger_entries ADD COLUMN closed_day_id uuid REFERENCES day_closes\(id\)/);
+    expect(latePostingsSql).toMatch(/CONSTRAINT ledger_entries_late_names_its_day/);
+    expect(latePostingsSql).toMatch(/CHECK \(posted_after_close = \(closed_day_id IS NOT NULL\)\)/);
+    expect(latePostingsSql).toMatch(/CREATE INDEX ledger_entries_closed_day_idx/);
+  });
+
+  it("stamps the row from the database's own reading, and only for a frozen day", () => {
+    expect(latePostingsSql).toMatch(/CREATE OR REPLACE FUNCTION ledger_entries_stamp_late_posting/);
+    // Location-scoped, on the row's effective date, and only where the day is frozen:
+    // an open day is not a seal, and another location's seal is not this row's.
+    expect(latePostingsSql).toMatch(/location_id = NEW\.location_id/);
+    expect(latePostingsSql).toMatch(/business_date = NEW\.effective_date/);
+    expect(latePostingsSql).toMatch(/AND status = 'frozen'/);
+    // The trigger assigns both columns, so whatever the writer passed is overwritten.
+    expect(latePostingsSql).toMatch(/NEW\.closed_day_id := frozen_day;/);
+    expect(latePostingsSql).toMatch(/NEW\.posted_after_close := frozen_day IS NOT NULL;/);
+    expect(latePostingsSql).toMatch(/CREATE TRIGGER ledger_entries_stamp_late_posting\s+BEFORE INSERT ON ledger_entries/);
+  });
+
+  it("records rather than refuses, and lets the append role read the seals", () => {
+    // The month close refuses (migration 0029). A day close is the practice's own,
+    // so a late posting into one is admitted and named, never turned away.
+    expect(latePostingsSql).not.toMatch(/RAISE EXCEPTION/);
+    expect(latePostingsSql).toMatch(/GRANT SELECT ON day_closes TO app_append;/);
+    expect(latePostingsSql).not.toMatch(/GRANT (INSERT|UPDATE|DELETE)[^;]*TO app_append/);
+    expect(latePostingsSql).not.toMatch(/DROP TABLE|DELETE FROM/);
+  });
+});
+
 describe("Increment 1.29 location hours", () => {
   it("gives every location a week of business hours with a plain default and closed weekend", () => {
     expect(locationHoursSql).toMatch(/ALTER TABLE locations\s+ADD COLUMN hours jsonb NOT NULL DEFAULT/);
@@ -416,5 +1118,234 @@ describe("Increment 0.2 auth lookup", () => {
     expect(authSql).toMatch(/CREATE OR REPLACE FUNCTION auth_lookup_session\(/);
     expect(authSql).toMatch(/SECURITY DEFINER/);
     expect(authSql).toMatch(/users_username_lower_uidx/);
+  });
+});
+
+/**
+ * The practice invites the seat it cannot otherwise create (Increment 1.71).
+ *
+ * The rules worth pinning are the three that make the act safe: the ask and
+ * the answer are two tables so nothing is a status column, the inviter must be
+ * the acting user, and the claim deliberately has no such rule because the
+ * person claiming has no account yet.
+ */
+describe("migration 0051: seat invitations", () => {
+  it("keeps the ask and the answer in two tables rather than a status column", () => {
+    expect(invitationsSql).toMatch(/CREATE TABLE seat_invitations \(/);
+    expect(invitationsSql).toMatch(/CREATE TABLE seat_invitation_claims \(/);
+    // A `claimed_at` on the ask would be an UPDATE on an append-only row and a
+    // fact that could be rewritten, which is why a proof is a table and not a
+    // column on a challenge (Increment 1.61).
+    expect(columnsOf(invitationsSql, "seat_invitations")).not.toMatch(/claimed/);
+    expect(invitationsSql).toMatch(
+      /CREATE UNIQUE INDEX seat_invitation_claims_one_per_invitation ON seat_invitation_claims \(invitation_id\);/
+    );
+    // One claim per invitation survives Increment 1.73: a seat may accumulate
+    // invitations, but a single secret still opens the account once.
+  });
+
+  it("keeps the secret out of the rows and bounds how long it works", () => {
+    expect(invitationsSql).toMatch(/token_hash text NOT NULL/);
+    expect(invitationsSql).toMatch(/CHECK \(token_hash ~ '\^\[0-9a-f\]\{64\}\$'\)/);
+    expect(invitationsSql).toMatch(/expires_at timestamptz NOT NULL/);
+    expect(invitationsSql).toMatch(/CHECK \(expires_at > invited_at\)/);
+    // Nothing here stores what the link carried.
+    expect(columnsOf(invitationsSql, "seat_invitations")).not.toMatch(/secret|password/);
+  });
+
+  it("makes an invitation somebody's act, and the acting user the one it names", () => {
+    expect(invitationsSql).toMatch(/FUNCTION seat_invitations_name_their_actor/);
+    expect(invitationsSql).toMatch(/may not record % as the inviter/);
+    expect(invitationsSql).toMatch(/CREATE TRIGGER seat_invitations_name_their_actor\s*\n\s*BEFORE INSERT ON seat_invitations/);
+  });
+
+  it("asks nothing about the session when a seat is claimed, because there is not one yet", () => {
+    // The same deliberate absence as Increment 1.67's refusal: what authorises
+    // the row is the secret the link carried, which the database cannot see.
+    const claimBody = statementsOf(invitationsSql).slice(statementsOf(invitationsSql).indexOf("seat_invitation_claims_match_their_tenant"));
+    expect(claimBody).not.toMatch(/current_setting\('app\.user_id'/);
+  });
+
+  it("is append-only, isolated per practice, and grants no way to change a row", () => {
+    expect(invitationsSql).toMatch(/seat_invitations_no_update/);
+    expect(invitationsSql).toMatch(/seat_invitations_no_delete/);
+    expect(invitationsSql).toMatch(/seat_invitation_claims_no_update/);
+    expect(invitationsSql).toMatch(/seat_invitation_claims_no_delete/);
+    expect(invitationsSql).toMatch(/ALTER TABLE seat_invitations FORCE ROW LEVEL SECURITY;/);
+    expect(invitationsSql).toMatch(/ALTER TABLE seat_invitation_claims FORCE ROW LEVEL SECURITY;/);
+    expect(invitationsSql).toMatch(/GRANT SELECT, INSERT ON seat_invitations TO app_rw;/);
+    expect(invitationsSql).not.toMatch(/GRANT[^\n]*(UPDATE|DELETE)[^\n]*seat_invitation/);
+  });
+});
+
+/**
+ * A seat whose link was lost gets another (Increment 1.73).
+ *
+ * The rule worth pinning is that "live" stays DERIVED. The unique index that
+ * forbade a second invitation goes, and nothing replaces it with a column: a
+ * superseded link is refused by the read that finds it, so there is no flag to
+ * set correctly and none to get wrong.
+ */
+describe("migration 0052: an invitation may be replaced", () => {
+  it("drops the index that forbade a second invitation for one seat", () => {
+    expect(newestWinsSql).toMatch(/DROP INDEX seat_invitations_one_per_seat;/);
+  });
+
+  it("indexes the read it now has, the newest invitation for a seat", () => {
+    expect(newestWinsSql).toMatch(
+      /CREATE INDEX seat_invitations_newest_idx\s*\n\s*ON seat_invitations \(tenant_id, user_id, invited_at DESC\);/
+    );
+  });
+
+  it("adds no column that could disagree with the rows under it", () => {
+    // No `superseded`, no `live`, no `revoked_at`: the newest row is in force
+    // and the rest are history, which is the shape `notice_addresses` has held
+    // since Increment 1.58.
+    const statements = statementsOf(newestWinsSql);
+    expect(statements).not.toMatch(/ADD COLUMN/);
+    expect(statements).not.toMatch(/superseded|revoked|is_live/);
+    expect(statements).not.toMatch(/UPDATE seat_invitations/);
+    expect(statements).not.toMatch(/DELETE FROM seat_invitations/);
+  });
+
+  it("leaves one secret naming at most one invitation", () => {
+    // `seat_invitations_token_uidx` is what makes a lookup by secret
+    // unambiguous; only how many invitations a seat may accumulate changed.
+    expect(statementsOf(newestWinsSql)).not.toMatch(/DROP INDEX seat_invitations_token_uidx/);
+  });
+});
+
+describe("migration 0053: one administrator may decide alone, once the practice records it", () => {
+  it("replaces the CHECK with a trigger, because the way out is a fact in another table", () => {
+    // A CHECK sees one row. Whether this practice has recorded that it decides
+    // alone lives in `control_decisions`, so the rule has to be able to read.
+    const statements = statementsOf(soleDeciderSql);
+    expect(statements).toMatch(/ALTER TABLE gl_mappings DROP CONSTRAINT gl_mappings_maker_ne_checker;/);
+    expect(statements).toMatch(/CREATE TRIGGER gl_mappings_maker_checker_ins\s+BEFORE INSERT ON gl_mappings/);
+    expect(statements).toMatch(/CREATE TRIGGER gl_mappings_maker_checker_upd\s+BEFORE UPDATE ON gl_mappings/);
+  });
+
+  it("reads the newest decision on the control, and only the kinds that license", () => {
+    // Newest-row-wins, as `seat_invitations` reads an invitation and
+    // `notice_addresses` reads an address. A `retire` row is not among the
+    // licensing kinds, so retiring tightens the control back by itself.
+    const statements = statementsOf(soleDeciderSql);
+    expect(statements).toMatch(/FROM control_decisions/);
+    expect(statements).toMatch(/subject_kind = 'control'/);
+    expect(statements).toMatch(/subject_id = 'gl_mapping_maker_checker'/);
+    expect(statements).toMatch(/kind IN \('accept_residual', 'compensate'\)/);
+    expect(statements).toMatch(/ORDER BY d\.decided_at DESC, d\.id DESC/);
+    expect(statements).toMatch(/LIMIT 1/);
+  });
+
+  it("adds no column that could disagree with the register", () => {
+    // Whether the control stands down is read from the decisions every time.
+    // A column on `gl_mappings` saying so would be a second answer, and the
+    // one a reader would find first. The licence is a function of the register
+    // — `gl_mappings_sole_decider_licensed` reads it on every write — rather
+    // than a value anybody stores, so the negative is about columns.
+    const statements = statementsOf(soleDeciderSql);
+    expect(statements).not.toMatch(/ADD COLUMN/);
+    expect(statements).not.toMatch(/ALTER TABLE gl_mappings ADD/);
+    expect(statements).toMatch(/CREATE OR REPLACE FUNCTION gl_mappings_sole_decider_licensed/);
+    // And nothing rewrites the mappings that already stand.
+    expect(statements).not.toMatch(/UPDATE gl_mappings/);
+    expect(statements).not.toMatch(/DELETE FROM gl_mappings/);
+  });
+
+  it("still refuses a self-decision that nothing licenses, and says where the licence would come from", () => {
+    // The guarantee moves from "never" to "never without a recorded,
+    // reviewable decision" — and it stays the database's. The message names
+    // the register rather than a person the practice may not have.
+    expect(soleDeciderSql).toMatch(/RAISE EXCEPTION\s+'gl_mappings_maker_ne_checker: [^']*recorded no decision that one administrator may decide alone'/);
+  });
+});
+
+describe("migration 0054: an authenticator being paired does not displace the one that works", () => {
+  it("gives a pairing in progress a column of its own", () => {
+    // `setMfaPendingSecret` writes `mfa_secret_enc` itself, which is harmless
+    // on a first enrolment and destructive on a re-pair: opening the screen
+    // would overwrite the live secret, so a person who changed their mind
+    // would be locked out immediately rather than eventually.
+    expect(statementsOf(pendingSecretSql)).toMatch(/ALTER TABLE users ADD COLUMN mfa_pending_secret_enc jsonb;/);
+  });
+
+  it("says in the database what the column is for, and what never reads it", () => {
+    expect(pendingSecretSql).toMatch(/COMMENT ON COLUMN users\.mfa_pending_secret_enc/);
+    expect(pendingSecretSql).toMatch(/Never read for a sign-in/);
+  });
+
+  it("touches no existing column and rewrites no row", () => {
+    // Accounts mid-enrolment before this migration keep working: they are
+    // unenrolled, so `authorize` never trusts the stale secret, and their next
+    // attempt stages through the new column.
+    const statements = statementsOf(pendingSecretSql);
+    expect(statements).not.toMatch(/DROP COLUMN/);
+    expect(statements).not.toMatch(/ALTER COLUMN/);
+    expect(statements).not.toMatch(/UPDATE users/);
+    expect(statements).not.toMatch(/DELETE FROM users/);
+  });
+});
+
+
+describe("migration 0056: the import apply path can read the rows it applies", () => {
+  it("grants the append role exactly what applying a run needs, and nothing else", () => {
+    // `POST /api/import/curve/apply` runs inside `withTenantAppendTransaction`,
+    // so both the eligibility read and the apply itself reach `import_runs` and
+    // `import_staged_rows` as `app_append`. Migration 0015 granted those two
+    // tables to `app_rw` alone, so every call answered "permission denied for
+    // table import_runs" — which nothing caught, because no screen called the
+    // route until Increment 1.94 built one.
+    const statements = statementsOf(importApplyGrantSql);
+    expect(statements).toMatch(/GRANT SELECT, UPDATE ON import_runs TO app_append;/);
+    expect(statements).toMatch(/GRANT SELECT ON import_staged_rows TO app_append;/);
+    // UPDATE on the run and not on the rows: applying stamps the run
+    // `applied`, and the staged rows are read and left as they were.
+    expect(statements).not.toMatch(/UPDATE ON import_staged_rows/);
+  });
+
+  it("widens nothing else and touches no policy", () => {
+    const statements = statementsOf(importApplyGrantSql);
+    expect(statements).not.toMatch(/TO PUBLIC/);
+    expect(statements).not.toMatch(/GRANT (INSERT|DELETE|ALL)/);
+    expect(statements).not.toMatch(/DISABLE ROW LEVEL SECURITY/);
+    expect(statements).not.toMatch(/(CREATE|DROP) POLICY/);
+    // The isolation policies on both tables name no role, so the GRANT is all
+    // the append role needs and the practice boundary is untouched.
+    expect(statements).not.toMatch(/app_rw|app_verify|app_auth_lookup/);
+  });
+
+  it("says in the migration why nothing had caught it", () => {
+    expect(importApplyGrantSql).toMatch(/nothing caught it because nothing called it/i);
+    expect(importApplyGrantSql).toMatch(/A route with no screen is a route nobody has run/);
+  });
+});
+
+describe("migration 0055: the recovery ceremony lookup can read the table it selects from", () => {
+  it("admits the role the SECURITY DEFINER function runs as, with both halves the rule needs", () => {
+    // Migration 0003 wrote the rule down: FORCE ROW LEVEL SECURITY binds table
+    // owners too, so a lookup owned by `app_auth_lookup` needs a GRANT *and* a
+    // role-scoped SELECT policy. Migration 0007 handed it the function and
+    // gave it neither, so every call answered "permission denied for table
+    // recovery_ceremonies" — which nothing caught, because nothing called it.
+    const statements = statementsOf(ceremonyGrantSql);
+    expect(statements).toMatch(/GRANT SELECT ON recovery_ceremonies TO app_auth_lookup;/);
+    expect(statements).toMatch(/CREATE POLICY recovery_ceremonies_auth_lookup ON recovery_ceremonies\s+FOR SELECT TO app_auth_lookup USING \(true\);/);
+  });
+
+  it("widens nothing else: no other role gains anything, and no row is touched", () => {
+    const statements = statementsOf(ceremonyGrantSql);
+    expect(statements).not.toMatch(/TO PUBLIC/);
+    expect(statements).not.toMatch(/GRANT (INSERT|UPDATE|DELETE|ALL)/);
+    expect(statements).not.toMatch(/DISABLE ROW LEVEL SECURITY/);
+    expect(statements).not.toMatch(/(UPDATE|DELETE FROM) recovery_ceremonies/);
+    // The practice-isolation policy every other reader goes through stays
+    // exactly as it was.
+    expect(statements).not.toMatch(/DROP POLICY/);
+  });
+
+  it("says in the database why one table admits a reader that crosses practices", () => {
+    expect(ceremonyGrantSql).toMatch(/COMMENT ON POLICY recovery_ceremonies_auth_lookup ON recovery_ceremonies/);
+    expect(ceremonyGrantSql).toMatch(/no session and no tenant context/);
   });
 });

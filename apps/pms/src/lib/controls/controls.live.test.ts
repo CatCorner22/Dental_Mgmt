@@ -5,6 +5,7 @@ import { uuidv7 } from "@pms/db";
 import { verifyDatabaseChains } from "@pms/verifier";
 import { evaluateRelease } from "@pms/controls-engine";
 import { resetDbPoolForTests, withTenantTransaction } from "../db/client";
+import { createPostgresStore } from "../auth/postgresStore";
 import { createApprovalRequest, getApprovalRequest } from "./approvals";
 import { approveAndPost } from "./decideAndPost";
 import { recordDecision } from "./decisions";
@@ -176,6 +177,49 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     expect(monitorOnly).toMatchObject({ ok: false, status: 400, code: "decision_invalid" });
   });
 
+  /**
+   * Increment 1.91. `run_import` guards the two import routes and the apply
+   * route, and belonged to no catalog: `grantEntitlement` refused it as
+   * unknown while `revokeEntitlement` took any string it was handed. So a
+   * practice could end an import grant and never make another, and the only
+   * way anybody held one was the seed writing the row directly — which means
+   * that in a practice this product set up rather than seeded, nobody could
+   * import a bank statement at all.
+   *
+   * The duty is in the rulebook now, so this drives the whole door: grant,
+   * revoke, grant again. The middle step is the one that used to be one-way.
+   */
+  it("grants the import duty, revokes it, and grants it again", async () => {
+    const granted = await tx((d) =>
+      grantEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: front.id, entitlement: "run_import" })
+    );
+    expect(granted.ok).toBe(true);
+
+    // What the person can now do, which is the control rather than the record:
+    // `withGuard` reads the entitlements the auth store returns.
+    const afterGrant = await createPostgresStore(env).getUserById(front.id);
+    expect(afterGrant?.entitlements).toContain("run_import");
+
+    const revoked = await tx((d) =>
+      revokeEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: front.id, entitlement: "run_import" })
+    );
+    expect(revoked.ok).toBe(true);
+    const afterRevoke = await createPostgresStore(env).getUserById(front.id);
+    expect(afterRevoke?.entitlements).not.toContain("run_import");
+
+    const again = await tx((d) =>
+      grantEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: front.id, entitlement: "run_import" })
+    );
+    expect(again.ok).toBe(true);
+
+    // Left as the fixture found it, so the cases after this one read the
+    // practice they were written against.
+    const tidy = await tx((d) =>
+      revokeEntitlement(d, { tenantId: tenant.id, actor: asOwner, targetUserId: front.id, entitlement: "run_import" })
+    );
+    expect(tidy.ok).toBe(true);
+  });
+
   it("refuses an administrator licensing their own critical conflict", async () => {
     // The office manager is promoted to admin for this case only.
     await db.admin.query("UPDATE users SET role = 'admin' WHERE id = $1", [om.id]);
@@ -308,6 +352,17 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     expect(revoked.ok).toBe(true);
     if (!revoked.ok) return;
     expect(revoked.findings.closed).toBeGreaterThan(0);
+
+    /**
+     * What the person can now do, which this case never asked (Increment
+     * 1.86). The revoke stamps `effective_to` and leaves the row and the
+     * person's sessions in place, so until 1.86 the authorization path — which
+     * read every row the user had ever held — went on opening the duty's
+     * routes. Closing the finding is the paperwork; this is the control.
+     */
+    const seenByAuth = await createPostgresStore(env).getUserById(om.id);
+    expect(seenByAuth?.entitlements).not.toContain("bank_reconcile");
+
     let findings = await tx((d) => listFindings(d, tenant.id));
     let custodyRec = findings.find((f) => f.ruleId === "rule-custody-rec" && f.personId === om.id)!;
     expect(custodyRec.status).toBe("closed");
@@ -475,8 +530,11 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
     const versionsBefore = (await db.admin.query("SELECT max(version) AS v FROM control_policies WHERE tenant_id = $1", [tenant.id])).rows[0].v as number;
 
     // No decision: refused, and no policy version is written.
+    // 409: the request is well formed, and the practice's state is what refuses
+    // it until a decision stands beside it — the same answer setReasonThreshold
+    // gives for the same condition (Increment 1.48).
     const bare = await tx((d) => retireException(d, { tenantId: tenant.id, actor: asOwner, exceptionId: holdId, reason: "Evening clinic." }));
-    expect(bare).toMatchObject({ ok: false, status: 400, code: "needs_decision" });
+    expect(bare).toMatchObject({ ok: false, status: 409, code: "needs_decision" });
     if (bare.ok) return;
     expect(bare.errors[0]).toMatch(/^Switching off "After-hours hold" loosens a control\./);
 
@@ -604,7 +662,7 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
   it("freezes a snapshot with both versions and serves it back", async () => {
     const stored = await tx((d) => takeSnapshot(d, { tenantId: tenant.id, actor: asOwner, trigger: "manual" }));
     expect(stored.snapshot.scoringVersion).toBe("precog-residual-v1.1.0");
-    expect(stored.snapshot.rulebookVersion).toBe("0.2.1");
+    expect(stored.snapshot.rulebookVersion).toBe("0.3.1");
     expect(stored.snapshot.headline.unmitigatedCritical).toBeGreaterThanOrEqual(1);
     expect(stored.snapshot.assumptions.some((a) => /Payroll transmission/.test(a))).toBe(true);
 

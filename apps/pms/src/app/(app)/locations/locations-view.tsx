@@ -1,14 +1,18 @@
 "use client";
 
+import { loadFailure } from "../session-ended";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
+import { readViewer } from "@/lib/auth/viewer";
+import { SessionEnded } from "../session-ended";
 import { validateWeekHours, WEEKDAY_LABEL, WEEKDAYS, type Weekday, type WeekHoursComplete } from "@/lib/locations/hours";
 import type { HoursChange, LocationRow } from "@/lib/locations/service";
 
-type Me = { ok: boolean; role?: string };
-
 type LoadState =
   | { status: "loading" }
+  /** The sign-in is over (Increment 1.81). Not the same fact as the one below. */
+  | { status: "sign_in_ended" }
   | { status: "not_for_seat" }
   | { status: "error"; message: string }
   | { status: "ready"; items: LocationRow[]; isAdmin: boolean };
@@ -23,6 +27,7 @@ function complete(hours: LocationRow["hours"]): WeekHoursComplete {
 async function loadLocations(): Promise<LocationRow[]> {
   const res = await fetch("/api/locations");
   const body = (await res.json().catch(() => ({}))) as { items?: LocationRow[]; error?: string };
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error(body.error ?? "Could not load the locations.");
   return body.items ?? [];
 }
@@ -36,10 +41,20 @@ export function LocationsView() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      // A 401 is the sign-in ending, never the seat lacking rank (Increment
+      // 1.81). The old test was `!meRes.ok`, which is true of both, and told a
+      // person whose session had timed out that this screen was not for their
+      // seat — pointing them at a header the same fact had just emptied.
       const meRes = await fetch("/api/me");
-      const me = (await meRes.json().catch(() => ({ ok: false }))) as Me;
-      const role = me.role && isRole(me.role) ? me.role : undefined;
-      if (!meRes.ok || !meetsRole(role, "manager")) {
+      const viewer = readViewer(meRes.status, await meRes.json().catch(() => ({})));
+      if (viewer.state !== "present") {
+        if (!cancelled) {
+          setState(viewer.state === "ended" ? { status: "sign_in_ended" } : { status: "error", message: viewer.why });
+        }
+        return;
+      }
+      const role = isRole(viewer.role) ? viewer.role : undefined;
+      if (!meetsRole(role, "manager")) {
         if (!cancelled) setState({ status: "not_for_seat" });
         return;
       }
@@ -48,7 +63,7 @@ export function LocationsView() {
       setDrafts(Object.fromEntries(items.map((l) => [l.id, complete(l.hours)])));
       setState({ status: "ready", items, isAdmin: meetsRole(role, "admin") });
     })().catch((err: unknown) => {
-      if (!cancelled) setState({ status: "error", message: err instanceof Error ? err.message : "Could not load the locations." });
+      if (!cancelled) setState(loadFailure(err, "Could not load the locations."));
     });
     return () => {
       cancelled = true;
@@ -76,6 +91,7 @@ export function LocationsView() {
         body: JSON.stringify({ hours: drafts[location.id] }),
       });
       const body = (await res.json().catch(() => ({}))) as { location?: LocationRow; changed?: HoursChange[]; error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
       if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
       const changed = body.changed ?? [];
       const items = await loadLocations();
@@ -87,6 +103,11 @@ export function LocationsView() {
           : `Saved ${location.name}: ${changed.map((c) => `${c.label} ${c.before} → ${c.after}`).join("; ")}. The after-hours hold reads these hours from the next posting.`
       );
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The hours were not saved.");
     } finally {
       setBusy(null);
@@ -94,8 +115,9 @@ export function LocationsView() {
   }
 
   if (state.status === "loading") return <p className="text-sm text-[var(--ink-2)]">Reading the locations…</p>;
+  if (state.status === "sign_in_ended") return <SessionEnded />;
   if (state.status === "not_for_seat") {
-    return <p className="max-w-prose text-[var(--ink-2)]">Location hours are for the manager and owner seats. Your seat works from the links on the home page.</p>;
+    return <p className="max-w-prose text-[var(--ink-2)]">Location hours are for the manager and owner seats. Your seat works from the links in the header.</p>;
   }
   if (state.status === "error") return <p className="text-sm text-[var(--ink-2)]">{state.message}</p>;
 

@@ -1,15 +1,43 @@
 "use client";
 
+import { loadFailure } from "../session-ended";
+import { isSignInEnded, refuseIfSignInEnded } from "@/lib/auth/guardedFetch";
 import { useCallback, useEffect, useState } from "react";
 import { isRole, meetsRole } from "@/lib/auth/roles";
+import { readViewer } from "@/lib/auth/viewer";
+import { SessionEnded } from "../session-ended";
+import { isCpaSeat } from "@/lib/auth/seats";
+import { ANY_REASON, GL_BUCKETS, GL_KINDS, GL_SIDES, type GlMapping } from "@/lib/cpa/types";
+import type { MonthClose } from "@/lib/cpa/close";
 import type { MonthPackage, PackageExport } from "@/lib/cpa/package";
+import type { CloseComparison, RehashBaseline } from "@/lib/cpa/rehash";
 import { formatCents } from "@/lib/ledger/format";
-
-type Me = { ok: boolean; role?: string };
+import { AttestView } from "./attest-view";
+import { QuestionsView } from "./questions-view";
+import { DeliveryPanel, type AddressResponse } from "../delivery-panel";
+import { DecisionForm, type DecisionDraft } from "../decision-form";
+import { SOLE_DECIDER_CONTROL, soleDeciderStanding, type SoleDeciderStanding } from "@/lib/cpa/soleDecider";
+import type { ControlDecision } from "@pms/controls-engine";
+import {
+  askForCode as askForCodeAct,
+  proveAddress as proveAddressAct,
+  readDelivery,
+  saveAddress as saveAddressAct,
+  saveAddressLabel,
+  sendNoticesNow as sendNoticesNowAct,
+} from "../delivery-acts";
 
 type PackageResponse = {
   month: string;
   inProgress: boolean;
+  close: MonthClose | null;
+  packageSchema: string;
+  schemaChanged: boolean;
+  /** What a reader may conclude about this close right now, and from which date (Increment 1.56). */
+  comparison: CloseComparison;
+  baseline: RehashBaseline | null;
+  changedSinceClose: boolean;
+  frozenFiguresHold: boolean;
   package: MonthPackage;
   packageHash: string;
   exports: PackageExport[];
@@ -19,9 +47,57 @@ type PackageResponse = {
 
 type LoadState =
   | { status: "loading" }
+  /** The sign-in is over (Increment 1.81). Not the same fact as the one below. */
+  | { status: "sign_in_ended" }
   | { status: "not_for_seat" }
   | { status: "error"; message: string }
-  | { status: "ready"; data: PackageResponse; isAdmin: boolean };
+  | {
+      status: "ready";
+      data: PackageResponse;
+      mappings: MappingRow[];
+      isAdmin: boolean;
+      /** True for the outside accountant: it reads and exports, and the practice's own governance is not its to run. */
+      seat: boolean;
+      /** Where the chart-of-accounts maker-checker stands (Increment 1.75); null for the seat, which is not offered it. */
+      soleDecider: SoleDeciderStanding | null;
+      /**
+       * Where this seat's own notices go (Increment 1.74), loaded only for the
+       * seat that has nowhere else to say so. The three routes behind the panel
+       * were widened for this seat long ago; the surface was not, so the seat
+       * could be mailed a code and told to open a screen it cannot open.
+       */
+      delivery: AddressResponse | null;
+    };
+
+/** A mapping as the route serves it: the row plus whether the viewer proposed it. */
+type MappingRow = GlMapping & { mine: boolean };
+
+type Draft = { glBucket: string; kind: string; reasonCode: string; accountCode: string; accountName: string; side: string };
+
+const EMPTY_DRAFT: Draft = { glBucket: GL_BUCKETS[0], kind: GL_KINDS[0], reasonCode: "", accountCode: "", accountName: "", side: GL_SIDES[0] };
+
+/**
+ * Where the chart-of-accounts maker-checker stands for this practice
+ * (Increment 1.75), read from the decision register rather than from anything
+ * stored beside it. Only the practice's own seats read this: the route is
+ * manager rank, and the outside accountant is not offered the chart of
+ * accounts at all.
+ */
+async function loadSoleDecider(): Promise<SoleDeciderStanding> {
+  const res = await fetch("/api/controls/decisions");
+  const body = (await res.json().catch(() => ({}))) as { items?: ControlDecision[]; asOf?: string; error?: string };
+  refuseIfSignInEnded(res);
+  if (!res.ok) throw new Error(body.error ?? "Could not read the decision register.");
+  return soleDeciderStanding(body.items ?? [], body.asOf ?? new Date().toISOString().slice(0, 10));
+}
+
+async function loadMappings(): Promise<MappingRow[]> {
+  const res = await fetch("/api/cpa/mappings");
+  const body = (await res.json().catch(() => ({}))) as { items?: MappingRow[]; error?: string };
+  refuseIfSignInEnded(res);
+  if (!res.ok) throw new Error(body.error ?? "Could not load the mappings.");
+  return body.items ?? [];
+}
 
 function thisMonth(): string {
   return new Date().toISOString().slice(0, 7);
@@ -30,6 +106,7 @@ function thisMonth(): string {
 async function loadPackage(month: string): Promise<PackageResponse> {
   const res = await fetch(`/api/cpa/package?month=${encodeURIComponent(month)}`);
   const body = (await res.json().catch(() => ({}))) as PackageResponse & { error?: string };
+  refuseIfSignInEnded(res);
   if (!res.ok) throw new Error(body.error ?? "Could not load the package.");
   return body;
 }
@@ -68,29 +145,93 @@ export function PackageView() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  // The month the owner is confirming a close for; closing cannot be undone.
+  const [confirmClose, setConfirmClose] = useState<string | null>(null);
+
+  const [addressDraft, setAddressDraft] = useState<string | null>(null);
+  const [codeDraft, setCodeDraft] = useState("");
+  // The refusal a practice with one administrator meets, held so the act that
+  // answers it can be offered beside it rather than somewhere else entirely
+  // (Increment 1.75).
+  const [soleRefusal, setSoleRefusal] = useState<string[] | null>(null);
 
   const load = useCallback(async (m: string) => {
+    // A 401 is the sign-in ending, never the seat lacking rank (Increment
+    // 1.81). The old test was `!meRes.ok`, which is true of both, and told a
+    // person whose session had timed out that this screen was not for their
+    // seat — pointing them at a header the same fact had just emptied.
     const meRes = await fetch("/api/me");
-    const me = (await meRes.json().catch(() => ({ ok: false }))) as Me;
-    const role = me.role && isRole(me.role) ? me.role : undefined;
-    if (!meRes.ok || !meetsRole(role, "manager")) {
+    const viewer = readViewer(meRes.status, await meRes.json().catch(() => ({})));
+    if (viewer.state !== "present") {
+      setState(viewer.state === "ended" ? { status: "sign_in_ended" } : { status: "error", message: viewer.why });
+      return;
+    }
+    const role = isRole(viewer.role) ? viewer.role : undefined;
+    // The outside accountant reaches this screen on its grant rather than its
+    // rank (Increment 1.49), and reads the package alone: the chart of accounts
+    // is the practice's own maker-checker, so the seat neither loads nor is
+    // offered it. Asking for it would answer 403, which is the right answer.
+    const seat = isCpaSeat(role ? { role, entitlements: viewer.entitlements } : null);
+    if (!meetsRole(role, "manager") && !seat) {
       setState({ status: "not_for_seat" });
       return;
     }
-    const data = await loadPackage(m);
-    setState({ status: "ready", data, isAdmin: meetsRole(role, "admin") });
+    const [data, mappings, delivery, soleDecider] = await Promise.all([
+      loadPackage(m),
+      seat ? Promise.resolve([]) : loadMappings(),
+      // Only for the seat that cannot open Practice Risk, where everybody else
+      // says where their notices go. Loading it for a manager would put one act
+      // on two screens.
+      seat ? readDelivery() : Promise.resolve(null),
+      seat ? Promise.resolve(null) : loadSoleDecider(),
+    ]);
+    setState({ status: "ready", data, mappings, isAdmin: meetsRole(role, "admin"), seat, delivery, soleDecider });
   }, []);
 
   useEffect(() => {
     let cancelled = false;
     setState({ status: "loading" });
     load(month).catch((err: unknown) => {
-      if (!cancelled) setState({ status: "error", message: err instanceof Error ? err.message : "Could not load the package." });
+      if (!cancelled) setState(loadFailure(err, "Could not load the package."));
     });
     return () => {
       cancelled = true;
     };
   }, [load, month]);
+
+  /**
+   * Takes the baseline for a month closed under an older shape (Increment 1.56).
+   *
+   * It writes a new row and rewrites nothing: the close's own frozen hash goes
+   * on saying what the accountant received. What changes is what a later reader
+   * may conclude, and the date that claim runs from.
+   */
+  async function recordBaseline() {
+    setBusy("baseline");
+    setMessage(null);
+    try {
+      const res = await fetch("/api/cpa/rehash", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ month }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { why?: string; verb?: string };
+      if (res.status === 401) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
+      if (!res.ok) {
+        setMessage(`${body.verb ?? "Not recorded"}: ${body.why ?? "The baseline was not recorded."}`);
+        return;
+      }
+      setMessage(`Baseline recorded for ${month}. From today, this month can be asked again whether a figure moved.`);
+      const [data, mappings] = await Promise.all([loadPackage(month), loadMappings()]);
+      setState((s) => (s.status === "ready" ? { ...s, data, mappings } : s));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   /** Exports through the chain-recording route, then hands the browser the file and re-reads the exports list. */
   async function download(format: "json" | "csv") {
@@ -103,6 +244,10 @@ export function PackageView() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ month, format }),
       });
+      if (res.status === 401) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? "The package was not exported.");
@@ -122,7 +267,193 @@ export function PackageView() {
       setState({ ...state, data });
       setMessage(`Exported as ${format.toUpperCase()}: ${rows} rows, package hash ${hash.slice(0, 12)}…, recorded on the chain.`);
     } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "The package was not exported.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Freezes the month. Irreversible, so the page asks once before calling. */
+  async function close() {
+    if (state.status !== "ready") return;
+    setBusy("close");
+    setMessage(null);
+    try {
+      const res = await fetch("/api/cpa/close", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ month }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
+      if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      setConfirmClose(null);
+      const [data, mappings] = await Promise.all([loadPackage(month), loadMappings()]);
+      setState({ ...state, data, mappings });
+      setMessage(`Closed ${month}. The package hash is frozen; a correction now posts today with reason prior_period.`);
+    } catch (err: unknown) {
+      setConfirmClose(null);
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
+      setMessage(err instanceof Error ? err.message : "The month was not closed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** One proposal; a different person decides it. */
+  async function propose() {
+    if (state.status !== "ready") return;
+    setBusy("propose");
+    setMessage(null);
+    try {
+      const res = await fetch("/api/cpa/mappings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...draft, reasonCode: draft.reasonCode.trim() || undefined }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
+      if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      setDraft(EMPTY_DRAFT);
+      const [data, mappings] = await Promise.all([loadPackage(month), loadMappings()]);
+      setState({ ...state, data, mappings });
+      setMessage("Proposed. A different person approves it before the journal reads it.");
+    } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
+      setMessage(err instanceof Error ? err.message : "The mapping was not proposed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * Runs one delivery act and re-reads the panel from its route
+   * (Increment 1.74).
+   *
+   * The panel is a reading of rows rather than of what the browser last sent,
+   * so every act ends in a fresh read: an address saved, a code asked for and
+   * a code brought back each change what the next sentence on the screen may
+   * say, and a panel left showing the state before the act would tell this
+   * seat it still owes something it has just done. Increment 1.73 found that
+   * same omission on the invite panel.
+   *
+   * Only this seat reaches these: everybody else says where their notices go
+   * on Practice Risk, and one act offered on two screens would be two answers
+   * to one question.
+   */
+  async function runDelivery(label: string, act: () => Promise<string>) {
+    setBusy(label);
+    setMessage(null);
+    try {
+      const note = await act();
+      const delivery = await readDelivery();
+      setState((s) => (s.status === "ready" ? { ...s, delivery } : s));
+      setMessage(note);
+    } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
+      setMessage(err instanceof Error ? err.message : `${label} failed.`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function decide(mapping: MappingRow, decision: "approved" | "rejected") {
+    if (state.status !== "ready") return;
+    setBusy(mapping.id);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/cpa/mappings/decide", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mappingId: mapping.id, decision }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      if (res.status === 401) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
+      if (!res.ok) {
+        // A practice with nobody else to decide is refused in more than one
+        // sentence, and the last of them names an act. Flattening that into
+        // the banner would lose the act (Increment 1.75).
+        if (res.status === 403 && (body.errors?.length ?? 0) > 1) {
+          setSoleRefusal(body.errors ?? []);
+          return;
+        }
+        throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      }
+      setSoleRefusal(null);
+      const [data, mappings] = await Promise.all([loadPackage(month), loadMappings()]);
+      setState({ ...state, data, mappings });
+      setMessage(`${decision === "approved" ? "Approved" : "Rejected"}: ${mapping.glBucket} · ${mapping.kind} → ${mapping.accountCode}.`);
+    } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
+      setMessage(err instanceof Error ? err.message : "The mapping was not decided.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * Records that this practice has one administrator, which is what lets that
+   * administrator decide their own proposals (Increment 1.75).
+   *
+   * Recorded by the person it licenses, deliberately: requiring a different
+   * administrator would ask for the second pair of hands whose absence is the
+   * whole reason this exists. What stands in for that second person is the
+   * record itself — dated, carrying a review date, and reported to the outside
+   * accountant in every month-end package built on a mapping decided this way.
+   */
+  async function recordSoleDecider(decision: DecisionDraft) {
+    setBusy("sole-decider");
+    setMessage(null);
+    try {
+      const res = await fetch("/api/controls/decisions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          subjectKind: "control",
+          subjectId: SOLE_DECIDER_CONTROL,
+          kind: decision.kind,
+          note: decision.note,
+          reviewBy: decision.reviewBy || undefined,
+        }),
+      });
+      const body = (await res.json().catch(() => ({}))) as { error?: string; errors?: string[] };
+      refuseIfSignInEnded(res);
+      if (!res.ok) throw new Error([body.error, ...(body.errors ?? [])].filter(Boolean).join(" "));
+      setSoleRefusal(null);
+      const soleDecider = await loadSoleDecider();
+      setState((st) => (st.status === "ready" ? { ...st, soleDecider } : st));
+      setMessage("Recorded. You may now decide your own proposals, and every mapping so decided is named in the month-end package.");
+    } catch (err: unknown) {
+      // The sign-in is over, so nothing this screen offers can succeed (Increment 1.83).
+      if (isSignInEnded(err)) {
+        setState({ status: "sign_in_ended" });
+        return;
+      }
+      setMessage(err instanceof Error ? err.message : "The decision was not recorded.");
     } finally {
       setBusy(null);
     }
@@ -148,8 +479,9 @@ export function PackageView() {
         </p>
       )}
       {state.status === "loading" && <p className="text-sm text-[var(--ink-2)]">Reading the month&apos;s rows…</p>}
+      {state.status === "sign_in_ended" && <SessionEnded />}
       {state.status === "not_for_seat" && (
-        <p className="max-w-prose text-[var(--ink-2)]">The month-end package is for the manager and owner seats. Your seat works from the links on the home page.</p>
+        <p className="max-w-prose text-[var(--ink-2)]">The month-end package is for the manager and owner seats and for the practice&apos;s accountant. Your seat works from the links in the header.</p>
       )}
       {state.status === "error" && <p className="text-sm text-[var(--ink-2)]">{state.message}</p>}
       {state.status === "ready" && (
@@ -167,7 +499,42 @@ export function PackageView() {
                     state.data.changedSinceLastExport ? "The rows have changed since that export." : "Unchanged since that export."
                   }`}
             </p>
-            {state.isAdmin ? (
+            {state.data.close && (
+              <p className="mt-2 text-sm text-[var(--ink-2)]">
+                Closed by {state.data.close.closedByName} on {state.data.close.closedAt.slice(0, 10)}, with {state.data.close.entryCount} entr
+                {state.data.close.entryCount === 1 ? "y" : "ies"} totalling {formatCents(state.data.close.totalCents)}. Frozen hash{" "}
+                <code className="text-xs">{state.data.close.packageHash.slice(0, 16)}…</code>.{" "}
+                {state.data.schemaChanged
+                  ? `The package has changed shape since this close (${state.data.close.packageSchema} then, ${state.data.packageSchema} now), so the two hashes do not compare and neither one says anything about the figures. What the close froze in its own columns does: the entry count and the journal total above ${
+                      state.data.frozenFiguresHold ? "still match what the month reads today." : "no longer match what the month reads today, so a figure has moved since."
+                    }`
+                  : state.data.changedSinceClose
+                    ? "This month no longer reads as the accountant received it: a figure it states has changed since, most often an account mapping or a control policy. The hash above is what it reads now."
+                    : "This month still reads as the accountant received it. A later correction into it posts today with reason prior_period, and is reported in the month it posts."}
+              </p>
+            )}
+            {/* A month closed under an older shape can be compared again, from a
+                baseline rather than from the close (Increment 1.56). The close's
+                own frozen hash is never rewritten: it records what the accountant
+                received, and the table refuses every update. */}
+            {(state.data.comparison.state === "older_shape_no_baseline" ||
+              state.data.comparison.state === "older_shape_with_baseline") && (
+              <div className="mt-2 rounded-md border border-[var(--line)] p-3">
+                <p className="max-w-prose text-sm text-[var(--ink-2)]">{state.data.comparison.sentence}</p>
+                {state.data.comparison.state === "older_shape_no_baseline" && state.isAdmin && (
+                  <button
+                    type="button"
+                    className="mt-2 min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                    disabled={busy !== null}
+                    onClick={() => void recordBaseline()}
+                  >
+                    {busy === "baseline" ? "Recording…" : "Record a baseline under the current shape"}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {state.isAdmin || state.seat ? (
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -185,9 +552,43 @@ export function PackageView() {
                 >
                   {busy === "json" ? "Exporting…" : "Download JSON"}
                 </button>
+                {state.isAdmin &&
+                  !state.data.close &&
+                  !state.data.inProgress &&
+                  (confirmClose === month ? (
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm text-[var(--ink-2)]">
+                        Closing {month} cannot be undone. A correction afterwards posts today with reason prior_period.
+                      </span>
+                      <button
+                        type="button"
+                        className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                        disabled={busy !== null}
+                        onClick={() => void close()}
+                      >
+                        {busy === "close" ? "Closing…" : "Close it for good"}
+                      </button>
+                      <button
+                        type="button"
+                        className="min-h-[var(--target)] rounded-md border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold"
+                        onClick={() => setConfirmClose(null)}
+                      >
+                        Cancel
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="min-h-[var(--target)] rounded-md border border-[var(--line)] bg-[var(--surface)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                      disabled={busy !== null}
+                      onClick={() => setConfirmClose(month)}
+                    >
+                      Close month
+                    </button>
+                  ))}
               </div>
             ) : (
-              <p className="mt-2 text-sm text-[var(--ink-3)]">Only an administrator exports the package; each export is recorded on the chain.</p>
+              <p className="mt-2 text-sm text-[var(--ink-3)]">An administrator or the practice&apos;s accountant exports the package; each export is recorded on the chain.</p>
             )}
           </section>
 
@@ -208,7 +609,12 @@ export function PackageView() {
             <Rows
               id="package-journal"
               title={`Journal · ${state.data.package.journal.entryCount} entr${state.data.package.journal.entryCount === 1 ? "y" : "ies"} · ${formatCents(state.data.package.journal.totalCents)}`}
-              rows={state.data.package.journal.rows.map((r) => ({ key: `${r.bucket}|${r.kind}`, label: r.label, count: r.count, cents: r.cents }))}
+              rows={state.data.package.journal.rows.map((r) => ({
+                key: `${r.bucket}|${r.kind}`,
+                label: r.account ? `${r.label} → ${r.account.code} ${r.account.name} (${r.account.side})` : `${r.label} → unmapped`,
+                count: r.count,
+                cents: r.cents,
+              }))}
               empty="Nothing posted this month."
             />
             <Rows
@@ -223,6 +629,40 @@ export function PackageView() {
               rows={state.data.package.depositRegister.rows.map((r) => ({ key: `${r.method}|${r.status}`, label: `${r.method} · ${r.status}`, count: r.count, cents: r.cents }))}
               empty="No deposits prepared this month."
             />
+            {/* What landed behind this month's seals (Increment 1.44). Windowed on the
+                sealed day rather than the posting, which is why a row can appear here
+                and not in this month's journal; the sentence says so. */}
+            <Rows
+              id="package-sealed-days"
+              title={`Sealed days · ${state.data.package.sealedDays.closesFrozen} frozen · ${state.data.package.sealedDays.postings} posted behind them`}
+              rows={[
+                ...state.data.package.sealedDays.daysDisturbed.map((d) => ({
+                  key: d.businessDate,
+                  label: `${d.businessDate} · ${d.firstPostings} first posting${d.firstPostings === 1 ? "" : "s"}${d.closes > 1 ? ` · ${d.closes} seals` : ""}`,
+                  count: d.postings,
+                  cents: d.cents,
+                })),
+                // The total only earns a row once there is more than one day to total.
+                ...(state.data.package.sealedDays.daysDisturbed.length > 1
+                  ? [
+                      {
+                        key: "total",
+                        label: "Total behind this month's seals",
+                        count: state.data.package.sealedDays.postings,
+                        cents: state.data.package.sealedDays.totalCents,
+                      },
+                    ]
+                  : []),
+              ]}
+              empty={`${state.data.package.sealedDays.closesFrozen} day close${state.data.package.sealedDays.closesFrozen === 1 ? "" : "s"} frozen this month, and nothing posted against any of them afterward.`}
+            />
+            {state.data.package.sealedDays.postings > 0 && (
+              <p className="max-w-prose text-sm text-[var(--ink-2)]">
+                These rows are counted against the day they were dated for, not the month they
+                posted in, so a row that posted later than this month appears here and not in this
+                month&apos;s journal. The sealed figures themselves did not move.
+              </p>
+            )}
             <Rows
               id="package-bank"
               title="Bank, close, approvals"
@@ -250,7 +690,18 @@ export function PackageView() {
                 { key: "dec_recorded", label: "Decisions recorded this month", count: state.data.package.controls.decisions.recordedInMonth },
                 { key: "findings_open", label: "Detector findings open at month end", count: state.data.package.counts.findings.openNow },
                 { key: "acks", label: "Hard events acknowledged", count: state.data.package.counts.alerts.hardEventsAcknowledged },
-                ...state.data.package.controls.attestations.map((a) => ({ key: `att:${a.channel}`, label: `${a.channel} attested (external channel)`, count: a.count })),
+                ...state.data.package.controls.attestations.map((a) => ({
+                  key: `att:${a.channel}`,
+                  // Increment 1.97. A count alone read a deposit bag and a
+                  // payroll file alike; this says how many of them the policy
+                  // required a second pair of hands for, which is what the
+                  // practice still owes evidence for.
+                  label:
+                    a.requiredSecond > 0
+                      ? `${a.channel} attested (external channel) · ${a.requiredSecond} needed a second pair of hands`
+                      : `${a.channel} attested (external channel)`,
+                  count: a.count,
+                })),
               ]}
               empty=""
             />
@@ -269,6 +720,250 @@ export function PackageView() {
               empty=""
             />
           </div>
+          {/* What stands behind the word "attested" on the coverage table (Increment 1.51). */}
+          <AttestView month={month} />
+
+          {/* Either side may ask about a line of this month (Increment 1.50). */}
+          <QuestionsView month={month} />
+
+          {/* Where this seat's own notices go (Increment 1.74).
+              `/risk` carries this panel for every other seat, and this seat
+              cannot open `/risk`: it is `readonly` by construction. The three
+              routes behind the panel were widened for it long ago, so without
+              this the product would mail it a code and name a screen it may
+              not reach. */}
+          {state.seat && state.delivery && (
+            <DeliveryPanel
+              delivery={state.delivery}
+              busy={busy}
+              form={{
+                draft: addressDraft,
+                setDraft: setAddressDraft,
+                save: (address) =>
+                  void runDelivery(saveAddressLabel(address), async () => {
+                    const note = await saveAddressAct(address);
+                    setAddressDraft(null);
+                    return note;
+                  }),
+                sendNow: () => void runDelivery("Send this to me now", () => sendNoticesNowAct()),
+                codeDraft,
+                setCodeDraft,
+                askForCode: () => void runDelivery("Send me a code", () => askForCodeAct()),
+                prove: (code: string) =>
+                  void runDelivery("Prove this address", async () => {
+                    const note = await proveAddressAct(code);
+                    setCodeDraft("");
+                    return note;
+                  }),
+              }}
+            />
+          )}
+
+          {/* The chart of accounts is the practice's own maker-checker, so the
+              outside accountant is not offered it; each journal line above
+              already carries the account it was mapped to. */}
+          {!state.seat && (
+          <section aria-labelledby="package-mappings" className="rounded-lg border border-[var(--line)] bg-[var(--surface)] p-4">
+            <h2 id="package-mappings" className="mb-1 text-base font-semibold">
+              Chart of accounts
+            </h2>
+            <p className="mb-3 max-w-prose text-sm text-[var(--ink-2)]">
+              {state.data.package.mappings.approved} approved mapping{state.data.package.mappings.approved === 1 ? "" : "s"};{" "}
+              {state.data.package.mappings.pending} waiting for a second person;{" "}
+              {state.data.package.mappings.unmappedLines} journal line{state.data.package.mappings.unmappedLines === 1 ? "" : "s"} unmapped this month. One
+              person proposes a mapping and a different person approves it, so no one maps the practice&apos;s books alone.
+            </p>
+
+            {/* Increment 1.75. A practice whose only administrator is the
+                proposer could propose a mapping nobody may decide, leaving
+                every line unmapped and no month closable — for ever, since
+                this product has no way to appoint a second administrator. The
+                way out is a decision, recorded here because here is where the
+                refusal happens. */}
+            {state.soleDecider && state.soleDecider.standing !== "none" ? (
+              <p className="mb-3 max-w-prose rounded-lg border border-[var(--line)] bg-[var(--cream)] p-3 text-sm text-[var(--ink-2)]">
+                <strong>This practice has recorded that one administrator decides alone.</strong>{" "}
+                {state.soleDecider.decision.decidedByName} recorded it on {state.soleDecider.decision.decidedAt.slice(0, 10)}:{" "}
+                {state.soleDecider.decision.note}{" "}
+                {state.soleDecider.standing === "overdue"
+                  ? `That review was due ${state.soleDecider.decision.reviewBy} and has not happened. It still stands — a licence that expired mid-month would close the practice's books to it without warning — but it is overdue, and Practice Risk lists it among the reviews that are.`
+                  : state.soleDecider.decision.reviewBy
+                    ? `It is looked at again on ${state.soleDecider.decision.reviewBy}. Retiring it from Practice Risk puts the second pair of hands back.`
+                    : "Retiring it from Practice Risk puts the second pair of hands back."}{" "}
+                Every mapping decided this way is counted in the month-end package your accountant receives.
+              </p>
+            ) : null}
+
+            {soleRefusal ? (
+              <div className="mb-3 max-w-prose rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] p-3" role="alert">
+                {soleRefusal.map((line) => (
+                  <p key={line} className="mb-2 text-sm text-[var(--ink-2)]">
+                    {line}
+                  </p>
+                ))}
+                {state.isAdmin ? (
+                  <DecisionForm
+                    /* Only the kinds that answer this refusal. Recording that
+                       the practice will monitor the control, or intends to
+                       remediate it, is a true thing to record and changes
+                       nothing about who may decide — so offering it here would
+                       hand somebody an act that looks like the way out and
+                       is not. Practice Risk is where the other kinds belong. */
+                    kinds={["accept_residual", "compensate"]}
+                    submitLabel="Record this decision"
+                    busy={busy !== null}
+                    reviewByRequired
+                    onSubmit={(d) => void recordSoleDecider(d)}
+                    onCancel={() => setSoleRefusal(null)}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+            {state.mappings.length > 0 && (
+              <div className="overflow-x-auto rounded-lg border border-[var(--line)]">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="border-b border-[var(--line)] bg-[var(--cream)] text-[var(--ink-2)]">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold">Line</th>
+                      <th className="px-3 py-2 font-semibold">Account</th>
+                      <th className="px-3 py-2 font-semibold">State</th>
+                      {state.isAdmin && <th className="px-3 py-2 font-semibold">Decide</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {state.mappings.map((m) => (
+                      <tr key={m.id} className="border-b border-[var(--line)] last:border-0 align-top">
+                        <td className="px-3 py-2">
+                          {m.glBucket.replace(/_/g, " ")} · {m.kind.replace(/_/g, " ")}
+                          {m.reasonCode === ANY_REASON ? "" : ` · ${m.reasonCode}`}
+                        </td>
+                        <td className="px-3 py-2">
+                          {m.accountCode} {m.accountName} ({m.side})
+                        </td>
+                        <td className="px-3 py-2">
+                          {m.status === "proposed"
+                            ? `Proposed by ${m.proposedByName}`
+                            : `${m.status === "approved" ? "Approved" : "Rejected"} by ${m.decidedByName ?? "someone"} on ${(m.decidedAt ?? "").slice(0, 10)}`}
+                        </td>
+                        {state.isAdmin && (
+                          <td className="px-3 py-2">
+                            {m.status === "proposed" && (!m.mine || state.soleDecider?.standing !== "none") ? (
+                              <span className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-3 py-1 text-xs font-semibold disabled:opacity-50"
+                                  disabled={busy !== null}
+                                  aria-label={`Approve mapping ${m.accountCode}`}
+                                  onClick={() => void decide(m, "approved")}
+                                >
+                                  {busy === m.id ? "Deciding…" : "Approve"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="min-h-[var(--target)] rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-semibold disabled:opacity-50"
+                                  disabled={busy !== null}
+                                  aria-label={`Reject mapping ${m.accountCode}`}
+                                  onClick={() => void decide(m, "rejected")}
+                                >
+                                  Reject
+                                </button>
+                              </span>
+                            ) : m.status === "proposed" ? (
+                              /* Increment 1.75. The button used to simply not
+                                 be here, which told a practice with one
+                                 administrator nothing about why, and offered
+                                 it nothing to do. Asking is now an act: it
+                                 meets the refusal, and the refusal carries the
+                                 decision that answers it. */
+                              <span className="flex flex-col items-start gap-1">
+                                <span className="text-xs text-[var(--ink-3)]">Yours; a different person decides it.</span>
+                                <button
+                                  type="button"
+                                  className="min-h-[var(--target)] rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-xs font-semibold disabled:opacity-50"
+                                  disabled={busy !== null}
+                                  aria-label={`Nobody else can decide mapping ${m.accountCode}`}
+                                  onClick={() => void decide(m, "approved")}
+                                >
+                                  Nobody else can decide this
+                                </button>
+                              </span>
+                            ) : (
+                              <span className="text-xs text-[var(--ink-3)]">Decided</span>
+                            )}
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <form
+              className="mt-3 flex flex-wrap items-end gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (draft.accountCode.trim() && draft.accountName.trim()) void propose();
+              }}
+            >
+              <label className="flex flex-col text-sm">
+                <span className="mb-1 font-semibold text-[var(--ink-2)]">Bucket</span>
+                <select className="rounded-md border border-[var(--line)] bg-[var(--bg)] px-3 py-2" value={draft.glBucket} onChange={(e) => setDraft({ ...draft, glBucket: e.target.value })}>
+                  {GL_BUCKETS.map((b) => (
+                    <option key={b} value={b}>
+                      {b.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col text-sm">
+                <span className="mb-1 font-semibold text-[var(--ink-2)]">Kind</span>
+                <select className="rounded-md border border-[var(--line)] bg-[var(--bg)] px-3 py-2" value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
+                  {GL_KINDS.map((k) => (
+                    <option key={k} value={k}>
+                      {k.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col text-sm">
+                <span className="mb-1 font-semibold text-[var(--ink-2)]">Account code</span>
+                <input
+                  className="rounded-md border border-[var(--line)] bg-[var(--bg)] px-3 py-2"
+                  value={draft.accountCode}
+                  placeholder="1200"
+                  onChange={(e) => setDraft({ ...draft, accountCode: e.target.value })}
+                />
+              </label>
+              <label className="flex min-w-[12rem] flex-1 flex-col text-sm">
+                <span className="mb-1 font-semibold text-[var(--ink-2)]">Account name</span>
+                <input
+                  className="rounded-md border border-[var(--line)] bg-[var(--bg)] px-3 py-2"
+                  value={draft.accountName}
+                  placeholder="Patient receivables"
+                  onChange={(e) => setDraft({ ...draft, accountName: e.target.value })}
+                />
+              </label>
+              <label className="flex flex-col text-sm">
+                <span className="mb-1 font-semibold text-[var(--ink-2)]">Side</span>
+                <select className="rounded-md border border-[var(--line)] bg-[var(--bg)] px-3 py-2" value={draft.side} onChange={(e) => setDraft({ ...draft, side: e.target.value })}>
+                  {GL_SIDES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="submit"
+                className="min-h-[var(--target)] rounded-md border border-[var(--line-strong)] bg-[var(--cream)] px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                disabled={busy !== null || !draft.accountCode.trim() || !draft.accountName.trim()}
+              >
+                {busy === "propose" ? "Proposing…" : "Propose mapping"}
+              </button>
+            </form>
+          </section>
+          )}
+
           <p className="max-w-prose text-xs text-[var(--ink-3)]">{state.data.package.scope}</p>
         </>
       )}

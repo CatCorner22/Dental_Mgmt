@@ -1,6 +1,9 @@
+import { CPA_SEAT_ENTITLEMENT } from "@/lib/auth/seats";
 import { withGuard } from "@/lib/auth/withGuard";
 import { withTenantTransaction } from "@/lib/db/client";
-import { computeMonthPackage, isMonth, listPackageExports, packageHash } from "@/lib/cpa/package";
+import { computeMonthPackage, isMonth, listPackageExports, packageHash, PACKAGE_SCHEMA_VERSION } from "@/lib/cpa/package";
+import { loadMonthClose } from "@/lib/cpa/close";
+import { compareClose, loadRehashBaseline } from "@/lib/cpa/rehash";
 
 /**
  * The CPA month-end package for `month` (YYYY-MM, default the current
@@ -14,14 +17,44 @@ export const GET = withGuard(
     const month = new URL(req.url).searchParams.get("month") ?? thisMonth;
     if (!isMonth(month)) return Response.json({ error: "The month must be a calendar month (YYYY-MM)." }, { status: 400 });
     if (month > thisMonth) return Response.json({ error: "The package reads rows that exist; a month that has not started has none yet." }, { status: 400 });
-    const { pkg, exports } = await withTenantTransaction(user.tenantId, user.id, async (db) => ({
+    const { pkg, exports, close, baseline } = await withTenantTransaction(user.tenantId, user.id, async (db) => ({
       pkg: await computeMonthPackage(db, user.tenantId, month),
       exports: await listPackageExports(db, user.tenantId, month),
+      close: await loadMonthClose(db, user.tenantId, month),
+      // The baseline under the shape in force now, if the practice took one (Increment 1.56).
+      baseline: await loadRehashBaseline(db, user.tenantId, month),
     }));
     const hash = packageHash(pkg);
+    // A frozen hash compares only against a package of the same shape. Where the
+    // close was taken under an earlier schema the two are incomparable, and saying
+    // "changed" would be a claim the hashes cannot support (Increment 1.43).
+    const schemaChanged = close ? close.packageSchema !== PACKAGE_SCHEMA_VERSION : false;
     return Response.json({
       month,
       inProgress: month === thisMonth,
+      close,
+      packageSchema: PACKAGE_SCHEMA_VERSION,
+      /** True when this month was closed under a different package shape, so the hashes do not compare. */
+      schemaChanged,
+      /** True when the rows moved after the month was closed: a correction posted since. Only meaningful within one schema. */
+      changedSinceClose: close && !schemaChanged ? close.packageHash !== hash : false,
+      /**
+       * The two figures the close froze in their own columns, checked against the
+       * package as it computes now. No schema change touches them, so this answers
+       * even where the hashes cannot.
+       */
+      frozenFiguresHold: close
+        ? pkg.journal.entryCount === close.entryCount && pkg.journal.totalCents === close.totalCents
+        : true,
+      /** What a reader may conclude about this close right now, and from which date (Increment 1.56). */
+      comparison: compareClose({
+        closedUnder: close?.packageSchema ?? null,
+        closeHash: close?.packageHash ?? null,
+        currentSchema: PACKAGE_SCHEMA_VERSION,
+        currentHash: hash,
+        baseline,
+      }),
+      baseline,
       package: pkg,
       packageHash: hash,
       exports,
@@ -30,5 +63,6 @@ export const GET = withGuard(
       computedAt: new Date().toISOString(),
     });
   },
-  { minRank: "manager" }
+  // The outside accountant reaches this and no other screen (Increment 1.49).
+  { minRank: "manager", orEntitlement: CPA_SEAT_ENTITLEMENT }
 );

@@ -16,6 +16,8 @@ import { createApprovalRequest } from "../controls/approvals";
 import { staffToPeople } from "../controls/people";
 import { loadActivePolicy } from "../controls/policy";
 import type { AppDb } from "../db/client";
+import { loadReasonThresholdCents } from "./reasonCodes";
+import { tightenPolicyForReason } from "./reasonThreshold";
 import { hoursPhrase, isOutsideHours, localClock, WEEKDAY_LABEL, type WeekHours } from "../locations/hours";
 
 import { POSTABLE_KINDS, type PostableKind } from "./types";
@@ -341,9 +343,16 @@ export async function postLedgerEntry(
 
   const writer = makePostgresWriter(db, tenantId);
   const postEntry = createPostEntry(writer);
+  // The reason's own threshold tightens this channel's before the engine sees it
+  // (Increment 1.46), so the service reaches the same figure the database trigger
+  // will; where the two disagree the practice meets a crash instead of a hold.
+  const reasonThresholdCents = await loadReasonThresholdCents(db, tenantId, payload.reasonCode ?? null);
+  const channel = CHANNEL_BY_KIND[post.kind];
+  const policy = channel ? tightenPolicyForReason(active.policy, channel, reasonThresholdCents) : active.policy;
+
   const result = await postGuarded(postEntry, {
     ...payload,
-    policy: active.policy,
+    policy,
     people,
     outsideBusinessHours: afterHours != null,
   });
