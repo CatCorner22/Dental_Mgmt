@@ -83,14 +83,20 @@
     if (!(opts && opts.keepFocus)) { const c = document.querySelector('[data-testid="rail.close"]'); if (c) c.focus(); }
   }
   function close() { rail.pid = null; rail.msg = null; const box = document.getElementById('rail'); if (box) { box.replaceChildren(); box.hidden = true; } syncOpeners(); }
-  /* Focus after Close: the opener if it is still on the screen, else its card, else the canvas heading. */
+  /* Focus after Close: the opener if it is still on the screen, else a control in its card, else the canvas heading.
+     What it lands on is made focusable first (as ui.js landFocus does): a card or a fresh h1 carries no tabindex, and
+     focus() on it is a no-op that left the keyboard on body. */
+  const FOCUSABLE = 'button:not([disabled]), input, select, textarea, a[href], [tabindex]';
   function closeToOpener() {
     const pid = rail.pid; const id = rail.openerId; close(); rail.openerId = null;
     const opener = id ? document.querySelector('[data-testid="' + id + '"]') : null;
+    const card = id ? document.querySelector('[data-testid="' + id.replace(/\.rail$/, '') + '"]') : null;
     const target = opener || (pid ? document.querySelector('[data-railopen="' + pid + '"]') : null)
-      || (id ? document.querySelector('[data-testid="' + id.replace(/\.rail$/, '') + '"]') : null)
+      || (card && (card.querySelector(FOCUSABLE) || card))
       || document.querySelector('#canvas h1') || document.getElementById('canvas');
-    if (target) target.focus();
+    if (!target) return;
+    if (!target.matches(FOCUSABLE)) target.setAttribute('tabindex', '-1');
+    target.focus();
   }
   function isOpen() { return !!rail.pid; }
   function button(pid, r, testid) {
