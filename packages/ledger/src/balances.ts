@@ -86,18 +86,24 @@ export function allocatePatientLedger(
     if (e.amountCents > 0) {
       const t = Math.min(unapplied, e.amountCents);
       unapplied -= t;
-      const back =
-        charges.find((c) => (c.takes[e.reversesEntryId ?? ""] ?? 0) > 0) ??
-        charges.slice().reverse().find((c) => c.applied.length);
+      let left = e.amountCents - t;
       const orig = e.reversesEntryId ? byId.get(e.reversesEntryId) : undefined;
-      if (back && e.amountCents - t > 0) {
-        take(back, e, t - e.amountCents);
-        if (orig && insurerMoney(orig)) {
-          back.insPaid = Math.max(0, back.insPaid - (e.amountCents - t));
-        }
-      } else if (e.amountCents - t > 0) {
-        shortfall += e.amountCents - t;
+      const ins = orig ? insurerMoney(orig) : false;
+      const giveBack = (c: ChargeState, n: number) => {
+        take(c, e, -n);
+        if (ins) c.insPaid = Math.max(0, c.insPaid - n);
+        left -= n;
+      };
+      // A reversal gives each charge back exactly what the reversed row took
+      // from it: a split payment is undone per charge, never against one.
+      for (const c of charges) {
+        if (left <= 0) break;
+        const took = orig ? c.takes[orig.id] ?? 0 : 0;
+        if (took > 0) giveBack(c, Math.min(left, took));
       }
+      const back = charges.slice().reverse().find((c) => c.applied.length);
+      if (left > 0 && back) giveBack(back, left);
+      else if (left > 0) shortfall += left;
       continue;
     }
 
