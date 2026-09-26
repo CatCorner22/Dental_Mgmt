@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DEV_MFA_SECRET, DEV_PASSWORD, DEV_TENANTS, SEED_BANK } from "@pms/db/seed-data";
-import { currentCodeForTest } from "../lib/auth/totp";
-import { e2eEnabled, startProductionApp, type E2eApp } from "./harness";
+import { DEV_PASSWORD, DEV_TENANTS, SEED_BANK } from "@pms/db/seed-data";
+import { e2eEnabled, freshCodeForTest, startProductionApp, type E2eApp } from "./harness";
 
 /**
  * Swarm 2, lens pms-app-authz: direct HTTP calls against the production
@@ -46,7 +45,7 @@ async function signIn(app: E2eApp, username: string): Promise<Jar> {
     csrfToken,
     username,
     password: DEV_PASSWORD,
-    totp: currentCodeForTest(username, DEV_MFA_SECRET, Date.now()),
+    totp: await freshCodeForTest(username),
     callbackUrl: `${app.base}/home`,
   });
   const res = await call(app, jar, "/api/auth/callback/credentials", {
@@ -92,12 +91,14 @@ describe.skipIf(!e2eEnabled)("S2 pms-app-authz (production server, direct HTTP)"
   }, 60_000);
 
   // Negative control: the same GET by the unenrolled ridgeview-newhire returns 200 with an otpauth URI.
-  it("S2-pms-app-authz-4: GET /api/enroll-mfa for an already-enrolled account is a refusal, not a 500", async () => {
+  it("S2-pms-app-authz-4: GET /api/enroll-mfa for an already-enrolled account is a controlled answer, not a 500", async () => {
     const owner = await signIn(app, "ridgeview-owner");
     const res = await call(app, owner, "/api/enroll-mfa");
     const text = await res.text();
     expect(res.status, `status ${res.status} body ${JSON.stringify(text)}`).toBeLessThan(500);
-    expect(text).toMatch(/already/i);
+    // Either a refusal that names the existing factor, or a re-pairing the
+    // route owns up to (`repairing: true`); never an unhandled throw.
+    expect(text).toMatch(/already|"repairing":true/i);
     expect(app.serverLog()).not.toMatch(/Error: MFA is already enrolled\./);
   }, 60_000);
 

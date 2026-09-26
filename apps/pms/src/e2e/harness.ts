@@ -55,14 +55,14 @@ const spentSteps = new Map<string, number>();
  * each sign-in takes the next unspent step inside the server's ±1 window,
  * waiting for the clock when both the current and the next step are spent.
  */
-export async function freshCodeForTest(username: string): Promise<string> {
+export async function freshCodeForTest(username: string, secret: string = DEV_MFA_SECRET): Promise<string> {
   for (;;) {
     const now = Date.now();
     const current = Math.floor(now / TOTP_STEP_MS);
     const step = Math.max(current, (spentSteps.get(username) ?? -1) + 1);
     if (step <= current + 1) {
       spentSteps.set(username, step);
-      return currentCodeForTest(username, DEV_MFA_SECRET, step * TOTP_STEP_MS);
+      return currentCodeForTest(username, secret, step * TOTP_STEP_MS);
     }
     await new Promise((r) => setTimeout(r, (current + 1) * TOTP_STEP_MS - now + 50));
   }
