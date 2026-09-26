@@ -94,14 +94,24 @@ describe("S2 pms-app-authz", () => {
   // or in a "use server" module outside src/app (never walked, never allowlisted).
   it("S2-pms-app-authz-3: check:routes fails on a bare server action, not only on bare HTTP-verb route handlers", () => {
     const appDir = path.resolve(__dirname, "..", "..");
-    const tmp = mkdtempSync(path.join(os.tmpdir(), "route-guards-"));
+    const repoDir = path.resolve(appDir, "..", "..");
+    const root = mkdtempSync(path.join(os.tmpdir(), "route-guards-"));
+    const tmp = path.join(root, "apps/pms");
+    const catalog = "packages/controls-engine/src/sod/conflict-rules.ts";
     const run = () =>
       spawnSync(process.execPath, [path.join(tmp, "scripts/check-route-guards.mjs")], { encoding: "utf8" });
     try {
-      mkdirSync(path.join(tmp, "scripts"));
+      mkdirSync(path.join(tmp, "scripts"), { recursive: true });
+      mkdirSync(path.dirname(path.join(root, catalog)), { recursive: true });
+      copyFileSync(path.join(repoDir, catalog), path.join(root, catalog));
       copyFileSync(path.join(appDir, "scripts/check-route-guards.mjs"), path.join(tmp, "scripts/check-route-guards.mjs"));
       mkdirSync(path.join(tmp, "src/app/api/planted"), { recursive: true });
       mkdirSync(path.join(tmp, "src/lib"), { recursive: true });
+      // The checker also audits its own UNCALLED list against the routes present,
+      // so the planted app carries the one route that list names.
+      const uncalled = "src/app/api/controls/policy/route.ts";
+      mkdirSync(path.dirname(path.join(tmp, uncalled)), { recursive: true });
+      copyFileSync(path.join(appDir, uncalled), path.join(tmp, uncalled));
 
       writeFileSync(
         path.join(tmp, "src/app/api/planted/route.ts"),
@@ -134,7 +144,7 @@ describe("S2 pms-app-authz", () => {
         `bare "use server" module outside src/app passed: ${libModule.stdout}${libModule.stderr}`
       ).toBe(1);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

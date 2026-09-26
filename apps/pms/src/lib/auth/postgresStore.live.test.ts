@@ -162,12 +162,14 @@ describe.skipIf(!adminUrl)("Postgres auth store (live)", () => {
    */
   it("stops opening a route on a duty that has been revoked", async () => {
     const store = createPostgresStore(env);
-    const code = currentCodeForTest(owner.username, DEV_MFA_SECRET, now.getTime());
+    // A TOTP step is single-use, so this third sign-in happens a further step on.
+    const later = new Date(now.getTime() + 90_000);
+    const code = currentCodeForTest(owner.username, DEV_MFA_SECRET, later.getTime());
     const result = await authorizeCredentials(
       store,
       { username: owner.username, password: DEV_PASSWORD, totp: code },
       loginReq(),
-      now,
+      later,
       env
     );
     expect(result.ok).toBe(true);
@@ -379,8 +381,9 @@ describe.skipIf(!adminUrl)("Postgres auth store (live)", () => {
     expect(after?.recoveryCodeHashes).not.toEqual(before?.recoveryCodeHashes);
     expect(await store.getMfaPendingSecret(owner.id)).toBeNull();
 
-    // The new authenticator signs in; the old one does not.
-    const later = new Date(at.getTime() + 60_000);
+    // The new authenticator signs in; the old one does not. A TOTP step is
+    // single-use per person, so this sign-in stands after every earlier one.
+    const later = new Date(at.getTime() + 120_000);
     expect(
       await authorizeCredentials(
         store,

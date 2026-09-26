@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createLiveDatabase, liveAdminUrl, type LiveDatabase } from "@pms/db/testing";
 import { seedDatabase } from "@pms/db/seed";
-import { DEV_TENANTS, DEV_USERS, SEED_BANK, SEED_LEDGER } from "@pms/db/seed-data";
+import { DEV_TENANTS, DEV_USERS, SEED_BANK, SEED_LEDGER, SEED_STORY_WEEK } from "@pms/db/seed-data";
 import { uuidv7 } from "@pms/db";
 import { AFTER_HOURS_HOLD_EXCEPTION, addDays, evaluateRelease } from "@pms/controls-engine";
 import type { PostEntryInput } from "@pms/ledger";
@@ -310,7 +310,7 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
             tenantId,
             actorId: front.id,
             actorName: front.displayName,
-            post: { accountId: SEED_LEDGER.accountDoeId, patientId: SEED_LEDGER.patientJaneId, kind: "write_off", amountCents: 1_200, effectiveDate: "2026-09-17", reasonCode: "courtesy" },
+            post: { accountId: SEED_LEDGER.accountDoeId, patientId: SEED_LEDGER.patientJaneId, kind: "write_off", amountCents: 1_200, effectiveDate: SEED_STORY_WEEK.effective, reasonCode: "courtesy" },
           }),
         env
       );
@@ -320,7 +320,7 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
 
       // The database is the second lock: the same row posted alone is refused, threshold or no threshold.
       await expect(
-        insertEntry({ id: uuidv7(34_041), kind: "write_off", amountCents: -1_200, effectiveDate: "2026-09-17", postedAt: new Date().toISOString() })
+        insertEntry({ id: uuidv7(34_041), kind: "write_off", amountCents: -1_200, effectiveDate: SEED_STORY_WEEK.effective, postedAt: new Date().toISOString() })
       ).rejects.toThrow(/after-hours hold/);
 
       // The owner decides; the posting runs citing the request and the trigger accepts it.
@@ -345,7 +345,7 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
           glBucket: "patient_ar",
           amountCents: 1_200,
           reasonCode: "overpayment",
-          effectiveDate: "2026-09-17",
+          effectiveDate: SEED_STORY_WEEK.effective,
           postedAt: new Date().toISOString(),
           createdById: front.id,
           createdByName: front.displayName,
@@ -379,7 +379,7 @@ describe.skipIf(!adminUrl)("Ledger detectors (live)", () => {
 
       // The database refuses the same refund posted alone, whatever the amount.
       await expect(
-        insertEntry({ id: uuidv7(34_042), kind: "refund", amountCents: 1_200, effectiveDate: "2026-09-17", postedAt: new Date().toISOString() })
+        insertEntry({ id: uuidv7(34_042), kind: "refund", amountCents: 1_200, effectiveDate: SEED_STORY_WEEK.effective, postedAt: new Date().toISOString() })
       ).rejects.toThrow(/after-hours hold/);
 
       // The owner decides; the posting cites the request, the trigger accepts it, and the event now reads approved.
