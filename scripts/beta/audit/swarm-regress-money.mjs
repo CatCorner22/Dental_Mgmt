@@ -5,7 +5,7 @@
 // from a seat with no identity, and two store-contract lies in postCheckout.
 // Default position is NOT reproduced: every check measures the breach it claims and carries the values.
 // Each check closes its browser context in `finally` so one failure cannot hang the run.
-export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => {
+export default ({ ctx, go, hop, open, press, click, txt, box, state, events, rec }) => {
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
   const after = async (p, seq) => (await events(p)).filter((e) => e.seq > seq);
   const writes = (ev) => ev.filter((e) => e.kind === 'write').map((e) => e.table + '/' + e.id);
@@ -140,7 +140,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         await go(p, '#/temp/close');
         const me = await p.evaluate(() => { const u = Proto.store.currentUser(); return { id: u.id, name: u.name, role: u.role, noPass: !!u.noPass, entitlements: u.entitlements || [], dayPasses: window.__proto.state().dayPasses.length }; });
         const before = await p.evaluate(() => ({ v1: window.__proto.state().variances.find((v) => v.id === 'v-1').status, rr3: window.__proto.state().reconciliation.find((r) => r.id === 'rr-loc-3').state, matches: window.__proto.state().reconciliationMatches.length }));
-        await click(p, 'close.tied.tile'); await p.waitForTimeout(200);
+        await open(p, 'close.tied.tile'); await p.waitForTimeout(200);
         let ids = await testids(p, /close\.(location|variance)\./);
         if (!ids.includes('close.variance.v-1.match') && ids.includes('close.location.loc-3')) { await click(p, 'close.location.loc-3'); await p.waitForTimeout(150); ids = await testids(p, /close\.variance\./); }
         const offered = ids.includes('close.variance.v-1.match');

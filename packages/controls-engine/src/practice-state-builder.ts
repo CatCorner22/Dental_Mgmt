@@ -19,7 +19,7 @@ import {
   type ChannelCoverageRow,
   type EnforcementByChannel,
 } from "./coverage";
-import { activeDecisions, governingDecision, type ControlDecision } from "./decisions";
+import { activeDecisions, governingDecision, latestDecisionFor, type ControlDecision } from "./decisions";
 import { findKnowledgeRisks } from "./engine";
 import { assignmentsFromGrants, type GrantRow } from "./grants";
 import type { PracticeState } from "./practice-state";
@@ -74,23 +74,34 @@ export interface BuiltPracticeState {
 export function controlDecisionInputs(
   decisions: ControlDecision[],
   sodConflicts?: SodDetectionReport["conflicts"],
+  asOf?: string,
 ): {
   residualAcceptedControlIds: Set<string>;
   compensatingByControlId: Record<string, string[]>;
 } {
   const residualAcceptedControlIds = new Set<string>();
   const compensatingByControlId: Record<string, string[]> = {};
-  for (const d of activeDecisions(decisions)) {
-    if (d.subjectKind !== "control") continue;
-    if (d.kind === "accept_residual") residualAcceptedControlIds.add(d.subjectId);
-    if (d.kind === "compensate") (compensatingByControlId[d.subjectId] ??= []).push(d.note);
+  // Only the latest decision on a subject governs it, and one past its
+  // review date governs nothing: nothing auto-renews (docs/13 item 21).
+  const current = (d: ControlDecision | undefined): ControlDecision | undefined =>
+    d && !(asOf && d.reviewBy != null && d.reviewBy < asOf) ? d : undefined;
+  const controlIds = new Set(
+    activeDecisions(decisions)
+      .filter((d) => d.subjectKind === "control")
+      .map((d) => d.subjectId),
+  );
+  for (const controlId of controlIds) {
+    const d = current(latestDecisionFor(decisions, "control", controlId));
+    if (!d) continue;
+    if (d.kind === "accept_residual") residualAcceptedControlIds.add(controlId);
+    if (d.kind === "compensate") (compensatingByControlId[controlId] ??= []).push(d.note);
   }
   if (sodConflicts) {
     for (const t of CONTROL_TEMPLATES) {
       const live = sodConflicts.filter((c) => t.ruleIds.includes(c.ruleId));
       if (live.length === 0) continue;
       const allAccepted = live.every(
-        (c) => governingDecision(c, decisions)?.kind === "accept_residual",
+        (c) => current(governingDecision(c, decisions))?.kind === "accept_residual",
       );
       if (allAccepted) residualAcceptedControlIds.add(t.id);
     }
@@ -103,8 +114,9 @@ export function deriveControlsRegistry(
   sod: SodDetectionReport,
   coverage: ChannelCoverageRow[],
   decisions: ControlDecision[],
+  asOf?: string,
 ): ControlItem[] {
-  const inputs = controlDecisionInputs(decisions, sod.conflicts);
+  const inputs = controlDecisionInputs(decisions, sod.conflicts, asOf);
   return CONTROL_TEMPLATES.map((t) => {
     const live = sod.conflicts.filter((c) => t.ruleIds.includes(c.ruleId));
     const channelNotes = coverage
@@ -178,7 +190,7 @@ export function buildPracticeState(input: BuildPracticeStateInput): BuiltPractic
     },
     crimeStats: ILLUSTRATIVE_CRIME_STATS,
   };
-  const firstInputs = controlDecisionInputs(input.decisions);
+  const firstInputs = controlDecisionInputs(input.decisions, undefined, input.asOf);
   const firstPass = detectSodConflicts(seed, {
     assignments,
     dualReleaseMitigatedRuleIds: mitigated,
@@ -197,10 +209,10 @@ export function buildPracticeState(input: BuildPracticeStateInput): BuiltPractic
   });
   const detectOptions = {
     dualReleaseMitigatedRuleIds: mitigated,
-    ...controlDecisionInputs(input.decisions, firstPass.conflicts),
+    ...controlDecisionInputs(input.decisions, firstPass.conflicts, input.asOf),
   };
   const sod = detectSodConflicts({ ...seed, staff }, { assignments, ...detectOptions });
-  const controls = deriveControlsRegistry(sod, coverage, input.decisions);
+  const controls = deriveControlsRegistry(sod, coverage, input.decisions, input.asOf);
   const state: PracticeState = { ...seed, controls, staff };
   return {
     state,

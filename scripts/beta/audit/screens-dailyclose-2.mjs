@@ -11,7 +11,7 @@
 //      marked, because there the store write must survive.
 //   3. A collapsed <details> still lays out with a non-zero box in this Chromium, so "visible prose" is decided by
 //      ancestry (closest('details')) plus computed visibility, never by box size.
-export default ({ ctx, go, hop, press, click, txt, box, state, events, rec, FILE }) => {
+export default ({ ctx, go, hop, open, press, click, txt, box, state, events, rec, FILE }) => {
   const blank = async (p) => { await p.goto('about:blank'); };
   const words = (s) => (s || '').trim().split(/\s+/).filter(Boolean).length;
   const flat = (s) => (s || '').replace(/\s+/g, ' ').trim();
@@ -94,7 +94,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec, FILE
       try {
         // Leg 1: Daily Close with the tile and the variance location open.
         await go(p, '#/owner/close');
-        await click(p, 'close.tied.tile'); await p.waitForTimeout(120);
+        await open(p, 'close.tied.tile'); await p.waitForTimeout(120);
         if (!(await p.$('[data-testid="close.tender.card"]'))) { await click(p, 'close.location.loc-3'); await p.waitForTimeout(120); }
         const closeChips = await chips(p);
         // Leg 2: Practice risk on its own document, so leg 1's open tile cannot leak through dailyclose.js's module state
@@ -284,7 +284,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec, FILE
           v.tender = 'cash'; v.amountCents = 55555;                              // the row's basis and money
           return { locationName: S.locations.find((l) => l.id === 'loc-3').name, tender: v.tender, amountCents: v.amountCents };
         });
-        await click(p, 'close.tied.tile'); await p.waitForTimeout(120);
+        await open(p, 'close.tied.tile'); await p.waitForTimeout(120);
         if (!(await p.$('[data-testid="close.variance.v-1.match"]'))) { await click(p, 'close.location.loc-3'); await p.waitForTimeout(120); }
         const cardText = flat(await p.evaluate(() => { const e = document.querySelector('[aria-label="Variance v-1"]'); return e ? e.textContent : null; }));
         // The card's own "tender · location · date" line, read as its own node: sibling spans concatenate in textContent

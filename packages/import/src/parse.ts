@@ -14,19 +14,19 @@ export function parseCurveHeroReport(
 
   switch (reportKind) {
     case "day_sheet":
-      rows = parseCurveHeroDaySheet(content);
+      rows = parseCurveHeroDaySheet(content, warnings);
       break;
     case "ar_aging":
-      rows = parseCurveHeroArAging(content);
+      rows = parseCurveHeroArAging(content, warnings);
       break;
     case "deposit_slip":
-      rows = parseCurveHeroDepositSlip(content);
+      rows = parseCurveHeroDepositSlip(content, warnings);
       break;
     case "patient_header":
-      rows = parseCurveHeroPatientHeader(content);
+      rows = parseCurveHeroPatientHeader(content, warnings);
       break;
     case "coverage_header":
-      rows = parseCurveHeroCoverageHeader(content);
+      rows = parseCurveHeroCoverageHeader(content, warnings);
       break;
     default:
       throw new Error(`Unsupported Curve Hero report kind: ${reportKind}`);

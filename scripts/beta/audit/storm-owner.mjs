@@ -2,7 +2,7 @@
 // (dailyclose.js), Roles (roles.js) and the approver's phone card (phone.js). Default position is NOT reproduced:
 // every check measures the breach it claims, carries the precondition values in its evidence, and closes its
 // context in `finally`.
-export default ({ ctx, go, hop, click, txt, state, events, rec }) => {
+export default ({ ctx, go, hop, open, click, txt, state, events, rec }) => {
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
   const since = async (p, seq, kind) => (await events(p)).filter((e) => e.seq > seq && (!kind || e.kind === kind)).map((e) => ({ seq: e.seq, kind: e.kind, code: e.code, table: e.table, id: e.id, testid: e.testid }));
   const refusals = (p) => p.evaluate(() => [...document.querySelectorAll('.refusal')].map((r) => ({ code: r.dataset.code || null, verb: ((r.querySelector('[data-testid="refusal.verb"]') || {}).textContent || '').trim(), control: ((r.querySelector('[data-testid="refusal.control"]') || {}).textContent || '').trim() })));
@@ -23,7 +23,7 @@ export default ({ ctx, go, hop, click, txt, state, events, rec }) => {
     async 'A-storm-owner-1'(b) {
       const { c, p } = await ctx(b);
       try {
-        await go(p, '#/owner/close?outage=1'); await click(p, 'close.tied.tile');
+        await go(p, '#/owner/close?outage=1'); await open(p, 'close.tied.tile');
         const seq = await lastSeq(p);
         const pressedMatch = await click(p, 'close.variance.v-1.match');
         const afterMatch = { refusals: await refusals(p), events: await since(p, seq, 'refusal') };
@@ -125,7 +125,7 @@ export default ({ ctx, go, hop, click, txt, state, events, rec }) => {
     async 'A-storm-owner-7'(b) {
       const { c, p } = await ctx(b);
       try {
-        await go(p, '#/owner/close'); await click(p, 'close.tied.tile');
+        await go(p, '#/owner/close'); await open(p, 'close.tied.tile');
         const before = (await state(p)).disclosures.length; const seq = await lastSeq(p);
         const pressed = await click(p, 'close.variance.v-1.investigate');
         const rows = await p.evaluate(() => [...document.querySelectorAll('[aria-label="Variance v-1"] .dc-sentences li')].map((e) => e.textContent.trim()));
@@ -237,7 +237,7 @@ export default ({ ctx, go, hop, click, txt, state, events, rec }) => {
     async 'A-storm-owner-14'(b) {
       const { c, p } = await ctx(b, 420, 860);
       try {
-        await go(p, '#/owner/close'); await click(p, 'close.tied.tile'); await p.waitForTimeout(150);
+        await go(p, '#/owner/close'); await open(p, 'close.tied.tile'); await p.waitForTimeout(150);
         const src = await p.$$eval('.dc-loc .small.muted.grow', (l) => l.map((e) => ({ text: e.textContent.trim(), sw: e.scrollWidth, cw: e.clientWidth, h: Math.round(e.getBoundingClientRect().height) })));
         const chip = await p.$eval('[data-testid="close.tender.card"] .chip', (e) => ({ text: e.textContent.trim(), right: Math.round(e.getBoundingClientRect().right), tableRight: Math.round(e.closest('.dc-detail').getBoundingClientRect().right) })).catch(() => null);
         const o = { viewport: 420, src, chip };

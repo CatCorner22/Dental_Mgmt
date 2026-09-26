@@ -662,7 +662,7 @@ describe.skipIf(!adminUrl)("Precog controls (live)", () => {
   it("freezes a snapshot with both versions and serves it back", async () => {
     const stored = await tx((d) => takeSnapshot(d, { tenantId: tenant.id, actor: asOwner, trigger: "manual" }));
     expect(stored.snapshot.scoringVersion).toBe("precog-residual-v1.1.0");
-    expect(stored.snapshot.rulebookVersion).toBe("0.3.0");
+    expect(stored.snapshot.rulebookVersion).toBe("0.3.1");
     expect(stored.snapshot.headline.unmitigatedCritical).toBeGreaterThanOrEqual(1);
     expect(stored.snapshot.assumptions.some((a) => /Payroll transmission/.test(a))).toBe(true);
 

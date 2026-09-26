@@ -39,3 +39,12 @@ export function mapDaySheetRow(row: DaySheetRow): DaySheetLedgerMapping | null {
 export function importCurveIdempotencyKey(runId: string, rowNumber: number): string {
   return `import:curve:${runId}:${rowNumber}`;
 }
+
+/**
+ * Names a posting by the file it came from and the line in that file, so the
+ * same export staged into a second run posts nothing new, while a different
+ * export with an identical line still posts.
+ */
+export function importCurveRowIdempotencyKey(fileSha256: string, rowNumber: number): string {
+  return `import:curve:file:${fileSha256}:${rowNumber}`;
+}

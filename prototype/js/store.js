@@ -45,7 +45,8 @@
   /* One PIN rule for every posting verb, the author switch and the phone's step-up: the digits name their owner (an
      account or the day-pass holder) or they refuse. Misses count per device, not per account; the third locks the
      pad for five minutes and writes a practice finding, so a guessed PIN never posts. forUserId: the PIN must be
-     that person's own — a step-up carrying somebody else's PIN is a miss. */
+     that person's own — a step-up carrying somebody else's PIN is a miss. Verifying only reads: the seat moves in
+     the verb that succeeds (openSession), so a refused verb leaves the author where it found it. */
   const PIN_LOCK_MS = 5 * 60 * 1000;
   const PIN_WHY = 'No account carries that PIN. The posting freezes the poster the PIN names, so it cannot post under a guess. Three misses lock this device for five minutes.';
   const lockedOut = () => refuse('pin_locked', 'Wait five minutes — device locked', 'Close', 'Three PINs in a row matched nobody, so this device takes no PIN for five minutes. The lock is on the device, not on any account, and the misses are on record as a practice finding.');
@@ -58,7 +59,7 @@
     // without saying so, and the first temp's 8001 then counted as a miss toward the device lock.
     const pass = livePasses().find((d) => d.pin === pin);
     const who = S.users.find((x) => x.pin && x.pin === pin) || (pass ? passUser(pass) : null);
-    if (who && (!forUserId || who.id === forUserId)) { lock.misses = 0; if (pass) S.tempUser = who; return { ok: true, user: who }; }
+    if (who && (!forUserId || who.id === forUserId)) { lock.misses = 0; return { ok: true, user: who }; }
     lock.misses += 1;
     if (lock.misses >= 3) { lock.misses = 0; lock.until = Date.now() + PIN_LOCK_MS; pinLockout(); return lockedOut(); }
     return refuse('pin_no_match', 'Retype the PIN — no match', 'Enter PIN', PIN_WHY);
@@ -79,8 +80,9 @@
   const patient = (pid) => S.patients.find((p) => p.id === pid);
   const appt = (aid) => S.appointments.find((a) => a.id === aid);
   const encounter = (eid) => S.encounters.find((e) => e.id === eid);
-  // The pass holder is an account too: the pad verified 8001 and then refused the session it names.
-  const user = (uid) => S.users.find((u) => u.id === uid) || (S.tempUser && S.tempUser.id === uid ? tempSeat() : null);
+  // The pass holder is an account too: the pad verified 8001 and then refused the session it names. Every live pass
+  // resolves by its own id, not only the one in the seat, so a second approver on another pass is a person here.
+  const user = (uid) => S.users.find((u) => u.id === uid) || (S.tempUser && S.tempUser.id === uid ? tempSeat() : null) || (String(uid || '').startsWith(PASS_ID) ? livePasses().filter((d) => PASS_ID + d.id === uid).map(passUser)[0] || null : null);
   const carrierName = (cid) => (S.carriers.find((c) => c.id === cid) || {}).name || '—';
   const NOT_FOUND = { appointment: 'Open a scheduled appointment', encounter: 'Open a chart from the Board', patient: 'Search for the patient', claim: 'Open a claim from Money Desk', request: 'Open a request from Approvals' };
   const notFound = (what) => refuse('notfound', 'Open ' + what + ' from a list', NOT_FOUND[what] || 'Go back', 'The id in the address does not name a row in this practice. Nothing was read and nothing was written.');
@@ -89,14 +91,16 @@
   const NO_PASS = { id: 'u-temp', name: 'No day pass issued', short: 'No day pass', role: 'temp', entitlements: [], noPass: true };
   /* Which passes are live is the store's to say, once: a pass is live until it is revoked or its shift end plus the
      30-minute grace has passed on the store clock. Roles prints this state on each pass row and verifyPin accepts every
-     live pass's PIN; the temp seat (u-temp, the one persona every pass holder shares) is whichever holder's PIN last
-     verified, the newest pass until one does. */
+     live pass's PIN; the temp seat (the one persona every pass holder shares) is whichever holder the pad last opened a
+     session for, the newest pass until one does. Each pass is its own principal: drafts, sessions, decisions and the
+     same-person rule key on u-pass-<dayPassId>, never on the shared persona. */
   const GRACE_MIN = 30;
+  const PASS_ID = 'u-pass-';
   const passEnds = (dp) => { const [hh, mm] = String(dp.shiftEnd || '23:59').split(':').map(Number); const t = hh * 60 + mm + GRACE_MIN; return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0'); };
   const passState = (dp) => (dp.revokedAt ? 'revoked' : passEnds(dp) <= S.clock.time ? 'ended' : 'live');
   const passLive = (dp) => passState(dp) === 'live';
   const livePasses = () => S.dayPasses.filter(passLive);
-  const passUser = (dp) => ({ id: 'u-temp', name: dp.name, short: dp.name.split(' ')[0], role: dp.role, entitlements: dp.entitlements, dayPass: dp.id, pin: dp.pin });
+  const passUser = (dp) => ({ id: PASS_ID + dp.id, name: dp.name, short: dp.name.split(' ')[0], role: dp.role, entitlements: dp.entitlements, dayPass: dp.id, pin: dp.pin });
   // A seat whose pass has ended is nobody again, so the gates that need a pass refuse as before it was issued.
   const tempSeat = () => (S.tempUser && S.dayPasses.some((d) => d.id === S.tempUser.dayPass && passLive(d)) ? S.tempUser : null);
   const currentUser = () => { const p = window.__proto && window.__proto.persona; if (p === 'temp') return tempSeat() || NO_PASS; return user(S.personaUser[p]) || S.users[0]; };
@@ -104,11 +108,19 @@
   const noPass = (verb) => (currentUser().noPass ? refuse('entitlement', verb, 'Open Roles', NO_PASS_WHY) : null);
   /* One entitlement rule: the seat carries one of the grants or the verb refuses and names a seat that does. */
   const needs = (u, ents, verb, control, why) => (ents.some((e) => (u.entitlements || []).includes(e)) ? null : refuse('entitlement', verb, control, why));
+  /* One amount rule for every verb that puts a number on the ledger: a positive, whole, safe count of cents. The
+     window, the request and the approval all read it, so what one refuses none of the others posts. */
+  const validCents = (n) => Number.isSafeInteger(n) && n > 0;
+  const badAmount = (verb) => refuse('amount_required', verb, 'Go to amount', 'The amount has to be a positive whole number of cents. A value the ledger cannot store would post NaN, a fraction or a credit against the account.');
   /* Money Desk and the Ledger post money, so the seat that runs them carries a billing grant: a pass-less temp and a hygienist
      used to post 37 ERA rows and a write-off under their names while Checkout beside them refused. */
   const BILLING = ['post_payment', 'post_era', 'write_off', 'submit_claims'];
   const bills = (u) => (u.noPass ? refuse('entitlement', 'Issue a day pass before posting', 'Open Roles', NO_PASS_WHY)
     : needs(u, BILLING, 'Ask a seat that posts payments', 'Switch author', u.short + ' carries no billing entitlement, and this posts money against the ledger. The biller, the front desk, Dana or Dr. Reagan post here; the author switch names who.'));
+  /* An 835 is posted by the seat that carries post_era: a payment-only seat posts at the window, not remittances, and a
+     contractual write-off an ERA line carries is a write-off, so Confirm needs write_off as the write-off control does. */
+  const postsEra = (u) => bills(u) || needs(u, ['post_era'], 'Ask a seat that posts remittances', 'Switch author', u.short + ' carries no post_era grant, and this posts an 835 against the ledger. The biller posts remittances here; the author switch names who.');
+  const writesOff = (u) => needs(u, ['write_off'], 'Ask a seat that can write off balances', 'Switch author', u.short + ' carries no write_off grant, and confirming this line writes the contractual difference off. The biller, Dana or Dr. Reagan write off here; the author switch names who.');
   /* A write-off retires what the patient owes and no more: $1,000 against a $410 balance posted and hid a −$590 net,
      and a $100 courtesy beside a $410 cash payment on a $410 window posted a credit nobody paid. */
   const writeoffCap = (amountCents, due) => (amountCents > Math.max(0, due)
@@ -289,6 +301,13 @@
     const open = balances(a.patientId).patientDue + S.procedures.filter((p) => p.encounterId === a.encounterId && !charged(p)).reduce((s, p) => s + p.feeCents, 0);
     return Object.assign({}, seed, { patientCents: Math.min(seed.patientCents, open) });
   }
+  /* The balance a checkout Post leaves to write off against: the ledger plus the charges a filed note releases at Post.
+     The window, the request and the approval all read it, so what one allows none of the others refuses. */
+  function dueAfterPost(pid, aid) {
+    const a = aid ? appt(aid) : null; const enc = a ? encounter(a.encounterId) : null;
+    const deferred = enc && enc.noteFiled ? S.procedures.filter((p) => p.encounterId === enc.id && !charged(p)).reduce((s, p) => s + p.feeCents, 0) : 0;
+    return balances(pid).patientDue + deferred;
+  }
   function postCheckout(aid, form) {
     const a = appt(aid); if (!a) return notFound('appointment');
     const est = windowEstimate(aid);
@@ -307,26 +326,30 @@
     if (form.decision === 'collect' && form.tender && !['card', 'cash', 'check'].includes(form.tender)) return refuse('invalid_input', 'Choose a tender', 'Choose card', 'Card, cash or check are the tenders the day sheet can reconcile. A value outside that list cannot post.');
     if (form.decision === 'collect' && form.amountCents != null && form.amountCents !== '') {
       const typed = Number(form.amountCents);
-      if (!Number.isFinite(typed) || typed <= 0 || !Number.isInteger(typed)) return refuse('amount_required', 'Type a dollar amount to collect', 'Go to amount', 'The amount has to be a positive number of cents. A value the ledger cannot store would post NaN against the account.');
+      if (!validCents(typed)) return badAmount('Type a dollar amount to collect');
     }
     if (S.collectionDecisions.some((d) => d.encounterId === a.encounterId)) return refuse('already_decided', 'Correct this visit from the ledger', 'Open the ledger', 'One typed decision per visit. To change what was collected, post a correction from the ledger: a reversal and a repost, both linked to the original.');
     const encId = a.encounterId; const enc = encounter(encId);
     const procs = S.procedures.filter((p) => p.encounterId === encId);
     const amt = form.decision === 'collect' ? form.amountCents || est.patientCents : 0;
+    const noteFiled = enc && enc.noteFiled;
     // Write-off gate (dual release inside the posting transaction). The request row is written when the
     // biller presses Request approval, not here: writing it at Post created an approval nobody asked for
     // and left the control itself a no-op. After hours nothing is requested either: the hold lifts at 7:30.
     if (form.writeoffCents && form.writeoffCents > 0) {
-      const cap = writeoffCap(form.writeoffCents, Math.max(0, Math.min(est.patientCents - amt, balances(a.patientId).patientDue))); if (cap) return cap;
+      if (!validCents(form.writeoffCents)) return badAmount('Type a write-off in whole cents');
+      // The cap is the balance as it stands after this Post: the charges a filed note releases here count, so a first
+      // visit is measured against what the patient will owe, not against the $0 the ledger shows before Post.
+      const left = dueAfterPost(a.patientId, aid) - amt;
+      const cap = writeoffCap(form.writeoffCents, Math.max(0, Math.min(est.patientCents - amt, left))); if (cap) return cap;
       const gate = evaluateRelease('write_off', form.writeoffCents, u, { pid: a.patientId });
       if (gate.code === 'after_hours') return refuse(gate.code, gate.verb, 'Remove the write-off', gate.why);
-      // The request names the PIN's owner, not the persona at the desk: Dr. Reagan's PIN used to raise a request in Priya's name and then approve it as his own.
-      if (!gate.ok) return Object.assign(refuse(gate.code, gate.verb, 'Request approval', gate.why), { held: true, pendingRequest: { kind: 'write_off', amountCents: form.writeoffCents, reason: form.writeoffReason || 'courtesy', patientId: a.patientId, eligible: gate.eligible, appointmentId: aid, posterId: u.id } });
+      // The request carries the PIN that named the poster, never an id: requestApproval verifies it again, so the request names the PIN's owner and nobody a caller names.
+      if (!gate.ok) return Object.assign(refuse(gate.code, gate.verb, 'Request approval', gate.why), { held: true, pendingRequest: { kind: 'write_off', amountCents: form.writeoffCents, reason: form.writeoffReason || 'courtesy', patientId: a.patientId, eligible: gate.eligible, appointmentId: aid, pin: form.pin || null } });
     }
     // A statement, a plan and the decision carry what is left after the write-off posted beside them: a $410 statement used to queue on a $310 balance.
     const portion = est.patientCents - (form.writeoffCents || 0);
     // Post: charges (if note filed), payment, allocations, decision, self-pay flags in one transaction
-    const noteFiled = enc && enc.noteFiled;
     poster(u);
     const rows = [];
     // charged() is the ledger, not a flag: the seed marks a crown "completed" without setting charged, so the
@@ -352,15 +375,24 @@
     retireChip('checkout', u); if (form.decision === 'collect') retireChip('payment', u);
     return { ok: true, taps: 0 };
   }
-  /* Written when the biller presses Request approval, so the control does the thing its label promises. */
-  function requestApproval(pending, who) {
+  /* Written when the biller presses Request approval, so the control does the thing its label promises. The request
+     is checked as the posting it defers would be: a kind the ledger knows, a requester who posts money, a whole
+     positive amount, and no more than the balance it retires — the approval trusts the row it decides. */
+  const REQUEST_KINDS = ['write_off'];
+  function requestApproval(pending) {
     if (!pending) return notFound('request');
     const off = offline('Wait for the server — approvals are paused'); if (off) return off;
-    const u = who || (pending.posterId && user(pending.posterId)) || currentUser();
+    if (!REQUEST_KINDS.includes(pending.kind)) return refuse('invalid_input', 'Choose a posting the ledger knows', 'Dismiss', 'A request defers one kind of posting, and the ledger knows write-offs here. Nothing was written.');
+    if (!patient(pending.patientId)) return notFound('patient');
+    // The requester is a person the store verified — the PIN's owner, else the seat — never an id or a name the caller passes.
+    const pin = requirePin(pending); if (!pin.ok) return pin; const u = pin.user;
+    const ent = bills(u); if (ent) return ent;
+    if (!validCents(pending.amountCents)) return badAmount('Type an amount above zero');
+    const cap = writeoffCap(pending.amountCents, dueAfterPost(pending.patientId, pending.appointmentId)); if (cap) return cap;
     const open = S.approvals.find((x) => x.status === 'pending' && x.kind === pending.kind && x.patientId === pending.patientId && x.amountCents === pending.amountCents);
     if (open) return { ok: true, requestId: open.id, already: true };
     poster(u);
-    const { posterId, ...rest } = pending;
+    const rest = Object.assign({}, pending); delete rest.pin; delete rest.posterId;
     const req = write('approvals', Object.assign({ id: 'ar-' + nextId.ar++, requestedBy: u.name, requestedById: u.id, status: 'pending', requestedAt: S.clock.time }, rest));
     return { ok: true, requestId: req.id };
   }
@@ -399,24 +431,35 @@
   }
   /* An approver who sends a request back says why: the biller reads the reason on the write-off card, and
      without it the card could name who sent it back but not their line. The reason rides on the request and
-     on the log row, so the decision and its reason are one record. */
+     on the log row, so the decision and its reason are one record.
+     The decider is a person the store verified — the PIN's owner, else the seat with the live session — never the
+     id the caller passes; both decisions need approve_second, a person other than the requester, and on a shared
+     desk a PIN. `approverId` only says whose PIN the step-up must be. */
+  const DECISIONS = ['approved', 'declined'];
   function decideApproval(reqId, approverId, decision, stepup, reason) {
     const r = S.approvals.find((x) => x.id === reqId); if (!r) return notFound('request');
     const off = offline('Wait for the server — approvals are paused'); if (off) return off;
-    const approver = user(approverId) || currentUser();
-    if (r.requestedById === approver.id) return refuse('blocked_same_person', 'Ask someone else to approve this', 'Send back', 'You requested it, so you cannot be its second approver. The rule is enforced on the posting itself, not just on this screen.');
+    if (!DECISIONS.includes(decision)) return refuse('invalid_input', 'Choose Approve or Send back', 'Dismiss', 'A request is approved or sent back; no other decision exists, so the request and its log were not touched.');
     // A step-up is a challenge, not a refusal: it carries no gate identity and never reached the shared component.
-    // An approval's step-up is the approver's own PIN under the one PIN rule; a bare `true` or a colleague's PIN is
-    // no step-up, so Bree's 1111 can no longer approve as Dr. Reagan. A send-back needs none.
-    const needStepup = { ok: false, needsStepup: true, verb: 'Enter your PIN to approve', why: 'Approvals above the high-value band re-verify within two minutes.' };
+    // The step-up is the decider's own PIN under the one PIN rule; a bare `true` or a colleague's PIN is no step-up,
+    // so Bree's 1111 can no longer approve as Dr. Reagan, and nobody sends back in a third party's name.
+    const needStepup = { ok: false, needsStepup: true, verb: 'Enter your PIN to ' + (decision === 'declined' ? 'send back' : 'approve'), why: 'Approvals above the high-value band re-verify within two minutes.' };
+    const seat = currentUser();
+    let approver = seat;
+    if (stepup && stepup.pin) { const v = verifyPin(stepup.pin, approverId || undefined); if (!v.ok) return v; approver = v.user; }
+    else if (approverId && approverId !== seat.id) return needStepup;
+    if (r.requestedById === approver.id) return refuse('blocked_same_person', 'Ask someone else to approve this', 'Send back', 'You requested it, so you cannot be its second approver. The rule is enforced on the posting itself, not just on this screen.');
+    // A second approver is a seat that carries the grant: the phone shows the request to approve_second and the store decides for approve_second alone.
+    const ent = approver.noPass ? refuse('entitlement', 'Ask a second approver to decide this', 'Open Roles', NO_PASS_WHY)
+      : needs(approver, ['approve_second'], 'Ask a second approver to decide this', 'Switch author', approver.short + ' carries no approve_second grant, and a dual release is decided by a distinct seat that does: ' + (r.eligible || []).join(' or ') + '. Nothing was written; the author switch names who decides.'); if (ent) return ent;
     if (!stepup) return needStepup;
-    if (decision === 'approved') { if (!stepup.pin) return needStepup; const v = verifyPin(stepup.pin, approver.id); if (!v.ok) return v; }
+    if (!stepup.pin && (decision === 'approved' || shared())) return needStepup;
     if (r.status && r.status !== 'pending') return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'This request was already ' + r.status + ' by ' + (r.decidedBy || 'someone') + '. Deciding it twice would post the write-off twice; a correction is a reversal and a repost.');
     // The hold is checked when the money would post, not only when it was asked for.
     const ah = decision === 'approved' ? afterHours(r.kind, 'Send back') : null; if (ah) return ah;
     // The cap is re-read against the live balance when the money posts, not only when it was asked for: a $410 approved after
     // the window collected the $410 posted a credit nobody paid. Nothing left refuses; less left settles what is left.
-    const due = decision === 'approved' && r.kind === 'write_off' ? balances(r.patientId).patientDue : null;
+    const due = decision === 'approved' && REQUEST_KINDS.includes(r.kind) ? dueAfterPost(r.patientId, r.appointmentId) : null;
     if (due !== null && due <= 0) return refuse('amount_required', 'Send back — nothing left to write off', 'Send back', 'The balance this request was raised against has since been paid or written off. Approving it now would post a credit nobody paid; send it back so the biller sees why.');
     const postCents = due === null ? r.amountCents : Math.min(r.amountCents, due);
     // The reason rides on the request and on the log row, so the decision and its reason are one record. It is
@@ -436,13 +479,13 @@
     const off = offline('Wait for the server — postings are paused'); if (off) return off;
     const pin = requirePin(extras); if (!pin.ok) return pin; const u = pin.user;
     const ent = bills(u) || needs(u, ['write_off'], 'Ask a seat that can write off balances', 'Switch author', u.short + ' posts payments but carries no write_off grant, and a write-off retires what the patient owes. The biller, Dana or Dr. Reagan write off here; the author switch names who.'); if (ent) return ent;
-    if (!Number.isFinite(amountCents) || amountCents <= 0) return refuse('amount_required', 'Type an amount above zero', 'Go to amount', 'A write-off posts the number you type against the balance, so it cannot be blank, negative, or zero.');
+    if (!validCents(amountCents)) return badAmount('Type an amount above zero');
     const cap = writeoffCap(amountCents, balances(accountPid).patientDue); if (cap) return cap;
     const gate = evaluateRelease('write_off', amountCents, u, { pid: accountPid });
     // The hold takes the write-off off the card; nothing is requested after hours.
     if (gate.code === 'after_hours') return refuse(gate.code, gate.verb, 'Remove the write-off', gate.why);
     if (!gate.ok) {
-      const req = requestApproval({ kind: 'write_off', amountCents, reason, patientId: accountPid, eligible: gate.eligible, appointmentId: null }, u);
+      const req = requestApproval({ kind: 'write_off', amountCents, reason, patientId: accountPid, eligible: gate.eligible, appointmentId: null, pin: extras && extras.pin });
       return Object.assign(refuse(gate.code, gate.verb, 'Request approval', gate.why), { requestId: req.requestId, held: true });
     }
     poster(u);
@@ -479,6 +522,9 @@
     // Save is once only: a second Save on a saved chart is an addendum or nothing. The screen swapped the button
     // for Amend, but two dispatches of one Save wrote two exams.
     if (prior && !(extras && extras.amending)) return refuse('exam_sealed', 'Amend the saved exam with an addendum', 'Start an addendum', 'This visit already carries a saved exam. A saved exam is the record; a change is a dated addendum that links to it, never a second exam.');
+    // A screening scores sextants and cannot amend site depths: once a full chart stands on the visit, the note keeps
+    // that chart's line and an addendum is charted in the full lane.
+    if (mode === 'screening' && S.perioExams.some((e) => e.encounterId === encId && e.mode === 'full')) return refuse('invalid_input', 'Amend the full chart, not a screening', 'Use the full chart lane', 'This visit already carries a full six-point chart. A screening addendum would replace its line in the note with a sentence asking for the chart that already exists; the addendum is charted in the full lane.');
     const amends = prior ? prior.id : null;
     // A licence explains skipped sites; with none skipped there is nothing for it to explain.
     const licence = skipped > 0 ? extras.licence : null;
@@ -499,6 +545,18 @@
     touch('notes', encId);
     retireChip('perio'); retireChip('save');
     return { ok: true, exam };
+  }
+  /* One recall status per patient (A5): the perio card, the Chairs card and the rail all read this row. The latest
+     exam row is the record (an addendum supersedes the exam it amends); a screening coded 3 or 4 books the full chart,
+     a full chart with a 5 mm pocket books perio maintenance, anything else the 6-month recall. */
+  function perioRecall(patientId) {
+    const exams = S.perioExams.filter((e) => e.patientId === patientId).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    const last = exams[exams.length - 1];
+    if (!last) return null;
+    const screening = last.mode === 'screening';
+    const fullChartDue = screening && (last.sextantCodes || []).some((c) => c === '3' || c === '4');
+    const deepPockets = !screening && (last.deepest || 0) >= 5;
+    return { examId: last.id, date: last.date, mode: last.mode, fullChartDue, deepPockets, sev: fullChartDue || deepPockets ? 'required' : 'clear', word: fullChartDue ? 'Full chart due' : deepPockets ? '4-month perio maintenance with BWX' : '6-month recall' };
   }
   /* Charting is clinical work under a licence: a pass-less temp is nobody, and a seat with neither a licence nor a
      clinical entitlement (the front desk) does not write on the chart. The front desk used to paint chart events
@@ -542,9 +600,13 @@
     const fee = (S.cdt[cdtCode] || [null, 0])[1];
     if (wholePatient(cdtCode)) { tooth = null; surfaces = []; }
     else {
-      const t = Number(tooth);
+      // One spelling per tooth and surface set: the row and the duplicate key hold the normalised value, so
+      // 14, "14" and O/o are the same paint and a second one is refused, not billed.
+      const t = /^\d{1,2}$/.test(String(tooth)) ? parseInt(String(tooth), 10) : NaN;
       if (!Number.isInteger(t) || t < 1 || t > 32) return refuse('tooth_required', 'Choose a tooth on the chart', 'Go to the odontogram', 'A procedure that belongs to a tooth has to name one of the 32. A number outside that range would write a chart event nobody can find on the odontogram.');
       if (!Array.isArray(surfaces) || surfaces.some((s) => typeof s !== 'string' || !/^[modbl]$/i.test(s))) return refuse('invalid_input', 'Choose surfaces from the chart', 'Go to the odontogram', 'Surfaces are the letters M, O, D, B and L from the odontogram. A string or an empty value would throw when the note tried to print them.');
+      const order = 'MODBL';
+      tooth = t; surfaces = [...new Set(surfaces.map((s) => s.toUpperCase()))].sort((a, b) => order.indexOf(a) - order.indexOf(b));
     }
     temporality = temporality || 'today';
     if (!['today', 'planned', 'existing'].includes(temporality)) return refuse('invalid_input', 'Choose today, planned or existing', 'Go to temporality', 'Every paint is today, planned or existing. A value outside that list would write a procedure the visit cannot bill.');
@@ -642,6 +704,8 @@
     const prior = S.sessions.filter((x) => !x.endedAt).pop() || null;
     if (prior) { prior.endedAt = S.clock.time; prior.endedBy = who.name; touch('sessions', prior.id); }
     const row = write('sessions', { id: 'ses-' + nextId.ses++, userId: who.id, actor: who.name, device: (window.__proto && window.__proto.device) || 'desk', startedAt: S.clock.time, supersedes: prior ? prior.id : null, endedAt: null });
+    // The temp seat moves in the same transaction as the session row: no refused verb, and no PIN that only verified, moves it.
+    if (who.dayPass) S.tempUser = who;
     return { ok: true, session: row };
   }
   /* The approvals one person is waiting on. Four surfaces counted this and disagreed: the Andon filtered by
@@ -667,7 +731,11 @@
     const named = [...text.matchAll(/(?:#|\btooth\s+#?)(\d{1,2})\b/gi)].map((m) => Number(m[1]));
     const wrong = named.find((t) => !toothed.some((c) => c.tooth === t));
     if (wrong != null && toothed.length) {
-      const c = toothed[0];
+      // The chart tooth offered for a wrong token is the paint its own sentence names (by procedure name), else
+      // a live tooth the note has not named yet: the correct #NN tokens are never the ones rewritten.
+      const sentence = text.split(/[.;!?\n]/).find((s) => new RegExp('(?:#|\\btooth\\s+#?)' + wrong + '\\b', 'i').test(s)) || '';
+      const byName = toothed.find((ce) => { const nm = ((S.cdt[ce.cdt] || [''])[0].match(/^[A-Za-z]+/) || [])[0]; return nm && new RegExp('\\b' + nm + '\\b', 'i').test(sentence); });
+      const c = byName || toothed.find((ce) => !named.includes(ce.tooth)) || toothed[0];
       killers.push({ code: 'contradiction', verb: 'Use the chart tooth #' + c.tooth, control: 'Use chart tooth', fix: 'contradiction', why: 'The note says #' + wrong + ' and the chart says #' + c.tooth + '. A wrong-tooth claim is denied or paid wrongly, so the two must agree before filing.', noteTooth: wrong, chartTooth: c.tooth });
     }
     // The assessment is the dentist's to write, so a hygienist is not handed a control that lands on a readonly field: her
@@ -737,7 +805,7 @@
     const b = S.eraBatches.find((x) => x.id === batchId); if (!b) return notFound('claim');
     const off = offline('Wait for the server — postings are paused'); if (off) return off;
     if (b.status === 'deltas' || b.status === 'posted') return refuse('already_decided', 'Confirm the delta lines below', 'Go to the deltas', 'The matched lines of this batch are already posted. What is left is the lines where the payer differs from the claim.');
-    const pin = requirePin(extras); if (!pin.ok) return pin; const ent = bills(pin.user); if (ent) return ent; const u = poster(pin.user); let posted = 0;
+    const pin = requirePin(extras); if (!pin.ok) return pin; const ent = postsEra(pin.user); if (ent) return ent; const u = poster(pin.user); let posted = 0;
     // A line is posted when its ledger row exists: the status flips here, with the row, never in the seed.
     for (const l of S.eraLines.filter((x) => x.batchId === batchId && x.status === 'matched')) {
       if (!S.ledger.some((e) => e.eraLineId === l.id)) ledgerRow({ id: id('le'), kind: 'insurance_payment', patientId: l.patientId, amountCents: -l.paidCents, effective: S.tenant.today, posted: S.tenant.today, actor: u.name, actorKind: 'user', locationId: 'loc-1', payer: b.payer, eraLineId: l.id, gl: 'ins_ar_primary', chargeIds: eraTargets(l, S.tenant.today) });
@@ -751,11 +819,15 @@
      aside is still undecided (its money is off the ledger), so a batch with one held line used to read "Batch complete". */
   const OPEN_LINE = ['delta', 'held'];
   function settleBatch(batchId) { const b = S.eraBatches.find((x) => x.id === batchId); if (b && b.status === 'deltas' && !S.eraLines.some((l) => l.batchId === batchId && OPEN_LINE.includes(l.status))) { b.status = 'posted'; touch('eraBatches', b.id); } }
+  // One 835 line is decided once: the ledger rows that cite it are the record, whatever status the line was moved to since.
+  const decidedLine = (l) => l.status === 'posted' || l.status === 'disputed' || S.ledger.some((e) => e.eraLineId === l.id);
+  const DECIDED_WHY = 'This line is already decided. A correction is a reversal and a repost, both linked to the original.';
   function eraConfirm(lineId, extras) {
     const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — postings are paused'); if (off) return off;
-    if (l.status === 'posted' || l.status === 'disputed') return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'This line is already decided. A correction is a reversal and a repost, both linked to the original.');
-    if (l.status === 'denied') return refuse('already_decided', 'Appeal or attach — this line paid nothing', 'Open the denial', 'A denied line paid $0. Confirming it would post a $0 insurance payment and a write-off of the whole expected amount; the denial worklist is where that line is worked.');
-    const pin = requirePin(extras); if (!pin.ok) return pin; const ent = bills(pin.user); if (ent) return ent;
+    if (decidedLine(l)) return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', DECIDED_WHY);
+    const claim = S.claims.find((x) => x.id === l.claimId);
+    if (l.status === 'denied' || (claim && claim.status === 'denied')) return refuse('already_decided', 'Appeal or attach — this line paid nothing', 'Open the denial', 'A denied line paid $0. Confirming it would post a $0 insurance payment and a write-off of the whole expected amount; the denial worklist is where that line is worked.');
+    const pin = requirePin(extras); if (!pin.ok) return pin; const ent = postsEra(pin.user) || (l.expectedCents - l.paidCents > 0 ? writesOff(pin.user) : null); if (ent) return ent;
     // A contractual write-off is still a write-off: the after-hours hold applies to it as to any other.
     const gate = evaluateRelease('write_off', l.expectedCents - l.paidCents, pin.user, { contractual: true });
     if (!gate.ok) return refuse(gate.code, gate.verb, 'Set aside', gate.why);
@@ -766,12 +838,24 @@
     settleBatch(l.batchId);
     return { ok: true };
   }
-  function eraHold(lineId, extras) { const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — the line cannot be held'); if (off) return off; const pin = requirePin(extras); if (!pin.ok) return pin; const ent = bills(pin.user); if (ent) return ent; const u = poster(pin.user); l.status = 'held'; touch('eraLines', l.id); write('claimEvents', { id: id('cev'), claimId: l.claimId, kind: 'era.line_held', actor: u.name }); settleBatch(l.batchId); return { ok: true }; }
+  // Set aside is for a line still to be decided: a posted line is corrected from the ledger and a denied one is worked from the denial.
+  const HOLDABLE = ['matched', 'unmatched', 'delta'];
+  function eraHold(lineId, extras) {
+    const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — the line cannot be held'); if (off) return off;
+    if (l.status === 'held') return { ok: true, already: true };
+    if (l.status === 'denied') return refuse('already_decided', 'Appeal or attach — this line paid nothing', 'Open the denial', 'A denied line paid $0 and is worked from the denial worklist. Setting it aside would let Confirm post its whole expected amount as a write-off.');
+    if (!HOLDABLE.includes(l.status)) return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'This line is already ' + l.status + '. A correction is a reversal and a repost, both linked to the original; setting it aside would let it post again.');
+    const pin = requirePin(extras); if (!pin.ok) return pin; const ent = postsEra(pin.user); if (ent) return ent; const u = poster(pin.user);
+    l.status = 'held'; touch('eraLines', l.id); write('claimEvents', { id: id('cev'), claimId: l.claimId, kind: 'era.line_held', actor: u.name }); settleBatch(l.batchId); return { ok: true };
+  }
   /* Dispute writes the appeal row its Why promises: one packet per line, citing the fee-schedule line the payer paid under.
      It used to write the claim event alone, so the decided row said "An appeal row cites the fee-schedule line" over none. */
   function eraDispute(lineId, extras) {
     const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — the dispute cannot send'); if (off) return off;
-    const pin = requirePin(extras); if (!pin.ok) return pin; const ent = bills(pin.user); if (ent) return ent; const u = poster(pin.user);
+    // Dispute is for a line still to be decided: posted money is corrected from the ledger and a denied line is worked from the denial.
+    if (l.status === 'denied') return refuse('already_decided', 'Appeal or attach — this line paid nothing', 'Open the denial', 'A denied line paid $0 and is worked from the denial worklist, where the appeal is built. Disputing it here would write a second packet over the same claim.');
+    if (decidedLine(l)) return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', DECIDED_WHY);
+    const pin = requirePin(extras); if (!pin.ok) return pin; const ent = postsEra(pin.user); if (ent) return ent; const u = poster(pin.user);
     l.status = 'disputed'; touch('eraLines', l.id);
     write('claimEvents', { id: id('cev'), claimId: l.claimId, kind: 'era.contract_variance_disputed', actor: u.name });
     const packet = S.appealPackets.find((p) => p.eraLineId === lineId) || write('appealPackets', { id: id('ap'), claimId: l.claimId, eraLineId: lineId, kind: 'contract_variance', slots: { feeSchedule: true, eraSegment: true, letter: true }, citation: 'Fee schedule allows ' + Proto.ui.money(l.expectedCents) + ' for ' + l.cdt.toUpperCase() + '; ERA paid ' + Proto.ui.money(l.paidCents) + ' (CARC ' + l.carc + ')', patientSentence: 'We are asking your plan about the amount it paid. You owe nothing while they review.' });
@@ -947,7 +1031,7 @@
     // nobody else's; the pad shows it once, at issue. Minted past every seeded PIN, so it collides with none.
     const pin = '80' + String(nextId.dp).padStart(2, '0');
     const dp = write('dayPasses', { id: 'dp-' + nextId.dp++, name: form.name, role, requestedRole: form.role, locationId: form.location, shiftEnd: form.end, entitlements: ents, expiresAt: form.end + ' + 30 min grace', createdBy: currentUser().name, credentialId: pv.credential ? pv.credential.id : null, sodDecision: decision || null, pin });
-    write('userEntitlements', { id: 'ue-' + nextId.ue++, userId: 'u-temp', entitlements: ents, expiresAt: dp.expiresAt, grantedBy: currentUser().name });
+    write('userEntitlements', { id: 'ue-' + nextId.ue++, userId: PASS_ID + dp.id, entitlements: ents, expiresAt: dp.expiresAt, grantedBy: currentUser().name });
     if (decision) for (const c of (blocking.length ? blocking : pv.conflicts)) write('controlDecisions', { id: 'dec-' + nextId.dec++, kind: decision, ruleId: c.id, rulePair: c.pair, severity: c.severity, dayPassId: dp.id, reviewBy: '2026-10-03', by: currentUser().name });
     // The newest pass takes the temp seat; the earlier passes stay live and their PINs still name their holders.
     S.tempUser = passUser(dp);
@@ -1025,5 +1109,5 @@
   reset = function (seedNum) { const s = _reset(seedNum); for (const t of TABLES) if (!s[t]) s[t] = []; return s; };
 
   const LICENCE_WORDS = { implant: 'implant', crown_margin: 'crown margin', not_tolerated: 'patient could not tolerate probing', third_molar_absent: 'third molar absent' };
-  Proto.store = { reset, get, railStateFor, prefsFor, setPref, resetPrefs, PREF_OPTIONS, PREF_DEFAULTS, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, windowEstimate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, clinician, addTag, readyForExam, wholePatient, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, claimAction, disclose, sendStatement, raiseStatement, openStatement, requirePin, verifyPin, pinLockout, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, passState, passLive, livePasses, railSteps, retireChip, search, refuse, notFound };
+  Proto.store = { reset, get, railStateFor, prefsFor, setPref, resetPrefs, PREF_OPTIONS, PREF_DEFAULTS, LICENCE_WORDS, patient, appt, encounter, user, carrierName, currentUser, balances, explain, allocate, charged, windowEstimate, arrive, seat, reverify, pingChair, postCheckout, evaluateRelease, decideApproval, requestApproval, approvalSentence, requestWriteoff, savePerio, perioRecall, clinician, addTag, readyForExam, wholePatient, chartPaint, chartUndo, dismissTag, needsAttachment, openSession, pendingApprovalsFor, noteKillers, fileNote, eraPostMatched, eraConfirm, eraHold, eraDispute, buildAppeal, sendAppeal, claimAction, disclose, sendStatement, raiseStatement, openStatement, requirePin, verifyPin, pinLockout, matchVariance, clearVariance, reviewDecision, closeDay, previewDayPass, addDayPass, passState, passLive, livePasses, railSteps, retireChip, search, refuse, notFound };
 })();

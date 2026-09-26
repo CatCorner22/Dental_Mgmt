@@ -16,7 +16,7 @@ export interface Queryable {
 }
 
 export const CHAIN_QUERY = `
-SELECT tenant_id, kind, payload, prev_hash, hash, occurred_at, seq
+SELECT tenant_id, actor_user_id, kind, payload, prev_hash, hash, occurred_at, seq
   FROM domain_event
  ORDER BY tenant_id, seq`;
 
@@ -89,6 +89,7 @@ export function groupByTenant(rows: Record<string, unknown>[]): Map<string, Chai
     const list = chains.get(tenantId) ?? [];
     list.push({
       tenantId,
+      actorUserId: row.actor_user_id === null || row.actor_user_id === undefined ? null : String(row.actor_user_id),
       kind: String(row.kind),
       payload: row.payload,
       prevHash: String(row.prev_hash),

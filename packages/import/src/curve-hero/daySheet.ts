@@ -1,7 +1,7 @@
-import { headerIndex, parseCsv, parseIsoDate, parseMoneyToCents, requireColumns } from "../csv";
+import { headerIndex, parseCsv, parseIsoDate, parseMoneyToCents, requireColumns, skipRow } from "../csv";
 import type { DaySheetRow } from "../types";
 
-export function parseCurveHeroDaySheet(content: string): DaySheetRow[] {
+export function parseCurveHeroDaySheet(content: string, warnings: string[] = []): DaySheetRow[] {
   const table = parseCsv(content);
   if (table.length === 0) return [];
   const headers = table[0];
@@ -27,10 +27,11 @@ export function parseCurveHeroDaySheet(content: string): DaySheetRow[] {
   const descriptionIdx = headerIndex(headers, ["Description", "Memo"]);
 
   const rows: DaySheetRow[] = [];
-  for (const cells of table.slice(1)) {
+  table.slice(1).forEach((cells, i) => {
     const businessDate = parseIsoDate(cells[dateIdx] ?? "");
     const amountCents = parseMoneyToCents(cells[amountIdx] ?? "");
-    if (!businessDate || amountCents === null) continue;
+    if (!businessDate) return skipRow(warnings, i + 1, "date_unparseable", `invalid date "${cells[dateIdx] ?? ""}"`);
+    if (amountCents === null) return skipRow(warnings, i + 1, "amount_unparseable", `invalid amount "${cells[amountIdx] ?? ""}"`);
     rows.push({
       kind: "day_sheet",
       businessDate,
@@ -42,6 +43,6 @@ export function parseCurveHeroDaySheet(content: string): DaySheetRow[] {
       providerCode: providerIdx >= 0 ? (cells[providerIdx] ?? "").trim() || null : null,
       description: descriptionIdx >= 0 ? (cells[descriptionIdx] ?? "").trim() || null : null,
     });
-  }
+  });
   return rows;
 }

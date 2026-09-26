@@ -13,7 +13,7 @@
 //  3. A collapsed <details> still lays out with a non-zero box in this Chromium, so "is this text on
 //     screen" walkers skip the body of a closed <details> explicitly (only its <summary> is on screen).
 
-export default ({ ctx, go, hop, press, click, txt, box, state, events, rec, FILE }) => {
+export default ({ ctx, go, hop, railOf, press, click, txt, box, state, events, rec, FILE }) => {
 
 // The readiness row ids carry seed id segments (`board.readiness.row.<seedId>.<control>`), and a fix round
 // can legitimately change which seed id a row names. A probe that hard-codes one stops pressing anything the
@@ -83,7 +83,7 @@ const readinessRow = (p, control) => p.evaluate((c) => {
           board.readinessControl = await label(p, await readinessRow(p, 'reverify-all'));
           // Rail, same patient, same appointment. The Coverage summary is a closed <details> on open: its box
           // measures non-zero either way (rule 3), so it is opened explicitly and `open` is asserted.
-          await click(p, 'board.card.a-1042.rail'); await p.waitForTimeout(150);
+          await click(p, await railOf(p, 'a-1042')); await p.waitForTimeout(150);
           board.railBefore = await p.evaluate(() => { const d = [...document.querySelectorAll('#rail details.rail-sum')].find((x) => (x.querySelector('summary') || {}).getAttribute && x.querySelector('summary').getAttribute('data-testid') === 'rail.sum.coverage'); if (!d) return null; const r = d.getBoundingClientRect(); return { open: d.open, boxW: Math.round(r.width), boxH: Math.round(r.height) }; });
           await click(p, 'rail.sum.coverage'); await p.waitForTimeout(150);
           board.railCoverage = await p.evaluate(() => {

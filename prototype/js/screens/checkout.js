@@ -139,7 +139,9 @@
     return [...st.selfPay].filter((pid) => { const p = S.procedures.find((x) => x.id === pid && x.encounterId === a.encounterId); return p && !p.selfPayRestricted && payCents >= p.feeCents; });
   }
   // A statement or plan bills what the write-off typed beside it leaves: the row the store writes carries the same number.
-  const afterWriteoff = (st, est) => { const wo = st.writeoffOpen ? cents(st.writeoffStr) : 0; return Math.max(0, est.patientCents - (wo > 0 ? wo : 0)); };
+  // Once the write-off is approved it is on the ledger and the estimate already carries it: the typed figure is spent, so the
+  // promise, the read-back and the Post all read the estimate alone.
+  const afterWriteoff = (st, est) => { const approved = st.heldReq && st.heldReq.status === 'approved'; const wo = !approved && st.writeoffOpen ? cents(st.writeoffStr) : 0; return Math.max(0, est.patientCents - (wo > 0 ? wo : 0)); };
   const AMOUNT_WHY = 'A payment posts the number in the field against the balance, so it cannot be blank, negative, or a value that is not a number. To take nothing at the window, choose Nothing due today.';
   const WRITEOFF_WHY = 'A write-off posts the number in the field against the balance, so it cannot be blank, negative, or a value that is not a number. Remove the write-off to post without one.';
 
@@ -177,7 +179,7 @@
       // The request row is written when this control is pressed, by the store verb that owns it. Post writes
       // nothing here, so a control labelled "Request approval" performs the request it names.
       st.refusalNode = refusal({ code: res.code, verb: res.verb, control: res.control || 'Request approval', why: res.why, onControl: () => {
-        // The pending request names the PIN poster (store.js posterId), so the phone's same-person rule reads the right name.
+        // The pending request carries the PIN that posted, so the store names the requester itself and the phone's same-person rule reads the right name.
         const out = Proto.store.requestApproval(res.pendingRequest);
         if (!out.ok) { st.refusalNode = refusal(withControl(out, r, a, st)); rerender(r, 'refusal.control'); return; }
         st.heldReq = Proto.store.get().approvals.find((x) => x.id === out.requestId) || null;

@@ -14,6 +14,7 @@ import {
 } from "@pms/db";
 import type { AppDb } from "../db/client";
 import { TENANT_CHAIN_LOCK_SQL } from "../auth/postgresStore";
+import { requireTenantBankAccount } from "../bank/accounts";
 import { loadActivePolicy } from "../controls/policy";
 import { loadStaff } from "../controls/staff";
 import { canSealDeposits, type SealVerdict } from "./seal";
@@ -56,6 +57,7 @@ async function appendEvent(
   const hash = hashDomainEvent({
     prevHash,
     tenantId,
+    actorUserId,
     kind,
     payload,
     occurredAt: at.toISOString(),
@@ -180,6 +182,7 @@ export async function applyStagedDeposits(
   }
 ): Promise<{ created: number }> {
   const now = input.now ?? new Date();
+  await requireTenantBankAccount(db, input.tenantId, input.bankAccountId);
   const staged = await db
     .select({
       stagedRowId: importStagedRows.id,

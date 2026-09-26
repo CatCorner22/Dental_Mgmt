@@ -316,6 +316,7 @@ export const CONFLICT_RULES: ConflictRule[] = [
     why: "Can grant self extra rights then conceal activity.",
     fraudPath: "Elevate privileges, alter audit trail",
     compensatingDefaults: ["Owner-only admin role", "Access change log review"],
+    linkedControlId: "c-pms-admin",
   },
   {
     id: "rule-admin-writeoff",

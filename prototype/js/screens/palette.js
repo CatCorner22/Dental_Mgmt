@@ -288,7 +288,7 @@
       onInput: (ev) => { st.dob = ev.target.value; if (st.dobTouched && parseDob(ev.target.value)) clearDobError(); },
     });
     st.dobInput = dobInput;
-    st.dobField = Proto.ui.field('Date of birth', dobInput, { required: true, hint: 'MM/DD/YYYY, for example 04/12/1978. The second identifier: ask the patient, or read it from the appointment card.' });
+    st.dobField = Proto.ui.field('Date of birth', dobInput, { required: true, hint: 'MM/DD/YYYY, for example 07/04/1990. The second identifier: ask the patient, or read it from the appointment card.' });
     st.errors = h('div', { class: 'pal-errors', hidden: true });
     st.gate = h('div', { class: 'pal-gate' });
     st.go = btn('Open chart', { testid: 'palette.confirm.go', kind: 'reversible', onClick: confirmDob });
@@ -333,7 +333,7 @@
   function validateDob() {
     const v = st.dob.trim();
     if (!v) { refuseDob('Enter the date of birth to open the chart.'); return false; }
-    if (!parseDob(v)) { refuseDob('Use MM/DD/YYYY, for example 04/12/1978.'); return false; }
+    if (!parseDob(v)) { refuseDob('Use MM/DD/YYYY, for example 07/04/1990.'); return false; }
     clearDobError();
     return true;
   }

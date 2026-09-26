@@ -1,7 +1,7 @@
 // Swarm audit, lens moneydesk-close: prototype/js/screens/moneydesk.js, screens/dailyclose.js and their store verbs.
 // Default position is NOT reproduced: every check measures the breach it claims and carries the values it read.
 // Each check closes its browser context in `finally` so one failure cannot hang the run.
-export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => {
+export default ({ ctx, go, hop, open, press, click, txt, box, state, events, rec }) => {
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
   const after = async (p, seq) => (await events(p)).filter((e) => e.seq > seq);
   const range = (ev) => (ev.length ? [ev[0].seq, ev[ev.length - 1].seq] : null);
@@ -82,7 +82,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       const { c, p, errs } = await ctx(b);
       try {
         await go(p, '#/owner/close');
-        await click(p, 'close.tied.tile'); await p.waitForTimeout(150);
+        await open(p, 'close.tied.tile'); await p.waitForTimeout(150);
         const seq0 = await lastSeq(p);
         const clicked = await click(p, 'close.variance.v-1.clear'); await p.waitForTimeout(150);
         const ev = await after(p, seq0);

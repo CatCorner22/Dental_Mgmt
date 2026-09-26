@@ -9,11 +9,11 @@ import {
   uuidv7,
 } from "@pms/db";
 import type { DaySheetRow } from "@pms/import";
-import { createPostEntry } from "@pms/ledger";
+import { createPostEntry, type PostEntryFn, type PostEntryInput, type PostResult } from "@pms/ledger";
 import type { AppDb } from "../db/client";
 import { TENANT_CHAIN_LOCK_SQL } from "../auth/postgresStore";
 import { makePostgresLedgerWriter } from "../ledger/postgresWriter";
-import { importCurveIdempotencyKey, mapDaySheetRow } from "./map";
+import { importCurveRowIdempotencyKey, mapDaySheetRow } from "./map";
 
 type PatientRef = {
   patientId: string;
@@ -112,6 +112,7 @@ async function appendEvent(
   const hash = hashDomainEvent({
     prevHash,
     tenantId,
+    actorUserId,
     kind,
     payload,
     occurredAt: at.toISOString(),
@@ -143,9 +144,35 @@ async function resolveLocationId(
     .from(locations)
     .where(eq(locations.tenantId, tenantId));
   const match = rows.find((row) => row.name.trim().toLowerCase() === normalized);
-  const resolved = match?.id ?? rows[0]?.id ?? null;
+  // An unknown location code is a row error, never a silent post to whichever
+  // location happens to sort first.
+  const resolved = match?.id ?? null;
   cache.set(normalized, resolved);
   return resolved;
+}
+
+/**
+ * Posts one staged row inside its own savepoint so a writer failure (a
+ * constraint the kernel does not model) becomes that row's error instead of
+ * poisoning the transaction and aborting every other row of the run.
+ */
+async function postRow(db: AppDb, post: PostEntryFn, input: PostEntryInput): Promise<PostResult> {
+  await db.execute(sql`SAVEPOINT import_row`);
+  try {
+    const result = await post(input);
+    await db.execute(sql`RELEASE SAVEPOINT import_row`);
+    return result;
+  } catch (error) {
+    await db.execute(sql`ROLLBACK TO SAVEPOINT import_row`);
+    const pg = error as { code?: string; constraint?: string };
+    return {
+      ok: false,
+      code: pg.constraint ? `writer_${pg.constraint}` : `writer_${pg.code ?? "error"}`,
+      verb: "Cannot post",
+      control: "Ledger",
+      why: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 async function resolvePatientRef(
@@ -260,6 +287,14 @@ export async function planCurveHeroImport(
         continue;
       }
 
+      // A day sheet names no procedure, and a charge cannot post without one
+      // (ledger_entries_charge_requires_procedure); that is this row's error.
+      if (mapping.kind === "charge") {
+        plan.errors.push({ runId: run.id, rowNumber: staged.rowNumber, code: "charge_requires_procedure" });
+        skipped += 1;
+        continue;
+      }
+
       plan.entries.push({
         runId: run.id,
         rowNumber: staged.rowNumber,
@@ -271,7 +306,7 @@ export async function planCurveHeroImport(
         amountCents: mapping.amountCents,
         effectiveDate: payload.businessDate,
         memo: payload.description ?? null,
-        idempotencyKey: importCurveIdempotencyKey(run.id, staged.rowNumber),
+        idempotencyKey: importCurveRowIdempotencyKey(run.fileSha256, staged.rowNumber),
       });
     }
 
@@ -317,7 +352,7 @@ export async function writeCurveHeroImport(
     let runSkipped = run.skipped;
 
     for (const entry of plan.entries.filter((e) => e.runId === run.runId)) {
-      const postResult = await post({
+      const postResult = await postRow(db, post, {
         tenantId: input.tenantId,
         accountId: entry.accountId,
         patientId: entry.patientId,

@@ -29,9 +29,9 @@ export const CHAIN_STEPS: readonly PipelineStep[] = [
   },
   {
     id: "hash-agrees",
-    promise: "Each event hash is SHA-256 of prev_hash, tenant, kind, payload, and time.",
+    promise: "Each event hash is SHA-256 of prev_hash, tenant, actor, kind, payload, and time.",
     evidence: "Recomputing the digest from those fields matches the stored hash.",
-    ifAbsent: "A row was rewritten or assembled from two different events.",
+    ifAbsent: "A row was rewritten, its actor re-attributed, or it was assembled from two different events.",
   },
   {
     id: "links-hold",
@@ -44,6 +44,16 @@ export const CHAIN_STEPS: readonly PipelineStep[] = [
     promise: "A tenant's events are numbered 1, 2, 3 … with no gap, when a seq is present.",
     evidence: "event[n].seq === n + 1 for every row read in seq order.",
     ifAbsent: "A row was removed from the middle or the chain was rebuilt from two sources.",
+  },
+];
+
+/** Checked by verify:chain:record, which alone may read audit_chain_checks. */
+export const RECORD_STEPS: readonly PipelineStep[] = [
+  {
+    id: "head-recorded",
+    promise: "A chain still contains the last head it was recorded with, at the same position.",
+    evidence: "domain_event at seq = recorded event_count has hash = recorded head_hash.",
+    ifAbsent: "The tail was deleted or the chain rebuilt; a shorter chain that is internally consistent would otherwise be published.",
   },
 ];
 

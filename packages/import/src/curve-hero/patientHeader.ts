@@ -1,7 +1,7 @@
-import { headerIndex, parseCsv, parseIsoDate, requireColumns } from "../csv";
+import { headerIndex, parseCsv, parseIsoDate, requireColumns, skipRow } from "../csv";
 import type { PatientHeaderRow } from "../types";
 
-export function parseCurveHeroPatientHeader(content: string): PatientHeaderRow[] {
+export function parseCurveHeroPatientHeader(content: string, warnings: string[] = []): PatientHeaderRow[] {
   const table = parseCsv(content);
   if (table.length === 0) return [];
   const headers = table[0];
@@ -24,10 +24,11 @@ export function parseCurveHeroPatientHeader(content: string): PatientHeaderRow[]
   const guarantorIdx = headerIndex(headers, ["Guarantor Name", "Guarantor"]);
 
   const rows: PatientHeaderRow[] = [];
-  for (const cells of table.slice(1)) {
+  table.slice(1).forEach((cells, i) => {
     const patientMrn = (cells[mrnIdx] ?? "").trim();
     const dateOfBirth = parseIsoDate(cells[dobIdx] ?? "");
-    if (!patientMrn || !dateOfBirth) continue;
+    if (!patientMrn) return skipRow(warnings, i + 1, "patient_mrn_required", "blank patient MRN");
+    if (!dateOfBirth) return skipRow(warnings, i + 1, "date_unparseable", `invalid date of birth "${cells[dobIdx] ?? ""}"`);
     rows.push({
       kind: "patient_header",
       patientMrn,
@@ -37,6 +38,6 @@ export function parseCurveHeroPatientHeader(content: string): PatientHeaderRow[]
       locationCode: (cells[locationIdx] ?? "").trim(),
       guarantorName: guarantorIdx >= 0 ? (cells[guarantorIdx] ?? "").trim() || null : null,
     });
-  }
+  });
   return rows;
 }

@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export default ({ ctx, go, hop, press, click, txt, box, state, events, rec, FILE }) => {
+export default ({ ctx, go, hop, open, press, click, txt, box, state, events, rec, FILE }) => {
   const active = (p) => p.evaluate(() => { const a = document.activeElement; return !a || a === document.body ? 'BODY' : ((a.getAttribute && a.getAttribute('data-testid')) || a.tagName); });
   const live = (p) => p.evaluate(() => (document.getElementById('live') || {}).textContent || '');
   const words = (s) => (s || '').trim().split(/\s+/).filter(Boolean).length;
@@ -64,7 +64,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec, FILE
       try {
         await go(p, '#/hygienist/close');
         const me = await p.evaluate(() => { const u = Proto.store.currentUser(); return { id: u.id, name: u.name, role: u.role, entitlements: u.entitlements }; });
-        await click(p, 'close.tied.tile'); await p.waitForTimeout(120);
+        await open(p, 'close.tied.tile'); await p.waitForTimeout(120);
         const shown = !!(await p.$('[data-testid="close.variance.v-1.clear"]'));
         const before = (await state(p)).variances.find((v) => v.id === 'v-1');
         const seqBefore = lastSeq(await events(p));
@@ -102,7 +102,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec, FILE
         await click(p, 'money.writeoff.p-306'); await click(p, 'money.writeoff.reason.courtesy'); await click(p, 'money.writeoff.post'); await p.waitForTimeout(150);
         const pending = (await state(p)).approvals.filter((a) => a.status === 'pending').map((a) => a.id);
         await hop(p, '#/owner/close'); await p.waitForTimeout(150);
-        await click(p, 'close.tied.tile'); await click(p, 'close.variance.v-1.investigate'); await click(p, 'close.closeday'); await p.waitForTimeout(120);
+        await open(p, 'close.tied.tile'); await click(p, 'close.variance.v-1.investigate'); await click(p, 'close.closeday'); await p.waitForTimeout(120);
         const dom = await p.evaluate(() => [...document.querySelectorAll('#canvas [data-testid]')].map((e) => e.getAttribute('data-testid')).filter((t) => /^close\./.test(t)));
         const notInContract = [...new Set(dom)].filter((t) => !matches(t));
         const claimed = ['close.counts.why', 'close.decision.d-1.why', 'close.approval.ar-1.open', 'close.sod.roles'];
@@ -130,7 +130,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec, FILE
         await click(p, 'close.decision.d-1.retire'); await p.waitForTimeout(150);
         const h1 = await health();
         const S1 = await state(p); const d1 = S1.decisions.find((d) => d.id === 'd-1').status;
-        await click(p, 'close.tied.tile'); await p.waitForTimeout(100);
+        await open(p, 'close.tied.tile'); await p.waitForTimeout(100);
         await click(p, 'close.variance.v-1.match'); await p.waitForTimeout(150);
         const h2 = await health();
         const S2 = await state(p); const v2 = S2.variances.find((v) => v.id === 'v-1').status; const rr3 = S2.reconciliation.find((r) => r.id === 'rr-loc-3').state;

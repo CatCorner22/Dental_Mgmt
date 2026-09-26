@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays } from "@pms/controls-engine";
-import { assertNoProblems, e2eEnabled, openBrowser, startProductionApp, type E2eApp, type E2eBrowser } from "./harness";
+import { assertNoProblems, e2eEnabled, freshCodeForTest, openBrowser, startProductionApp, type E2eApp, type E2eBrowser } from "./harness";
 import { currentCodeForTest } from "../lib/auth/totp";
 import { DEV_MFA_SECRET, DEV_PASSWORD, DEV_TENANTS, DEV_USERS } from "@pms/db/seed-data";
 import { uuidv7 } from "@pms/db";
@@ -360,7 +360,7 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
     // Addressed to a seat, never merely to a reader.
     expect(text).toContain("THE PRACTICE");
     await b.audit("practice risk, what people owe");
-  });
+  }, 150_000);
 
   it("shows the message that would be sent and where, sends nothing, and quotes nobody", async () => {
     // Increment 1.58. The screen and the message are not the same surface: the
@@ -1268,7 +1268,7 @@ describe.skipIf(!e2eEnabled)("Practice Risk page (browser, production server)", 
 
     await page().fill('input[name="username"]', "ridgeview-owner");
     await page().fill('input[name="password"]', DEV_PASSWORD);
-    await page().fill('input[name="totp"]', currentCodeForTest("ridgeview-owner", secret!, Date.now()));
+    await page().fill('input[name="totp"]', await freshCodeForTest("ridgeview-owner", secret!));
     await page().click('button[type="submit"]');
     await page().getByRole("heading", { name: "Today's board" }).waitFor({ timeout: 60_000 });
   }, 180_000);

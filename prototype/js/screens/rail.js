@@ -74,12 +74,30 @@
     if (!Proto.store.patient(pid)) { announce(Proto.store.notFound('patient').verb); return; }
     if (rail.pid !== pid) { rail.explain = false; rail.msg = null; }
     rail.pid = pid; if (r) rail.r = r;
+    // Close gives the keyboard back to the control that opened the rail, so the opener is remembered by test id.
+    const act = document.activeElement; const opener = act && act.closest ? act.closest('[data-railopen]') : null;
+    rail.openerId = opener ? opener.getAttribute('data-testid') : (opts && opts.keepFocus ? rail.openerId : null);
     const box = document.getElementById('rail'); if (box) box.hidden = false;
     renderRail();
     syncOpeners();
     if (!(opts && opts.keepFocus)) { const c = document.querySelector('[data-testid="rail.close"]'); if (c) c.focus(); }
   }
   function close() { rail.pid = null; rail.msg = null; const box = document.getElementById('rail'); if (box) { box.replaceChildren(); box.hidden = true; } syncOpeners(); }
+  /* Focus after Close: the opener if it is still on the screen, else a control in its card, else the canvas heading.
+     What it lands on is made focusable first (as ui.js landFocus does): a card or a fresh h1 carries no tabindex, and
+     focus() on it is a no-op that left the keyboard on body. */
+  const FOCUSABLE = 'button:not([disabled]), input, select, textarea, a[href], [tabindex]';
+  function closeToOpener() {
+    const pid = rail.pid; const id = rail.openerId; close(); rail.openerId = null;
+    const opener = id ? document.querySelector('[data-testid="' + id + '"]') : null;
+    const card = id ? document.querySelector('[data-testid="' + id.replace(/\.rail$/, '') + '"]') : null;
+    const target = opener || (pid ? document.querySelector('[data-railopen="' + pid + '"]') : null)
+      || (card && (card.querySelector(FOCUSABLE) || card))
+      || document.querySelector('#canvas h1') || document.getElementById('canvas');
+    if (!target) return;
+    if (!target.matches(FOCUSABLE)) target.setAttribute('tabindex', '-1');
+    target.focus();
+  }
   function isOpen() { return !!rail.pid; }
   function button(pid, r, testid) {
     const p = Proto.store.patient(pid);
@@ -121,8 +139,9 @@
     return [h('div', { text: nextLine }), h('div', { class: 'muted', text: lastLine })];
   }
   function recallLine(pid) {
-    const a = apptsToday(pid).find((x) => x.perioLast); const pe = S().perioExams.filter((x) => x.patientId === pid).sort((x, y) => y.date.localeCompare(x.date))[0];
-    if (pe && pe.date === today()) return 'Perio charted today; next full chart in 12 months';
+    const a = apptsToday(pid).find((x) => x.perioLast); const rc = Proto.store.perioRecall(pid);
+    // The status word is the store's, the same one the perio card and the Chairs card print.
+    if (rc && rc.date === today()) return 'Perio charted today; ' + rc.word;
     // One months-since helper serves the Chairs delta strip and this line; the local days ÷ 30.44 rounding read a
     // month older than the Chairs card for any last chart in the first days of a month.
     if (a && a.perioLast) { const monthsAgo = (Proto.screens.chairs || {}).monthsAgo; const m = monthsAgo ? monthsAgo(a.perioLast) : null; return 'Perio due: last full chart ' + longDate(a.perioLast) + (m == null ? '' : ' (' + m + (m === 1 ? ' month ago)' : ' months ago)')); }
@@ -165,7 +184,7 @@
     const explainRows = rail.explain ? Proto.store.explain(rail.pid) : [];
     const explainBody = rail.explain ? h('div', { class: 'explain' }, explainRows.length ? explainRows.map((x) => h('p', { class: 'sentence' }, boldAmounts(x.sentence))) : h('p', { class: 'sentence muted', text: explainEmpty(false) })) : null;
     box.replaceChildren(...[
-      h('div', { class: 'rail-head' }, h('div', null, h('div', { class: 'name', text: displayName(p.name, priv) }), h('div', { class: 'rail-ids', text: identLine(p, priv) })), btn('Close', { kind: 'quiet', class: 'compact', testid: 'rail.close', ariaLabel: 'Close the patient rail', onClick: () => { close(); const c = document.getElementById('canvas'); if (c) c.focus(); } })),
+      h('div', { class: 'rail-head' }, h('div', null, h('div', { class: 'name', text: displayName(p.name, priv) }), h('div', { class: 'rail-ids', text: identLine(p, priv) })), btn('Close', { kind: 'quiet', class: 'compact', testid: 'rail.close', ariaLabel: 'Close the patient rail', onClick: closeToOpener })),
       alertbar, tabs,
       rail.msg ? h('p', { class: 'rail-msg', text: rail.msg }) : null,   // the verb line is announced once, from tabGo
       summary('appts', 'Appointments', ...apptSummary(rail.pid)),
@@ -344,7 +363,13 @@
         h('div', { class: 'btnrow' },
           btn('Explain', { kind: 'reversible', testid: 'ledger.explain', pressed: pressed(st.explain), onClick: () => { st.explain = !st.explain; rerender(r, 'ledger.explain'); } }),
           // The accessible name leads with the printed words and stays under twelve (CLT-label-words); the same name as Checkout's.
-          btn('Show patient', { kind: 'reversible', testid: 'ledger.showpatient', pressed: pressed(st.patientVoice), ariaLabel: st.patientVoice ? 'Show patient: on; press to return to the staff view' : 'Show patient: the same rows in plain words', onClick: () => { st.patientVoice = !st.patientVoice; if (st.patientVoice) st.explain = true; rerender(r, 'ledger.showpatient'); } })),
+          // The patient view is a screen disclosure: the reveal follows the store's row, the same verb the phone card and Daily Close write.
+          btn('Show patient', { kind: 'reversible', testid: 'ledger.showpatient', pressed: pressed(st.patientVoice), ariaLabel: st.patientVoice ? 'Show patient: on; press to return to the staff view' : 'Show patient: the same rows in plain words', onClick: () => {
+            if (st.patientVoice) { st.patientVoice = false; rerender(r, 'ledger.showpatient'); return; }
+            const res = Proto.store.disclose({ patientId: pid, purpose: 'patient_view', recordIds: S().ledger.filter((e) => e.patientId === pid).map((e) => e.id) });
+            if (res && res.ok) { st.patientVoice = true; st.explain = true; }
+            rerender(r, 'ledger.showpatient');
+          } })),
         st.explain ? explainBlock(pid, st, r) : null),
       st.asofOpen ? section('As of', asOfBlock(pid, st, r, all)) : null,
       section('Rows', h('p', { class: 'small muted', text: 'Newest first by posted date. Reversals and reposts name the row they correct; nothing is edited in place.' }), ledgerTable(rows, st)),

@@ -155,7 +155,7 @@ describe("unreviewed decision detector", () => {
     const c = overdueDecisionCandidate(due[0]!);
     expect(c).toMatchObject({ subjectId: "d1", severity: "medium", detail: { reviewBy: "2026-09-01", daysOverdue: 16 } });
     expect(c.detail.sentence).toBe(
-      'A "Accept residual" decision on sod finding u-1:rule-cash-rec was due for review on 2026-09-01 and has been past that date for 16 days. It still governs until a new decision supersedes it.'
+      'A "Accept residual" decision on sod finding u-1:rule-cash-rec was due for review on 2026-09-01 and has been past that date for 16 days. It no longer governs: the subject reads as undecided until a new decision is recorded.'
     );
     expect(String(c.detail.sentence)).not.toMatch(/Riley/);
   });

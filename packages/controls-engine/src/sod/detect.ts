@@ -286,9 +286,13 @@ export function detectSodConflicts(
             ),
           });
         } else {
+          // One id per pair whichever order the grants arrived in, so a
+          // decision recorded on the finding keeps governing it.
+          const [pa, pb] = [a, b].sort();
+          const [pfa, pfb] = [fa, fb].sort();
           conflicts.push({
-            id: `${person.personId}:family:${a}:${b}`,
-            ruleId: `family-${fa}-${fb}`,
+            id: `${person.personId}:family:${pa}:${pb}`,
+            ruleId: `family-${pfa}-${pfb}`,
             personId: person.personId,
             personName: person.personName,
             role: person.role,
@@ -340,7 +344,7 @@ export function detectSodConflicts(
           row,
           col,
           status: "conflict",
-          ruleIds: [`family-${entFamily(row)}-${entFamily(col)}`],
+          ruleIds: [`family-${[entFamily(row), entFamily(col)].sort().join("-")}`],
           severity: "family",
         });
       } else {

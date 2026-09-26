@@ -59,6 +59,7 @@ async function appendEvent(
   const hash = hashDomainEvent({
     prevHash,
     tenantId,
+    actorUserId,
     kind,
     payload,
     occurredAt: occurredAt.toISOString(),

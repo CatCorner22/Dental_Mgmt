@@ -14,5 +14,6 @@
 //        a column, and a person holding it alongside a custody, reconciliation
 //        or authorization duty gains a family-level finding that was always
 //        true and never scored.
-export const CONTROL_RULEBOOK_VERSION = "0.3.0";
+// 0.3.1: rule-admin-pay links to c-pms-admin; family conflict ids are order-independent; a matching force_dual outranks any loosening exception.
+export const CONTROL_RULEBOOK_VERSION = "0.3.1";
 export const SCORING_VERSION = "precog-residual-v1.1.0";

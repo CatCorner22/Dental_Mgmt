@@ -150,6 +150,11 @@ export interface AuthStore {
   }): Promise<void>;
   consumeRecoveryCeremony(id: string, consumedAt: Date): Promise<void>;
   setPassword(userId: string, passwordHash: string, passwordChangedAt: Date): Promise<void>;
+  /**
+   * Records the TOTP step that just signed the user in. Resolves false when
+   * that step, or a later one, was already accepted: the code is a replay.
+   */
+  consumeMfaStep(userId: string, step: number): Promise<boolean>;
   getThrottle(key: string): Promise<ThrottleRow | null>;
   putThrottle(row: ThrottleRow): Promise<ThrottleRow>;
   applyLock(key: string, lockedUntil: Date, now: Date): Promise<ThrottleRow | null>;

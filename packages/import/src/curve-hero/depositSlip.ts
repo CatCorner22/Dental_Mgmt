@@ -1,7 +1,7 @@
-import { headerIndex, parseCsv, parseIsoDate, parseMoneyToCents, requireColumns } from "../csv";
+import { headerIndex, parseCsv, parseIsoDate, parseMoneyToCents, requireColumns, skipRow } from "../csv";
 import type { DepositSlipRow } from "../types";
 
-export function parseCurveHeroDepositSlip(content: string): DepositSlipRow[] {
+export function parseCurveHeroDepositSlip(content: string, warnings: string[] = []): DepositSlipRow[] {
   const table = parseCsv(content);
   if (table.length === 0) return [];
   const headers = table[0];
@@ -22,10 +22,11 @@ export function parseCurveHeroDepositSlip(content: string): DepositSlipRow[] {
   const referenceIdx = headerIndex(headers, ["Reference", "Check #", "Check Number"]);
 
   const rows: DepositSlipRow[] = [];
-  for (const cells of table.slice(1)) {
+  table.slice(1).forEach((cells, i) => {
     const depositDate = parseIsoDate(cells[dateIdx] ?? "");
     const amountCents = parseMoneyToCents(cells[amountIdx] ?? "");
-    if (!depositDate || amountCents === null) continue;
+    if (!depositDate) return skipRow(warnings, i + 1, "date_unparseable", `invalid date "${cells[dateIdx] ?? ""}"`);
+    if (amountCents === null) return skipRow(warnings, i + 1, "amount_unparseable", `invalid amount "${cells[amountIdx] ?? ""}"`);
     rows.push({
       kind: "deposit_slip",
       depositDate,
@@ -34,6 +35,6 @@ export function parseCurveHeroDepositSlip(content: string): DepositSlipRow[] {
       amountCents,
       reference: referenceIdx >= 0 ? (cells[referenceIdx] ?? "").trim() || null : null,
     });
-  }
+  });
   return rows;
 }

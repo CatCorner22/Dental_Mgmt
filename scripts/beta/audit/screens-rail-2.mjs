@@ -4,7 +4,7 @@
 // CSS consequences are read through getComputedStyle and geometry only; document.styleSheets is never scanned
 // (cssRules throws over file:// and a catch-and-continue would silently return an empty list).
 // Each check closes its browser context in `finally` so one failure cannot hang the run.
-export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => {
+export default ({ ctx, go, hop, railOf, press, click, txt, box, state, events, rec }) => {
   // A button as it stands in the DOM: identity class, aria-pressed word, and whether ui.btn's ✓ mark is present.
   const button = (p, tid) => p.evaluate((t) => {
     const e = document.querySelector('[data-testid="' + t + '"]');
@@ -35,14 +35,14 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       const { c, p } = await ctx(b, 1280, 900);
       try {
         await go(p, '#/frontdesk/board');
-        const before = await button(p, 'board.card.a-1042.rail');
-        const pressed = await click(p, 'board.card.a-1042.rail'); await p.waitForTimeout(200);
+        const before = await button(p, await railOf(p, 'a-1042'));
+        const pressed = await click(p, await railOf(p, 'a-1042')); await p.waitForTimeout(200);
         const after = await button(p, 'board.card.a-1042.rail');
         const rail = await railInfo(p);
         const railPid = await p.evaluate(() => Proto.screens.rail.isOpen());
         // Comparator in the same run: leave and come back, which makes the Board rebuild the card.
         await hop(p, '#/frontdesk/money'); await hop(p, '#/frontdesk/board'); await p.waitForTimeout(150);
-        const afterRouteRedraw = await button(p, 'board.card.a-1042.rail');
+        const afterRouteRedraw = await button(p, await railOf(p, 'a-1042'));
         const railStillOpen = await railInfo(p);
         const reproduced = pressed && rail.open && railPid && !!after && after.pressed === 'false' && after.pressmark === false
           && !!afterRouteRedraw && afterRouteRedraw.pressed === 'true' && afterRouteRedraw.pressmark === true;
@@ -63,7 +63,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       try {
         await go(p, '#/frontdesk/board?device=phone');
         const beforeOpen = await p.evaluate(() => { const cv = document.getElementById('canvas'); const r = cv.getBoundingClientRect(); return { canvasY: Math.round(r.y), canvasH: Math.round(r.height), railHidden: document.getElementById('rail').hidden, shellFlexDirection: getComputedStyle(document.querySelector('.shell')).flexDirection }; });
-        const opened = await click(p, 'board.card.a-1042.rail'); await p.waitForTimeout(250);
+        const opened = await click(p, await railOf(p, 'a-1042')); await p.waitForTimeout(250);
         const hitTest = () => p.evaluate(() => {
           const r = document.getElementById('rail'), cv = document.getElementById('canvas');
           const bx = (e) => { const b = e.getBoundingClientRect(); return { y: Math.round(b.y), h: Math.round(b.height) }; };
@@ -198,7 +198,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       const { c, p } = await ctx(b, 1280, 900);
       try {
         await go(p, '#/frontdesk/board');
-        await click(p, 'board.card.a-1042.rail'); await p.waitForTimeout(200);
+        await click(p, await railOf(p, 'a-1042')); await p.waitForTimeout(200);
         const rail = await railInfo(p);
         const pressedExplain = await click(p, 'rail.explain'); await p.waitForTimeout(200);
         const explainBtn = await button(p, 'rail.explain');

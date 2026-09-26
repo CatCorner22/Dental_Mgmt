@@ -63,6 +63,7 @@ async function appendRestoreDrillEvent(
     const hash = hashDomainEvent({
       prevHash,
       tenantId,
+      actorUserId: null,
       kind: "backup.restore_drill",
       payload,
       occurredAt: occurredAt.toISOString(),

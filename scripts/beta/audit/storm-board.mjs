@@ -3,7 +3,7 @@
 // -8, -11 screen part, -14, -15, -18, -19, -20; invariants-4; shell-nav-14 checkout part).
 // Default position is NOT reproduced: every check measures the breach it claims and carries the measured values.
 // Every check closes its browser context in `finally` so one failure cannot hang the run.
-export default ({ ctx, go, hop, press, click, txt, state, rec }) => {
+export default ({ ctx, go, hop, railOf, press, click, txt, state, rec }) => {
   const tid = (t) => `[data-testid="${t}"]`;
   const focused = (p) => p.evaluate(() => { const a = document.activeElement; return a === document.body ? 'BODY' : (a.getAttribute && a.getAttribute('data-testid')) || a.tagName; });
   const gateCode = (p) => p.evaluate(() => { const r = document.querySelector('.refusal'); return r ? r.dataset.code : null; });
@@ -110,7 +110,7 @@ export default ({ ctx, go, hop, press, click, txt, state, rec }) => {
       const { c, p } = await ctx(b, 1280, 900);
       try {
         await go(p, '#/frontdesk/board');
-        await click(p, 'board.card.a-1044.rail'); await p.waitForTimeout(200);
+        await click(p, await railOf(p, 'a-1044')); await p.waitForTimeout(200);
         const o = await p.evaluate(() => {
           const side = document.querySelector('.board-layout > .stack:last-child');
           const railOpen = !document.getElementById('rail').hidden;

@@ -307,6 +307,7 @@ export function createPostgresStore(
         const hash = hashDomainEvent({
           prevHash,
           tenantId: input.tenantId,
+          actorUserId: input.actorUserId,
           kind: input.kind,
           payload: input.payload,
           occurredAt: occurredAt.toISOString(),
@@ -490,6 +491,18 @@ export function createPostgresStore(
           .update(users)
           .set({ passwordHash, passwordChangedAt })
           .where(eq(users.id, userId));
+      }, env);
+    },
+    async consumeMfaStep(userId, step) {
+      const user = await this.getUserById(userId);
+      if (!user) return false;
+      return withTenantTransaction(user.tenantId, userId, async (db) => {
+        const updated = await db
+          .update(users)
+          .set({ mfaLastStep: step })
+          .where(and(eq(users.id, userId), or(isNull(users.mfaLastStep), lt(users.mfaLastStep, step))))
+          .returning({ id: users.id });
+        return updated.length > 0;
       }, env);
     },
     async setTenantContext() {

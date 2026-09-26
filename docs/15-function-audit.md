@@ -195,7 +195,7 @@ What the storms did not prove is the same as before, with one addition. The rand
 
 | Measure | Count |
 |---|---|
-| Functions in `prototype/js` (`scripts/audit/inventory.mjs`) | 837 |
+| Functions in `prototype/js` (`scripts/audit/inventory.mjs`) | 847 |
 | Of those, from the registered audited universe of 497 | 486 |
 | Registered functions the fix round removed or renamed | 10 |
 | Registered functions the five storms removed | 1 |
@@ -980,6 +980,7 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `notice` | `screens/phone.js` | 137 | operational | A-storm-owner-2, A-storm2-owner-8 | Names the missing request, announces it and lands focus on the notice, where a pad over a decided or reset request used to close silently |
 | `onApprove` | `screens/phone.js` | 138 | operational | phone.request.<id>.approve (click and Enter). | S1 eventsOpenStepup (click → focus phone.stepup.1, no write); S2 seq 7-8 and 10-11 (two presses, two refusals… |
 | `onDecline` | `screens/phone.js` | 152 | broken → fixed | phone.request.<id>.decline; Enter inside the reason input. | S1 eventsDeclineEmpty (no write); eventsDecline seq 58-59 (key Enter field:true → write:approvalsLog:al-3); d… |
+| `landDecline` | `screens/phone.js` | 200 | operational | onDecline; the step-up pad's Send back. | The confirmation after a send-back the store recorded, whether it needed a PIN (shared desk) or the live session was enough |
 | `simulate` | `screens/phone.js` | 170 | operational | phone.simulate. | S1 events seq 3 and 6 (write:approvals:ar-1, ar-2); simNote; liveAfterSimulate; S4 with afterHours=1 → held w… |
 | `kv` | `screens/phone.js` | 183 | operational | requestCard grid. | S1 requestedAt: ["Patient \| LF · MRN-306 \| Show name","Requested by \| Sam Dawson","Requested at \| 8:40 am… |
 | `requestCard` | `screens/phone.js` | 185 | broken → fixed | render for each pending approval. | S7 cards/cardsRefusalDecline small=[] close=[] at all widths; S1 classes approve "btn irreversible", decline … |
@@ -1015,6 +1016,7 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `syncOpeners` | `screens/rail.js` | 62 | operational | route sweep · frontdesk; route sweep · biller; route sweep · hygienist | V8 recorded 10 executions across 10 driven legs (route sweep · frontdesk; route sweep · biller; route sweep ·… |
 | `open` | `screens/rail.js` | 73 | operational | board.card.a-1042.rail, chairs.card.a-1042.rail, palette.confirm.go, renderLedger, Proto.… | S1 afterOpen (click seq 2); S1b unknown.live 'Patient not found'; S1b afterOpen.name 'Jonah Ortiz' after writ… |
 | `close` | `screens/rail.js` | 82 | operational | rail.close; hashchange to #/signin | S1 afterClose (click seq 43), afterSignin |
+| `closeToOpener` | `screens/rail.js` | 84 | operational | rail.close | S2-shell-board-a11y-3: after Close, document.activeElement is the opener `board.card.a-1044.rail` (falls back to the card, then the canvas heading), never the bare #canvas |
 | `isOpen` | `screens/rail.js` | 83 | operational | shell.render, hashchange listener, MutationObserver | S1 afterOpen.isOpen, afterClose.isOpen |
 | `button` | `screens/rail.js` | 84 | operational | board.js:184, chairs.js:152, checkout.js:239, encounter.js:124 | S1 ariaLabelBtn, afterOpen.focused rail.close, pressedAfter 'false'; S1b api.btnTestid 'rail.open.p-301' |
 | `summaryFor` | `screens/rail.js` | 89 | operational | rail.tab.imaging\|claims\|docs\|profile | S1 tabMsgs.profile.msg; drive2 rail['tab.docs'].text |
@@ -1142,7 +1144,12 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `noPass` | `store.js` | 83 | operational | A-storm-store-6, A-storm2-store-13 | The pass-less temp is refused entitlement with "Open Roles" on every verb, clinical and money alike |
 | `needs` | `store.js` | 85 | operational | A-storm3-store-6, A-storm2-store-5, A-storm2-store-15 | One entitlement rule: the seat carries one of the grants or the verb refuses and names a seat that does |
 | `bills` | `store.js` | 89 | operational | A-storm3-store-6, A-storm2-store-5 | Money Desk, the Ledger and Checkout post money, so the seat carries a billing grant; a hygienist and a pass-less temp posted 37 ERA rows and a write-off |
+| `postsEra` | `store.js` | 92 | operational | S2-approvals-writeoff-era-8 | An 835 is posted, confirmed, held or disputed by a seat that carries post_era; a post_payment-only seat posted 37 insurance payments and opened an appeal |
+| `writesOff` | `store.js` | 93 | operational | S2-approvals-writeoff-era-8 | The contractual write-off an ERA line carries is a write-off, so Confirm needs write_off as the write-off control does; a seat the window refused for lacking write_off confirmed −$50 |
+| `validCents` | `store.js` | 96 | operational | S2-approvals-writeoff-era-4, S2-approvals-writeoff-era-10 | One amount rule for every verb that puts a number on the ledger: a positive, whole, safe count of cents; −5000, NaN, 100.5 and 1e-7 reached the ledger through the request path |
+| `badAmount` | `store.js` | 97 | operational | S2-approvals-writeoff-era-4, S2-approvals-writeoff-era-10 | The refusal validCents raises, verb-first with the amount field as its control |
 | `writeoffCap` | `store.js` | 93 | operational | A-storm-store-15, A-storm2-store-3 | A write-off retires what the patient owes and no more, at request and at Checkout; $1,000 on a $410 balance hid a −$590 net, and $410 cash plus a $100 courtesy posted a credit nobody paid |
+| `dueAfterPost` | `store.js` | — | operational | postCheckout, requestApproval, decideApproval (S2-regress-proto-money-identity-1) | The balance a checkout Post leaves: ledger patientDue plus the charges a filed note releases at Post. One expression for the window cap, the request cap and the approval cap, so a $160 write-off held at a first visit can be requested against the $168 the window shows rather than refused against the $0 ledger. |
 | `openDenial` | `store.js` | 384 | operational | A-regress-3-3, S-moneydesk-close-10 | The account's denied claim with no appeal packet sent; a $50 write-off on p-321 (c-88 denied, unappealed) returns needs_second with a pending request and no ledger row |
 | `afterHours` | `store.js` | 100 | operational | A-storm-store-12, A-storm2-store-4, A-storm3-money-2 | One after-hours rule for refunds and write-offs, with the control the screen acts on; eraConfirm's contractual write-off bypassed it |
 | `allocate` | `store.js` | 109 | operational | Direct call on the seed's busiest ledger from #/biller/ledger; also the sole source for b… | allocate('p-317') over 9 ledger rows (charge, patient_payment) → 5 charges, patientDue 169935, insurancePendi… |
@@ -1170,6 +1177,7 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `decideApproval` | `store.js` | 343 | operational | phone.stepup.submit (approve), phone.request.<id>.decline (decline), pre-check on phone.r… | S2c seq 37-43; S2d seq 12-15 and 26-28; S2c.decideAgainStore writeoffRowsForAr1 2. |
 | `requestWriteoff` | `store.js` | 374 | operational | money.writeoff.post (moneydesk.js:138), phone.simulate (phone.js:119) | S2d seq 7-10; S6 seq 43-52 ledger/le-5002 −10000; S2d seq 33-36 approvals/ar-2; S6.evaluate requestWriteoff_*. |
 | `savePerio` | `store.js` | 394 | operational | perio.save, perio.licence.confirm (perio.js:174) | S4 seq 173-187; S4b omission seq 101-115, screening seq 19-23; S4b.evaluate. |
+| `perioRecall` | `store.js` | 530 | operational | perio.js savedCard, chairs.js perio lines, rail.js recallLine | S2-perio-encounter-lineage-4: one recall word per patient — perio card, Chairs card and rail all read 'Full chart due' after a code-4 screening |
 | `clinician` | `store.js` | 433 | operational | A-storm2-store-13, A-storm2-polish-2, A-storm-enc-9 | One clinician rule for chartPaint, addTag, readyForExam and savePerio: a pass, then a licence or clinical entitlement, else licence_scope with Switch author; perio.js carried its own copy |
 | `addTag` | `store.js` | 439 | operational | perio.tag.save (perio.js:196) | S4 seq 188-195; S4b.evaluate addTag_ok, addTag_unknownEnc ok:true. |
 | `readyForExam` | `store.js` | 446 | operational | chairs.card.<id>.ready (chairs.js:102), encounter killer fix licence (encounter.js:361) | S3 seq 11-15; S5b_hyg seq 6-11; S3b refusal outage; S1.evaluate readyForExam_unknown threw. |
@@ -1191,6 +1199,7 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `eraPostMatched` | `store.js` | 634 | broken → fixed | money.era.era-1.postmatched, Money Desk "P" key (moneydesk.js:63) | S6 seq 1-4; S6.evaluate eraPostMatched_unknown threw. |
 | `settleBatch` | `store.js` | 651 | operational | A-storm-store-17, A-storm2-ledger-7 | The ERA batch posts only when no line is open; a held line keeps it in deltas with a way to decide it |
 | `eraConfirm` | `store.js` | 652 | operational | money.era.line.<id>.confirm (moneydesk.js:100) | S6 seq 5-8; S6.evaluate eraConfirm_twice_store 2, eraConfirm_unknown threw. |
+| `decidedLine` | `store.js` | — | operational | eraConfirm, eraDispute (S2-regress-proto-money-identity-2) | One 835 line is decided once: posted, disputed, or cited by a ledger row. Shared by Confirm and Dispute so a posted line cannot be flipped to disputed with its money still on the ledger. |
 | `eraHold` | `store.js` | 666 | operational | money.era.line.<id>.hold | S6 seq 9-12; S6.evaluate eraHold_unknown threw. |
 | `eraDispute` | `store.js` | 669 | operational | money.era.line.<id>.dispute | S6 seq 13-16; S6.evaluate eraDispute_unknown threw. |
 | `buildAppeal` | `store.js` | 679 | broken → fixed | money.denial.<id>.appeal, denial_suppression control, "A" key (moneydesk.js:151) | S6 seq 17-24; S6.evaluate buildAppeal_unknown threw. |
@@ -1245,6 +1254,7 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `shadowGates` | `ui.js` | 150 | operational | A-storm2-shell-7, A-storm3-shell-4 | Renames gates beneath an open dialog to refusal.prior.* and back on close, so the contract selector resolves to the live gate; a repaint under the dialog keeps the shadow |
 | `dialog` | `ui.js` | 154 | operational | topbar.author → openPinPad (shell.js:85), topbar.search → palette, phone step-up, rail di… | raw.json S5-pin-*.opened {role:dialog, aria-modal:true, label:'Switch author'}, focus pin.key.1; tabwrap forw… |
 | `close` | `ui.js` | 161 | operational | Escape, Cancel, overlay click, hashchange, refusal control 'Keep current author', success… | raw.json S5-pin-desk.dana.afterControl {dialogOpen:false, focus:topbar.author}; S6-topbar-*.searchEscape {pal… |
+| `onHash` | `ui.js` | 164 | operational | hashchange while a dialog stands | S2-shell-board-a11y-2: Back from Settings, the author pad or the palette closes the dialog and focus lands on the arriving screen's h1, not the top-bar opener |
 | `onKey` | `ui.js` | 165 | operational | Any key while a dialog is open. | raw.json S5-pin-*.escape {dialogOpen:false}; tabwrap.forwardFromLast = pin.key.1, backFromFirst = pin.cancel. |
 | `closeDialogs` | `ui.js` | 185 | operational | A-storm2-shell-5 | Closes every standing dialog through its own close on __proto.reset, so no pad stands over a store that no longer holds its request |
 | `section` | `ui.js` | 187 | operational | Screen modules (24 uses in dailyclose, 16 in moneydesk, …); page.evaluate. | raw.json S4-ui.helpers.section: '<section class="card stack" aria-label="Title"><h2>Title</h2><p>x</p></secti… |
@@ -1334,7 +1344,7 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `plainReason` | `screens/moneydesk.js` | — | operational | Every row of the Unallocated credits tab. | Wave 3 INT-real-world-words probe: 0 `(c-nn)`-shaped tokens on the credits tab. |
 | `onKeydown` | `screens/palette.js` | — | operational | Enter and Space on a palette result row. | Wave 3 CLT-label-words and CDS-BTN probes: the result rows are options, not buttons (0 buttons in the results). From the code, not a probe: Enter and Space on a row call the same activate() a click does. |
 | `clearDobError` | `screens/palette.js` | — | operational | Every edit to the date-of-birth field after a refusal. | Wave 3 INT-keep-data probe: after a refused value and one keystroke, `aria-invalid` is null and the summary is hidden. |
-| `refuseDob` | `screens/palette.js` | — | operational | The Confirm press with a malformed date of birth. | Wave 3 CDS-ERR probes: `aria-invalid="true"`, 'Error: Use MM/DD/YYYY, for example 04/12/1978.' at weight 600 before the input; 1 `role="alert"` summary with 1 link, focused on the press, its link 44 px tall. |
+| `refuseDob` | `screens/palette.js` | — | operational | The Confirm press with a malformed date of birth. | Wave 3 CDS-ERR probes: `aria-invalid="true"`, 'Error: Use MM/DD/YYYY, for example 07/04/1990.' at weight 600 before the input; 1 `role="alert"` summary with 1 link, focused on the press, its link 44 px tall. |
 | `say` | `screens/perio.js` | — | operational | Every depth entry, undo, save and refusal on the perio grid. | Wave 3 WCAG-2.2.1 probe: the echo line stands at +300 ms and at +5.2 s; `#live` announces the same text unless `quiet`. |
 | `shortcutsOn` | `screens/perio.js` | — | operational | onKey, for every key outside the work surface. | Wave 3 CUST-2.1.4 probe: from body, 3, 4 and ArrowRight leave `st.sites` unchanged with shortcuts off; inside the grid the grammar still works because the grid is the work surface. |
 | `inWorkSurface` | `screens/perio.js` | — | operational | onKey, on every key. | Same probe: Space on `perio.settings` activates it (aria-expanded flips) instead of being taken by the grammar. |

@@ -1,9 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DEV_MFA_SECRET, DEV_PASSWORD, SEED_BANK, SEED_STORY_WEEK } from "@pms/db/seed-data";
-import { currentCodeForTest } from "../lib/auth/totp";
+import { DEV_PASSWORD, SEED_BANK, SEED_STORY_WEEK } from "@pms/db/seed-data";
 import { DEPOSIT_DAYS_AGO } from "../lib/controls/seedWindow";
 import { uuidv7 } from "@pms/db";
-import { assertNoProblems, e2eEnabled, openBrowser, startProductionApp, type E2eApp, type E2eBrowser } from "./harness";
+import { assertNoProblems, e2eEnabled, freshCodeForTest, openBrowser, startProductionApp, type E2eApp, type E2eBrowser } from "./harness";
 
 /**
  * The Money Desk in a real browser against the production server, on the
@@ -1545,7 +1544,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().waitForURL((url) => url.pathname === "/signin", { timeout: 60_000 });
     await page().fill('input[name="username"]', "ridgeview-owner");
     await page().fill('input[name="password"]', DEV_PASSWORD);
-    await page().fill('input[name="totp"]', currentCodeForTest("ridgeview-owner", DEV_MFA_SECRET, Date.now()));
+    await page().fill('input[name="totp"]', await freshCodeForTest("ridgeview-owner"));
     await page().click('button[type="submit"]');
     await page().waitForURL((url) => url.pathname === "/locations", { timeout: 60_000 });
     await page().getByRole("heading", { name: "Business hours" }).waitFor({ timeout: 60_000 });
@@ -1608,7 +1607,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().waitForURL((url) => url.pathname === "/signin", { timeout: 60_000 });
     await page().fill('input[name="username"]', "ridgeview-owner");
     await page().fill('input[name="password"]', DEV_PASSWORD);
-    await page().fill('input[name="totp"]', currentCodeForTest("ridgeview-owner", DEV_MFA_SECRET, Date.now()));
+    await page().fill('input[name="totp"]', await freshCodeForTest("ridgeview-owner"));
     await page().click('button[type="submit"]');
     await page().waitForURL((url) => url.pathname === "/approvals", { timeout: 60_000 });
   }, 150_000);
@@ -1665,7 +1664,7 @@ describe.skipIf(!e2eEnabled)("Money Desk (browser, production server)", () => {
     await page().waitForURL((url) => url.pathname === "/signin", { timeout: 60_000 });
     await page().fill('input[name="username"]', "ridgeview-owner");
     await page().fill('input[name="password"]', DEV_PASSWORD);
-    await page().fill('input[name="totp"]', currentCodeForTest("ridgeview-owner", DEV_MFA_SECRET, Date.now()));
+    await page().fill('input[name="totp"]', await freshCodeForTest("ridgeview-owner"));
     await page().click('button[type="submit"]');
     await page().waitForURL((url) => url.pathname === "/locations", { timeout: 60_000 });
     await main.waitFor({ timeout: 60_000 });

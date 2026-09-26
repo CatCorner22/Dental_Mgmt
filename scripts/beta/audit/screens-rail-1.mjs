@@ -4,7 +4,7 @@
 // Each check closes its browser context in `finally` so one failure cannot hang the run.
 import fs from 'node:fs';
 
-export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) => {
+export default ({ ctx, go, hop, railOf, press, click, txt, box, state, events, rec }) => {
   const lastSeq = async (p) => { const ev = await events(p); return ev.length ? ev[ev.length - 1].seq : 0; };
   const after = async (p, seq) => (await events(p)).filter((e) => e.seq > seq);
   const range = (ev, seq0) => [seq0 + 1, ev.length ? ev[ev.length - 1].seq : seq0];
@@ -225,7 +225,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
         const announcement = await live(p);
         // Comparator: the Rail button on a Board card, activated by keyboard (a pointer click on it is intercepted by the checkout queue at 1280 px).
         await go(p, '#/frontdesk/board');
-        await press(p, 'board.card.a-1044.rail'); await p.waitForTimeout(200);
+        await press(p, await railOf(p, 'a-1044')); await p.waitForTimeout(200);
         const viaButton = { rail: await railInfo(p), focus: await active(p) };
         const reproduced = rail.open && !palette.paletteStillOpen && !focus.insideRail && focus.testid === 'topbar.search';
         rec('A-screens-rail-1-6', 'Opening a chart from the palette (search, row, date of birth, Open chart) opens the Patient Rail for Ines Okoro, but focus rests on topbar.search — the control that opened the palette — not inside the rail', 'B10 — after a mutation (PHI access row written) focus lands on the next action, never back on the opener; rail.js:47 open() never takes focus',
@@ -241,7 +241,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       const { c, p } = await ctx(b);
       try {
         await go(p, '#/frontdesk/board');
-        await click(p, 'board.card.a-1042.rail'); await p.waitForTimeout(200);
+        await click(p, await railOf(p, 'a-1042')); await p.waitForTimeout(200);
         const rail = await railInfo(p);
         const focusAfterButton = await active(p);
         const tabs = [];
@@ -289,7 +289,7 @@ export default ({ ctx, go, hop, press, click, txt, box, state, events, rec }) =>
       const { c, p } = await ctx(b);
       try {
         await go(p, '#/frontdesk/board');
-        await click(p, 'board.card.a-1042.rail'); await p.waitForTimeout(200);
+        await click(p, await railOf(p, 'a-1042')); await p.waitForTimeout(200);
         const rail = await railInfo(p);
         const tabs = [];
         for (const t of ['profile', 'docs', 'imaging']) {

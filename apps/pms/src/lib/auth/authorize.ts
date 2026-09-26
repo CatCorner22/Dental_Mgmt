@@ -5,8 +5,8 @@ import { indexOfRecoveryCode, normalizeRecoveryCode } from "./recovery";
 import { timingDummyHash, verifyPassword } from "./password";
 import type { AuthStore, StoredUser } from "./store";
 import { checkThrottle, clearThrottle, recordFailure } from "./throttleOps";
-import { FREE_ATTEMPTS, IP_FREE_ATTEMPTS, IP_MAX_LOCK_MS, loginIpKey, loginPairKey } from "./throttle";
-import { verifyMfaCode } from "./totp";
+import { FREE_ATTEMPTS, IP_FREE_ATTEMPTS, IP_MAX_LOCK_MS, MAX_LOCK_MS, loginIpKey, loginPairKey } from "./throttle";
+import { matchMfaCodeStep } from "./totp";
 
 export interface AuthorizeSuccess {
   id: string;
@@ -37,7 +37,7 @@ async function chargeFailure(
   now: Date
 ): Promise<void> {
   if (!pairKey || !ip) return;
-  await recordFailure(store, pairKey, now, FREE_ATTEMPTS, IP_MAX_LOCK_MS);
+  await recordFailure(store, pairKey, now, FREE_ATTEMPTS, MAX_LOCK_MS);
   await recordFailure(store, loginIpKey(ip), now, IP_FREE_ATTEMPTS, IP_MAX_LOCK_MS);
 }
 
@@ -46,15 +46,15 @@ function secondFactorOk(
   totpCode: string,
   env: Record<string, string | undefined>,
   now: Date
-): { totp: boolean; recoveryIndex: number } {
-  if (!user.mfaSecretEnc) return { totp: false, recoveryIndex: -1 };
+): { totpStep: number | null; recoveryIndex: number } {
+  if (!user.mfaSecretEnc) return { totpStep: null, recoveryIndex: -1 };
   const secret = decryptSecret(user.mfaSecretEnc, cryptoEnv(env));
-  const totp = verifyMfaCode(user.username, secret, totpCode, now.getTime());
-  if (totp) return { totp: true, recoveryIndex: -1 };
+  const totpStep = matchMfaCodeStep(user.username, secret, totpCode, now.getTime());
+  if (totpStep !== null) return { totpStep, recoveryIndex: -1 };
   const pepper = cryptoEnv(env).DEV_MFA_KEY ?? cryptoEnv(env).ENCRYPTION_KEY ?? "";
-  if (normalizeRecoveryCode(totpCode).length < 8) return { totp: false, recoveryIndex: -1 };
+  if (normalizeRecoveryCode(totpCode).length < 8) return { totpStep: null, recoveryIndex: -1 };
   return {
-    totp: false,
+    totpStep: null,
     recoveryIndex: indexOfRecoveryCode(totpCode, user.recoveryCodeHashes, pepper),
   };
 }
@@ -127,7 +127,12 @@ export async function authorizeCredentials(
   }
 
   const factor = secondFactorOk(user, totpCode, env, now);
-  if (!factor.totp && factor.recoveryIndex < 0) {
+  if (factor.totpStep === null && factor.recoveryIndex < 0) {
+    await chargeFailure(store, pairKey, ip, now);
+    return { ok: false, reason: "credentials" };
+  }
+  // A code is single-use: the step it belongs to is spent by the first sign-in.
+  if (factor.totpStep !== null && !(await store.consumeMfaStep(user.id, factor.totpStep))) {
     await chargeFailure(store, pairKey, ip, now);
     return { ok: false, reason: "credentials" };
   }

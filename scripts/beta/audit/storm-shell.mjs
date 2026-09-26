@@ -2,7 +2,7 @@
 // router.js, index.html. Each check states the storm finding it guards, drives the prototype and measures
 // the breach; default position is NOT reproduced, and every check carries the precondition it needed.
 // Every check closes its browser context in `finally` so one failure cannot hang the run.
-export default ({ ctx, go, hop, press, click, txt, state, events, rec }) => {
+export default ({ ctx, go, hop, railOf, press, click, txt, state, events, rec }) => {
   const evalIn = (p, fn) => p.evaluate(fn);
   const padOpen = (p) => evalIn(p, () => !!document.querySelector('#dialogs .dialog'));
   const live = (p) => evalIn(p, () => document.getElementById('live').textContent);
@@ -46,7 +46,7 @@ export default ({ ctx, go, hop, press, click, txt, state, events, rec }) => {
       const { c, p } = await ctx(b);
       try {
         await go(p, '#/frontdesk/board');
-        await press(p, 'board.card.a-1042.rail');
+        await press(p, await railOf(p, 'a-1042'));
         const railBefore = await evalIn(p, () => !document.getElementById('rail').hidden);
         await evalIn(p, () => document.querySelector('[data-testid="skip.canvas"]').focus());
         await key(p, 'Enter'); await p.waitForTimeout(200);
@@ -155,10 +155,16 @@ export default ({ ctx, go, hop, press, click, txt, state, events, rec }) => {
       const { c, p } = await ctx(b);
       try {
         await go(p, '#/signin');
+        // Device, grayscale, outage and after-hours live in the closed test-harness <details>; open it before pressing.
+        if (!(await p.$('details.signin-harness[open]'))) { await click(p, 'signin.harness'); await p.waitForTimeout(150); }
         const out = [];
-        for (const t of ['signin.device.shared', 'signin.motion', 'signin.grayscale', 'signin.privacy', 'signin.outage', 'signin.afterhours', 'signin.theme.dark']) { const ok = await press(p, t); out.push({ t, pressed: ok, focus: await focused(p) }); }
+        for (const t of ['signin.device.shared', 'signin.motion', 'signin.grayscale', 'signin.privacy', 'signin.outage', 'signin.afterhours', 'signin.theme.dark']) {
+          const ok = await press(p, t);
+          if (!ok) throw new Error(t + ' is not on the sign-in screen');
+          out.push({ t, pressed: ok, focus: await focused(p) });
+        }
         rec('A-storm-shell-8', 'Every option toggle on sign-in moves keyboard focus to signin.go instead of keeping it on the toggled control', 'docs/04 keyboard-first (focus stays on the control you operated) — signin.js render',
-          out.every((o) => o.pressed) && out.some((o) => o.focus !== o.t), { out });
+          out.some((o) => o.focus !== o.t), { out });
       } finally { await c.close(); }
     },
 
@@ -200,7 +206,7 @@ export default ({ ctx, go, hop, press, click, txt, state, events, rec }) => {
       const { c, p, errs } = await ctx(b);
       try {
         await go(p, '#/frontdesk/board');
-        await press(p, 'board.card.a-1042.rail');
+        await press(p, await railOf(p, 'a-1042'));
         const railBefore = await evalIn(p, () => !document.getElementById('rail').hidden);
         await hop(p, '#/FRONTDESK/board');
         const a = await evalIn(p, () => ({ signin: !!document.querySelector('[data-testid="signin.go"]'), board: !!document.querySelector('[data-testid="board.card.a-1042"]'), rail: !document.getElementById('rail').hidden }));

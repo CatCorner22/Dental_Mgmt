@@ -57,6 +57,8 @@ export const users = pgTable(
     mfaPendingSecretEnc: jsonb("mfa_pending_secret_enc"),
     mfaEnrolledAt: timestamp("mfa_enrolled_at", { withTimezone: true }),
     recoveryCodesHash: text("recovery_codes_hash"),
+    /** Last TOTP step that opened a session; an equal or earlier step is a replay. */
+    mfaLastStep: bigint("mfa_last_step", { mode: "number" }),
     passwordChangedAt: timestamp("password_changed_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
   },

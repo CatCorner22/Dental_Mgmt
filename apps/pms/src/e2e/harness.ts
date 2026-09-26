@@ -47,6 +47,27 @@ function pickPort(): number {
   return 3100 + Math.floor(Math.random() * 800);
 }
 
+const TOTP_STEP_MS = 30_000;
+const spentSteps = new Map<string, number>();
+
+/**
+ * A code the server has not seen for this account. Codes are single-use, so
+ * each sign-in takes the next unspent step inside the server's ±1 window,
+ * waiting for the clock when both the current and the next step are spent.
+ */
+export async function freshCodeForTest(username: string, secret: string = DEV_MFA_SECRET): Promise<string> {
+  for (;;) {
+    const now = Date.now();
+    const current = Math.floor(now / TOTP_STEP_MS);
+    const step = Math.max(current, (spentSteps.get(username) ?? -1) + 1);
+    if (step <= current + 1) {
+      spentSteps.set(username, step);
+      return currentCodeForTest(username, secret, step * TOTP_STEP_MS);
+    }
+    await new Promise((r) => setTimeout(r, (current + 1) * TOTP_STEP_MS - now + 50));
+  }
+}
+
 async function waitForHealth(base: string, ms: number): Promise<void> {
   const until = Date.now() + ms;
   let last = "";
@@ -314,7 +335,7 @@ export async function openBrowser(app: E2eApp): Promise<E2eBrowser> {
       await page.goto(`${app.base}/signin?callbackUrl=${encodeURIComponent(callbackPath)}`, { waitUntil: "networkidle" });
       await page.fill('input[name="username"]', username);
       await page.fill('input[name="password"]', DEV_PASSWORD);
-      await page.fill('input[name="totp"]', currentCodeForTest(username, DEV_MFA_SECRET, Date.now()));
+      await page.fill('input[name="totp"]', await freshCodeForTest(username));
       await page.click('button[type="submit"]');
       await page.waitForURL((url) => url.pathname === callbackPath, { timeout: 60_000 });
     },
