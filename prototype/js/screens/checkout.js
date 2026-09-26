@@ -179,7 +179,7 @@
       // The request row is written when this control is pressed, by the store verb that owns it. Post writes
       // nothing here, so a control labelled "Request approval" performs the request it names.
       st.refusalNode = refusal({ code: res.code, verb: res.verb, control: res.control || 'Request approval', why: res.why, onControl: () => {
-        // The pending request names the PIN poster (store.js posterId), so the phone's same-person rule reads the right name.
+        // The pending request carries the PIN that posted, so the store names the requester itself and the phone's same-person rule reads the right name.
         const out = Proto.store.requestApproval(res.pendingRequest);
         if (!out.ok) { st.refusalNode = refusal(withControl(out, r, a, st)); rerender(r, 'refusal.control'); return; }
         st.heldReq = Proto.store.get().approvals.find((x) => x.id === out.requestId) || null;

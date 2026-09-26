@@ -195,7 +195,7 @@ What the storms did not prove is the same as before, with one addition. The rand
 
 | Measure | Count |
 |---|---|
-| Functions in `prototype/js` (`scripts/audit/inventory.mjs`) | 845 |
+| Functions in `prototype/js` (`scripts/audit/inventory.mjs`) | 847 |
 | Of those, from the registered audited universe of 497 | 486 |
 | Registered functions the fix round removed or renamed | 10 |
 | Registered functions the five storms removed | 1 |
@@ -1149,6 +1149,7 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `validCents` | `store.js` | 96 | operational | S2-approvals-writeoff-era-4, S2-approvals-writeoff-era-10 | One amount rule for every verb that puts a number on the ledger: a positive, whole, safe count of cents; −5000, NaN, 100.5 and 1e-7 reached the ledger through the request path |
 | `badAmount` | `store.js` | 97 | operational | S2-approvals-writeoff-era-4, S2-approvals-writeoff-era-10 | The refusal validCents raises, verb-first with the amount field as its control |
 | `writeoffCap` | `store.js` | 93 | operational | A-storm-store-15, A-storm2-store-3 | A write-off retires what the patient owes and no more, at request and at Checkout; $1,000 on a $410 balance hid a −$590 net, and $410 cash plus a $100 courtesy posted a credit nobody paid |
+| `dueAfterPost` | `store.js` | — | operational | postCheckout, requestApproval, decideApproval (S2-regress-proto-money-identity-1) | The balance a checkout Post leaves: ledger patientDue plus the charges a filed note releases at Post. One expression for the window cap, the request cap and the approval cap, so a $160 write-off held at a first visit can be requested against the $168 the window shows rather than refused against the $0 ledger. |
 | `openDenial` | `store.js` | 384 | operational | A-regress-3-3, S-moneydesk-close-10 | The account's denied claim with no appeal packet sent; a $50 write-off on p-321 (c-88 denied, unappealed) returns needs_second with a pending request and no ledger row |
 | `afterHours` | `store.js` | 100 | operational | A-storm-store-12, A-storm2-store-4, A-storm3-money-2 | One after-hours rule for refunds and write-offs, with the control the screen acts on; eraConfirm's contractual write-off bypassed it |
 | `allocate` | `store.js` | 109 | operational | Direct call on the seed's busiest ledger from #/biller/ledger; also the sole source for b… | allocate('p-317') over 9 ledger rows (charge, patient_payment) → 5 charges, patientDue 169935, insurancePendi… |
@@ -1198,6 +1199,7 @@ One row per function in `prototype/js`, in file order. Status is the audited sta
 | `eraPostMatched` | `store.js` | 634 | broken → fixed | money.era.era-1.postmatched, Money Desk "P" key (moneydesk.js:63) | S6 seq 1-4; S6.evaluate eraPostMatched_unknown threw. |
 | `settleBatch` | `store.js` | 651 | operational | A-storm-store-17, A-storm2-ledger-7 | The ERA batch posts only when no line is open; a held line keeps it in deltas with a way to decide it |
 | `eraConfirm` | `store.js` | 652 | operational | money.era.line.<id>.confirm (moneydesk.js:100) | S6 seq 5-8; S6.evaluate eraConfirm_twice_store 2, eraConfirm_unknown threw. |
+| `decidedLine` | `store.js` | — | operational | eraConfirm, eraDispute (S2-regress-proto-money-identity-2) | One 835 line is decided once: posted, disputed, or cited by a ledger row. Shared by Confirm and Dispute so a posted line cannot be flipped to disputed with its money still on the ledger. |
 | `eraHold` | `store.js` | 666 | operational | money.era.line.<id>.hold | S6 seq 9-12; S6.evaluate eraHold_unknown threw. |
 | `eraDispute` | `store.js` | 669 | operational | money.era.line.<id>.dispute | S6 seq 13-16; S6.evaluate eraDispute_unknown threw. |
 | `buildAppeal` | `store.js` | 679 | broken → fixed | money.denial.<id>.appeal, denial_suppression control, "A" key (moneydesk.js:151) | S6 seq 17-24; S6.evaluate buildAppeal_unknown threw. |

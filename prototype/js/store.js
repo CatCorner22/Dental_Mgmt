@@ -301,6 +301,13 @@
     const open = balances(a.patientId).patientDue + S.procedures.filter((p) => p.encounterId === a.encounterId && !charged(p)).reduce((s, p) => s + p.feeCents, 0);
     return Object.assign({}, seed, { patientCents: Math.min(seed.patientCents, open) });
   }
+  /* The balance a checkout Post leaves to write off against: the ledger plus the charges a filed note releases at Post.
+     The window, the request and the approval all read it, so what one allows none of the others refuses. */
+  function dueAfterPost(pid, aid) {
+    const a = aid ? appt(aid) : null; const enc = a ? encounter(a.encounterId) : null;
+    const deferred = enc && enc.noteFiled ? S.procedures.filter((p) => p.encounterId === enc.id && !charged(p)).reduce((s, p) => s + p.feeCents, 0) : 0;
+    return balances(pid).patientDue + deferred;
+  }
   function postCheckout(aid, form) {
     const a = appt(aid); if (!a) return notFound('appointment');
     const est = windowEstimate(aid);
@@ -333,12 +340,12 @@
       if (!validCents(form.writeoffCents)) return badAmount('Type a write-off in whole cents');
       // The cap is the balance as it stands after this Post: the charges a filed note releases here count, so a first
       // visit is measured against what the patient will owe, not against the $0 the ledger shows before Post.
-      const dueAfterPost = balances(a.patientId).patientDue + (noteFiled ? procs.filter((p) => !charged(p)).reduce((s, p) => s + p.feeCents, 0) : 0) - amt;
-      const cap = writeoffCap(form.writeoffCents, Math.max(0, Math.min(est.patientCents - amt, dueAfterPost))); if (cap) return cap;
+      const left = dueAfterPost(a.patientId, aid) - amt;
+      const cap = writeoffCap(form.writeoffCents, Math.max(0, Math.min(est.patientCents - amt, left))); if (cap) return cap;
       const gate = evaluateRelease('write_off', form.writeoffCents, u, { pid: a.patientId });
       if (gate.code === 'after_hours') return refuse(gate.code, gate.verb, 'Remove the write-off', gate.why);
-      // The request names the PIN's owner, not the persona at the desk: Dr. Reagan's PIN used to raise a request in Priya's name and then approve it as his own.
-      if (!gate.ok) return Object.assign(refuse(gate.code, gate.verb, 'Request approval', gate.why), { held: true, pendingRequest: { kind: 'write_off', amountCents: form.writeoffCents, reason: form.writeoffReason || 'courtesy', patientId: a.patientId, eligible: gate.eligible, appointmentId: aid, posterId: u.id } });
+      // The request carries the PIN that named the poster, never an id: requestApproval verifies it again, so the request names the PIN's owner and nobody a caller names.
+      if (!gate.ok) return Object.assign(refuse(gate.code, gate.verb, 'Request approval', gate.why), { held: true, pendingRequest: { kind: 'write_off', amountCents: form.writeoffCents, reason: form.writeoffReason || 'courtesy', patientId: a.patientId, eligible: gate.eligible, appointmentId: aid, pin: form.pin || null } });
     }
     // A statement, a plan and the decision carry what is left after the write-off posted beside them: a $410 statement used to queue on a $310 balance.
     const portion = est.patientCents - (form.writeoffCents || 0);
@@ -372,19 +379,20 @@
      is checked as the posting it defers would be: a kind the ledger knows, a requester who posts money, a whole
      positive amount, and no more than the balance it retires — the approval trusts the row it decides. */
   const REQUEST_KINDS = ['write_off'];
-  function requestApproval(pending, who) {
+  function requestApproval(pending) {
     if (!pending) return notFound('request');
     const off = offline('Wait for the server — approvals are paused'); if (off) return off;
     if (!REQUEST_KINDS.includes(pending.kind)) return refuse('invalid_input', 'Choose a posting the ledger knows', 'Dismiss', 'A request defers one kind of posting, and the ledger knows write-offs here. Nothing was written.');
     if (!patient(pending.patientId)) return notFound('patient');
-    const u = who || (pending.posterId && user(pending.posterId)) || currentUser();
+    // The requester is a person the store verified — the PIN's owner, else the seat — never an id or a name the caller passes.
+    const pin = requirePin(pending); if (!pin.ok) return pin; const u = pin.user;
     const ent = bills(u); if (ent) return ent;
     if (!validCents(pending.amountCents)) return badAmount('Type an amount above zero');
-    const cap = writeoffCap(pending.amountCents, balances(pending.patientId).patientDue); if (cap) return cap;
+    const cap = writeoffCap(pending.amountCents, dueAfterPost(pending.patientId, pending.appointmentId)); if (cap) return cap;
     const open = S.approvals.find((x) => x.status === 'pending' && x.kind === pending.kind && x.patientId === pending.patientId && x.amountCents === pending.amountCents);
     if (open) return { ok: true, requestId: open.id, already: true };
     poster(u);
-    const { posterId, ...rest } = pending;
+    const rest = Object.assign({}, pending); delete rest.pin; delete rest.posterId;
     const req = write('approvals', Object.assign({ id: 'ar-' + nextId.ar++, requestedBy: u.name, requestedById: u.id, status: 'pending', requestedAt: S.clock.time }, rest));
     return { ok: true, requestId: req.id };
   }
@@ -451,7 +459,7 @@
     const ah = decision === 'approved' ? afterHours(r.kind, 'Send back') : null; if (ah) return ah;
     // The cap is re-read against the live balance when the money posts, not only when it was asked for: a $410 approved after
     // the window collected the $410 posted a credit nobody paid. Nothing left refuses; less left settles what is left.
-    const due = decision === 'approved' && REQUEST_KINDS.includes(r.kind) ? balances(r.patientId).patientDue : null;
+    const due = decision === 'approved' && REQUEST_KINDS.includes(r.kind) ? dueAfterPost(r.patientId, r.appointmentId) : null;
     if (due !== null && due <= 0) return refuse('amount_required', 'Send back — nothing left to write off', 'Send back', 'The balance this request was raised against has since been paid or written off. Approving it now would post a credit nobody paid; send it back so the biller sees why.');
     const postCents = due === null ? r.amountCents : Math.min(r.amountCents, due);
     // The reason rides on the request and on the log row, so the decision and its reason are one record. It is
@@ -477,7 +485,7 @@
     // The hold takes the write-off off the card; nothing is requested after hours.
     if (gate.code === 'after_hours') return refuse(gate.code, gate.verb, 'Remove the write-off', gate.why);
     if (!gate.ok) {
-      const req = requestApproval({ kind: 'write_off', amountCents, reason, patientId: accountPid, eligible: gate.eligible, appointmentId: null }, u);
+      const req = requestApproval({ kind: 'write_off', amountCents, reason, patientId: accountPid, eligible: gate.eligible, appointmentId: null, pin: extras && extras.pin });
       return Object.assign(refuse(gate.code, gate.verb, 'Request approval', gate.why), { requestId: req.requestId, held: true });
     }
     poster(u);
@@ -811,10 +819,12 @@
      aside is still undecided (its money is off the ledger), so a batch with one held line used to read "Batch complete". */
   const OPEN_LINE = ['delta', 'held'];
   function settleBatch(batchId) { const b = S.eraBatches.find((x) => x.id === batchId); if (b && b.status === 'deltas' && !S.eraLines.some((l) => l.batchId === batchId && OPEN_LINE.includes(l.status))) { b.status = 'posted'; touch('eraBatches', b.id); } }
+  // One 835 line is decided once: the ledger rows that cite it are the record, whatever status the line was moved to since.
+  const decidedLine = (l) => l.status === 'posted' || l.status === 'disputed' || S.ledger.some((e) => e.eraLineId === l.id);
+  const DECIDED_WHY = 'This line is already decided. A correction is a reversal and a repost, both linked to the original.';
   function eraConfirm(lineId, extras) {
     const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — postings are paused'); if (off) return off;
-    // One 835 line posts once: the ledger rows that cite it are the record, whatever status the line was moved to since.
-    if (l.status === 'posted' || l.status === 'disputed' || S.ledger.some((e) => e.eraLineId === lineId)) return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', 'This line is already decided. A correction is a reversal and a repost, both linked to the original.');
+    if (decidedLine(l)) return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', DECIDED_WHY);
     const claim = S.claims.find((x) => x.id === l.claimId);
     if (l.status === 'denied' || (claim && claim.status === 'denied')) return refuse('already_decided', 'Appeal or attach — this line paid nothing', 'Open the denial', 'A denied line paid $0. Confirming it would post a $0 insurance payment and a write-off of the whole expected amount; the denial worklist is where that line is worked.');
     const pin = requirePin(extras); if (!pin.ok) return pin; const ent = postsEra(pin.user) || (l.expectedCents - l.paidCents > 0 ? writesOff(pin.user) : null); if (ent) return ent;
@@ -842,6 +852,9 @@
      It used to write the claim event alone, so the decided row said "An appeal row cites the fee-schedule line" over none. */
   function eraDispute(lineId, extras) {
     const l = S.eraLines.find((x) => x.id === lineId); if (!l) return notFound('claim'); const off = offline('Wait for the server — the dispute cannot send'); if (off) return off;
+    // Dispute is for a line still to be decided: posted money is corrected from the ledger and a denied line is worked from the denial.
+    if (l.status === 'denied') return refuse('already_decided', 'Appeal or attach — this line paid nothing', 'Open the denial', 'A denied line paid $0 and is worked from the denial worklist, where the appeal is built. Disputing it here would write a second packet over the same claim.');
+    if (decidedLine(l)) return refuse('already_decided', 'Open the ledger to correct this', 'Open the ledger', DECIDED_WHY);
     const pin = requirePin(extras); if (!pin.ok) return pin; const ent = postsEra(pin.user); if (ent) return ent; const u = poster(pin.user);
     l.status = 'disputed'; touch('eraLines', l.id);
     write('claimEvents', { id: id('cev'), claimId: l.claimId, kind: 'era.contract_variance_disputed', actor: u.name });
