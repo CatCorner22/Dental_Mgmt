@@ -388,7 +388,14 @@
     const region = Proto.ui.scrollRegion('Perio grid', 'perio.grid:perio-wrap', table);
     region.setAttribute('aria-keyshortcuts', '1 2 3 4 5 6 7 8 9 0 Space S Backspace ArrowRight ArrowLeft PageDown PageUp');
     // The two-digit buffer belongs to the grid: leaving it drops a pending "0" rather than carrying it to the next key.
-    region.addEventListener('focusout', (ev) => { if (!rendering && st.pendingZero && !(ev.relatedTarget && region.contains(ev.relatedTarget))) st.pendingZero = false; });
+    // The active-site line prints the buffer, so dropping it rebuilds the line; the keyboard stays where the Tab put it.
+    region.addEventListener('focusout', (ev) => {
+      if (rendering || !st.pendingZero || (ev.relatedTarget && region.contains(ev.relatedTarget))) return;
+      st.pendingZero = false;
+      const to = ev.relatedTarget && ev.relatedTarget.getAttribute ? ev.relatedTarget.getAttribute('data-testid') : null;
+      rerender(r);
+      const el = to ? document.querySelector('[data-testid="' + to + '"]') : null; if (el) el.focus();
+    });
     /* The legend lives in the box with the cells it explains, not 440 px below them (CLT-split-attention),
        and the keys are printed beside the instrument they drive (CLT-recognition-keys). */
     const legend = h('div', { class: 'stack pe-legend-in' },
